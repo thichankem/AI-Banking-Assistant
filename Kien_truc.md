@@ -76,62 +76,18 @@
 
 ---
 
-### 1.3. Luồng xử lý dữ liệu End-to-End 6 giai đoạn (Data Execution Flow)
-
-```text
-[GIAI ĐOẠN 1: INGRESS & SECURITY SANITIZATION]
-  User Query 
-    ───> FastAPI Ingress Gateway 
-            ───> Strip Prompt Injection (Regex + Guardrails Engine)
-                    ───> Extract User_ID from Validated JWT
-
-[GIAI ĐOẠN 2: PRE-FETCH MULTI-USER CONTEXT]
-  Gateway 
-    ───> Kích hoạt Truy vấn Song song (Parallel Async Read)
-            ├───> [Redis Buffer] Kéo Top 10 tin nhắn phiên hiện tại (Latency < 2ms)
-            └───> [PostgreSQL pgvector] Kéo Top 3 Semantic Facts của User_ID (Latency < 12ms)
-                    ───> Đóng gói vào `AgentState` ban đầu
-
-[GIAI ĐOẠN 3: PRE-ROUTE & SUBGRAPH ROUTING]
-  `AgentState` 
-    ───> Master Orchestrator (Pre-Route Node)
-            ├─── [Chào hỏi / Đơn giản] ───> Trả về Direct Response
-            ├─── [Tra cứu tri thức]   ───> Route sang Agentic RAG Pipeline
-            └─── [Tác vụ Nghiệp vụ]   ───> Route sang Subgraph [1 / 2 / 3 / 4] tương ứng
-
-[GIAI ĐOẠN 4: SUBGRAPH EXECUTION & MCP TOOL CALLING]
-  Subgraph Agent Node
-    ───> Thực hiện Vòng lặp Lập luận (ReAct / ToT)
-            ───> Sinh Tool Call Request 
-                    ───> Chuyển đổi sang chuẩn MCP 
-                            ───> Đẩy tới MCP Server tương ứng
-                                    ───> Thực thi trong Python Sandbox
-                                            ───> Nhận kết quả Tool Response & Cập nhật `AgentState`
-
-[GIAI ĐOẠN 5: EVALUATOR-OPTIMIZER]
-  Agent Raw Output 
-    ───> Critic Node (Đánh giá Faithfulness & Nguy cơ Rủi ro)
-            ├─── [Phát hiện Ảo giác / Thiếu ý] ───> Yêu cầu Subgraph Regenerate (Tối đa 2 lần)
-            ├─── [Tác vụ Tài chính Nguy hiểm]  ───> Trigger LangGraph `interrupt()`
-            └─── [Đạt tiêu chuẩn / An toàn]    ───> Chuyển tiếp ra Response Stream
-
-[GIAI ĐOẠN 6: ASYNCHRONOUS MEMORY CONSOLIDATION]
-  Final Output Sent to User
-    ───> Bắn Event Payload bất đồng bộ vào Celery / RabbitMQ
-            ───> Memory Consolidation Worker thu gom
-                    ───> LLM trích xuất Atomic Facts & Ước tính Decay
-                            ───> Ghi / Cập nhật vào PostgreSQL `semantic_memories` (RLS Secured)
-```
 
 ## PHẦN 2: HẠ TẦNG BỘ NHỚ
 
-| Tầng Bộ Nhớ | Công Nghệ Lưu Trữ | Thời Gian Tồn Tại (TTL) | Mục Đích Sử Dụng | Latency Truy Xuất |
+---
+
+| Tầng Bộ Nhớ | Công Nghệ Lưu Trữ | Thời Gian Tồn Tại (TTL) | Mục Đích Sử Dụng 
 | :--- | :--- | :--- | :--- | :--- |
-| **1. In-Context RAM** | LangGraph State (RAM) | Trong phiên gọi API | Chứa prompt active & scratchpad | < 0.1ms |
-| **2. Short-Term Buffer**| Redis Cluster | 24 giờ | Lưu vết 10 lượt thoại gần nhất | < 2ms |
-| **3. Episodic Memory** | PostgreSQL (`pgvector`) | Vĩnh viễn (Lọc Decay) | Lưu vết sự cố, lỗi giao dịch từng gặp | < 15ms |
-| **4. Semantic Memory** | PostgreSQL (`pgvector` + RLS) | Vĩnh viễn (Có Cập nhật) | Lưu thuộc tính định danh, sở thích tài chính | < 15ms |
-| **5. Archival Storage** | MinIO Object Storage | Lưu trữ lâu dài (Cold) | Snapshot toàn bộ lịch sử phục vụ Audit | < 100ms |
+| **1. In-Context RAM** | LangGraph State (RAM) | Trong phiên gọi API | Chứa prompt active & scratchpad
+| **2. Short-Term Buffer**| Redis Cluster | 24 giờ | Lưu vết 10 lượt thoại gần nhất 
+| **3. Episodic Memory** | PostgreSQL (`pgvector`) | Vĩnh viễn (Lọc Decay) | Lưu vết sự cố, lỗi giao dịch từng gặp 
+| **4. Semantic Memory** | PostgreSQL (`pgvector` + RLS) | Vĩnh viễn (Có Cập nhật) | Lưu thuộc tính định danh, sở thích tài chính 
+| **5. Archival Storage** | MinIO Object Storage | Lưu trữ lâu dài (Cold) | Snapshot toàn bộ lịch sử phục vụ Audit
 
 
 ---
@@ -141,7 +97,7 @@
 ### 3.1. Tại sao loại bỏ phương pháp đánh giá Q&A tĩnh truyền thống?
 Bộ câu hỏi - câu trả lời tĩnh không thể đo đạc được tác động thực tế của Agent đối với CSDL (Side-effects) và dễ bị quá khớp (Overfitting).
 
----
+
 
 ### 3.2. Phương pháp 1: Kiểm thử Biến đổi Trạng thái Cơ sở Dữ liệu (State-Verification Testing)
 Truy vấn trực tiếp CSDL **Mock Banking Database Sandbox** sau tương tác:
