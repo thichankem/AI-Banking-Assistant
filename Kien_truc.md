@@ -79,45 +79,40 @@
 
 ## PHẦN 2: HẠ TẦNG BỘ NHỚ
 
----
-
-| Tầng Bộ Nhớ | Công Nghệ Lưu Trữ | Thời Gian Tồn Tại (TTL) | Mục Đích Sử Dụng 
-| :--- | :--- | :--- | :--- | :--- |
-| **1. In-Context RAM** | LangGraph State (RAM) | Trong phiên gọi API | Chứa prompt active & scratchpad
-| **2. Short-Term Buffer**| Redis Cluster | 24 giờ | Lưu vết 10 lượt thoại gần nhất 
-| **3. Episodic Memory** | PostgreSQL (`pgvector`) | Vĩnh viễn (Lọc Decay) | Lưu vết sự cố, lỗi giao dịch từng gặp 
-| **4. Semantic Memory** | PostgreSQL (`pgvector` + RLS) | Vĩnh viễn (Có Cập nhật) | Lưu thuộc tính định danh, sở thích tài chính 
-| **5. Archival Storage** | MinIO Object Storage | Lưu trữ lâu dài (Cold) | Snapshot toàn bộ lịch sử phục vụ Audit
-
+--- 
+| Tầng Bộ Nhớ | Công Nghệ Lưu Trữ | Thời Gian Tồn Tại (TTL) | Mục Đích Sử Dụng |
+|---|---|---|---|
+| **1. In-Context RAM** | LangGraph State (RAM) | Trong phiên gọi API | Chứa prompt active & scratchpad |
+| **2. Short-Term Buffer** | Redis Cluster | 24 giờ | Lưu vết 10 lượt thoại gần nhất |
+| **3. Episodic Memory** | PostgreSQL (`pgvector`) | Vĩnh viễn (Lọc Decay) | Lưu vết sự cố, lỗi giao dịch từng gặp |
+| **4. Semantic Memory** | PostgreSQL (`pgvector` + RLS) | Vĩnh viễn (Có cập nhật) | Lưu thuộc tính định danh, sở thích tài chính |
+| **5. Archival Storage** | MinIO Object Storage | Lưu trữ lâu dài (Cold) | Snapshot toàn bộ lịch sử phục vụ Audit |
 
 ---
 
-## PHẦN 3: KHUNG BENCHMARK VÀ BỘ TIÊU CHÍ CHẤM ĐIỂM ĐỘNG THỰC TẾ
-
-### 3.1. Tại sao loại bỏ phương pháp đánh giá Q&A tĩnh truyền thống?
-Bộ câu hỏi - câu trả lời tĩnh không thể đo đạc được tác động thực tế của Agent đối với CSDL (Side-effects) và dễ bị quá khớp (Overfitting).
+## PHẦN 3: KHUNG BENCHMARK VÀ BỘ TIÊU CHÍ CHẤM ĐIỂM 
 
 
 
-### 3.2. Phương pháp 1: Kiểm thử Biến đổi Trạng thái Cơ sở Dữ liệu (State-Verification Testing)
+### 3.1. Phương pháp 1: Kiểm thử Biến đổi Trạng thái Cơ sở Dữ liệu (State-Verification Testing)
 Truy vấn trực tiếp CSDL **Mock Banking Database Sandbox** sau tương tác:
 $$\text{State\_Match} = \mathbb{I}\left( \text{DB}_{\text{actual\_after}} \equiv \text{DB}_{\text{expected\_after}} \right)$$
 
 ---
 
-### 3.3. Phương pháp 2: Mô phỏng Hội thoại Động Đa lượt (TAU-Bench Style Agent Simulation)
+### 3.2. Phương pháp 2: Mô phỏng Hội thoại Động Đa lượt (TAU-Bench Style Agent Simulation)
 Sử dụng **User Simulator Agent** đóng vai khách hàng với các Persona phức tạp (thiếu thông tin, thiếu kiên nhẫn, tấn công Red-Teaming) để đo chỉ số **Goal Completion Rate (GCR)**.
 
 ---
 
-### 3.4. Phương pháp 3: Chấm điểm Cấu trúc & Thuật toán Độc lập (Deterministic Algorithmic Scoring)
+### 3.3. Phương pháp 3: Chấm điểm Cấu trúc & Thuật toán Độc lập (Deterministic Algorithmic Scoring)
 1. **Trajectory Match Rate**: So sánh chuỗi Tool Calls thực tế với chuỗi tối ưu bằng **Tree Edit Distance**.
 2. **Exact Deterministic Math Verification**: Kiểm tra kết quả tính toán tài chính bằng AST Math Engine độc lập (Sai số = 0).
 3. **JSON Schema Precision Rate**: Đo tỷ lệ tham số MCP Tools tuân thủ Pydantic Schema.
 
 ---
 
-### 4.5. Phương pháp 4: LLM-as-a-Judge kết hợp Ước lượng Độ tin cậy (Uncertainty Estimation)
+### 3.4. Phương pháp 4: LLM-as-a-Judge kết hợp Ước lượng Độ tin cậy (Uncertainty Estimation)
 Chạy $N=5$ lần đánh giá độc lập để tính độ lệch chuẩn $\sigma$. Nếu $\sigma > 0.5$, hệ thống tự động đẩy kịch bản về cho Human Reviewer thẩm định thủ công.
 
 
