@@ -1,0 +1,311 @@
+{
+  "name": "AI Banking Agent System & Benchmark Framework",
+  "children": [
+    {
+      "name": "System Architecture",
+      "children": [
+        {
+          "name": "User Interface Layer",
+          "children": [
+            {
+              "name": "React.js + TypeScript + WebSockets"
+            }
+          ]
+        },
+        {
+          "name": "API Gateway & Security Shield",
+          "children": [
+            {
+              "name": "FastAPI Ingress"
+            },
+            {
+              "name": "Input Sanitization & Injection Shield"
+            },
+            {
+              "name": "Tenant & User Auth Extraction (JWT)"
+            }
+          ]
+        },
+        {
+          "name": "LangGraph Stateful Orchestrator",
+          "children": [
+            {
+              "name": "Pre-Route Router (Direct, RAG, Long-Context)"
+            },
+            {
+              "name": "Business Subgraphs",
+              "children": [
+                {
+                  "name": "Subgraph 1: Procedures & Account Filing"
+                },
+                {
+                  "name": "Subgraph 2: Operations & Incident Handling"
+                },
+                {
+                  "name": "Subgraph 3: Product & Financial Advisory"
+                },
+                {
+                  "name": "Subgraph 4: General Info & Policy FAQ"
+                }
+              ]
+            },
+            {
+              "name": "Evaluator-Optimizer & HITL",
+              "children": [
+                {
+                  "name": "Critic Node (Faithfulness, Hallucination)"
+                },
+                {
+                  "name": "HITL Gate (Interrupt for Critical Actions)"
+                }
+              ]
+            },
+            {
+              "name": "AgentState & Pydantic Reducers"
+            }
+          ]
+        },
+        {
+          "name": "MCP Tool Layer Server",
+          "children": [
+            {
+              "name": "Banking Mock API Server"
+            },
+            {
+              "name": "Financial Engine Server"
+            },
+            {
+              "name": "Product & Policy Server"
+            },
+            {
+              "name": "Python Sandbox Execution"
+            }
+          ]
+        },
+        {
+          "name": "Agentic RAG Subsystem",
+          "children": [
+            {
+              "name": "Late Chunking + Hybrid HNSW/BM25"
+            },
+            {
+              "name": "Corrective RAG (CRAG) Evaluator"
+            },
+            {
+              "name": "GraphRAG Knowledge Graph"
+            }
+          ]
+        },
+        {
+          "name": "Multi-Tenant Memory System",
+          "children": [
+            {
+              "name": "Redis Session Cache (TTL 24h)"
+            },
+            {
+              "name": "Postgres pgvector (RLS Secured)"
+            },
+            {
+              "name": "Async Memory Consolidation Worker"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Dynamic Algorithmic Suite",
+      "children": [
+        {
+          "name": "Adaptive Chunking Suite",
+          "children": [
+            {
+              "name": "Dynamic Semantic Chunking (Cosine Similarity)"
+            },
+            {
+              "name": "Late Chunking (Solves Coreference Trap)"
+            },
+            {
+              "name": "Tree-Sitter AST Chunking (Tables & Code)"
+            }
+          ]
+        },
+        {
+          "name": "Multi-Route Agentic Retrieval",
+          "children": [
+            {
+              "name": "Hybrid Search + Reciprocal Rank Fusion (RRF)"
+            },
+            {
+              "name": "CRAG & Self-RAG Thresholding"
+            },
+            {
+              "name": "GraphRAG (Leiden Community Detection)"
+            }
+          ]
+        },
+        {
+          "name": "Memory Decay & Consolidation",
+          "children": [
+            {
+              "name": "Ebbinghaus Memory Decay Function"
+            },
+            {
+              "name": "Deduplication & Conflict Resolution"
+            }
+          ]
+        },
+        {
+          "name": "Adaptive Planning & Reasoning",
+          "children": [
+            {
+              "name": "ReAct Pattern (Standard Tasks)"
+            },
+            {
+              "name": "Tree-of-Thoughts / MCTS (Complex Financials)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Multi-Tenant Memory Infrastructure",
+      "children": [
+        {
+          "name": "5-Tier Memory Taxonomy",
+          "children": [
+            {
+              "name": "Tier 1: In-Context RAM (<0.1ms)"
+            },
+            {
+              "name": "Tier 2: Short-Term Buffer (<2ms)"
+            },
+            {
+              "name": "Tier 3: Episodic Memory (<15ms)"
+            },
+            {
+              "name": "Tier 4: Semantic Memory (<15ms)"
+            },
+            {
+              "name": "Tier 5: Archival Storage (<100ms)"
+            }
+          ]
+        },
+        {
+          "name": "Database Isolation & Security",
+          "children": [
+            {
+              "name": "PostgreSQL Row-Level Security (RLS)"
+            },
+            {
+              "name": "Hybrid B-Tree & HNSW Vector Indexing"
+            },
+            {
+              "name": "Mandatory tenant_id and user_id Context"
+            }
+          ]
+        },
+        {
+          "name": "Async Consolidation Pipeline",
+          "children": [
+            {
+              "name": "RabbitMQ / Celery Event Payload"
+            },
+            {
+              "name": "Atomic Fact Extraction via LLM"
+            },
+            {
+              "name": "Deduplication & Overwrite Logic"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Dynamic Benchmark Framework",
+      "children": [
+        {
+          "name": "Limitations of Static Q&A",
+          "children": [
+            {
+              "name": "Fails to Test Side-Effects / DB Changes"
+            },
+            {
+              "name": "Prone to Overfitting Static Golden Pairs"
+            }
+          ]
+        },
+        {
+          "name": "Dynamic Evaluation Methods",
+          "children": [
+            {
+              "name": "State-Verification Testing (Sandbox DB Audit)"
+            },
+            {
+              "name": "TAU-Bench Multi-Turn Simulation (Personas & Red-Teaming)"
+            },
+            {
+              "name": "Deterministic Algorithmic Scoring (Tree Edit Distance, AST Math)"
+            },
+            {
+              "name": "LLM-as-a-Judge with Uncertainty Estimation (Self-Consistency)"
+            }
+          ]
+        },
+        {
+          "name": "Evaluation Metrics",
+          "children": [
+            {
+              "name": "Faithfulness & Context Recall/Precision"
+            },
+            {
+              "name": "Multi-Tenant Isolation Score & Memory Recall"
+            },
+            {
+              "name": "Pre-Route & Trajectory Efficiency"
+            },
+            {
+              "name": "Tool Accuracy & State-Verification Success Rate"
+            },
+            {
+              "name": "End-to-End Weighted System Utility Score"
+            }
+          ]
+        },
+        {
+          "name": "Continuous Tuning Flywheel",
+          "children": [
+            {
+              "name": "Production Tracing (LangSmith/OpenTelemetry)"
+            },
+            {
+              "name": "Hard Negative Mining"
+            },
+            {
+              "name": "DPO Dataset Packaging"
+            },
+            {
+              "name": "LoRA/QLoRA Fine-Tuning & CI/CD Gate Tests"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Banking Business Domains",
+      "children": [
+        {
+          "name": "Group 1: Procedures & Registrations"
+        },
+        {
+          "name": "Group 2: Operations & Troubleshooting"
+        },
+        {
+          "name": "Group 3: Financial & Product Advisory"
+        },
+        {
+          "name": "Group 4: General Info, FAQ & Biêu phí"
+        }
+      ]
+    }
+  ]
+}
