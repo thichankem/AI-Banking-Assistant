@@ -99,16 +99,19 @@ flowchart TD
 
 ---
 
-## 6. Quy định Bắt buộc: Luôn Chọn Chế độ Deep Research (`mode: "deep"`)
+## 6. Quy định Bắt buộc: Luôn Lấy Nguồn Trước Bằng Deep Research (`mode: "deep"`)
 
-Khi thực hiện tìm kiếm tài liệu mới hoặc kích hoạt tác vụ nghiên cứu mở rộng trong NotebookLM:
+Không có tài liệu nguồn thì không thể thực hiện nghiên cứu, đối soát hay benchmark chuẩn xác. Tuyệt đối tuân thủ quy tắc **Source-First**:
+* **Kiểm tra nguồn bắt buộc (Pre-flight Source Check)**:
+  * Trước khi truy vấn, phân tích hoặc benchmark, luôn gọi `notebook_get` để kiểm tra `source_count`.
+  * Nếu sổ tay chưa có nguồn (`source_count == 0`) hoặc chưa có nguồn tài liệu cho khía cạnh cần nghiên cứu: **BẮT BUỘC KHỞI ĐỘNG DEEP RESEARCH ĐỂ LẤY NGUỒN TRƯỚC TIÊN**.
 * **Tham số bắt buộc**: Truyền `"mode": "deep"` trong công cụ `research_start` (tuyệt đối KHÔNG sử dụng `"mode": "fast"`).
 * **Mục đích học thuật**:
   * Chế độ **fast** chỉ quét sơ bộ (~30 giây, ~10 nguồn).
   * Chế độ **deep** (~5 phút, quét ~40 nguồn học thuật uy tín) khảo sát đa tầng trên toàn mạng, phát hiện các bài báo khoa học chất lượng cao, preprint arXiv và tài liệu kiến trúc thực tế.
-* **Quy trình chuẩn**:
-  1. Khởi chạy: `research_start(query="...", mode="deep", source="web", notebook_id="...")`.
-  2. Theo dõi: `research_status(task_id="...", notebook_id="...")`.
-  3. Nạp nguồn: `research_import(task_id="...", notebook_id="...")`.
+* **Quy trình chuẩn 3 bước**:
+  1. **Khởi chạy**: `research_start(query="...", mode="deep", source="web", notebook_id="...")`.
+  2. **Theo dõi & Tự động nạp**: `research_status(notebook_id="...", auto_import=True, max_wait=900)`.
+  3. **Đối soát sau nạp**: Kiểm tra lại nguồn bằng `notebook_get` rồi mới tiến hành `notebook_query` và tổng hợp báo cáo.
 
 
