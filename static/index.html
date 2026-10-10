@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Banking Assistant & RAG Benchmark Suite</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="chat-container">
+        <!-- HEADER -->
+        <header class="chat-header">
+            <div class="header-left">
+                <h2>🏦 AI Banking Assistant</h2>
+                <span class="badge" id="modelBadge">DeepSeek-V4-Flash</span>
+            </div>
+            <div class="header-right">
+                <select id="modeSelect" class="header-select">
+                    <option value="rag">🛡️ RAG Grounded (EXP-001)</option>
+                    <option value="baseline">⚡ Baseline thuần (EXP-000)</option>
+                </select>
+                <button type="button" id="openBenchmarkBtn" class="btn-benchmark">
+                    📊 Chấm Điểm & Benchmark
+                </button>
+            </div>
+        </header>
+
+        <!-- CHAT MESSAGES -->
+        <main class="chat-messages" id="chatMessages">
+            <div class="message bot-message">
+                <div class="bubble">
+                    Xin chào! Tôi là Trợ lý AI Banking của Ngân hàng Mẫu (Mock Banking).<br>
+                    Tôi hỗ trợ giải đáp quy trình mở tài khoản và phát hành thẻ qua eKYC theo chuẩn quy chế <strong>QT-NH-2024/01</strong>.<br>
+                    <em>Hệ thống đã tích hợp bộ chấm điểm & benchmark toàn diện (RAG Triad, RAGAS, Faithfulness, Negative Rejection).</em>
+                </div>
+            </div>
+        </main>
+
+        <!-- CHAT INPUT -->
+        <form class="chat-input-area" id="chatForm">
+            <input 
+                type="text" 
+                id="userInput" 
+                placeholder="Hỏi về quy trình eKYC, hạn mức, điều kiện thẻ..." 
+                autocomplete="off" 
+                required
+            >
+            <button type="submit" id="sendBtn">Gửi</button>
+        </form>
+    </div>
+
+    <!-- BENCHMARK MODAL / DRAWER -->
+    <div class="modal-overlay" id="benchmarkModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">
+                    <h3>🏆 BỘ CHẤM ĐIỂM & ĐỐI SOÁT HỌC THUẬT RAG (GR2)</h3>
+                    <p>Khung đo lường chuẩn hóa theo <strong>TruLens RAG Triad</strong> và <strong>RAGAS Harmonic Mean</strong></p>
+                </div>
+                <button class="modal-close-btn" id="closeBenchmarkBtn">&times;</button>
+            </div>
+
+            <!-- TABS -->
+            <div class="modal-tabs">
+                <button class="tab-btn active" data-tab="tab-compare">📊 So Sánh Đối Đầu (EXP-000 vs EXP-001)</button>
+                <button class="tab-btn" data-tab="tab-dataset">📋 Bộ Dữ Liệu Kiểm Chuẩn (FinanceBench)</button>
+            </div>
+
+            <!-- TAB 1: RUN BENCHMARK & COMPARISON -->
+            <div class="tab-pane active" id="tab-compare">
+                <div class="benchmark-controls">
+                    <div class="control-group">
+                        <label>Chế độ kiểm thử:</label>
+                        <select id="benchmarkModeSelect">
+                            <option value="compare">⚔️ So sánh Đối đầu (EXP-000 vs EXP-001)</option>
+                            <option value="rag">🛡️ Chỉ đo RAG Grounded (EXP-001)</option>
+                            <option value="baseline">⚡ Chỉ đo Baseline (EXP-000)</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label>Quy mô mẫu test:</label>
+                        <select id="benchmarkSampleSelect">
+                            <option value="4">4 kịch bản mẫu (Chạy nhanh ~10s)</option>
+                            <option value="12" selected>Tất cả 12 kịch bản (Đầy đủ ~35s)</option>
+                        </select>
+                    </div>
+                    <button id="runBenchmarkBtn" class="btn-run-benchmark">🚀 Bắt Đầu Đo Lường</button>
+                </div>
+
+                <div id="benchmarkLoading" class="benchmark-loading" style="display: none;">
+                    <div class="spinner"></div>
+                    <p id="benchmarkLoadingText">Đang thực thi các kịch bản kiểm thử qua LLM Judge...</p>
+                </div>
+
+                <!-- KPI SUMMARY CARDS -->
+                <div id="benchmarkResultsArea" style="display: none;">
+                    <div class="kpi-grid">
+                        <div class="kpi-card">
+                            <div class="kpi-title">Faithfulness (Chống Ảo Giác)</div>
+                            <div class="kpi-value highlight" id="kpiFaithfulness">--</div>
+                            <div class="kpi-sub" id="kpiFaithfulnessDelta">So với baseline: --</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-title">TruLens RAG Triad Score</div>
+                            <div class="kpi-value" id="kpiTriad">--</div>
+                            <div class="kpi-sub" id="kpiTriadDelta">Context + Grounded + Relevance</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-title">RAGAS Harmonic Mean</div>
+                            <div class="kpi-value highlight" id="kpiRagas">--</div>
+                            <div class="kpi-sub" id="kpiRagasDelta">Điểm điều hòa toàn diện</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-title">Negative Rejection Rate</div>
+                            <div class="kpi-value" id="kpiRejection">--</div>
+                            <div class="kpi-sub" id="kpiRejectionDelta">Bắt bẫy câu hỏi ngoài phạm vi</div>
+                        </div>
+                    </div>
+
+                    <!-- DETAILED COMPARISON TABLE -->
+                    <h4 style="margin: 20px 0 10px 0; color: #cbd5e1;">Bảng Tổng Hợp Chi Tiết Chỉ Số Kỹ Thuật:</h4>
+                    <table class="benchmark-table" id="summaryTable">
+                        <thead>
+                            <tr>
+                                <th>Chỉ Số Đo Lường</th>
+                                <th>EXP-000: Baseline</th>
+                                <th>EXP-001: RAG Grounded</th>
+                                <th>Chênh Lệch (Delta)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="summaryTableBody">
+                            <!-- Injected by JS -->
+                        </tbody>
+                    </table>
+
+                    <!-- DETAILED TEST CASES ACCORDION -->
+                    <h4 style="margin: 24px 0 10px 0; color: #cbd5e1;">Chi Tiết Từng Kịch Bản Kiểm Thử & Lời Phê Giám Khảo:</h4>
+                    <div id="detailedTestCasesList" class="test-cases-accordion">
+                        <!-- Injected by JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 2: DATASET EXPLORER -->
+            <div class="tab-pane" id="tab-dataset" style="display: none;">
+                <p style="margin-bottom: 12px; color: #94a3b8; font-size: 0.9rem;">
+                    Bộ câu hỏi kiểm chuẩn được xây dựng theo chuẩn <strong>FinanceBench</strong> bao gồm 3 phân nhóm: 
+                    <em>Factual (Dữ kiện cụ thể)</em>, <em>Conditional (Điều kiện loại trừ)</em>, và <em>Unanswerable Trap (Bẫy ảo giác)</em>.
+                </p>
+                <div id="datasetListContainer" class="dataset-list">
+                    <!-- Injected by JS -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- LIVE EVALUATION MODAL -->
+    <div class="modal-overlay" id="liveEvalModal" style="display: none;">
+        <div class="modal-content modal-sm">
+            <div class="modal-header">
+                <h3>🔍 KẾT QUẢ ĐÁNH GIÁ REAL-TIME (LLM JUDGE)</h3>
+                <button class="modal-close-btn" id="closeLiveEvalBtn">&times;</button>
+            </div>
+            <div id="liveEvalContent" class="live-eval-body">
+                <!-- Injected by JS -->
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

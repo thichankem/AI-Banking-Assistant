@@ -1,6 +1,6 @@
 # ĐỀ XUẤT ĐỀ TÀI GR2
 
-## XÂY DỰNG TRỢ LÝ AI SỬ DỤNG KIẾN TRÚC AI AGENT HỖ TRỢ KHÁCH HÀNG TRONG LĨNH VỰC NGÂN HÀNG
+## XÂY DỰNG TRỢ LÝ AI SỬ DỤNG KIẾN TRÚC AI AGENT HỖ TRỢ KHÁCH HÀNG TRONG LĨNH VỰC NGÂN HÀNG (HOÀN TOÀN CHƯA ĐƯỢC KIỂM CHỨNG)
 
 *AI Banking Assistant*
 
