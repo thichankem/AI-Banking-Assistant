@@ -4,10 +4,27 @@ env/
 venv/
 ENV/
 
-# Environment Variables & Secrets
+# Environment Variables, Secrets & Cloud API Configurations
 .env
-.env.local
+.env.*
 *.env
+!*.env.example
+config.yaml
+config.yml
+config.json
+secrets.yaml
+secrets.yml
+secrets.json
+secrets.toml
+api_config.json
+api_config.yaml
+llm_config.json
+gateway_config.*
+credentials*.json
+credentials*.yaml
+service_account*.json
+token.json
+token.pickle
 
 # Python Cache
 __pycache__/
@@ -16,7 +33,7 @@ __pycache__/
 *.so
 .pytest_cache/
 
-# Streamlit
+# Streamlit Secrets
 .streamlit/secrets.toml
 
 # OS & Temp
@@ -24,3 +41,37 @@ __pycache__/
 Thumbs.db
 *.tmp
 *.log
+
+# Scripts
+scripts/
+.scripts/
+crawl scripts/
+
+.vscode/
+.gemini/
+
+# Agent Directories & Contents
+.agent
+.agent/
+.agent/**
+agent
+agent/
+agent/**
+.agents
+.agents/
+.agents/**
+
+# AI Configuration & Rules
+GEMINI.md
+gemini.md
+AGENTS.md
+
+# Knowledge Base Data
+knowledge_base/
+
+# Dataset (Retrieval Test Benchmark)
+dataset/
+retrieval_dataset/
+retrieval dataset/
+retival dataset/
+retival_dataset/
