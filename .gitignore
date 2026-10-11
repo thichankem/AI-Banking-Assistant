@@ -1,83 +1,75 @@
 # Python Virtual Environments
 .venv/
-env/
 venv/
+env/
 ENV/
 
-# Environment Variables, Secrets & Cloud API Configurations
+# Environment Variables & Secrets
 .env
 .env.*
 *.env
 !*.env.example
-config.yaml
-config.yml
-config.json
-secrets.yaml
-secrets.yml
-secrets.json
-secrets.toml
-api_config.json
-api_config.yaml
-llm_config.json
-gateway_config.*
+secrets.*
 credentials*.json
 credentials*.yaml
 service_account*.json
 token.json
 token.pickle
 
-# Python Cache
+# Application & API Configurations
+config.yaml
+config.yml
+config.json
+api_config.json
+api_config.yaml
+llm_config.json
+gateway_config.*
+
+# Python Cache & Bytecode
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .pytest_cache/
 
-# Streamlit Secrets
+# Streamlit
 .streamlit/secrets.toml
 
-# OS & Temp
+# IDEs & Code Editors
+.idea/
+.vscode/
+.gemini/
+
+# Operating System & Temporary Files
 .DS_Store
 Thumbs.db
 *.tmp
 *.log
 
-# Scripts
+# Scripts & Crawlers
 scripts/
 .scripts/
 crawl scripts/
 
-.vscode/
-.idea/
-.gemini/
-
-# Agent Directories & Contents
-.agent
+# AI Agent Directories & Rules
 .agent/
-.agent/**
-agent
 agent/
-agent/**
-.agents
 .agents/
-.agents/**
-
-# AI Configuration & Rules
 GEMINI.md
 gemini.md
 AGENTS.md
 
-# Knowledge Base Data & Study Modules
+# Knowledge Base & Study Modules
 knowledge_base/
 notebooks_study/
 rag_modular_study/
 
-# Dataset (Retrieval Test Benchmark)
+# Datasets & Benchmarks
 dataset/
 retrieval_dataset/
 retrieval dataset/
-retival dataset/
 retival_dataset/
+retival dataset/
 
 # Documentation & Diagrams
 docs/
