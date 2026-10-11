@@ -66,8 +66,9 @@ GEMINI.md
 gemini.md
 AGENTS.md
 
-# Knowledge Base Data
+# Knowledge Base Data & Study Notebooks
 knowledge_base/
+notebooks_study/
 
 # Dataset (Retrieval Test Benchmark)
 dataset/
