@@ -48,6 +48,7 @@ scripts/
 crawl scripts/
 
 .vscode/
+.idea/
 .gemini/
 
 # Agent Directories & Contents
