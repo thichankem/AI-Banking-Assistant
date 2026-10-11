@@ -71,6 +71,7 @@ retrieval dataset/
 retival_dataset/
 retival dataset/
 
-# Documentation & Diagrams
-docs/
-doc/
+# Documentation Exclusions (Only ignore study_flow & documentation)
+docs/study_flow/
+docs/api documentation/
+docs/documentation/
