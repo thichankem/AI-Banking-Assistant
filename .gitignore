@@ -67,6 +67,8 @@ rag_modular_study/
 rag_modular/
 
 # Datasets & Benchmarks
+benchmark/
+!rag_banking/benchmark/
 dataset/
 *dataset/
 *dataset*/
