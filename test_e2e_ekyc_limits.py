@@ -45,8 +45,8 @@ def main():
     print("=" * 70)
     print("KẾT QUẢ TRUY VẤN & SUY LUẬN TỪ HỆ THỐNG:")
     print("=" * 70)
-    print(f"• Câu trả lời sinh ra:\n{result['answer']}\n")
-    print(f"• Dẫn chứng nguồn (Citations): {result['legal_citations']}\n")
+    print(f"Câu trả lời của bot:\n{result['answer']}\n")
+    print(f"Dẫn chứng nguồn (Citations): {result['legal_citations']}\n")
 
     print("-" * 70)
     print("BẢNG THỐNG KÊ ĐỘ TRỄ CHI TIẾT (LATENCY BENCHMARK):")

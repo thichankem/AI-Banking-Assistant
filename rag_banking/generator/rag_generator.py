@@ -45,7 +45,7 @@ class RAGGenerator:
         base_url: str = None,
         model: str = None,
         temperature: float = 0.2,
-        max_tokens: int = 1500
+        max_tokens: int = 2500
     ):
         self.api_key = api_key or os.getenv("API_KEY", "")
         self.base_url = base_url or os.getenv("BASE_URL", "https://mkp-api.fptcloud.com/v1")
