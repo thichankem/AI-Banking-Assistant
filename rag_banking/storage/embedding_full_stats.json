@@ -1,0 +1,41 @@
+{
+  "model_name": "all-MiniLM-L6-v2",
+  "vector_dimension": 384,
+  "total_chunks_embedded": 1789,
+  "full_embedding_duration_seconds": 46.51,
+  "overall_throughput_chunks_per_sec": 38.5,
+  "optimal_batch_size": 128,
+  "batch_benchmarks": [
+    {
+      "batch_size": 16,
+      "duration_seconds": 10.485,
+      "throughput_chunks_per_sec": 19.1,
+      "avg_latency_ms_per_chunk": 52.43
+    },
+    {
+      "batch_size": 32,
+      "duration_seconds": 6.014,
+      "throughput_chunks_per_sec": 33.3,
+      "avg_latency_ms_per_chunk": 30.07
+    },
+    {
+      "batch_size": 64,
+      "duration_seconds": 5.659,
+      "throughput_chunks_per_sec": 35.3,
+      "avg_latency_ms_per_chunk": 28.29
+    },
+    {
+      "batch_size": 128,
+      "duration_seconds": 5.232,
+      "throughput_chunks_per_sec": 38.2,
+      "avg_latency_ms_per_chunk": 26.16
+    }
+  ],
+  "integrity_metrics": {
+    "is_valid": true,
+    "nan_errors": 0,
+    "inf_errors": 0,
+    "dimension_mismatches": 0,
+    "l2_normalized": true
+  }
+}
