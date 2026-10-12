@@ -8,6 +8,7 @@ Nhiệm vụ:
 """
 
 import os
+import re
 from typing import Dict, Any, Union
 from openai import OpenAI
 from ..synthesizer.context_synthesizer import SynthesizedContext
@@ -35,7 +36,13 @@ HỆ THỐNG NGUYÊN TẮC AN TOÀN & BẢO VỆ NGÂN HÀNG (SYSTEM GUARDRAILS)
 
 5. PHONG CÁCH DIỄN ĐẠT:
    - Lịch thiệp, chuẩn mực ngôn phong tài chính ngân hàng, sử dụng đại từ "Vietcombank" và "Quý khách".
+   - Trả lời súc tích, trực diện vào nội dung câu hỏi, tránh dài dòng.
    - Sử dụng gạch đầu dòng, bảng Markdown rõ ràng khi liệt kê các bước quy trình, biểu phí hoặc so sánh sản phẩm.
+
+6. QUY CÁCH PHẢN HỒI (OUTPUT DIRECTIVE):
+   - Trả lời TRỰC TIẾP đến khách hàng.
+   - TUYỆT ĐỐI KHÔNG xuất các bước suy nghĩ nội bộ, phân tích đề bài, lập dàn ý hoặc câu từ nháp như: "Chúng ta cần trả lời...", "Soạn câu trả lời:", "Cần trích dẫn...", "Phải tuân thủ guardrails...".
+   - Chỉ xuất nội dung phản hồi hoàn chỉnh duy nhất gửi tới Quý khách hàng.
 """
 
 class RAGGenerator:
@@ -132,6 +139,9 @@ class RAGGenerator:
                 f"Để nhận câu trả lời đầy đủ từ LLM DeepSeek/Gemini, vui lòng cấu hình API_KEY."
             )
 
+        # Làm sạch và loại bỏ hoàn toàn các đoạn suy nghĩ nháp/thinking nếu có
+        answer_text = self._clean_bot_response(answer_text)
+
         return {
             "query": query,
             "answer": answer_text,
@@ -141,3 +151,37 @@ class RAGGenerator:
             "model_served": model_used,
             "guardrails_applied": True
         }
+
+    @staticmethod
+    def _clean_bot_response(text: str) -> str:
+        """
+        Loại bỏ hoàn toàn tư duy nội bộ (thinking / scratchpad) khỏi câu trả lời của bot.
+        """
+        if not text:
+            return ""
+
+        # 1. Bỏ thẻ <think>...</think>
+        text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+
+        # 2. Bỏ nháp suy nghĩ nội bộ nếu bắt đầu bằng các cụm từ phân tích
+        meta_phrases = [
+            "Soạn câu trả lời:",
+            "Soạn thảo câu trả lời:",
+            "Câu trả lời của bot:",
+            "Câu trả lời:",
+            "Nội dung phản hồi:"
+        ]
+        for phrase in meta_phrases:
+            if phrase in text:
+                parts = text.split(phrase, 1)
+                if len(parts) > 1 and len(parts[1].strip()) > 30:
+                    text = parts[1].strip()
+                    break
+
+        # 3. Nếu còn dính "Chúng ta cần trả lời..." hoặc "Tôi cần...", cắt tới lời chào hoặc trích dẫn chính thức
+        if text.startswith(("Chúng ta cần", "Ta cần", "Tôi cần", "Để trả lời", "Cần trả lời")):
+            match = re.search(r'(Kính thưa Quý khách|Kính chào Quý khách|Chào Quý khách|Theo quy định|Về hạn mức)', text)
+            if match:
+                text = text[match.start():].strip()
+
+        return text.strip()
