@@ -79,7 +79,8 @@ retival dataset/
 chunking_dataset/
 output_dataset/
 
-# Documentation Exclusions (Only ignore study_flow & documentation)
+# Documentation Exclusions (Only ignore study_flow, documentation & research)
 docs/study_flow/
 docs/api documentation/
 docs/documentation/
+docs/research/
