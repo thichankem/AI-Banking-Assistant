@@ -1,0 +1,49 @@
+{
+  "dataset_name": "Vietcombank Chunking Benchmark Dataset",
+  "total_files_processed": 110,
+  "total_chunks_extracted": 1789,
+  "total_time_seconds": 210.53,
+  "overall_speed_chunks_per_sec": 8.5,
+  "chunk_type_distribution": {
+    "text": 1116,
+    "table_item": 119,
+    "excel_table": 164,
+    "pdf_ocr_scan": 123,
+    "pdf_text": 267
+  },
+  "length_statistics": {
+    "min_chars": 61,
+    "max_chars": 4255,
+    "avg_chars": 676.2,
+    "median_chars": 593,
+    "p25_chars": 351,
+    "p75_chars": 833
+  },
+  "quality_metrics": {
+    "empty_chunks": 0,
+    "breadcrumb_coverage_rate": "100.0%",
+    "integrity_score": "100%"
+  },
+  "category_breakdown": {
+    "markdown": {
+      "files_count": 50,
+      "chunks_count": 1235,
+      "duration_seconds": 0.03,
+      "speed_chunks_per_sec": 39011.3
+    },
+    "excel": {
+      "files_count": 10,
+      "chunks_count": 164,
+      "duration_seconds": 0.07,
+      "speed_chunks_per_sec": 2471.4
+    },
+    "pdf": {
+      "files_count": 50,
+      "chunks_count": 390,
+      "duration_seconds": 210.43,
+      "speed_chunks_per_sec": 1.9
+    }
+  },
+  "output_directory": "D:\\GitHub\\AI Banking Asistant\\rag_banking\\chunking\\chunking_dataset\\output_dataset",
+  "timestamp": "2026-10-12 09:43:22"
+}

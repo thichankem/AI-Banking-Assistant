@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="Electron" modified="2026-10-12T09:48:00.000Z" agent="DrawioEditor" version="24.0.0" type="device">
+  <diagram id="diagram-rag-banking-flow" name="AI Banking RAG Flow">
+    <mxGraphModel dx="1200" dy="1650" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1080" pageHeight="1620" background="#FFFFFF">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- ================= LEVEL 1: START & LOAD ================= -->
+        <mxCell id="node_start" value="Start" vertex="1" parent="1" style="rounded=1;arcSize=24;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="460" y="40" width="120" height="45" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_load_docs" value="Load documents" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="440" y="125" width="160" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- ================= LEVEL 2: FILE TYPE DECISION ================= -->
+        <mxCell id="node_type_check" value="File type?" vertex="1" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="465" y="210" width="110" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_md_parse" value="Parse headers &amp; tables" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="140" y="310" width="180" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_excel_parse" value="Linearize Excel rows" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="430" y="310" width="180" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_pdf_scan_check" value="Scanned?" vertex="1" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="750" y="300" width="100" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_digital_pdf" value="Extract digital text" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="670" y="400" width="140" height="45" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_ocr_extract" value="RapidOCR extraction" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="830" y="400" width="150" height="45" as="geometry"/>
+        </mxCell>
+
+        <!-- ================= LEVEL 3: ENRICHMENT & LENGTH SPLIT ================= -->
+        <mxCell id="node_enrich_chunks" value="Enrich with breadcrumbs" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="425" y="480" width="190" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_len_check" value="Length &gt; 800?" vertex="1" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="460" y="560" width="120" height="65" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_split_sentences" value="Split sentences" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="250" y="568" width="140" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- ================= LEVEL 4: DUAL INDEXING & STORAGE ================= -->
+        <mxCell id="node_dual_index" value="Dual indexing" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="445" y="655" width="150" height="45" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_embed_docs" value="Generate embeddings" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="240" y="730" width="170" height="45" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_weaviate_store" value="Weaviate Vector DB" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="240" y="805" width="170" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_tokenize_corpus" value="Tokenize corpus" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="630" y="730" width="160" height="45" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_bm25_store" value="BM25 Inverted Index" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="630" y="805" width="160" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- ================= LEVEL 5: QUERY & PARALLEL RETRIEVAL ================= -->
+        <mxCell id="node_receive_query" value="Receive user query" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="435" y="885" width="170" height="45" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_dense_search" value="Dense vector search" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="240" y="960" width="170" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_sparse_search" value="BM25 keyword search" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="630" y="960" width="160" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- ================= LEVEL 6: RRF FUSION & SELECTION ================= -->
+        <mxCell id="node_rrf_fusion" value="RRF fusion ranking" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="435" y="1045" width="170" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_select_top" value="Select top 5 chunks" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="435" y="1125" width="170" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- ================= LEVEL 7: GENERATION & OUTPUT ================= -->
+        <mxCell id="node_build_prompt" value="Build prompt context" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="435" y="1205" width="170" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_call_llm" value="Call DeepSeek LLM" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="435" y="1285" width="170" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_log_trace" value="Log Bird Trace" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="445" y="1365" width="150" height="45" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_return_ans" value="Return final answer" vertex="1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="435" y="1440" width="170" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_end" value="End" vertex="1" parent="1" style="rounded=1;arcSize=24;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=2;fontSize=13;fontFamily=Helvetica;fontColor=#000000;">
+          <mxGeometry x="460" y="1520" width="120" height="45" as="geometry"/>
+        </mxCell>
+
+        <!-- ================= EDGES (CLEAN MINIMAL ORTHOGONAL) ================= -->
+        <!-- Start -> Load -->
+        <mxCell id="e_start_load" value="" edge="1" parent="1" source="node_start" target="node_load_docs" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Load -> File type check -->
+        <mxCell id="e_load_check" value="" edge="1" parent="1" source="node_load_docs" target="node_type_check" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- File type -> Markdown -->
+        <mxCell id="e_check_md" value="Markdown" edge="1" parent="1" source="node_type_check" target="node_md_parse" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;labelBackgroundColor=#FFFFFF;fontSize=11;fontColor=#000000;">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="230" y="245"/></Array></mxGeometry>
+        </mxCell>
+
+        <!-- File type -> Excel -->
+        <mxCell id="e_check_excel" value="Excel" edge="1" parent="1" source="node_type_check" target="node_excel_parse" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;labelBackgroundColor=#FFFFFF;fontSize=11;fontColor=#000000;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- File type -> PDF -->
+        <mxCell id="e_check_pdf" value="PDF" edge="1" parent="1" source="node_type_check" target="node_pdf_scan_check" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;labelBackgroundColor=#FFFFFF;fontSize=11;fontColor=#000000;">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="800" y="245"/></Array></mxGeometry>
+        </mxCell>
+
+        <!-- PDF scanned check -> Digital text -->
+        <mxCell id="e_pdf_digital" value="false" edge="1" parent="1" source="node_pdf_scan_check" target="node_digital_pdf" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;labelBackgroundColor=#FFFFFF;fontSize=11;fontColor=#000000;">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="740" y="380"/><mxPoint x="740" y="380"/></Array></mxGeometry>
+        </mxCell>
+
+        <!-- PDF scanned check -> OCR -->
+        <mxCell id="e_pdf_ocr" value="true" edge="1" parent="1" source="node_pdf_scan_check" target="node_ocr_extract" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;labelBackgroundColor=#FFFFFF;fontSize=11;fontColor=#000000;">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="905" y="335"/></Array></mxGeometry>
+        </mxCell>
+
+        <!-- Converge to Enrich Chunks (Clean routing without line crossings) -->
+        <mxCell id="e_md_enrich" value="" edge="1" parent="1" source="node_md_parse" target="node_enrich_chunks" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;entryX=0;entryY=0.5;entryDx=0;entryDy=0;">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="230" y="505"/></Array></mxGeometry>
+        </mxCell>
+
+        <mxCell id="e_excel_enrich" value="" edge="1" parent="1" source="node_excel_parse" target="node_enrich_chunks" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Digital PDF & OCR converge smoothly on the right -->
+        <mxCell id="e_digital_enrich" value="" edge="1" parent="1" source="node_digital_pdf" target="node_enrich_chunks" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;entryX=1;entryY=0.35;entryDx=0;entryDy=0;">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="740" y="498"/></Array></mxGeometry>
+        </mxCell>
+
+        <mxCell id="e_ocr_enrich" value="" edge="1" parent="1" source="node_ocr_extract" target="node_digital_pdf" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;entryX=1;entryY=0.5;entryDx=0;entryDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Enrich -> Length check -->
+        <mxCell id="e_enrich_len" value="" edge="1" parent="1" source="node_enrich_chunks" target="node_len_check" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Length check -> Split sentences -->
+        <mxCell id="e_len_split" value="true" edge="1" parent="1" source="node_len_check" target="node_split_sentences" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;labelBackgroundColor=#FFFFFF;fontSize=11;fontColor=#000000;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Split sentences -> Dual indexing -->
+        <mxCell id="e_split_dual" value="" edge="1" parent="1" source="node_split_sentences" target="node_dual_index" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;entryX=0;entryY=0.5;entryDx=0;entryDy=0;">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="320" y="677"/></Array></mxGeometry>
+        </mxCell>
+
+        <!-- Length check (false) -> Dual indexing -->
+        <mxCell id="e_len_dual" value="false" edge="1" parent="1" source="node_len_check" target="node_dual_index" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;labelBackgroundColor=#FFFFFF;fontSize=11;fontColor=#000000;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Dual index -> Embed docs -->
+        <mxCell id="e_dual_embed" value="" edge="1" parent="1" source="node_dual_index" target="node_embed_docs" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="325" y="677"/></Array></mxGeometry>
+        </mxCell>
+
+        <!-- Embed docs -> Weaviate DB -->
+        <mxCell id="e_embed_weaviate" value="" edge="1" parent="1" source="node_embed_docs" target="node_weaviate_store" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Dual index -> Tokenize corpus -->
+        <mxCell id="e_dual_tok" value="" edge="1" parent="1" source="node_dual_index" target="node_tokenize_corpus" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="710" y="677"/></Array></mxGeometry>
+        </mxCell>
+
+        <!-- Tokenize corpus -> BM25 Index -->
+        <mxCell id="e_tok_bm25" value="" edge="1" parent="1" source="node_tokenize_corpus" target="node_bm25_store" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Query -> Dense Search (enters top-right of Dense Search) -->
+        <mxCell id="e_query_dense" value="" edge="1" parent="1" source="node_receive_query" target="node_dense_search" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;entryX=0.8;entryY=0;entryDx=0;entryDy=0;">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="376" y="907"/></Array></mxGeometry>
+        </mxCell>
+
+        <!-- Weaviate -> Dense Search (enters top-left of Dense Search) -->
+        <mxCell id="e_weaviate_dense" value="" edge="1" parent="1" source="node_weaviate_store" target="node_dense_search" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;exitX=0.35;exitY=1;entryX=0.35;entryY=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Query -> Sparse Search (enters top-left of Sparse Search) -->
+        <mxCell id="e_query_sparse" value="" edge="1" parent="1" source="node_receive_query" target="node_sparse_search" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;entryX=0.2;entryY=0;entryDx=0;entryDy=0;">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="662" y="907"/></Array></mxGeometry>
+        </mxCell>
+
+        <!-- BM25 Index -> Sparse Search (enters top-right of Sparse Search) -->
+        <mxCell id="e_bm25_sparse" value="" edge="1" parent="1" source="node_bm25_store" target="node_sparse_search" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;exitX=0.65;exitY=1;entryX=0.65;entryY=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Dense Search -> RRF -->
+        <mxCell id="e_dense_rrf" value="top 15" edge="1" parent="1" source="node_dense_search" target="node_rrf_fusion" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;labelBackgroundColor=#FFFFFF;fontSize=11;fontColor=#000000;entryX=0;entryY=0.5;entryDx=0;entryDy=0;">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="325" y="1070"/></Array></mxGeometry>
+        </mxCell>
+
+        <!-- Sparse Search -> RRF -->
+        <mxCell id="e_sparse_rrf" value="top 15" edge="1" parent="1" source="node_sparse_search" target="node_rrf_fusion" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;labelBackgroundColor=#FFFFFF;fontSize=11;fontColor=#000000;entryX=1;entryY=0.5;entryDx=0;entryDy=0;">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="710" y="1070"/></Array></mxGeometry>
+        </mxCell>
+
+        <!-- RRF -> Select Top -->
+        <mxCell id="e_rrf_top" value="" edge="1" parent="1" source="node_rrf_fusion" target="node_select_top" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Select Top -> Build Prompt -->
+        <mxCell id="e_top_prompt" value="" edge="1" parent="1" source="node_select_top" target="node_build_prompt" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Build Prompt -> LLM -->
+        <mxCell id="e_prompt_llm" value="" edge="1" parent="1" source="node_build_prompt" target="node_call_llm" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- LLM -> Log Trace -->
+        <mxCell id="e_llm_trace" value="" edge="1" parent="1" source="node_call_llm" target="node_log_trace" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Log Trace -> Return Answer -->
+        <mxCell id="e_trace_return" value="" edge="1" parent="1" source="node_log_trace" target="node_return_ans" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Return Answer -> End -->
+        <mxCell id="e_return_end" value="" edge="1" parent="1" source="node_return_ans" target="node_end" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeColor=#000000;strokeWidth=1.5;endArrow=classic;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
