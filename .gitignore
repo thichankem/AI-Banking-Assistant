@@ -63,6 +63,7 @@ AGENTS.md
 knowledge_base/
 notebooks_study/
 rag_modular_study/
+rag_modular/
 
 # Datasets & Benchmarks
 dataset/
