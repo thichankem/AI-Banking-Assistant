@@ -15,45 +15,153 @@ class BreadcrumbsChunker:
         self.max_chunk_size = max_chunk_size
         self.chunk_overlap = chunk_overlap
 
-    def _extract_legal_ref(self, breadcrumb_text, text_chunk):
+    def _extract_document_identifier(self, breadcrumb_text: str, full_context: str, source_name: str = "") -> str:
         """
-        Trích xuất tham chiếu pháp lý chuẩn xác dạng:
-        [Quy chế eKYC Vietcombank - Điều 12, Khoản 2; Quyết định 2345/QĐ-NHNN]
+        Trích xuất tên hoặc số hiệu văn bản định danh một cách tổng quát:
+        Tự động nhận diện từ Breadcrumb Root, Số hiệu văn bản pháp quy, hoặc Source Name.
+        Tuyệt đối không hardcode tên văn bản.
         """
-        full_context = f"{breadcrumb_text} {text_chunk}"
-        refs = []
+        # 1. Tìm số hiệu văn bản chính thức xuất hiện ở đầu văn bản (vd: Quyết định 2345/QĐ-NHNN, Thông tư 17/2024/TT-NHNN)
+        doc_code_match = re.search(
+            r"\b((?:Luật|Nghị quyết|Quyết định|Thông tư|Nghị định|Quy chế|Quy định)\s+(?:số\s+)?\d+(?:/[A-ZĐ0-9\-_]+)+)\b",
+            breadcrumb_text or full_context[:200],
+            re.IGNORECASE
+        )
+        if doc_code_match:
+            return doc_code_match.group(1).strip()
 
-        # Tên quy chế / văn bản
-        doc_prefix = ""
-        if "quy chế ekyc" in full_context.lower():
-            doc_prefix = "Quy chế eKYC Vietcombank - "
-        elif "điều kiện điều khoản" in full_context.lower():
-            doc_prefix = "ĐKĐK VCB - "
+        # 2. Lấy phần tử gốc đầu tiên của Breadcrumb (Root Node)
+        if breadcrumb_text:
+            root_part = breadcrumb_text.split(" > ")[0].strip()
+            # Làm sạch các tiền tố số thứ tự hoặc tag phân loại dạng [PHÁP LÝ], vcb_md_01, v.v.
+            clean_root = re.sub(r"^\[.*?\]\s*", "", root_part)
+            clean_root = re.sub(r"^(?:vcb_)?(?:md|pdf|docx|excel)_\d+__?", "", clean_root, flags=re.IGNORECASE)
+            clean_root = clean_root.replace("_", " ").strip()
+            if len(clean_root) > 40:
+                # Nếu tiêu đề quá dài, lấy vế chính trước dấu gạch ngang hoặc dấu hai chấm
+                split_title = re.split(r"[-–—:]", clean_root)[0].strip()
+                if len(split_title) >= 8:
+                    clean_root = split_title
+            if clean_root:
+                return clean_root
 
-        # Tìm Điều X và Khoản Y
-        dieu_match = re.search(r"Điều\s+(\d+[a-zA-Z]?)", full_context, re.IGNORECASE)
-        khoan_match = re.search(r"Khoản\s+(\d+)", full_context, re.IGNORECASE)
-        if not khoan_match:
+        # 3. Fallback: Chuẩn hóa từ tên tệp tin nguồn
+        if source_name:
+            stem = Path(source_name).stem
+            stem = re.sub(r"^(?:vcb_)?(?:md|pdf|docx|excel)_\d+__?", "", stem, flags=re.IGNORECASE)
+            stem = stem.replace("_", " ").strip().title()
+            if stem:
+                return stem
+
+        return ""
+
+    def _extract_hierarchical_units(self, full_context: str, text_chunk: str) -> str:
+        """
+        Bóc tách tự động các đơn vị phân cấp chuẩn trong văn bản ngân hàng và quy phạm pháp luật:
+        Chương > Mục > Điều > Khoản > Điểm > Câu hỏi FAQ.
+        """
+        units = []
+
+        # 1. Phát hiện Điều (Article)
+        dieu_match = re.search(r"\bĐiều\s+(\d+[a-zA-Z]?)\b", full_context, re.IGNORECASE)
+
+        # 2. Phát hiện Khoản (Clause)
+        khoan_match = re.search(r"\bKhoản\s+(\d+)\b", full_context, re.IGNORECASE)
+        if not khoan_match and dieu_match:
+            # Phát hiện khoản dạng số thứ tự đầu đoạn: "1. Khách hàng...", "2. Hạn mức..."
             khoan_num_match = re.search(r"(?:^|\n)\s*(\d{1,2})\.\s+[A-ZÀ-Ỹ]", text_chunk)
-            if khoan_num_match and dieu_match:
+            if khoan_num_match:
                 khoan_match = khoan_num_match
 
-        if dieu_match and khoan_match:
-            refs.append(f"{doc_prefix}Điều {dieu_match.group(1)}, Khoản {khoan_match.group(1)}")
-        elif dieu_match:
-            refs.append(f"{doc_prefix}Điều {dieu_match.group(1)}")
+        # 3. Phát hiện Điểm (Point)
+        diem_match = re.search(r"\bĐiểm\s+([a-zđ])\b", full_context, re.IGNORECASE)
+        if not diem_match and khoan_match:
+            # Phát hiện điểm dạng chữ cái đầu dòng: "a) Trường hợp...", "b) Đối với..."
+            diem_char_match = re.search(r"(?:^|\n)\s*([a-zđ])\)\s+[A-ZÀ-Ỹa-zà-ỹ]", text_chunk)
+            if diem_char_match:
+                diem_match = diem_char_match
+
+        # 4. Phát hiện Chương / Mục
+        chuong_match = re.search(r"\b(?:Chương|Phần)\s+([IVXLCDM\d]+)\b", full_context, re.IGNORECASE)
+        muc_match = re.search(r"\b(?:Tiểu\s+mục|Mục)\s+([IVXLCDM\d]+|\d+)\b", full_context, re.IGNORECASE)
+
+        # 5. Phát hiện Câu hỏi (FAQ)
+        faq_match = re.search(r"\b(?:Câu|Câu\s+hỏi)\s+(\d+)\b", full_context, re.IGNORECASE)
+
+        # Tổng hợp các đơn vị theo thứ bậc
+        if dieu_match:
+            unit_str = f"Điều {dieu_match.group(1)}"
+            if khoan_match:
+                unit_str += f", Khoản {khoan_match.group(1)}"
+                if diem_match:
+                    unit_str += f", Điểm {diem_match.group(1)}"
+            units.append(unit_str)
+        elif faq_match:
+            units.append(f"Câu {faq_match.group(1)}")
+        elif muc_match:
+            unit_str = f"Mục {muc_match.group(1)}"
+            if khoan_match:
+                unit_str += f", Khoản {khoan_match.group(1)}"
+            units.append(unit_str)
+        elif chuong_match:
+            units.append(f"Chương {chuong_match.group(1)}")
         elif khoan_match:
-            refs.append(f"Khoản {khoan_match.group(1)}")
+            units.append(f"Khoản {khoan_match.group(1)}")
 
-        # Tìm Quyết định 2345/QĐ-NHNN hoặc Thông tư
-        qd_match = re.search(r"(Quyết định\s+\d+/[A-ZĐ\-]+)", full_context, re.IGNORECASE)
-        if qd_match:
-            qd_str = qd_match.group(1)
-            if qd_str not in refs:
-                refs.append(qd_str)
+        return units[0] if units else ""
 
-        if refs:
-            return f"[{'; '.join(refs)}]"
+    def _extract_cross_statutory_citations(self, full_context: str, current_doc: str) -> List[str]:
+        """
+        Quét và trích xuất tự động mọi văn bản pháp quy được viện dẫn chéo trong nội dung
+        (Quyết định NHNN, Thông tư, Nghị định, Luật các TCTD).
+        """
+        pattern = r"\b((?:Quyết định|Thông tư|Nghị định|Nghị quyết|Luật)\s+(?:số\s+)?\d+(?:/[A-ZĐ0-9\-_]+)+)\b"
+        matches = re.findall(pattern, full_context, re.IGNORECASE)
+        citations = []
+        for m in matches:
+            m_clean = m.strip()
+            # Tránh trùng lặp và tránh trùng với tên của chính văn bản hiện tại
+            if m_clean.lower() not in [c.lower() for c in citations] and m_clean.lower() not in current_doc.lower():
+                citations.append(m_clean)
+        return citations
+
+    def _extract_legal_ref(self, breadcrumb_text: str, text_chunk: str, source_name: str = "") -> str:
+        """
+        Trích xuất tham chiếu pháp lý & cấu trúc chuẩn tắc TỔNG QUÁT (Generic Canonical Reference):
+        Tự động nhận diện cho MỌI loại văn bản ngân hàng, biểu phí, quy chế, FAQ, nghị quyết:
+        Ví dụ:
+        - [Quy chế eKYC - Điều 12, Khoản 2; Quyết định 2345/QĐ-NHNN]
+        - [Biểu phí thẻ quốc tế - Mục II, Khoản 1]
+        - [Nghị quyết 728/NQ-HĐQT - Điều 1]
+        - [FAQ Thẻ ngân hàng - Câu 5]
+        """
+        full_context = f"{breadcrumb_text} {text_chunk}"
+
+        # 1. Bóc tách tên định danh văn bản
+        doc_identifier = self._extract_document_identifier(breadcrumb_text, full_context, source_name)
+
+        # 2. Bóc tách đơn vị phân cấp (Điều, Khoản, Điểm, Mục, Câu)
+        hierarchical_unit = self._extract_hierarchical_units(full_context, text_chunk)
+
+        # 3. Bóc tách các văn bản viện dẫn chéo
+        cross_citations = self._extract_cross_statutory_citations(full_context, doc_identifier)
+
+        parts = []
+        # Ghép định danh văn bản với đơn vị phân cấp
+        if doc_identifier and hierarchical_unit:
+            parts.append(f"{doc_identifier} - {hierarchical_unit}")
+        elif hierarchical_unit:
+            parts.append(hierarchical_unit)
+        elif doc_identifier:
+            parts.append(doc_identifier)
+
+        # Thêm các văn bản viện dẫn chéo
+        for c in cross_citations:
+            if c not in parts:
+                parts.append(c)
+
+        if parts:
+            return f"[{'; '.join(parts)}]"
         return ""
 
     def chunk_text(self, text, source_name="document.md"):
@@ -86,7 +194,7 @@ class BreadcrumbsChunker:
                 return
 
             breadcrumb = get_breadcrumb_str()
-            legal_ref = self._extract_legal_ref(breadcrumb, raw)
+            legal_ref = self._extract_legal_ref(breadcrumb, raw, source_name=source_name)
 
             # Xác định loại chunk
             chunk_type = "text"
@@ -124,7 +232,7 @@ class BreadcrumbsChunker:
                 for p in paragraphs:
                     if sub_len + len(p) > self.max_chunk_size and sub_buf:
                         sub_text = "\n\n".join(sub_buf).strip()
-                        sub_legal = self._extract_legal_ref(breadcrumb, sub_text) or legal_ref
+                        sub_legal = self._extract_legal_ref(breadcrumb, sub_text, source_name=source_name) or legal_ref
                         chunks.append({
                             "chunk_id": f"{Path(source_name).stem}_bc_{chunk_counter}",
                             "source": source_name,

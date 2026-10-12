@@ -1,49 +1,53 @@
 {
-  "dataset_name": "Vietcombank Chunking Benchmark Dataset",
-  "total_files_processed": 110,
-  "total_chunks_extracted": 1789,
-  "total_time_seconds": 210.53,
-  "overall_speed_chunks_per_sec": 8.5,
+  "dataset_name": "Vietcombank Banking Chunking Dataset (Core PDF & DOCX)",
+  "total_files_processed": 101,
+  "total_chunks_extracted": 1344,
+  "total_time_seconds": 248.06,
+  "overall_speed_chunks_per_sec": 5.4,
   "chunk_type_distribution": {
-    "text": 1116,
-    "table_item": 119,
-    "excel_table": 164,
-    "pdf_ocr_scan": 123,
-    "pdf_text": 267
-  },
-  "length_statistics": {
-    "min_chars": 61,
-    "max_chars": 4255,
-    "avg_chars": 676.2,
-    "median_chars": 593,
-    "p25_chars": 351,
-    "p75_chars": 833
+    "docx_text": 825,
+    "docx_table": 29,
+    "pdf_ocr_scan": 140,
+    "pdf_table": 80,
+    "pdf_text": 270
   },
   "quality_metrics": {
     "empty_chunks": 0,
     "breadcrumb_coverage_rate": "100.0%",
+    "legal_ref_coverage_rate": "89.7%",
+    "under_80_words_pct": "15.0%",
+    "under_120_words_pct": "33.4%",
+    "golden_range_150_450_pct": "52.4%",
+    "over_450_words_pct": "0.0%",
     "integrity_score": "100%"
   },
-  "category_breakdown": {
-    "markdown": {
-      "files_count": 50,
-      "chunks_count": 1235,
-      "duration_seconds": 0.03,
-      "speed_chunks_per_sec": 39011.3
-    },
-    "excel": {
-      "files_count": 10,
-      "chunks_count": 164,
-      "duration_seconds": 0.07,
-      "speed_chunks_per_sec": 2471.4
+  "word_statistics": {
+    "min_words": 1,
+    "avg_words": 147.5,
+    "median_words": 154,
+    "max_words": 433
+  },
+  "length_statistics": {
+    "min_chars": 66,
+    "p25_chars": 533,
+    "avg_chars": 744.9,
+    "median_chars": 781,
+    "p75_chars": 933,
+    "max_chars": 2357
+  },
+  "format_breakdown": {
+    "docx": {
+      "files_count": 51,
+      "chunks_count": 854,
+      "duration_seconds": 2.5,
+      "speed_chunks_per_sec": 341.0
     },
     "pdf": {
       "files_count": 50,
-      "chunks_count": 390,
-      "duration_seconds": 210.43,
-      "speed_chunks_per_sec": 1.9
+      "chunks_count": 490,
+      "duration_seconds": 245.55,
+      "speed_chunks_per_sec": 2.0
     }
   },
-  "output_directory": "D:\\GitHub\\AI Banking Asistant\\rag_banking\\chunking\\chunking_dataset\\output_dataset",
-  "timestamp": "2026-10-12 09:43:22"
+  "timestamp": "2026-10-12 17:07:11"
 }

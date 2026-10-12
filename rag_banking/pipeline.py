@@ -22,6 +22,7 @@ from typing import Dict, Any, List
 
 from .config import Config
 from .chunking.breadcrumbs_chunker import BreadcrumbsChunker
+from .chunking.layout_aware_chunker import DLAChunker
 from .embeddings.embedding_model import EmbeddingModel
 from .vector_db.cosine_hnsw_store import CosineHNSWVectorStore
 from .keyword_search.bm25_search import BM25Search
@@ -39,9 +40,13 @@ class BankingRAGPipeline:
         print("  KHỞI TẠO HỆ THỐNG AI BANKING RAG ASSISTANT (VIETCOMBANK DUAL-INDEX)")
         print("=" * 70)
 
-        # 1. Khởi tạo Breadcrumbs Chunker
-        print("[1/6] Khởi tạo Breadcrumbs Chunker (Bảo toàn phân cấp & Thẻ pháp lý)...")
+        # 1. Khởi tạo Breadcrumbs & DLA Chunker (Hỗ trợ DOCX, PDF, Excel)
+        print("[1/6] Khởi tạo DLA & Breadcrumbs Chunker (Đa định dạng DOCX, PDF, Excel)...")
         self.chunker = BreadcrumbsChunker(
+            max_chunk_size=self.config.CHUNK_MAX_SIZE,
+            chunk_overlap=self.config.CHUNK_OVERLAP
+        )
+        self.dla_chunker = DLAChunker(
             max_chunk_size=self.config.CHUNK_MAX_SIZE,
             chunk_overlap=self.config.CHUNK_OVERLAP
         )
@@ -101,10 +106,10 @@ class BankingRAGPipeline:
         self.indexed_chunks = []
         print("[Hệ thống] Toàn bộ 5 phân hệ đã sẵn sàng hoạt động!\n")
 
-    def ingest_documents(self, dataset_dir=None, max_files=None, extensions=(".md", ".txt")):
+    def ingest_documents(self, dataset_dir=None, max_files=None, extensions=None, use_dla=True):
         """
         Pha Ingestion & Dual-Indexing:
-        1. Phân đoạn bảo toàn theo dạng Breadcrumbs
+        1. Phân đoạn bảo toàn theo dạng Breadcrumbs / DLA (hỗ trợ .docx, .pdf, .xlsx, .md)
         2. Lập chỉ mục kép song song:
            - Dense Vector Store (Cosine HNSW 1024 chiều)
            - Sparse BM25 (Okapi BM25)
@@ -115,10 +120,16 @@ class BankingRAGPipeline:
         if not target_dir.exists():
             raise FileNotFoundError(f"Không tìm thấy thư mục: {target_dir}")
 
-        # Bước A: Phân đoạn Breadcrumbs
+        target_exts = extensions or [".md", ".docx", ".pdf", ".xlsx", ".txt"]
+
+        # Bước A: Phân đoạn (DLA hoặc Breadcrumbs)
         t0 = time.time()
-        print(" -> [Ingestion] Đang phân đoạn tài liệu bảo toàn dạng Breadcrumbs & Pháp lý...")
-        chunks = self.chunker.chunk_directory(target_dir, max_files=max_files, extensions=extensions)
+        if use_dla:
+            print(" -> [Ingestion] Đang phân đoạn theo DLA Layout-Aware (DOCX, PDF, Excel, MD)...")
+            chunks = self.dla_chunker.chunk_directory(target_dir, extensions=target_exts, max_files=max_files)
+        else:
+            print(" -> [Ingestion] Đang phân đoạn tài liệu bảo toàn dạng Breadcrumbs & Pháp lý...")
+            chunks = self.chunker.chunk_directory(target_dir, max_files=max_files, extensions=target_exts)
         print(f"    + Đã trích xuất: {len(chunks)} chunks ({round((time.time() - t0)*1000, 1)}ms)")
 
         # Thống kê phân loại

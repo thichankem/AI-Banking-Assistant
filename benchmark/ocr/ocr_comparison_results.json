@@ -1,0 +1,615 @@
+{
+  "total_samples": 20,
+  "overall": {
+    "rapidocr": {
+      "cer": 45.6,
+      "wer": 91.32,
+      "diacritics_acc": 2.79,
+      "numeric_acc": 90.41,
+      "avg_time_s": 0.0
+    },
+    "tesseract_vie": {
+      "cer": 26.53,
+      "wer": 30.94,
+      "diacritics_acc": 95.26,
+      "numeric_acc": 94.57,
+      "avg_time_s": 1.47
+    },
+    "overall_improvements": {
+      "cer_reduction_pct_pts": 19.07,
+      "wer_reduction_pct_pts": 60.38,
+      "diacritics_gain_pct_pts": 92.47,
+      "numeric_gain_pct_pts": 4.16
+    }
+  },
+  "pdf_subset": {
+    "rapidocr": {
+      "cer": 31.57,
+      "wer": 80.28,
+      "diacritics_acc": 1.16,
+      "numeric_acc": 92.42
+    },
+    "tesseract_vie": {
+      "cer": 10.22,
+      "wer": 15.36,
+      "diacritics_acc": 97.43,
+      "numeric_acc": 93.79
+    }
+  },
+  "docx_subset": {
+    "rapidocr": {
+      "cer": 59.63,
+      "wer": 102.36,
+      "diacritics_acc": 4.42,
+      "numeric_acc": 88.39
+    },
+    "tesseract_vie": {
+      "cer": 42.83,
+      "wer": 46.52,
+      "diacritics_acc": 93.08,
+      "numeric_acc": 95.36
+    }
+  },
+  "details": [
+    {
+      "sample": "docx_01_faq_the_ngan_hang",
+      "doc_type": "DOCX",
+      "ref_length": 1369,
+      "ref_words": 292,
+      "rapidocr": {
+        "cer": 39.01,
+        "wer": 95.21,
+        "diacritics_acc": 7.0,
+        "numeric_acc": 100.0,
+        "time_s": 0.0,
+        "hyp_length": 1539
+      },
+      "tesseract_vie": {
+        "cer": 31.04,
+        "wer": 35.62,
+        "diacritics_acc": 100.0,
+        "numeric_acc": 100.0,
+        "time_s": 1.53,
+        "hyp_length": 1789
+      },
+      "improvements": {
+        "cer_reduction": 7.97,
+        "wer_reduction": 59.59,
+        "diacritics_gain": 93.0,
+        "numeric_gain": 0.0
+      }
+    },
+    {
+      "sample": "docx_02_le_loyalty",
+      "doc_type": "DOCX",
+      "ref_length": 3705,
+      "ref_words": 725,
+      "rapidocr": {
+        "cer": 54.68,
+        "wer": 87.03,
+        "diacritics_acc": 3.09,
+        "numeric_acc": 81.36,
+        "time_s": 0.0,
+        "hyp_length": 2047
+      },
+      "tesseract_vie": {
+        "cer": 36.63,
+        "wer": 44.28,
+        "diacritics_acc": 77.31,
+        "numeric_acc": 81.36,
+        "time_s": 2.04,
+        "hyp_length": 2462
+      },
+      "improvements": {
+        "cer_reduction": 18.05,
+        "wer_reduction": 42.75,
+        "diacritics_gain": 74.22,
+        "numeric_gain": 0.0
+      }
+    },
+    {
+      "sample": "docx_03_dkdk_ekyc",
+      "doc_type": "DOCX",
+      "ref_length": 2964,
+      "ref_words": 671,
+      "rapidocr": {
+        "cer": 41.36,
+        "wer": 84.95,
+        "diacritics_acc": 4.38,
+        "numeric_acc": 75.0,
+        "time_s": 0.0,
+        "hyp_length": 2331
+      },
+      "tesseract_vie": {
+        "cer": 15.15,
+        "wer": 15.8,
+        "diacritics_acc": 85.11,
+        "numeric_acc": 75.0,
+        "time_s": 2.07,
+        "hyp_length": 2548
+      },
+      "improvements": {
+        "cer_reduction": 26.21,
+        "wer_reduction": 69.15,
+        "diacritics_gain": 80.73,
+        "numeric_gain": 0.0
+      }
+    },
+    {
+      "sample": "docx_04_faq_digibank_otp",
+      "doc_type": "DOCX",
+      "ref_length": 875,
+      "ref_words": 183,
+      "rapidocr": {
+        "cer": 101.26,
+        "wer": 153.55,
+        "diacritics_acc": 3.97,
+        "numeric_acc": 100.0,
+        "time_s": 0.0,
+        "hyp_length": 1574
+      },
+      "tesseract_vie": {
+        "cer": 91.77,
+        "wer": 96.72,
+        "diacritics_acc": 100.0,
+        "numeric_acc": 100.0,
+        "time_s": 1.35,
+        "hyp_length": 1676
+      },
+      "improvements": {
+        "cer_reduction": 9.49,
+        "wer_reduction": 56.83,
+        "diacritics_gain": 96.03,
+        "numeric_gain": 0.0
+      }
+    },
+    {
+      "sample": "docx_05_dkdk_tai_khoan_khcn",
+      "doc_type": "DOCX",
+      "ref_length": 1919,
+      "ref_words": 436,
+      "rapidocr": {
+        "cer": 56.18,
+        "wer": 96.33,
+        "diacritics_acc": 7.08,
+        "numeric_acc": 100.0,
+        "time_s": 0.0,
+        "hyp_length": 2097
+      },
+      "tesseract_vie": {
+        "cer": 24.44,
+        "wer": 25.69,
+        "diacritics_acc": 100.0,
+        "numeric_acc": 100.0,
+        "time_s": 1.88,
+        "hyp_length": 2386
+      },
+      "improvements": {
+        "cer_reduction": 31.74,
+        "wer_reduction": 70.64,
+        "diacritics_gain": 92.92,
+        "numeric_gain": 0.0
+      }
+    },
+    {
+      "sample": "docx_06_faq_kieu_hoi",
+      "doc_type": "DOCX",
+      "ref_length": 1237,
+      "ref_words": 258,
+      "rapidocr": {
+        "cer": 67.91,
+        "wer": 97.29,
+        "diacritics_acc": 1.56,
+        "numeric_acc": 75.0,
+        "time_s": 0.0,
+        "hyp_length": 1201
+      },
+      "tesseract_vie": {
+        "cer": 53.44,
+        "wer": 56.2,
+        "diacritics_acc": 100.0,
+        "numeric_acc": 100.0,
+        "time_s": 1.47,
+        "hyp_length": 1898
+      },
+      "improvements": {
+        "cer_reduction": 14.47,
+        "wer_reduction": 41.09,
+        "diacritics_gain": 98.44,
+        "numeric_gain": 25.0
+      }
+    },
+    {
+      "sample": "docx_07_faq_loyalty_doi_qua",
+      "doc_type": "DOCX",
+      "ref_length": 1679,
+      "ref_words": 332,
+      "rapidocr": {
+        "cer": 54.38,
+        "wer": 91.87,
+        "diacritics_acc": 2.81,
+        "numeric_acc": 87.5,
+        "time_s": 0.0,
+        "hyp_length": 1296
+      },
+      "tesseract_vie": {
+        "cer": 24.6,
+        "wer": 27.41,
+        "diacritics_acc": 100.0,
+        "numeric_acc": 100.0,
+        "time_s": 1.72,
+        "hyp_length": 2092
+      },
+      "improvements": {
+        "cer_reduction": 29.78,
+        "wer_reduction": 64.46,
+        "diacritics_gain": 97.19,
+        "numeric_gain": 12.5
+      }
+    },
+    {
+      "sample": "docx_08_faq_cho_vay_khcn",
+      "doc_type": "DOCX",
+      "ref_length": 1479,
+      "ref_words": 322,
+      "rapidocr": {
+        "cer": 29.41,
+        "wer": 86.96,
+        "diacritics_acc": 3.1,
+        "numeric_acc": 90.0,
+        "time_s": 0.0,
+        "hyp_length": 1560
+      },
+      "tesseract_vie": {
+        "cer": 36.92,
+        "wer": 39.13,
+        "diacritics_acc": 100.0,
+        "numeric_acc": 100.0,
+        "time_s": 1.72,
+        "hyp_length": 2023
+      },
+      "improvements": {
+        "cer_reduction": -7.51,
+        "wer_reduction": 47.83,
+        "diacritics_gain": 96.9,
+        "numeric_gain": 10.0
+      }
+    },
+    {
+      "sample": "docx_09_urbox_evergreen",
+      "doc_type": "DOCX",
+      "ref_length": 3821,
+      "ref_words": 815,
+      "rapidocr": {
+        "cer": 63.18,
+        "wer": 90.18,
+        "diacritics_acc": 0.85,
+        "numeric_acc": 75.0,
+        "time_s": 0.0,
+        "hyp_length": 1780
+      },
+      "tesseract_vie": {
+        "cer": 30.91,
+        "wer": 32.15,
+        "diacritics_acc": 68.42,
+        "numeric_acc": 97.22,
+        "time_s": 2.04,
+        "hyp_length": 2679
+      },
+      "improvements": {
+        "cer_reduction": 32.27,
+        "wer_reduction": 58.03,
+        "diacritics_gain": 67.57,
+        "numeric_gain": 22.22
+      }
+    },
+    {
+      "sample": "docx_10_vibe_platinum",
+      "doc_type": "DOCX",
+      "ref_length": 1159,
+      "ref_words": 231,
+      "rapidocr": {
+        "cer": 88.96,
+        "wer": 140.26,
+        "diacritics_acc": 10.33,
+        "numeric_acc": 100.0,
+        "time_s": 0.0,
+        "hyp_length": 1835
+      },
+      "tesseract_vie": {
+        "cer": 83.43,
+        "wer": 92.21,
+        "diacritics_acc": 100.0,
+        "numeric_acc": 100.0,
+        "time_s": 1.72,
+        "hyp_length": 2121
+      },
+      "improvements": {
+        "cer_reduction": 5.53,
+        "wer_reduction": 48.05,
+        "diacritics_gain": 89.67,
+        "numeric_gain": 0.0
+      }
+    },
+    {
+      "sample": "pdf_01_bctc_2024_hop_nhat",
+      "doc_type": "PDF",
+      "ref_length": 155,
+      "ref_words": 32,
+      "rapidocr": {
+        "cer": 16.13,
+        "wer": 78.12,
+        "diacritics_acc": 0.0,
+        "numeric_acc": 100.0,
+        "time_s": 0.0,
+        "hyp_length": 153
+      },
+      "tesseract_vie": {
+        "cer": 0.0,
+        "wer": 0.0,
+        "diacritics_acc": 100.0,
+        "numeric_acc": 100.0,
+        "time_s": 0.31,
+        "hyp_length": 155
+      },
+      "improvements": {
+        "cer_reduction": 16.13,
+        "wer_reduction": 78.12,
+        "diacritics_gain": 100.0,
+        "numeric_gain": 0.0
+      }
+    },
+    {
+      "sample": "pdf_02_bctc_2024_rieng_le",
+      "doc_type": "PDF",
+      "ref_length": 155,
+      "ref_words": 32,
+      "rapidocr": {
+        "cer": 16.77,
+        "wer": 71.88,
+        "diacritics_acc": 0.0,
+        "numeric_acc": 100.0,
+        "time_s": 0.0,
+        "hyp_length": 151
+      },
+      "tesseract_vie": {
+        "cer": 1.94,
+        "wer": 3.12,
+        "diacritics_acc": 95.65,
+        "numeric_acc": 100.0,
+        "time_s": 0.27,
+        "hyp_length": 152
+      },
+      "improvements": {
+        "cer_reduction": 14.83,
+        "wer_reduction": 68.76,
+        "diacritics_gain": 95.65,
+        "numeric_gain": 0.0
+      }
+    },
+    {
+      "sample": "pdf_03_trai_phieu_cbtt",
+      "doc_type": "PDF",
+      "ref_length": 1581,
+      "ref_words": 311,
+      "rapidocr": {
+        "cer": 34.03,
+        "wer": 90.68,
+        "diacritics_acc": 0.36,
+        "numeric_acc": 91.3,
+        "time_s": 0.0,
+        "hyp_length": 1443
+      },
+      "tesseract_vie": {
+        "cer": 8.41,
+        "wer": 13.5,
+        "diacritics_acc": 100.0,
+        "numeric_acc": 97.83,
+        "time_s": 1.37,
+        "hyp_length": 1580
+      },
+      "improvements": {
+        "cer_reduction": 25.62,
+        "wer_reduction": 77.18,
+        "diacritics_gain": 99.64,
+        "numeric_gain": 6.53
+      }
+    },
+    {
+      "sample": "pdf_04_nq_hdqt_vcbs",
+      "doc_type": "PDF",
+      "ref_length": 1564,
+      "ref_words": 315,
+      "rapidocr": {
+        "cer": 35.55,
+        "wer": 91.11,
+        "diacritics_acc": 0.0,
+        "numeric_acc": 94.12,
+        "time_s": 0.0,
+        "hyp_length": 1409
+      },
+      "tesseract_vie": {
+        "cer": 8.31,
+        "wer": 13.02,
+        "diacritics_acc": 95.45,
+        "numeric_acc": 100.0,
+        "time_s": 1.33,
+        "hyp_length": 1510
+      },
+      "improvements": {
+        "cer_reduction": 27.24,
+        "wer_reduction": 78.09,
+        "diacritics_gain": 95.45,
+        "numeric_gain": 5.88
+      }
+    },
+    {
+      "sample": "pdf_05_bieu_phi_the_tdqt",
+      "doc_type": "PDF",
+      "ref_length": 1501,
+      "ref_words": 239,
+      "rapidocr": {
+        "cer": 26.58,
+        "wer": 70.29,
+        "diacritics_acc": 1.4,
+        "numeric_acc": 89.71,
+        "time_s": 0.0,
+        "hyp_length": 1364
+      },
+      "tesseract_vie": {
+        "cer": 15.39,
+        "wer": 19.25,
+        "diacritics_acc": 97.2,
+        "numeric_acc": 85.29,
+        "time_s": 1.33,
+        "hyp_length": 1406
+      },
+      "improvements": {
+        "cer_reduction": 11.19,
+        "wer_reduction": 51.04,
+        "diacritics_gain": 95.8,
+        "numeric_gain": -4.42
+      }
+    },
+    {
+      "sample": "pdf_06_bieu_phi_vay_khcn",
+      "doc_type": "PDF",
+      "ref_length": 1380,
+      "ref_words": 312,
+      "rapidocr": {
+        "cer": 43.12,
+        "wer": 83.97,
+        "diacritics_acc": 1.57,
+        "numeric_acc": 100.0,
+        "time_s": 0.0,
+        "hyp_length": 1388
+      },
+      "tesseract_vie": {
+        "cer": 7.75,
+        "wer": 13.46,
+        "diacritics_acc": 100.0,
+        "numeric_acc": 98.53,
+        "time_s": 1.27,
+        "hyp_length": 1296
+      },
+      "improvements": {
+        "cer_reduction": 35.37,
+        "wer_reduction": 70.51,
+        "diacritics_gain": 98.43,
+        "numeric_gain": -1.47
+      }
+    },
+    {
+      "sample": "pdf_07_bieu_phi_forex_digi",
+      "doc_type": "PDF",
+      "ref_length": 1547,
+      "ref_words": 319,
+      "rapidocr": {
+        "cer": 41.82,
+        "wer": 87.15,
+        "diacritics_acc": 0.0,
+        "numeric_acc": 92.86,
+        "time_s": 0.0,
+        "hyp_length": 1443
+      },
+      "tesseract_vie": {
+        "cer": 23.14,
+        "wer": 30.72,
+        "diacritics_acc": 96.4,
+        "numeric_acc": 100.0,
+        "time_s": 1.06,
+        "hyp_length": 1518
+      },
+      "improvements": {
+        "cer_reduction": 18.68,
+        "wer_reduction": 56.43,
+        "diacritics_gain": 96.4,
+        "numeric_gain": 7.14
+      }
+    },
+    {
+      "sample": "pdf_08_bieu_phi_so_dep",
+      "doc_type": "PDF",
+      "ref_length": 1530,
+      "ref_words": 266,
+      "rapidocr": {
+        "cer": 14.77,
+        "wer": 57.14,
+        "diacritics_acc": 0.63,
+        "numeric_acc": 100.0,
+        "time_s": 0.0,
+        "hyp_length": 1508
+      },
+      "tesseract_vie": {
+        "cer": 15.23,
+        "wer": 31.2,
+        "diacritics_acc": 93.71,
+        "numeric_acc": 100.0,
+        "time_s": 1.39,
+        "hyp_length": 1515
+      },
+      "improvements": {
+        "cer_reduction": -0.46,
+        "wer_reduction": 25.94,
+        "diacritics_gain": 93.08,
+        "numeric_gain": 0.0
+      }
+    },
+    {
+      "sample": "pdf_09_bieu_phi_debit_haha",
+      "doc_type": "PDF",
+      "ref_length": 1370,
+      "ref_words": 281,
+      "rapidocr": {
+        "cer": 30.66,
+        "wer": 82.56,
+        "diacritics_acc": 5.88,
+        "numeric_acc": 100.0,
+        "time_s": 0.0,
+        "hyp_length": 1354
+      },
+      "tesseract_vie": {
+        "cer": 17.96,
+        "wer": 24.2,
+        "diacritics_acc": 95.93,
+        "numeric_acc": 100.0,
+        "time_s": 1.22,
+        "hyp_length": 1339
+      },
+      "improvements": {
+        "cer_reduction": 12.7,
+        "wer_reduction": 58.36,
+        "diacritics_gain": 90.05,
+        "numeric_gain": 0.0
+      }
+    },
+    {
+      "sample": "pdf_10_dkdk_tktt_truc_tuyen",
+      "doc_type": "PDF",
+      "ref_length": 2928,
+      "ref_words": 661,
+      "rapidocr": {
+        "cer": 56.28,
+        "wer": 89.86,
+        "diacritics_acc": 1.79,
+        "numeric_acc": 56.25,
+        "time_s": 0.0,
+        "hyp_length": 1712
+      },
+      "tesseract_vie": {
+        "cer": 4.06,
+        "wer": 5.14,
+        "diacritics_acc": 100.0,
+        "numeric_acc": 56.25,
+        "time_s": 2.33,
+        "hyp_length": 2897
+      },
+      "improvements": {
+        "cer_reduction": 52.22,
+        "wer_reduction": 84.72,
+        "diacritics_gain": 98.21,
+        "numeric_gain": 0.0
+      }
+    }
+  ]
+}
