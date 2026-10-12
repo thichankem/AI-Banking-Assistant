@@ -45,6 +45,7 @@ __pycache__/
 Thumbs.db
 *.tmp
 *.log
+~$*
 
 # Scripts & Crawlers
 scripts/
@@ -67,10 +68,16 @@ rag_modular/
 
 # Datasets & Benchmarks
 dataset/
+*dataset/
+*dataset*/
+*datasets/
+*_dataset/
 retrieval_dataset/
 retrieval dataset/
 retival_dataset/
 retival dataset/
+chunking_dataset/
+output_dataset/
 
 # Documentation Exclusions (Only ignore study_flow & documentation)
 docs/study_flow/
