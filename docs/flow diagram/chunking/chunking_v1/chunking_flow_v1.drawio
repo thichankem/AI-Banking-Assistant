@@ -1,0 +1,388 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mxfile host="Electron" modified="2026-10-12T18:30:00.000Z" agent="DrawioEditor" version="24.0.0" type="device">
+  <diagram id="diagram-chunking-rag-v1" name="DLA Chunking Pipeline Flow v1">
+    <mxGraphModel dx="1400" dy="1600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1360" pageHeight="1480" background="#F8FAFC">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- TITLE BANNER -->
+        <mxCell id="title_banner" value="&lt;b style='font-size:16px;color:#38BDF8;'&gt;HỆ THỐNG PHÂN ĐOẠN TÀI LIỆU NHẬN THỨC BỐ CỤC (DLA CHUNKING PIPELINE V1)&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:12px;color:#94A3B8;'&gt;AI Banking Assistant &amp;bull; Phân Cấp Thuần Túy Hình Học OCR (0% Regex) &amp;amp; DOCX (Layout AST &amp;amp; Section-Length-Aware)&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;shape=rectangle;rounded=1;arcSize=6;fillColor=#0F172A;strokeColor=#1E293B;fontColor=#F8FAFC;fontSize=14;align=center;shadow=1;">
+          <mxGeometry x="60" y="20" width="1240" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- PHASE 1: INGESTION & ROUTER -->
+        <mxCell id="lane_ingest" value="PHASE 1: ĐẦU VÀO ĐA ĐỊNH DẠNG &amp; BỘ ĐIỀU PHỐI ĐỊNH TUYẾN (MULTI-FORMAT ROUTER)" vertex="1" parent="1" style="html=1;whiteSpace=wrap;swimlane;startSize=26;rounded=1;arcSize=4;fillColor=#FFFFFF;strokeColor=#CBD5E1;strokeWidth=1.5;fontColor=#0F172A;fontSize=12;fontStyle=1;collapsible=0;shadow=1;">
+          <mxGeometry x="60" y="95" width="1240" height="145" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="start_node" value="Bắt đầu" vertex="1" parent="1" style="html=1;whiteSpace=wrap;ellipse;fillColor=#10B981;strokeColor=#059669;fontColor=#FFFFFF;fontStyle=1;fontSize=12;shadow=1;align=center;">
+          <mxGeometry x="85" y="145" width="85" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_input_docs" value="&lt;b&gt;Kho Tài Liệu Ngân Hàng Mục Tiêu&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;'&gt;Tệp Word .docx: Quy chế eKYC, Điều kiện điều khoản&lt;br/&gt;Tệp PDF .pdf: Báo cáo số, Bản scan mộc đỏ, Văn bản pháp quy&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#FEF3C7;strokeColor=#D97706;fontColor=#92400E;fontSize=11;shadow=1;align=center;">
+          <mxGeometry x="195" y="135" width="295" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_router" value="&lt;b&gt;LayoutAwareChunker (DLA Engine)&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;'&gt;Phân tích phần mở rộng tệp &amp;amp; điều phối 2 luồng cốt lõi&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#EFF6FF;strokeColor=#3B82F6;fontColor=#1E40AF;fontSize=12;fontStyle=1;shadow=1;align=center;">
+          <mxGeometry x="540" y="135" width="285" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_config_badge" value="&lt;b&gt;Thông số Cấu hình DLA Chuẩn:&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;'&gt;&amp;bull; &lt;b&gt;max_chunk_size&lt;/b&gt; = 800 ký tự | &lt;b&gt;chunk_overlap&lt;/b&gt; = 100 ký tự&lt;br/&gt;&amp;bull; &lt;b&gt;min_section_size&lt;/b&gt; = 120 từ | &lt;b&gt;scanned_threshold&lt;/b&gt; = 40 ký tự&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=6;fillColor=#F1F5F9;strokeColor=#94A3B8;fontColor=#334155;fontSize=10;shadow=0;align=left;spacingLeft=10;">
+          <mxGeometry x="870" y="135" width="410" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e_start_input" value="" edge="1" parent="1" source="start_node" target="node_input_docs" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e_input_router" value="tải tài liệu" edge="1" parent="1" source="node_input_docs" target="node_router" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- PHASE 2: TWO CORE SWIMLANES (PDF & DOCX) -->
+        
+        <!-- ==================== LUỒNG 1: PDF CHUNKER ==================== -->
+        <mxCell id="lane_pdf" value="LUỒNG 1: PDF CHUNKER (OCR GEOMETRIC DLA &amp; ADVANCED SCAN RECONSTRUCTION)" vertex="1" parent="1" style="html=1;whiteSpace=wrap;swimlane;startSize=26;rounded=1;arcSize=4;fillColor=#FFFFFF;strokeColor=#93C5FD;strokeWidth=1.5;fontColor=#1E40AF;fontSize=12;fontStyle=1;collapsible=0;shadow=1;">
+          <mxGeometry x="60" y="255" width="595" height="675" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="pdf_open" value="&lt;b&gt;Mở tệp PDF (PyMuPDF &amp;amp; pdfplumber)&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;'&gt;find_tables() dò bảng biểu &amp;amp; Duyệt tuần tự các trang&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#EFF6FF;strokeColor=#3B82F6;fontColor=#1E40AF;fontSize=11;shadow=1;align=center;">
+          <mxGeometry x="110" y="295" width="495" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="pdf_check_scan" value="&lt;b&gt;Bản Scan?&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:9px;'&gt;img_area &amp;gt; 40% HOẶC lỗi font&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rhombus;fillColor=#FEF2F2;strokeColor=#EF4444;fontColor=#991B1B;fontSize=10;fontStyle=1;shadow=1;align=center;">
+          <mxGeometry x="260" y="345" width="195" height="46" as="geometry"/>
+        </mxCell>
+
+        <!-- Nhánh Scan PDF chuyên sâu -->
+        <mxCell id="pdf_scan_pre" value="&lt;b&gt;Tiền xử lý Scan Nâng cao (300 DPI, Deskew &amp;amp; Lọc Mộc Đỏ)&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:9px;'&gt;Render 300 DPI &amp;bull; Deskew Otsu/minAreaRect &amp;bull; Lọc mộc đỏ HSV OpenCV&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#FEE2E2;strokeColor=#DC2626;fontColor=#991B1B;fontSize=10;shadow=1;align=center;">
+          <mxGeometry x="110" y="405" width="290" height="42" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="pdf_ocr_box" value="&lt;b&gt;RapidOCR ONNX (Lưu Bounding Box &amp;amp; Điểm Tin Cậy)&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:9px;'&gt;Lưu [box, text, score] &amp;bull; Sắp xếp Reading Order 2 cột (Two-Column Layout)&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#FEE2E2;strokeColor=#DC2626;fontColor=#991B1B;fontSize=10;shadow=1;align=center;">
+          <mxGeometry x="110" y="460" width="290" height="42" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="pdf_filter_hf" value="&lt;b&gt;Loại bỏ Header/Footer Vùng Biên &amp;amp; Lặp Lại&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:9px;'&gt;Loại bỏ dòng ở 8% đỉnh/đáy &amp;amp; lặp lại &amp;ge; 50% số trang&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#FEE2E2;strokeColor=#DC2626;fontColor=#991B1B;fontSize=10;shadow=1;align=center;">
+          <mxGeometry x="110" y="515" width="290" height="42" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="pdf_scan_rec" value="&lt;b&gt;OCRLayoutHierarchyPredictor (0% Regex)&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:9px;'&gt;&amp;bull; Tỷ lệ cỡ chữ (rel_h = h/median_h) &amp;bull; Khoảng cách dọc (gap_before)&lt;br/&gt;&amp;bull; Căn giữa trang &amp;bull; Độ thụt lề Khoản/Điểm (&amp;Delta;x) &amp;bull; Miễn nhiễm 100% trích dẫn&lt;br/&gt;&amp;bull; TOC Verifier: Đối chiếu mục lục bằng fuzzy matching Unicode NFKD&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#FEF3C7;strokeColor=#D97706;fontColor=#92400E;fontSize=10;shadow=1;align=center;">
+          <mxGeometry x="110" y="568" width="290" height="52" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="pdf_tracker" value="&lt;b&gt;State Machine BreadcrumbTracker (Scan)&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:9px;'&gt;Stack Hình Học: title &amp;gt; h1 &amp;gt; h2 &amp;gt; h3 (Theo nhãn dự đoán OCR)&lt;br/&gt;Thụt lề Khoản/Điểm (indent_level 1-2) lưu vào metadata &amp;bull; Reset khi gặp Title&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#EFF6FF;strokeColor=#3B82F6;fontColor=#1E40AF;fontSize=10;shadow=1;align=center;">
+          <mxGeometry x="110" y="632" width="290" height="46" as="geometry"/>
+        </mxCell>
+
+        <!-- Nhánh Digital PDF & Tables -->
+        <mxCell id="pdf_digital_pass" value="&lt;b&gt;Trích xuất Bảng pdf_table&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:9px;'&gt;find_tables() tuyến tính hóa hàng&lt;br/&gt;Lặp lại Header ở mọi chunk bảng&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#ECFDF5;strokeColor=#059669;fontColor=#065F46;fontSize=10;shadow=1;align=center;">
+          <mxGeometry x="415" y="405" width="190" height="97" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="pdf_digital_stream" value="&lt;b&gt;Cross-Page Text Stream&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:9px;'&gt;Ghép luồng toàn tài liệu&lt;br/&gt;split_sentences_banking an toàn&lt;br/&gt;page_start &amp;amp; page_end liên tục&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#ECFDF5;strokeColor=#059669;fontColor=#065F46;fontSize=10;shadow=1;align=center;">
+          <mxGeometry x="415" y="515" width="190" height="103" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="pdf_fallback_tier" value="&lt;b&gt;Dự Đoán Đa Tầng Bố Cục: ocr_geometry_prediction &amp;rarr; page_fallback&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:9px;'&gt;Đo độ tin cậy: layout_confidence, heading_ocr_confidence &amp;amp; avg_ocr_confidence&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#F3E8FF;strokeColor=#9333EA;fontColor=#6B21A8;fontSize=10;shadow=1;align=center;">
+          <mxGeometry x="110" y="692" width="495" height="38" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="pdf_bc" value="&lt;b&gt;Gắn Tiền Tố Phả Hệ &amp; Tham Chiếu Chuẩn Tắc&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;'&gt;[Breadcrumbs: file.pdf &amp;gt; Mục lớn &amp;gt; Mục con] \n [Pháp lý: Tiêu đề chuẩn]&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#EFF6FF;strokeColor=#3B82F6;fontColor=#1E40AF;fontSize=11;shadow=1;align=center;">
+          <mxGeometry x="110" y="745" width="495" height="42" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="pdf_out" value="&lt;b&gt;Tạo PDF Chunks Chuẩn Hóa Đa Dạng (pdf_text, pdf_ocr_scan, pdf_table)&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;'&gt;Bảo toàn 100% Breadcrumb, Lưu page_start/end, ocr_confidence, legal_ref, indent_level&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#ECFDF5;strokeColor=#059669;fontColor=#065F46;fontSize=11;fontStyle=1;shadow=1;align=center;">
+          <mxGeometry x="110" y="870" width="495" height="45" as="geometry"/>
+        </mxCell>
+
+        <!-- Edges in PDF Lane -->
+        <mxCell id="e_router_pdf" value=".pdf" edge="1" parent="1" source="node_router" target="pdf_open" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="682" y="225"/>
+              <mxPoint x="357" y="225"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_pdf_1" value="" edge="1" parent="1" source="pdf_open" target="pdf_check_scan" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_pdf_scan_yes" value="Scan" edge="1" parent="1" source="pdf_check_scan" target="pdf_scan_pre" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#DC2626;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#DC2626;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="255" y="368"/>
+              <mxPoint x="255" y="405"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_pdf_scan_no" value="Digital" edge="1" parent="1" source="pdf_check_scan" target="pdf_digital_pass" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#059669;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#059669;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="510" y="368"/>
+              <mxPoint x="510" y="405"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_pdf_scan_1" value="" edge="1" parent="1" source="pdf_scan_pre" target="pdf_ocr_box" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#DC2626;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_pdf_scan_2" value="" edge="1" parent="1" source="pdf_ocr_box" target="pdf_filter_hf" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#DC2626;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_pdf_scan_3" value="" edge="1" parent="1" source="pdf_filter_hf" target="pdf_scan_rec" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#DC2626;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_pdf_scan_4" value="" edge="1" parent="1" source="pdf_scan_rec" target="pdf_tracker" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#DC2626;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_pdf_dig_1" value="" edge="1" parent="1" source="pdf_digital_pass" target="pdf_digital_stream" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#059669;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_pdf_merge_scan" value="" edge="1" parent="1" source="pdf_tracker" target="pdf_fallback_tier" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="255" y="685"/>
+              <mxPoint x="357" y="685"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_pdf_merge_dig" value="" edge="1" parent="1" source="pdf_digital_stream" target="pdf_fallback_tier" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="510" y="685"/>
+              <mxPoint x="357" y="685"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_pdf_tier_bc" value="" edge="1" parent="1" source="pdf_fallback_tier" target="pdf_bc" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_pdf_bc_out" value="" edge="1" parent="1" source="pdf_bc" target="pdf_out" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- ==================== LUỒNG 2: DOCX CHUNKER ==================== -->
+        <mxCell id="lane_docx" value="LUỒNG 2: DOCX CHUNKER (DOCUMENT LAYOUT AST &amp; TABLE ATOMICITY)" vertex="1" parent="1" style="html=1;whiteSpace=wrap;swimlane;startSize=26;rounded=1;arcSize=4;fillColor=#FFFFFF;strokeColor=#C4B5FD;strokeWidth=1.5;fontColor=#5B21B6;fontSize=12;fontStyle=1;collapsible=0;shadow=1;">
+          <mxGeometry x="705" y="255" width="595" height="675" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="docx_open" value="&lt;b&gt;Mở tệp Word DOCX (python-docx)&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;'&gt;Duyệt Body DOM tuần tự theo thứ tự hiển thị XML&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#F5F3FF;strokeColor=#8B5CF6;fontColor=#5B21B6;fontSize=11;shadow=1;align=center;">
+          <mxGeometry x="755" y="295" width="495" height="42" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="docx_branch" value="&lt;b&gt;Loại Khối Element?&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:9px;'&gt;&amp;lt;w:p&amp;gt; hay &amp;lt;w:tbl&amp;gt;?&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rhombus;fillColor=#FEF3C7;strokeColor=#D97706;fontColor=#92400E;fontSize=10;fontStyle=1;shadow=1;align=center;">
+          <mxGeometry x="920" y="360" width="165" height="52" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="docx_p_head" value="&lt;b&gt;Heading Hierarchy (AST Cây Phân Cấp)&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:9px;'&gt;Duyệt Word Styles chuẩn + Heuristic in đậm (run.bold) &amp;amp; cách đoạn&lt;br/&gt;Tự động cập nhật stack active_headers cấp 1..4&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#EEF2FF;strokeColor=#6366F1;fontColor=#3730A3;fontSize=10;shadow=1;align=center;">
+          <mxGeometry x="755" y="435" width="235" height="52" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="docx_table_head" value="&lt;b&gt;Table Atomicity &amp; Dual-Representation&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:9px;'&gt;Trích xuất toàn vẹn bảng biểu &amp;lt;tbl&amp;gt;&lt;br/&gt;Tuyến tính hóa: Hàng X: Cột_i: Giá_trị&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#FDF2F8;strokeColor=#DB2777;fontColor=#9D174D;fontSize=10;shadow=1;align=center;">
+          <mxGeometry x="1015" y="435" width="235" height="52" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="docx_p_body" value="&lt;b&gt;List &amp; Paragraph Grouping&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:9px;'&gt;Gom danh sách đạn (bullets, numbers) với đoạn dẫn nhập&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#F5F3FF;strokeColor=#8B5CF6;fontColor=#5B21B6;fontSize=10;shadow=1;align=center;">
+          <mxGeometry x="755" y="510" width="235" height="48" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="docx_table_chunk" value="&lt;b&gt;Batch Table Row Chunking&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:9px;'&gt;Đóng gói khối bảng biểu nguyên tử kèm header cột&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#FEF3C7;strokeColor=#D97706;fontColor=#92400E;fontSize=10;shadow=1;align=center;">
+          <mxGeometry x="1015" y="510" width="235" height="48" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="docx_anti_frag" value="&lt;b&gt;Cơ chế Chống phân mảnh vụn (Section-Length-Aware Anti-Fragmentation)&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;'&gt;Loại bỏ flush sớm; tự động gộp các tiểu mục còi cọc (&amp;lt; 120 từ) &amp;rarr; Đưa về Dải Vàng 150 - 450 từ&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#ECFDF5;strokeColor=#059669;fontColor=#065F46;fontSize=11;shadow=1;align=center;">
+          <mxGeometry x="755" y="580" width="495" height="48" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="docx_legal_resolve" value="&lt;b&gt;Universal Document Context (Kế Thừa Ngữ Cảnh Tệp)&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;'&gt;Kế thừa DocumentContext ở cấp tệp; tự động sinh tiền tố chuẩn xác không cần đoán mò&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#EEF2FF;strokeColor=#6366F1;fontColor=#3730A3;fontSize=11;shadow=1;align=center;">
+          <mxGeometry x="755" y="650" width="495" height="46" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="docx_bc" value="&lt;b&gt;Gắn Tiền Tố Phả Hệ &amp; Pháp Lý (Contextual Hierarchy Inheritance)&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;'&gt;[Breadcrumbs: file.docx &amp;gt; H1 &amp;gt; H2...] \n [Pháp lý: Tiêu đề chuẩn]&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#FEF3C7;strokeColor=#D97706;fontColor=#92400E;fontSize=11;shadow=1;align=center;">
+          <mxGeometry x="755" y="720" width="495" height="46" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="docx_out" value="&lt;b&gt;Tạo DOCX Chunks Chuẩn Hóa&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;'&gt;chunk_type: docx_text | docx_table (Đạt chuẩn Dải Vàng, Zero Fragmentation)&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#ECFDF5;strokeColor=#059669;fontColor=#065F46;fontSize=11;fontStyle=1;shadow=1;align=center;">
+          <mxGeometry x="755" y="870" width="495" height="45" as="geometry"/>
+        </mxCell>
+
+        <!-- Edges in DOCX Lane -->
+        <mxCell id="e_router_docx" value=".docx" edge="1" parent="1" source="node_router" target="docx_open" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="682" y="225"/>
+              <mxPoint x="1002" y="225"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_docx_1" value="" edge="1" parent="1" source="docx_open" target="docx_branch" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_docx_p" value="&lt;w:p&gt;" edge="1" parent="1" source="docx_branch" target="docx_p_head" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="872" y="386"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_docx_tbl" value="&lt;w:tbl&gt;" edge="1" parent="1" source="docx_branch" target="docx_table_head" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1132" y="386"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_docx_p_lead" value="" edge="1" parent="1" source="docx_p_head" target="docx_p_body" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_docx_tbl_chunk" value="" edge="1" parent="1" source="docx_table_head" target="docx_table_chunk" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_docx_p_merge" value="" edge="1" parent="1" source="docx_p_body" target="docx_anti_frag" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="872" y="570"/>
+              <mxPoint x="1002" y="570"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_docx_tbl_merge" value="" edge="1" parent="1" source="docx_table_chunk" target="docx_anti_frag" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1132" y="570"/>
+              <mxPoint x="1002" y="570"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_docx_frag_legal" value="" edge="1" parent="1" source="docx_anti_frag" target="docx_legal_resolve" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_docx_legal_bc" value="" edge="1" parent="1" source="docx_legal_resolve" target="docx_bc" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_docx_bc_out" value="" edge="1" parent="1" source="docx_bc" target="docx_out" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- PHASE 3: UNIFICATION & CONTEXT ENRICHMENT -->
+        <mxCell id="lane_unify" value="PHASE 3: HỢP NHẤT DỮ LIỆU &amp; LÀM GIÀU NGỮ CẢNH (UNIFICATION &amp; CONTEXT ENRICHMENT)" vertex="1" parent="1" style="html=1;whiteSpace=wrap;swimlane;startSize=26;rounded=1;arcSize=4;fillColor=#FFFFFF;strokeColor=#CBD5E1;strokeWidth=1.5;fontColor=#0F172A;fontSize=12;fontStyle=1;collapsible=0;shadow=1;">
+          <mxGeometry x="60" y="960" width="1240" height="205" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="unify_engine" value="&lt;b style='font-size:13px;'&gt;UNIFIED CONTEXT INJECTION &amp;amp; VALIDATION ENGINE&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;'&gt;&amp;bull; Gắn tiền tố Breadcrumb 100% chunks (Preservation) &amp;bull; Chuẩn hóa Unicode NFC &amp;bull; Lọc sạch chunk rỗng &amp;bull; Tính toán char_length, word_count, syllable_count&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#EFF6FF;strokeColor=#3B82F6;fontColor=#1E40AF;fontSize=11;fontStyle=1;shadow=1;align=center;">
+          <mxGeometry x="150" y="1005" width="1060" height="48" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="benchmark_badge" value="&lt;b&gt;Mục Tiêu Chất Lượng Thực Nghiệm (PDF &amp;amp; DOCX):&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;color:#059669;'&gt;&amp;bull; Độ phủ Breadcrumb &amp;amp; Pháp lý: &lt;b&gt;100%&lt;/b&gt; | Chunk rỗng: &lt;b&gt;0%&lt;/b&gt;&lt;br/&gt;&amp;bull; Tỷ lệ dải vàng (150-450 từ): &lt;b&gt;&amp;gt; 80%&lt;/b&gt; | Tỷ lệ &amp;lt; 80 từ: &lt;b&gt;&amp;lt; 5%&lt;/b&gt;&lt;br/&gt;&amp;bull; Zero Overfitting &amp;bull; Tự động hóa hoàn toàn 100% CPU cục bộ&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=6;fillColor=#ECFDF5;strokeColor=#059669;fontColor=#065F46;fontSize=10;shadow=0;align=left;spacingLeft=10;">
+          <mxGeometry x="85" y="1070" width="370" height="78" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="standard_schema" value="&lt;b&gt;CẤU TRÚC METADATA CHUẨN CỦA MỖI CHUNK (UNIFIED CHUNK SCHEMA):&lt;/b&gt;&lt;br/&gt;&lt;span style='font-family:Consolas,monospace;font-size:10px;color:#0F172A;line-height:1.5;'&gt;&amp;bull; &lt;b&gt;chunk_id:&lt;/b&gt; &quot;vcb_ekyc_docx_c0&quot; | &lt;b&gt;format:&lt;/b&gt; &quot;docx&quot; | &quot;pdf&quot; | &lt;b&gt;chunk_type:&lt;/b&gt; &quot;docx_text&quot; | &quot;docx_table&quot; | &quot;pdf_text&quot; | &quot;pdf_ocr_scan&quot;&lt;br/&gt;&amp;bull; &lt;b&gt;breadcrumb:&lt;/b&gt; &quot;Quy chế eKYC &amp;gt; Chương II &amp;gt; Điều 12 &amp;gt; Hạn mức giao dịch&quot; | &lt;b&gt;indent_level:&lt;/b&gt; 1 (Khoản) | 2 (Điểm)&lt;br/&gt;&amp;bull; &lt;b&gt;content:&lt;/b&gt; &quot;[Breadcrumbs...] [Pháp lý...] Nội dung đoạn văn bản hoặc bảng ma trận số liệu...&quot; | &lt;b&gt;word_count:&lt;/b&gt; 235&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=6;fillColor=#F8FAFC;strokeColor=#64748B;fontColor=#0F172A;fontSize=10;shadow=1;align=left;spacingLeft=12;">
+          <mxGeometry x="490" y="1070" width="790" height="78" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e_conv_pdf" value="" edge="1" parent="1" source="pdf_out" target="unify_engine" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="357" y="945"/>
+              <mxPoint x="420" y="945"/>
+              <mxPoint x="420" y="1005"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="e_conv_docx" value="" edge="1" parent="1" source="docx_out" target="unify_engine" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1002" y="945"/>
+              <mxPoint x="940" y="945"/>
+              <mxPoint x="940" y="1005"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- PHASE 4: STORAGE & DUAL INDEXING HANDOFF -->
+        <mxCell id="lane_storage" value="PHASE 4: XUẤT LƯU TRỮ ARTIFACTS &amp; BÀN GIAO TIẾP NHẬN RAG (DUAL INDEXING HANDOFF)" vertex="1" parent="1" style="html=1;whiteSpace=wrap;swimlane;startSize=26;rounded=1;arcSize=4;fillColor=#FFFFFF;strokeColor=#CBD5E1;strokeWidth=1.5;fontColor=#0F172A;fontSize=12;fontStyle=1;collapsible=0;shadow=1;">
+          <mxGeometry x="60" y="1190" width="1240" height="250" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="export_files" value="&lt;b&gt;Lưu Trữ File Phân Đoạn&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;'&gt;&amp;bull; &lt;b&gt;all_chunks.json&lt;/b&gt; &amp;amp; &lt;b&gt;all_chunks.jsonl&lt;/b&gt;&lt;br/&gt;&amp;bull; &lt;b&gt;chunks_by_format/&lt;/b&gt; (docx, pdf)&lt;br/&gt;&amp;bull; &lt;b&gt;chunking_summary_stats.json&lt;/b&gt;&lt;br/&gt;&amp;bull; Lưu trữ tập trung tại: &lt;i&gt;rag_banking/storage/&lt;/i&gt;&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#FEF3C7;strokeColor=#D97706;fontColor=#92400E;fontSize=10;shadow=1;align=left;spacingLeft=12;">
+          <mxGeometry x="85" y="1235" width="310" height="85" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="dual_indexing" value="&lt;b&gt;DUAL INDEXING HANDOFF&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;'&gt;Bàn giao đồng thời vào 2 nhánh&lt;br/&gt;truy xuất lai ghép (Hybrid RAG)&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#0F172A;strokeColor=#1E293B;fontColor=#FFFFFF;fontSize=11;fontStyle=1;shadow=1;align=center;">
+          <mxGeometry x="430" y="1240" width="225" height="75" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="dense_index" value="&lt;b&gt;Nhánh 1: Dense Vector Indexing&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;'&gt;ONNX all-MiniLM-L6-v2 (384d, CPU)&lt;br/&gt;&amp;rarr; &lt;b&gt;Weaviate Vector DB&lt;/b&gt;&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#EEF2FF;strokeColor=#6366F1;fontColor=#3730A3;fontSize=10;fontStyle=1;shadow=1;align=center;">
+          <mxGeometry x="685" y="1225" width="265" height="48" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="sparse_index" value="&lt;b&gt;Nhánh 2: Sparse Keyword Indexing&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;'&gt;BM25 Okapi (k1=1.5, b=0.75)&lt;br/&gt;&amp;rarr; &lt;b&gt;Inverted Index Store&lt;/b&gt;&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#FEF3C7;strokeColor=#D97706;fontColor=#92400E;fontSize=10;shadow=1;align=center;">
+          <mxGeometry x="685" y="1290" width="265" height="48" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="end_node" value="&lt;b&gt;SẴN SÀNG TRUY VẤN (RRF)&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;font-weight:normal;'&gt;Hệ thống sẵn sàng nhận câu hỏi &amp;amp; truy xuất lai ghép qua &lt;b&gt;Reciprocal Rank Fusion (RRF)&lt;/b&gt;&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=12;fillColor=#10B981;strokeColor=#059669;fontColor=#FFFFFF;fontStyle=1;fontSize=11;shadow=1;align=center;">
+          <mxGeometry x="980" y="1235" width="295" height="85" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e_unify_export" value="Lưu đĩa" edge="1" parent="1" source="unify_engine" target="export_files" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="180" y="1053"/>
+              <mxPoint x="180" y="1235"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="e_unify_handoff" value="Bàn giao RAG" edge="1" parent="1" source="unify_engine" target="dual_indexing" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="542" y="1053"/>
+              <mxPoint x="542" y="1240"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="e_dual_dense" value="text (Dense)" edge="1" parent="1" source="dual_indexing" target="dense_index" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="655" y="1249"/>
+              <mxPoint x="685" y="1249"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="e_dual_sparse" value="tokens (BM25)" edge="1" parent="1" source="dual_indexing" target="sparse_index" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="655" y="1314"/>
+              <mxPoint x="685" y="1314"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="e_dense_end" value="" edge="1" parent="1" source="dense_index" target="end_node" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="950" y="1249"/>
+              <mxPoint x="980" y="1255"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="e_sparse_end" value="" edge="1" parent="1" source="sparse_index" target="end_node" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#475569;strokeWidth=1.5;endArrow=classic;fontSize=10;fontColor=#334155;labelBackgroundColor=#FFFFFF;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="950" y="1314"/>
+              <mxPoint x="980" y="1300"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
