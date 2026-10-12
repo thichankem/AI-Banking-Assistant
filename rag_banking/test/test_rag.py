@@ -1,6 +1,6 @@
 """
 Script Kiểm thử Toàn trình Hệ thống RAG Banking
-Sử dụng dữ liệu thực tế từ: dataset/retrieval/retrieval_dataset
+Sử dụng dữ liệu thực tế từ: dataset/retrieval/retrieval_dataset hoặc dataset/chunking_dataset
 Kiểm tra:
 1. Document Layout-Aware Chunking (Table / Header Extraction)
 2. Weaviate Vector Database
@@ -17,7 +17,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 # Thêm đường dẫn gốc dự án vào sys.path để import
 CURRENT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = CURRENT_DIR.parent
+PROJECT_ROOT = CURRENT_DIR.parent.parent if CURRENT_DIR.name == "test" else CURRENT_DIR.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -33,7 +33,7 @@ def run_test():
 
     # 2. Nạp dữ liệu đa phương thức từ dataset/chunking_dataset (hỗ trợ fallback sang retrieval_dataset)
     chunking_dir = PROJECT_ROOT / "dataset" / "chunking_dataset"
-    retrieval_dir = PROJECT_ROOT / "dataset" / "retrieval" / "retrieval_dataset"
+    retrieval_dir = PROJECT_ROOT / "dataset" / "retrieval_study" / "retrieval_dataset"
     dataset_dir = chunking_dir if chunking_dir.exists() else retrieval_dir
     print(f"[*] Đang nạp dữ liệu kiểm thử từ: {dataset_dir}")
     
