@@ -63,7 +63,7 @@ class Config:
     LLM_BASE_URL = os.getenv("BASE_URL", "https://api.example.com/v1")
     LLM_MODEL = os.getenv("MODEL", "Language-Model")
     LLM_TEMPERATURE = 0.2         # Nhiệt độ thấp để trả lời chính xác, tránh hallucination
-    LLM_MAX_TOKENS = 1500
+    LLM_MAX_TOKENS = 2500
 
     # 9. Cấu hình Tracing
     ENABLE_TRACING = os.getenv("ENABLE_TRACING", "true").lower() == "true"
