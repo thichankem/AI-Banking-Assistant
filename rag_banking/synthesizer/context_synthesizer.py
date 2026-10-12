@@ -41,11 +41,11 @@ class ContextSynthesizer:
         if default_ref:
             tags.add(default_ref)
 
-        # Regex tìm các dạng pháp lý: [Điều X, Khoản Y], Điều X, Khoản Y
+        # Regex tìm các dạng pháp lý: [Quy chế...], [Điều X, Khoản Y], Quyết định 2345/QĐ-NHNN
         patterns = [
-            r"\[Điều\s+\d+[a-zA-Z]?(?:,\s*Khoản\s+\d+)?\]",
+            r"\[([^\]]*(?:Điều|Khoản|Quy chế|Quyết định|Thông tư)[^\]]*)\]",
             r"(?:^|\s)(Điều\s+\d+[a-zA-Z]?(?:[\,\.]\s*Khoản\s+\d+)?)",
-            r"(?:^|\s)(Khoản\s+\d+[\,\.]\s*Điều\s+\d+[a-zA-Z]?)"
+            r"(Quyết định\s+\d+/[A-ZĐ\-]+)"
         ]
 
         for pat in patterns:

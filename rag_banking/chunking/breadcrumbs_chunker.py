@@ -17,26 +17,43 @@ class BreadcrumbsChunker:
 
     def _extract_legal_ref(self, breadcrumb_text, text_chunk):
         """
-        Trích xuất tham chiếu pháp lý dạng [Điều X, Khoản Y] hoặc [Điều X]
-        từ breadcrumbs và nội dung đoạn trích.
+        Trích xuất tham chiếu pháp lý chuẩn xác dạng:
+        [Quy chế eKYC Vietcombank - Điều 12, Khoản 2; Quyết định 2345/QĐ-NHNN]
         """
-        # Tìm Điều X
-        dieu_match = re.search(r"Điều\s+(\d+[a-zA-Z]?)", breadcrumb_text + " " + text_chunk, re.IGNORECASE)
-        # Tìm Khoản Y
-        khoan_match = re.search(r"Khoản\s+(\d+)", breadcrumb_text + " " + text_chunk, re.IGNORECASE)
+        full_context = f"{breadcrumb_text} {text_chunk}"
+        refs = []
+
+        # Tên quy chế / văn bản
+        doc_prefix = ""
+        if "quy chế ekyc" in full_context.lower():
+            doc_prefix = "Quy chế eKYC Vietcombank - "
+        elif "điều kiện điều khoản" in full_context.lower():
+            doc_prefix = "ĐKĐK VCB - "
+
+        # Tìm Điều X và Khoản Y
+        dieu_match = re.search(r"Điều\s+(\d+[a-zA-Z]?)", full_context, re.IGNORECASE)
+        khoan_match = re.search(r"Khoản\s+(\d+)", full_context, re.IGNORECASE)
         if not khoan_match:
-            # Thử bắt dạng số thứ tự ở đầu dòng: '1. Khách hàng...' hoặc '12. Hạn mức...'
             khoan_num_match = re.search(r"(?:^|\n)\s*(\d{1,2})\.\s+[A-ZÀ-Ỹ]", text_chunk)
             if khoan_num_match and dieu_match:
-                khoan_num = khoan_num_match.group(1)
-                return f"[Điều {dieu_match.group(1)}, Khoản {khoan_num}]"
+                khoan_match = khoan_num_match
 
         if dieu_match and khoan_match:
-            return f"[Điều {dieu_match.group(1)}, Khoản {khoan_match.group(1)}]"
+            refs.append(f"{doc_prefix}Điều {dieu_match.group(1)}, Khoản {khoan_match.group(1)}")
         elif dieu_match:
-            return f"[Điều {dieu_match.group(1)}]"
+            refs.append(f"{doc_prefix}Điều {dieu_match.group(1)}")
         elif khoan_match:
-            return f"[Khoản {khoan_match.group(1)}]"
+            refs.append(f"Khoản {khoan_match.group(1)}")
+
+        # Tìm Quyết định 2345/QĐ-NHNN hoặc Thông tư
+        qd_match = re.search(r"(Quyết định\s+\d+/[A-ZĐ\-]+)", full_context, re.IGNORECASE)
+        if qd_match:
+            qd_str = qd_match.group(1)
+            if qd_str not in refs:
+                refs.append(qd_str)
+
+        if refs:
+            return f"[{'; '.join(refs)}]"
         return ""
 
     def chunk_text(self, text, source_name="document.md"):
