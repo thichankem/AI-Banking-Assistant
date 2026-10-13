@@ -1,0 +1,884 @@
+{
+  "node_id": "Node 05",
+  "node_name": "Excel Table Layout Chunker",
+  "timestamp": "2026-10-13T13:29:11.617839",
+  "total_samples": 51,
+  "passed": 51,
+  "failed": 0,
+  "accuracy_percent": 100.0,
+  "status": "PASS",
+  "results": [
+    {
+      "sample": "vcb_bctc_hop_nhat_bang_can_doi_va_kqkd_2021_2024.xlsx",
+      "chunks_count": 16,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "Bang_Can_Doi_Ke_Toan",
+        "Ket_Qua_Kinh_Doanh",
+        "Chi_So_Tai_Chinh"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_bctc_hop_nhat_bang_can_doi_va_kqkd_2021_2024 > Sheet: Bang_Can_Doi_Ke_Toan > Bảng dữ liệu]\nCột dữ liệu...",
+        "[Breadcrumbs: vcb_bctc_hop_nhat_bang_can_doi_va_kqkd_2021_2024 > Sheet: Bang_Can_Doi_Ke_Toan > Bảng dữ liệu]\nCột dữ liệu..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_bctc_hop_nhat_bang_can_doi_va_kqkd_2021_2024__sheet_Bang_Can_Doi_Ke_Toan.xlsx",
+      "chunks_count": 8,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "Bang_Can_Doi_Ke_Toan"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_bctc_hop_nhat_bang_can_doi_va_kqkd_2021_2024__sheet_Bang_Can_Doi_Ke_Toan > Sheet: Bang_Can_Doi_Ke_Toan...",
+        "[Breadcrumbs: vcb_bctc_hop_nhat_bang_can_doi_va_kqkd_2021_2024__sheet_Bang_Can_Doi_Ke_Toan > Sheet: Bang_Can_Doi_Ke_Toan..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_bctc_hop_nhat_bang_can_doi_va_kqkd_2021_2024__sheet_Chi_So_Tai_Chinh.xlsx",
+      "chunks_count": 3,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "Chi_So_Tai_Chinh"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_bctc_hop_nhat_bang_can_doi_va_kqkd_2021_2024__sheet_Chi_So_Tai_Chinh > Sheet: Chi_So_Tai_Chinh > Bảng ...",
+        "[Breadcrumbs: vcb_bctc_hop_nhat_bang_can_doi_va_kqkd_2021_2024__sheet_Chi_So_Tai_Chinh > Sheet: Chi_So_Tai_Chinh > Bảng ..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_bctc_hop_nhat_bang_can_doi_va_kqkd_2021_2024__sheet_Ket_Qua_Kinh_Doanh.xlsx",
+      "chunks_count": 5,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "Ket_Qua_Kinh_Doanh"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_bctc_hop_nhat_bang_can_doi_va_kqkd_2021_2024__sheet_Ket_Qua_Kinh_Doanh > Sheet: Ket_Qua_Kinh_Doanh > B...",
+        "[Breadcrumbs: vcb_bctc_hop_nhat_bang_can_doi_va_kqkd_2021_2024__sheet_Ket_Qua_Kinh_Doanh > Sheet: Ket_Qua_Kinh_Doanh > B..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_bieu_lai_suat_va_ty_gia_ngoai_te.xlsx",
+      "chunks_count": 14,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "Lai_Suat_Tiet_Kiem",
+        "Ty_Gia_20_Ngoai_Te",
+        "Bieu_Phi_Dich_Vu"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_bieu_lai_suat_va_ty_gia_ngoai_te > Sheet: Lai_Suat_Tiet_Kiem > Bảng dữ liệu]\nCột dữ liệu: Kỳ hạn gửi, ...",
+        "[Breadcrumbs: vcb_bieu_lai_suat_va_ty_gia_ngoai_te > Sheet: Lai_Suat_Tiet_Kiem > Bảng dữ liệu]\nCột dữ liệu: Kỳ hạn gửi, ..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_bieu_lai_suat_va_ty_gia_ngoai_te__sheet_Bieu_Phi_Dich_Vu.xlsx",
+      "chunks_count": 2,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "Bieu_Phi_Dich_Vu"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_bieu_lai_suat_va_ty_gia_ngoai_te__sheet_Bieu_Phi_Dich_Vu > Sheet: Bieu_Phi_Dich_Vu > Bảng dữ liệu]\nCột...",
+        "[Breadcrumbs: vcb_bieu_lai_suat_va_ty_gia_ngoai_te__sheet_Bieu_Phi_Dich_Vu > Sheet: Bieu_Phi_Dich_Vu > Bảng dữ liệu]\nCột..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_bieu_lai_suat_va_ty_gia_ngoai_te__sheet_Lai_Suat_Tiet_Kiem.xlsx",
+      "chunks_count": 5,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "Lai_Suat_Tiet_Kiem"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_bieu_lai_suat_va_ty_gia_ngoai_te__sheet_Lai_Suat_Tiet_Kiem > Sheet: Lai_Suat_Tiet_Kiem > Bảng dữ liệu]...",
+        "[Breadcrumbs: vcb_bieu_lai_suat_va_ty_gia_ngoai_te__sheet_Lai_Suat_Tiet_Kiem > Sheet: Lai_Suat_Tiet_Kiem > Bảng dữ liệu]..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_bieu_lai_suat_va_ty_gia_ngoai_te__sheet_Ty_Gia_20_Ngoai_Te.xlsx",
+      "chunks_count": 7,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "Ty_Gia_20_Ngoai_Te"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_bieu_lai_suat_va_ty_gia_ngoai_te__sheet_Ty_Gia_20_Ngoai_Te > Sheet: Ty_Gia_20_Ngoai_Te > Bảng dữ liệu]...",
+        "[Breadcrumbs: vcb_bieu_lai_suat_va_ty_gia_ngoai_te__sheet_Ty_Gia_20_Ngoai_Te > Sheet: Ty_Gia_20_Ngoai_Te > Bảng dữ liệu]..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_bieu_phi_tong_hop_the_va_digibank_toan_hang.xlsx",
+      "chunks_count": 6,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "Phi_The_Tin_Dung_Quoc_Te",
+        "Phi_The_Ghi_No"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_bieu_phi_tong_hop_the_va_digibank_toan_hang > Sheet: Phi_The_Tin_Dung_Quoc_Te > Bảng dữ liệu]\nCột dữ l...",
+        "[Breadcrumbs: vcb_bieu_phi_tong_hop_the_va_digibank_toan_hang > Sheet: Phi_The_Tin_Dung_Quoc_Te > Bảng dữ liệu]\nCột dữ l..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_bieu_phi_tong_hop_the_va_digibank_toan_hang__sheet_Phi_The_Ghi_No.xlsx",
+      "chunks_count": 2,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "Phi_The_Ghi_No"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_bieu_phi_tong_hop_the_va_digibank_toan_hang__sheet_Phi_The_Ghi_No > Sheet: Phi_The_Ghi_No > Bảng dữ li...",
+        "[Breadcrumbs: vcb_bieu_phi_tong_hop_the_va_digibank_toan_hang__sheet_Phi_The_Ghi_No > Sheet: Phi_The_Ghi_No > Bảng dữ li..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_bieu_phi_tong_hop_the_va_digibank_toan_hang__sheet_Phi_The_Tin_Dung_Quoc_Te.xlsx",
+      "chunks_count": 4,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "Phi_The_Tin_Dung_Quoc_Te"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_bieu_phi_tong_hop_the_va_digibank_toan_hang__sheet_Phi_The_Tin_Dung_Quoc_Te > Sheet: Phi_The_Tin_Dung_...",
+        "[Breadcrumbs: vcb_bieu_phi_tong_hop_the_va_digibank_toan_hang__sheet_Phi_The_Tin_Dung_Quoc_Te > Sheet: Phi_The_Tin_Dung_..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_danh_muc_san_pham_cho_vay_va_lai_suat.xlsx",
+      "chunks_count": 3,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "Goi_Vay_Khach_Hang_Ca_Nhan"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_danh_muc_san_pham_cho_vay_va_lai_suat > Sheet: Goi_Vay_Khach_Hang_Ca_Nhan > Bảng dữ liệu]\nCột dữ liệu:...",
+        "[Breadcrumbs: vcb_danh_muc_san_pham_cho_vay_va_lai_suat > Sheet: Goi_Vay_Khach_Hang_Ca_Nhan > Bảng dữ liệu]\nCột dữ liệu:..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__an_tam_kinh_doanh.xlsx",
+      "chunks_count": 2,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "an_tam_kinh_doanh"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__an_tam_kinh_doanh > Sheet: an_tam_kinh_doanh > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu ...",
+        "[Breadcrumbs: vcb_faq_subtopic__an_tam_kinh_doanh > Sheet: an_tam_kinh_doanh > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu ..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__cau_hoi_chung.xlsx",
+      "chunks_count": 5,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "cau_hoi_chung"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__cau_hoi_chung > Sheet: cau_hoi_chung > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), ST...",
+        "[Breadcrumbs: vcb_faq_subtopic__cau_hoi_chung > Sheet: cau_hoi_chung > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), ST..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__cho_vay_giay_to_co_gia.xlsx",
+      "chunks_count": 2,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "cho_vay_giay_to_co_gia"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__cho_vay_giay_to_co_gia > Sheet: cho_vay_giay_to_co_gia > Bảng dữ liệu]\nCột dữ liệu: Mã t...",
+        "[Breadcrumbs: vcb_faq_subtopic__cho_vay_giay_to_co_gia > Sheet: cho_vay_giay_to_co_gia > Bảng dữ liệu]\nCột dữ liệu: Mã t..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__chuyen_tien_tu_viet_nam_ra_nuoc_ngoai.xlsx",
+      "chunks_count": 7,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "chuyen_tien_tu_viet_nam_ra_nuo"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__chuyen_tien_tu_viet_nam_ra_nuoc_ngoai > Sheet: chuyen_tien_tu_viet_nam_ra_nuo > Bảng dữ ...",
+        "[Breadcrumbs: vcb_faq_subtopic__chuyen_tien_tu_viet_nam_ra_nuoc_ngoai > Sheet: chuyen_tien_tu_viet_nam_ra_nuo > Bảng dữ ..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__chuyen_va_nhan_tien_trong_nuoc.xlsx",
+      "chunks_count": 2,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "chuyen_va_nhan_tien_trong_nuoc"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__chuyen_va_nhan_tien_trong_nuoc > Sheet: chuyen_va_nhan_tien_trong_nuoc > Bảng dữ liệu]\nC...",
+        "[Breadcrumbs: vcb_faq_subtopic__chuyen_va_nhan_tien_trong_nuoc > Sheet: chuyen_va_nhan_tien_trong_nuoc > Bảng dữ liệu]\nC..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__kinh_doanh_tai_loc.xlsx",
+      "chunks_count": 2,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "kinh_doanh_tai_loc"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__kinh_doanh_tai_loc > Sheet: kinh_doanh_tai_loc > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiế...",
+        "[Breadcrumbs: vcb_faq_subtopic__kinh_doanh_tai_loc > Sheet: kinh_doanh_tai_loc > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiế..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__nang_cap_co_so_luu_tru_du_lich.xlsx",
+      "chunks_count": 2,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "nang_cap_co_so_luu_tru_du_lich"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__nang_cap_co_so_luu_tru_du_lich > Sheet: nang_cap_co_so_luu_tru_du_lich > Bảng dữ liệu]\nC...",
+        "[Breadcrumbs: vcb_faq_subtopic__nang_cap_co_so_luu_tru_du_lich > Sheet: nang_cap_co_so_luu_tru_du_lich > Bảng dữ liệu]\nC..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__nhan_kieu_hoi_tai_viet_nam.xlsx",
+      "chunks_count": 6,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "nhan_kieu_hoi_tai_viet_nam"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__nhan_kieu_hoi_tai_viet_nam > Sheet: nhan_kieu_hoi_tai_viet_nam > Bảng dữ liệu]\nCột dữ li...",
+        "[Breadcrumbs: vcb_faq_subtopic__nhan_kieu_hoi_tai_viet_nam > Sheet: nhan_kieu_hoi_tai_viet_nam > Bảng dữ liệu]\nCột dữ li..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__o_to.xlsx",
+      "chunks_count": 1,
+      "expected_min_chunks": 1,
+      "expected_sheets": [
+        "o_to"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__o_to > Sheet: o_to > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), STT, Chủ đề chính (T..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__phone_banking.xlsx",
+      "chunks_count": 1,
+      "expected_min_chunks": 1,
+      "expected_sheets": [
+        "phone_banking"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__phone_banking > Sheet: phone_banking > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), ST..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__sms_banking.xlsx",
+      "chunks_count": 1,
+      "expected_min_chunks": 1,
+      "expected_sheets": [
+        "sms_banking"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__sms_banking > Sheet: sms_banking > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), STT, C..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__the_thanh_toan.xlsx",
+      "chunks_count": 22,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "the_thanh_toan"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__the_thanh_toan > Sheet: the_thanh_toan > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), ...",
+        "[Breadcrumbs: vcb_faq_subtopic__the_thanh_toan > Sheet: the_thanh_toan > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), ..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__the_tin_dung.xlsx",
+      "chunks_count": 23,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "the_tin_dung"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__the_tin_dung > Sheet: the_tin_dung > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), STT,...",
+        "[Breadcrumbs: vcb_faq_subtopic__the_tin_dung > Sheet: the_tin_dung > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), STT,..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__tich_diem.xlsx",
+      "chunks_count": 3,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "tich_diem"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__tich_diem > Sheet: tich_diem > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), STT, Chủ đ...",
+        "[Breadcrumbs: vcb_faq_subtopic__tich_diem > Sheet: tich_diem > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), STT, Chủ đ..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__tieu_diem.xlsx",
+      "chunks_count": 2,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "tieu_diem"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__tieu_diem > Sheet: tieu_diem > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), STT, Chủ đ...",
+        "[Breadcrumbs: vcb_faq_subtopic__tieu_diem > Sheet: tieu_diem > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), STT, Chủ đ..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__tin_chap_nguoi_lao_dong.xlsx",
+      "chunks_count": 2,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "tin_chap_nguoi_lao_dong"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__tin_chap_nguoi_lao_dong > Sheet: tin_chap_nguoi_lao_dong > Bảng dữ liệu]\nCột dữ liệu: Mã...",
+        "[Breadcrumbs: vcb_faq_subtopic__tin_chap_nguoi_lao_dong > Sheet: tin_chap_nguoi_lao_dong > Bảng dữ liệu]\nCột dữ liệu: Mã..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__vay_mua_nha_dat.xlsx",
+      "chunks_count": 2,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "vay_mua_nha_dat"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__vay_mua_nha_dat > Sheet: vay_mua_nha_dat > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID)...",
+        "[Breadcrumbs: vcb_faq_subtopic__vay_mua_nha_dat > Sheet: vay_mua_nha_dat > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID)..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__vay_mua_nha_du_an.xlsx",
+      "chunks_count": 2,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "vay_mua_nha_du_an"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__vay_mua_nha_du_an > Sheet: vay_mua_nha_du_an > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu ...",
+        "[Breadcrumbs: vcb_faq_subtopic__vay_mua_nha_du_an > Sheet: vay_mua_nha_du_an > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu ..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__vay_tieu_dung_co_tai_san_bao_dam.xlsx",
+      "chunks_count": 2,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "vay_tieu_dung_co_tai_san_bao_d"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__vay_tieu_dung_co_tai_san_bao_dam > Sheet: vay_tieu_dung_co_tai_san_bao_d > Bảng dữ liệu]...",
+        "[Breadcrumbs: vcb_faq_subtopic__vay_tieu_dung_co_tai_san_bao_dam > Sheet: vay_tieu_dung_co_tai_san_bao_d > Bảng dữ liệu]..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__vay_xay_sua_nha_o.xlsx",
+      "chunks_count": 2,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "vay_xay_sua_nha_o"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__vay_xay_sua_nha_o > Sheet: vay_xay_sua_nha_o > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu ...",
+        "[Breadcrumbs: vcb_faq_subtopic__vay_xay_sua_nha_o > Sheet: vay_xay_sua_nha_o > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu ..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__vcb_digibank.xlsx",
+      "chunks_count": 15,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "vcb_digibank"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__vcb_digibank > Sheet: vcb_digibank > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), STT,...",
+        "[Breadcrumbs: vcb_faq_subtopic__vcb_digibank > Sheet: vcb_digibank > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), STT,..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_subtopic__xay_moi_co_so_luu_tru.xlsx",
+      "chunks_count": 2,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "xay_moi_co_so_luu_tru"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_subtopic__xay_moi_co_so_luu_tru > Sheet: xay_moi_co_so_luu_tru > Bảng dữ liệu]\nCột dữ liệu: Mã tha...",
+        "[Breadcrumbs: vcb_faq_subtopic__xay_moi_co_so_luu_tru > Sheet: xay_moi_co_so_luu_tru > Bảng dữ liệu]\nCột dữ liệu: Mã tha..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_topic__cho_vay.xlsx",
+      "chunks_count": 17,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "cho_vay"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_topic__cho_vay > Sheet: cho_vay > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), STT, Chủ đề chính...",
+        "[Breadcrumbs: vcb_faq_topic__cho_vay > Sheet: cho_vay > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), STT, Chủ đề chính..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_topic__chuyển_và_nhận_tiền.xlsx",
+      "chunks_count": 14,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "chuyển_và_nhận_tiền"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_topic__chuyển_và_nhận_tiền > Sheet: chuyển_và_nhận_tiền > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu...",
+        "[Breadcrumbs: vcb_faq_topic__chuyển_và_nhận_tiền > Sheet: chuyển_và_nhận_tiền > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_topic__ngân_hàng_số.xlsx",
+      "chunks_count": 16,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "ngân_hàng_số"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_topic__ngân_hàng_số > Sheet: ngân_hàng_số > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), STT, Ch...",
+        "[Breadcrumbs: vcb_faq_topic__ngân_hàng_số > Sheet: ngân_hàng_số > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), STT, Ch..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_topic__thẻ_ngân_hàng.xlsx",
+      "chunks_count": 45,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "thẻ_ngân_hàng"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_topic__thẻ_ngân_hàng > Sheet: thẻ_ngân_hàng > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), STT, ...",
+        "[Breadcrumbs: vcb_faq_topic__thẻ_ngân_hàng > Sheet: thẻ_ngân_hàng > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), STT, ..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_faq_topic__vcb_loyalty.xlsx",
+      "chunks_count": 10,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "vcb_loyalty"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_faq_topic__vcb_loyalty > Sheet: vcb_loyalty > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), STT, Chủ ...",
+        "[Breadcrumbs: vcb_faq_topic__vcb_loyalty > Sheet: vcb_loyalty > Bảng dữ liệu]\nCột dữ liệu: Mã tham chiếu (ID), STT, Chủ ..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_ma_tran_han_muc_giao_dich_theo_phuong_thuc_xac_thuc.xlsx",
+      "chunks_count": 4,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "Han_Muc_VCB_Digibank"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_ma_tran_han_muc_giao_dich_theo_phuong_thuc_xac_thuc > Sheet: Han_Muc_VCB_Digibank > Bảng dữ liệu]\nCột ...",
+        "[Breadcrumbs: vcb_ma_tran_han_muc_giao_dich_theo_phuong_thuc_xac_thuc > Sheet: Han_Muc_VCB_Digibank > Bảng dữ liệu]\nCột ..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_phan_loai_du_no_tin_dung_va_co_cau_nhom_no.xlsx",
+      "chunks_count": 3,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "Co_Cau_Nhom_No_VCB"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_phan_loai_du_no_tin_dung_va_co_cau_nhom_no > Sheet: Co_Cau_Nhom_No_VCB > Bảng dữ liệu]\nCột dữ liệu: Nh...",
+        "[Breadcrumbs: vcb_phan_loai_du_no_tin_dung_va_co_cau_nhom_no > Sheet: Co_Cau_Nhom_No_VCB > Bảng dữ liệu]\nCột dữ liệu: Nh..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_quy_che_tich_diem_va_danh_muc_doi_qua_rewards.xlsx",
+      "chunks_count": 6,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "He_So_Tich_Diem",
+        "Danh_Muc_Doi_Qua_Urbox"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_quy_che_tich_diem_va_danh_muc_doi_qua_rewards > Sheet: He_So_Tich_Diem > Bảng dữ liệu]\nCột dữ liệu: Dò...",
+        "[Breadcrumbs: vcb_quy_che_tich_diem_va_danh_muc_doi_qua_rewards > Sheet: He_So_Tich_Diem > Bảng dữ liệu]\nCột dữ liệu: Dò..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_quy_che_tich_diem_va_danh_muc_doi_qua_rewards__sheet_Danh_Muc_Doi_Qua_Urbox.xlsx",
+      "chunks_count": 3,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "Danh_Muc_Doi_Qua_Urbox"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_quy_che_tich_diem_va_danh_muc_doi_qua_rewards__sheet_Danh_Muc_Doi_Qua_Urbox > Sheet: Danh_Muc_Doi_Qua_...",
+        "[Breadcrumbs: vcb_quy_che_tich_diem_va_danh_muc_doi_qua_rewards__sheet_Danh_Muc_Doi_Qua_Urbox > Sheet: Danh_Muc_Doi_Qua_..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_quy_che_tich_diem_va_danh_muc_doi_qua_rewards__sheet_He_So_Tich_Diem.xlsx",
+      "chunks_count": 3,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "He_So_Tich_Diem"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_quy_che_tich_diem_va_danh_muc_doi_qua_rewards__sheet_He_So_Tich_Diem > Sheet: He_So_Tich_Diem > Bảng d...",
+        "[Breadcrumbs: vcb_quy_che_tich_diem_va_danh_muc_doi_qua_rewards__sheet_He_So_Tich_Diem > Sheet: He_So_Tich_Diem > Bảng d..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_so_sanh_cac_goi_tai_khoan_thanh_toan_tich_hop.xlsx",
+      "chunks_count": 4,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "So_Sanh_Goi_Tai_Khoan"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_so_sanh_cac_goi_tai_khoan_thanh_toan_tich_hop > Sheet: So_Sanh_Goi_Tai_Khoan > Bảng dữ liệu]\nCột dữ li...",
+        "[Breadcrumbs: vcb_so_sanh_cac_goi_tai_khoan_thanh_toan_tich_hop > Sheet: So_Sanh_Goi_Tai_Khoan > Bảng dữ liệu]\nCột dữ li..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_so_sanh_chi_tiet_cac_dong_the_tin_dung_ghi_no.xlsx",
+      "chunks_count": 5,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "The_Tin_Dung_Quoc_Te",
+        "The_Ghi_No_Debit"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_so_sanh_chi_tiet_cac_dong_the_tin_dung_ghi_no > Sheet: The_Tin_Dung_Quoc_Te > Bảng dữ liệu]\nCột dữ liệ...",
+        "[Breadcrumbs: vcb_so_sanh_chi_tiet_cac_dong_the_tin_dung_ghi_no > Sheet: The_Tin_Dung_Quoc_Te > Bảng dữ liệu]\nCột dữ liệ..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_so_sanh_chi_tiet_cac_dong_the_tin_dung_ghi_no__sheet_The_Ghi_No_Debit.xlsx",
+      "chunks_count": 2,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "The_Ghi_No_Debit"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_so_sanh_chi_tiet_cac_dong_the_tin_dung_ghi_no__sheet_The_Ghi_No_Debit > Sheet: The_Ghi_No_Debit > Bảng...",
+        "[Breadcrumbs: vcb_so_sanh_chi_tiet_cac_dong_the_tin_dung_ghi_no__sheet_The_Ghi_No_Debit > Sheet: The_Ghi_No_Debit > Bảng..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_so_sanh_chi_tiet_cac_dong_the_tin_dung_ghi_no__sheet_The_Tin_Dung_Quoc_Te.xlsx",
+      "chunks_count": 3,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "The_Tin_Dung_Quoc_Te"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_so_sanh_chi_tiet_cac_dong_the_tin_dung_ghi_no__sheet_The_Tin_Dung_Quoc_Te > Sheet: The_Tin_Dung_Quoc_T...",
+        "[Breadcrumbs: vcb_so_sanh_chi_tiet_cac_dong_the_tin_dung_ghi_no__sheet_The_Tin_Dung_Quoc_Te > Sheet: The_Tin_Dung_Quoc_T..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_tong_hop_303_faq_nghiep_vu_ngan_hang.xlsx",
+      "chunks_count": 103,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "Toan_Bo_303_FAQ",
+        "Thong_Ke_Phan_Bo"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_tong_hop_303_faq_nghiep_vu_ngan_hang > Sheet: Toan_Bo_303_FAQ > Bảng dữ liệu]\nCột dữ liệu: Mã tham chi...",
+        "[Breadcrumbs: vcb_tong_hop_303_faq_nghiep_vu_ngan_hang > Sheet: Toan_Bo_303_FAQ > Bảng dữ liệu]\nCột dữ liệu: Mã tham chi..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_tong_hop_303_faq_nghiep_vu_ngan_hang__sheet_Thong_Ke_Phan_Bo.xlsx",
+      "chunks_count": 2,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "Thong_Ke_Phan_Bo"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_tong_hop_303_faq_nghiep_vu_ngan_hang__sheet_Thong_Ke_Phan_Bo > Sheet: Thong_Ke_Phan_Bo > Bảng dữ liệu]...",
+        "[Breadcrumbs: vcb_tong_hop_303_faq_nghiep_vu_ngan_hang__sheet_Thong_Ke_Phan_Bo > Sheet: Thong_Ke_Phan_Bo > Bảng dữ liệu]..."
+      ],
+      "status": "PASS"
+    },
+    {
+      "sample": "vcb_tong_hop_303_faq_nghiep_vu_ngan_hang__sheet_Toan_Bo_303_FAQ.xlsx",
+      "chunks_count": 101,
+      "expected_min_chunks": 2,
+      "expected_sheets": [
+        "Toan_Bo_303_FAQ"
+      ],
+      "valid_schema": true,
+      "valid_types": true,
+      "sheets_ok": true,
+      "headers_ok": true,
+      "sample_preview": [
+        "[Breadcrumbs: vcb_tong_hop_303_faq_nghiep_vu_ngan_hang__sheet_Toan_Bo_303_FAQ > Sheet: Toan_Bo_303_FAQ > Bảng dữ liệu]\nC...",
+        "[Breadcrumbs: vcb_tong_hop_303_faq_nghiep_vu_ngan_hang__sheet_Toan_Bo_303_FAQ > Sheet: Toan_Bo_303_FAQ > Bảng dữ liệu]\nC..."
+      ],
+      "status": "PASS"
+    }
+  ]
+}

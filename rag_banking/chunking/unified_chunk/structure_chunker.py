@@ -68,7 +68,7 @@ def _build_structure_chunk(
     breadcrumb: str,
     section_title: str,
     content: str,
-    raw_content: str,
+    raw_content: Optional[str] = None,
     hierarchy_level: Optional[str] = None,
     parent_id: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -81,10 +81,8 @@ def _build_structure_chunk(
         "breadcrumb": breadcrumb,
         "section_title": section_title,
         "content": content,
-        "raw_content": raw_content,
         "syllable_count": count_syllables_vietnamese(content),
-        "word_count": count_words(content),
-        "char_length": len(content),
+        "word_count": count_words(content)
     }
     if hierarchy_level:
         chunk["hierarchy_level"] = hierarchy_level

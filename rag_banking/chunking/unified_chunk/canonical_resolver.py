@@ -1,14 +1,29 @@
 """
-Canonical Entity & Legal Structure Resolver
-Module phân giải định danh văn bản và cấu trúc pháp lý ngân hàng tổng quát hóa (Non-Overfitting):
-1. Document Identifier: Bóc tách tên/số hiệu văn bản động từ Breadcrumbs Root hoặc regex thể thức quốc gia.
-2. Hierarchical Units: Bóc tách thứ bậc: Chương -> Mục -> Điều -> Khoản -> Điểm -> Câu hỏi FAQ.
-3. Cross Statutory Citations: Quét các văn bản viện dẫn chéo (Quyết định NHNN, Thông tư, Nghị định...).
-4. Advanced Sentence Splitting: Tách câu nhận thức ngữ cảnh ngân hàng, bảo vệ Điều 12., TP.HCM, 1.000.000 VND, 5,5%/năm.
-5. Dehyphenation & Line-merge: Nối từ bị ngắt dòng và nối câu bị gãy dòng cứng.
-6. Vietnamese Text Quality Checker: Kiểm tra tỷ lệ ký tự tiếng Việt hợp lệ để phát hiện lỗi font VNI/TCVN3 hoặc text scan rác.
-7. Header/Footer Remover: Tự động phát hiện và loại bỏ header/footer lặp lại qua nhiều trang.
+Module Canonical Entity & Legal Structure Resolver
+===================================================
+Module xử lý ngôn ngữ tự nhiên (NLP) và bóc tách cấu trúc pháp lý chuyên biệt
+cho văn bản ngân hàng và tài chính Việt Nam (Vietcombank RAG Assistant).
+
+Các nhóm chức năng chính:
+1. Chuẩn hóa chuỗi ký tự & Âm tiết:
+   - `strip_vietnamese_accents()`: Khử dấu tiếng Việt (NFKD) chống lỗi OCR.
+   - `count_words()`, `count_syllables_vietnamese()`: Đếm từ và số âm tiết tiếng Việt.
+   - `clean_and_dehyphenate_text()`: Khử gạch nối ngắt dòng, nối câu gãy dòng cứng.
+
+2. Định danh văn bản & Cấu trúc pháp lý (Nghị định 30/2020/NĐ-CP):
+   - `extract_document_identifier()`: Bóc tách số hiệu văn bản (Thông tư, Nghị định, Quyết định).
+   - `extract_hierarchical_units()`: Bóc tách đơn vị thứ bậc (Chương, Mục, Điều, Khoản, Điểm, FAQ).
+
+3. Tách câu an toàn nhận thức ngữ cảnh ngân hàng:
+   - `split_sentences_banking()`: Bảo vệ số tiền, lãi suất, ký hiệu Điều/Khoản, từ viết tắt TP.HCM, v.v.
+   - `group_sentences_banking()`: Gom cụm câu theo kích thước trần max_chunk_size có overlap.
+
+4. Kiểm định chất lượng văn bản & Khử Header/Footer:
+   - `is_valid_vietnamese_text()`: Lọc bỏ văn bản scan rác hoặc lỗi font VNI/TCVN3 bằng âm vị học.
+   - `detect_and_remove_headers_footers()`: Tự động phát hiện và loại bỏ header/footer lặp qua trang.
 """
+
+from __future__ import annotations
 
 import re
 import unicodedata
@@ -17,52 +32,54 @@ from typing import List, Dict, Any, Optional, Set, Tuple
 
 
 # =============================================================================
-# CÁC BIỂU THỨC CHÍNH QUY (PRE-COMPILED REGEX CONSTANTS)
+# 1. BIỂU THỨC CHÍNH QUY CHUẨN HÓA (PRE-COMPILED REGEX CONSTANTS)
 # =============================================================================
 
-# Bắt số hiệu văn bản quy phạm pháp luật (theo thể thức Nghị định 30/2020/NĐ-CP)
-DOC_NUMBER_PATTERN = re.compile(
+# Thể thức số hiệu văn bản quy phạm pháp luật theo Nghị định 30/2020/NĐ-CP
+# Ví dụ: "Thông tư số 17/2024/TT-NHNN", "Nghị định 52/2024/NĐ-CP", "Quyết định 2345/QĐ-NHNN"
+DOC_NUMBER_PATTERN: re.Pattern = re.compile(
     r"\b((?:Luật|Nghị quyết|Quyết định|Thông tư|Nghị định|Quy chế|Quy định)\s+(?:số\s+)?\d+(?:/[A-ZĐ0-9\-_]+)+)\b",
     re.IGNORECASE
 )
 
-# Bắt các viện dẫn chéo văn bản quy phạm pháp luật
-CROSS_CITATION_PATTERN = re.compile(
-    r"\b((?:Quyết định|Thông tư|Nghị định|Nghị quyết|Luật)\s+(?:số\s+)?\d+(?:/[A-ZĐ0-9\-_]+)+)\b",
-    re.IGNORECASE
-)
+# Nhận diện thứ bậc pháp lý trong văn bản
+DIEU_PATTERN: re.Pattern = re.compile(r"\bĐiều\s+(\d+[a-zA-Z]?)\b", re.IGNORECASE)
+KHOAN_WORD_PATTERN: re.Pattern = re.compile(r"\bKhoản\s+(\d+)\b", re.IGNORECASE)
+KHOAN_DIGIT_PATTERN: re.Pattern = re.compile(r"(?:^|\n)\s*(\d{1,2})\.\s+[A-ZÀ-Ỹ]")
+DIEM_WORD_PATTERN: re.Pattern = re.compile(r"\bĐiểm\s+([a-zđ])\b", re.IGNORECASE)
+DIEM_CHAR_PATTERN: re.Pattern = re.compile(r"(?:^|\n)\s*([a-zđ])\)\s+[A-ZÀ-Ỹa-zà-ỹ]")
+CHUONG_PATTERN: re.Pattern = re.compile(r"\b(?:Chương|Phần)\s+([IVXLCDM\d]+)\b", re.IGNORECASE)
+MUC_PATTERN: re.Pattern = re.compile(r"\b(?:Tiểu\s+mục|Mục)\s+([IVXLCDM\d]+|\d+)\b", re.IGNORECASE)
+FAQ_PATTERN: re.Pattern = re.compile(r"\b(?:Câu|Câu\s+hỏi)\s+(\d+)\b", re.IGNORECASE)
 
-# Bắt các cấp bậc phân cấp trong văn bản ngân hàng
-DIEU_PATTERN = re.compile(r"\bĐiều\s+(\d+[a-zA-Z]?)\b", re.IGNORECASE)
-KHOAN_WORD_PATTERN = re.compile(r"\bKhoản\s+(\d+)\b", re.IGNORECASE)
-KHOAN_DIGIT_PATTERN = re.compile(r"(?:^|\n)\s*(\d{1,2})\.\s+[A-ZÀ-Ỹ]")
-DIEM_WORD_PATTERN = re.compile(r"\bĐiểm\s+([a-zđ])\b", re.IGNORECASE)
-DIEM_CHAR_PATTERN = re.compile(r"(?:^|\n)\s*([a-zđ])\)\s+[A-ZÀ-Ỹa-zà-ỹ]")
-CHUONG_PATTERN = re.compile(r"\b(?:Chương|Phần)\s+([IVXLCDM\d]+)\b", re.IGNORECASE)
-MUC_PATTERN = re.compile(r"\b(?:Tiểu\s+mục|Mục)\s+([IVXLCDM\d]+|\d+)\b", re.IGNORECASE)
-FAQ_PATTERN = re.compile(r"\b(?:Câu|Câu\s+hỏi)\s+(\d+)\b", re.IGNORECASE)
+# Bắt số trang dạng 'Trang 1/10' hoặc '1' đứng riêng lẻ
+PAGE_NUMBER_PATTERN: re.Pattern = re.compile(r"^\s*(?:Trang\s+)?\d+(?:/\d+)?\s*$", re.IGNORECASE)
 
-# Bắt số trang dạng 'Trang 1/10' hoặc '1' đứng riêng một mình
-PAGE_NUMBER_PATTERN = re.compile(r"^\s*(?:Trang\s+)?\d+(?:/\d+)?\s*$", re.IGNORECASE)
-
-# Tập hợp nguyên âm tiếng Việt chuẩn Unicode
-VIETNAMESE_VOWELS = set("aàáảãạăằắẳẵặâầấẩẫậeèéẻẽẹêềếểễệiìíỉĩịoòóỏõọôồốổỗộơờớởỡợuùúủũụưừứửữựyỳýỷỹỵ")
+# Bảng nguyên âm tiếng Việt chuẩn Unicode phục vụ kiểm tra ngôn ngữ
+VIETNAMESE_VOWELS: Set[str] = set("aàáảãạăằắẳẵặâầấẩẫậeèéẻẽẹêềếểễệiìíỉĩịoòóỏõọôồốổỗộơờớởỡợuùúủũụưừứửữựyỳýỷỹỵ")
 
 
 # =============================================================================
-# HÀM TIỆN ÍCH CƠ BẢN (STRING UTILITIES)
+# 2. CHUẨN HÓA KÝ TỰ & ĐẾM TỪ (STRING UTILITIES)
 # =============================================================================
 
 def strip_vietnamese_accents(text: str) -> str:
     """
     Chuyển đổi văn bản tiếng Việt có dấu thành không dấu (chuẩn Unicode NFKD).
-    Hữu ích cho fuzzy matching và đối chiếu Mục lục chống lỗi OCR.
+    Hỗ trợ fuzzy matching tiêu đề mục lục và đối chiếu chống sai lệch OCR.
     """
     if not text:
         return ""
     text_clean = text.replace("đ", "d").replace("Đ", "D")
     nfkd = unicodedata.normalize("NFKD", text_clean)
     return "".join(c for c in nfkd if not unicodedata.combining(c))
+
+
+def count_words(text: str) -> int:
+    """Đếm số từ phân tách bởi khoảng trắng (Whitespace Token Count)."""
+    if not text:
+        return 0
+    return len(text.split())
 
 
 def count_syllables_vietnamese(text: str) -> int:
@@ -73,33 +90,72 @@ def count_syllables_vietnamese(text: str) -> int:
     return len(words)
 
 
-def count_words(text: str) -> int:
-    """Đếm số từ phân tách bằng khoảng trắng."""
+def clean_and_dehyphenate_text(text: str) -> str:
+    """
+    Hàn gắn văn bản:
+    1. Khử gạch nối ngắt dòng tiếng Việt (ngân-\nhàng -> ngân hàng, thanh-\ntoán -> thanh toán).
+    2. Nối dòng gãy cứng giữa câu (hard line breaks trong cùng câu văn).
+    3. Chuẩn hóa khoảng trắng dư thừa và ngắt dòng tối đa 2 lần.
+    """
     if not text:
-        return 0
-    return len(text.split())
+        return ""
+
+    text_norm = unicodedata.normalize("NFC", text)
+
+    # 1. Khử gạch nối ngắt dòng ở cuối dòng (các âm tiết ghép tiếng Việt cách nhau bằng dấu cách)
+    text_norm = re.sub(r"(\b\w+)[-–—]\n\s*(\w+\b)", r"\1 \2", text_norm)
+
+    # 2. Nối dòng gãy cứng giữa câu
+    lines = text_norm.split("\n")
+    merged_lines: List[str] = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            merged_lines.append("")
+            continue
+
+        if merged_lines and merged_lines[-1] != "":
+            prev = merged_lines[-1]
+            # Nếu dòng trước không kết thúc bằng dấu ngắt câu hoặc ký tự tiêu đề/danh sách
+            if not prev.endswith((".", ":", ";", "!", "?", "---", "***")) and not prev.startswith(("#", "-", "*", "|", "•")):
+                # Nếu dòng sau bắt đầu bằng chữ thường hoặc không phải tiêu đề điều khoản
+                if stripped[0].islower() or (len(stripped) > 1 and stripped[0].isalnum() and not stripped.startswith(("Điều", "Khoản", "Chương"))):
+                    merged_lines[-1] = f"{prev} {stripped}"
+                    continue
+
+        merged_lines.append(stripped)
+
+    # 3. Làm sạch khoảng trắng thừa
+    result = "\n".join(merged_lines)
+    result = re.sub(r"[ \t]+", " ", result)
+    result = re.sub(r"\n{3,}", "\n\n", result)
+    return result.strip()
 
 
 # =============================================================================
-# ĐỊNH DANH VĂN BẢN & PHÂN CẤP PHÁP LÝ (CANONICAL RESOLUTION)
+# 3. ĐỊNH DANH PHÁP LÝ & CẤU TRÚC THỨ BẬC (CANONICAL RESOLUTION)
 # =============================================================================
 
 def extract_document_identifier(
-    breadcrumb_text: str,
+    breadcrumb_text: str = "",
     full_context: str = "",
     source_name: str = ""
 ) -> str:
     """
     Trích xuất tên hoặc số hiệu văn bản định danh một cách tổng quát:
-    Tự động nhận diện từ Số hiệu thể thức, Breadcrumb Root, hoặc Tên tệp nguồn.
-    Tuyệt đối không hardcode tên văn bản cụ thể.
+    Ưu tiên:
+    1. Số hiệu thể thức quy phạm pháp luật (Nghị định 30/2020) ở đầu context.
+    2. Phần tử gốc đầu tiên của Breadcrumb (Root Node).
+    3. Tên tệp nguồn được làm sạch.
     """
-    # 1. Bắt số hiệu văn bản chính thức xuất hiện ở đầu văn bản (Nghị định 30/2020)
-    match_code = DOC_NUMBER_PATTERN.search(breadcrumb_text or full_context[:200])
+    # 1. Bắt số hiệu văn bản chính thức xuất hiện ở đầu văn bản
+    target_str = breadcrumb_text or full_context[:200]
+    match_code = DOC_NUMBER_PATTERN.search(target_str)
     if match_code:
         return match_code.group(1).strip()
 
-    # 2. Lấy phần tử gốc đầu tiên của Breadcrumb (Root Node)
+    # 2. Lấy phần tử gốc đầu tiên của Breadcrumb
     if breadcrumb_text:
         root_part = breadcrumb_text.split(" > ")[0].strip()
         clean_root = re.sub(r"^\[.*?\]\s*", "", root_part)
@@ -112,7 +168,7 @@ def extract_document_identifier(
         if clean_root:
             return clean_root
 
-    # 3. Fallback: Chuẩn hóa từ tên tệp tin nguồn
+    # 3. Fallback từ tên tệp nguồn
     if source_name:
         stem = Path(source_name).stem
         stem = re.sub(r"^(?:vcb_)?(?:md|pdf|docx|excel)_\d+__?", "", stem, flags=re.IGNORECASE)
@@ -125,7 +181,8 @@ def extract_document_identifier(
 
 def extract_hierarchical_units(full_context: str, text_chunk: str = "") -> str:
     """
-    Bóc tách các đơn vị phân cấp chuẩn: Chương > Mục > Điều > Khoản > Điểm > FAQ.
+    Bóc tách các đơn vị phân cấp chuẩn:
+    Chương -> Mục -> Điều -> Khoản -> Điểm -> FAQ.
     """
     context = full_context or text_chunk
     dieu_match = DIEU_PATTERN.search(context)
@@ -168,57 +225,17 @@ def extract_hierarchical_units(full_context: str, text_chunk: str = "") -> str:
     return ""
 
 
-def extract_cross_statutory_citations(full_context: str, current_doc: str = "") -> List[str]:
-    """Quét và trích xuất mọi văn bản pháp quy được viện dẫn chéo trong nội dung."""
-    matches = CROSS_CITATION_PATTERN.findall(full_context)
-    citations: List[str] = []
-    current_lower = current_doc.lower()
-
-    for m in matches:
-        clean_m = m.strip()
-        lower_m = clean_m.lower()
-        if lower_m not in [c.lower() for c in citations] and lower_m not in current_lower:
-            citations.append(clean_m)
-
-    return citations
-
-
-def extract_canonical_legal_ref(
-    breadcrumb_text: str,
-    text_chunk: str,
-    source_name: str = ""
-) -> str:
-    """
-    Trích xuất tham chiếu pháp lý chuẩn tắc: [Tên/Số hiệu văn bản - Điều X, Khoản Y; Viện dẫn chéo].
-    """
-    full_context = f"{breadcrumb_text} {text_chunk}"
-    doc_identifier = extract_document_identifier(breadcrumb_text, full_context, source_name)
-    hierarchical_unit = extract_hierarchical_units(full_context, text_chunk)
-    cross_citations = extract_cross_statutory_citations(full_context, doc_identifier)
-
-    parts: List[str] = []
-    if doc_identifier and hierarchical_unit:
-        parts.append(f"{doc_identifier} - {hierarchical_unit}")
-    elif hierarchical_unit:
-        parts.append(hierarchical_unit)
-    elif doc_identifier:
-        parts.append(doc_identifier)
-
-    for c in cross_citations:
-        if c not in parts:
-            parts.append(c)
-
-    return f"[{'; '.join(parts)}]" if parts else ""
-
-
 # =============================================================================
-# HẬU XỬ LÝ VĂN BẢN VÀ TÁCH CÂU (TEXT PROCESSING & SPLITTING)
+# 4. TÁCH CÂU AN TOÀN NGÂN HÀNG (SENTENCE SPLITTING & GROUPING)
 # =============================================================================
 
 def split_sentences_banking(text: str) -> List[str]:
     """
     Tách câu nhận thức ngữ cảnh ngân hàng và pháp lý:
-    Bảo vệ an toàn: Điều 12., TP.HCM, 1.000.000 VND, 5,5%/năm, v.v.
+    Bảo vệ an toàn không bị cắt gãy các thực thể:
+    - Số tiền & Tỷ lệ: 1.000.000 VND, 5,5%/năm, 100 USD.
+    - Điều khoản pháp lý: Điều 12., Khoản 1., Mục 2.
+    - Viết tắt có dấu chấm: TP.HCM, v.v., TNHH., ThS.
     """
     if not text:
         return []
@@ -253,10 +270,10 @@ def split_sentences_banking(text: str) -> List[str]:
         flags=re.IGNORECASE
     )
 
-    # 4. Tách câu sau dấu kết thúc [.?!] kèm khoảng trắng và chữ hoa [A-ZÀ-Ỹ]
+    # 4. Tách câu sau dấu kết thúc [.?!] kèm khoảng trắng và chữ hoa [A-ZÀ-Ỹ] hoặc ngắt dòng kép
     raw_parts = re.split(r"(?<=[.?!])\s+(?=[A-ZÀ-Ỹ])|(?:\n{2,})", temp)
 
-    # 5. Phục hồi các token đã được bảo vệ
+    # 5. Khôi phục các token đã bảo vệ
     results: List[str] = []
     for part in raw_parts:
         clean_part = part.strip()
@@ -271,8 +288,8 @@ def split_sentences_banking(text: str) -> List[str]:
 
 def group_sentences_banking(sentences: List[str], max_size: int, overlap: int = 100) -> List[str]:
     """
-    Gom nhóm các câu an toàn vào chunk có độ dài phù hợp (không cắt giữa chừng câu).
-    Dùng chung cho cả PDF Chunker và DOCX Chunker.
+    Gom nhóm các câu thành các chunk vừa vặn với kích thước trần max_size (ký tự).
+    Không bao giờ cắt giữa chừng một câu văn.
     """
     if not sentences:
         return [""]
@@ -298,55 +315,23 @@ def group_sentences_banking(sentences: List[str], max_size: int, overlap: int = 
     return parts or (sentences if sentences else [""])
 
 
-def clean_and_dehyphenate_text(text: str) -> str:
-    """
-    Khử ngắt dòng gạch nối (ngân-\nhàng -> ngân hàng), nối dòng gãy cứng giữa câu,
-    và làm sạch khoảng trắng dư thừa.
-    """
-    if not text:
-        return ""
-
-    text_norm = unicodedata.normalize("NFC", text)
-
-    # 1. Khử gạch nối ở cuối dòng
-    text_norm = re.sub(r"(\b\w+)[-–—]\n\s*(\w+\b)", r"\1\2", text_norm)
-
-    # 2. Nối dòng gãy cứng giữa câu
-    lines = text_norm.split("\n")
-    merged_lines: List[str] = []
-
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            merged_lines.append("")
-            continue
-
-        if merged_lines and merged_lines[-1] != "":
-            prev = merged_lines[-1]
-            if not prev.endswith((".", ":", ";", "!", "?", "---", "***")) and not prev.startswith(("#", "-", "*", "|", "•")):
-                if stripped[0].islower() or (len(stripped) > 1 and stripped[0].isalnum() and not stripped.startswith(("Điều", "Khoản", "Chương"))):
-                    merged_lines[-1] = f"{prev} {stripped}"
-                    continue
-
-        merged_lines.append(stripped)
-
-    # 3. Loại bỏ khoảng trắng thừa
-    res = "\n".join(merged_lines)
-    res = re.sub(r"[ \t]+", " ", res)
-    res = re.sub(r"\n{3,}", "\n\n", res)
-    return res.strip()
-
+# =============================================================================
+# 5. ĐÁNH GIÁ CHẤT LƯỢNG TIẾNG VIỆT & LỌC HEADER/FOOTER
+# =============================================================================
 
 def is_valid_vietnamese_text(text: str, min_valid_ratio: float = 0.25) -> bool:
     """
     Kiểm tra chất lượng văn bản:
-    Phát hiện văn bản scan rác hoặc lỗi font VNI/TCVN3 dựa trên tỷ lệ từ có nguyên âm tiếng Việt.
+    Phát hiện văn bản scan rác hoặc lỗi font VNI/TCVN3 dựa trên 2 quy tắc:
+    1. Âm vị học tiếng Việt (Phonotactics): Tiếng Việt không bao giờ có >= 4 phụ âm liên tiếp.
+    2. Tỷ lệ từ có nguyên âm tiếng Việt hợp lệ >= min_valid_ratio (mặc định 25%).
     """
     if not text or len(text.strip()) < 10:
         return False
 
     text_lower = text.lower()
-    # Kiểm tra ký tự lỗi unicode không in được
+
+    # Kiểm tra ký tự lỗi unicode lạ (\ufffd hoặc byte điều khiển)
     weird_chars = len(re.findall(r"[\ufffd\x00-\x08\x0b\x0c\x0e-\x1f]", text))
     if weird_chars / max(len(text), 1) > 0.05:
         return False
@@ -355,7 +340,14 @@ def is_valid_vietnamese_text(text: str, min_valid_ratio: float = 0.25) -> bool:
     if not words:
         return False
 
-    # Đếm số từ có chứa ít nhất 1 nguyên âm
+    # 1. Phát hiện cụm phụ âm vô nghĩa (>= 4 phụ âm liên tiếp, ví dụ: asdkjh, zxclkj)
+    invalid_consonant_clusters = sum(
+        1 for w in words if re.search(r"[bcdfghjklmnpqrstvwxyz]{4,}", w)
+    )
+    if invalid_consonant_clusters / max(len(words), 1) > 0.20:
+        return False
+
+    # 2. Đếm số từ chứa ít nhất 1 nguyên âm
     words_with_vowels = sum(1 for w in words if any(c in VIETNAMESE_VOWELS for c in w))
     ratio = words_with_vowels / len(words)
 
@@ -364,10 +356,10 @@ def is_valid_vietnamese_text(text: str, min_valid_ratio: float = 0.25) -> bool:
 
 def detect_and_remove_headers_footers(pages_text: List[str]) -> List[str]:
     """
-    Tự động phát hiện và loại bỏ Header/Footer lặp lại và số trang qua nhiều trang.
+    Tự động phát hiện và loại bỏ Header/Footer và số trang lặp lại qua nhiều trang.
     """
     if len(pages_text) < 3:
-        # Nếu ít hơn 3 trang, chỉ loại bỏ số trang đơn thuần
+        # Với tài liệu ngắn (< 3 trang), chỉ lọc số trang đơn thuần
         cleaned: List[str] = []
         for p in pages_text:
             lines = [l for l in p.split("\n") if not PAGE_NUMBER_PATTERN.match(l.strip())]

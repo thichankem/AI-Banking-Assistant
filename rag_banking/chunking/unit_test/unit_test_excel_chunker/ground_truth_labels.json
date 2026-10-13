@@ -1,0 +1,520 @@
+{
+  "vcb_bctc_hop_nhat_bang_can_doi_va_kqkd_2021_2024.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "Bang_Can_Doi_Ke_Toan",
+      "Ket_Qua_Kinh_Doanh",
+      "Chi_So_Tai_Chinh"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_bctc_hop_nhat_bang_can_doi_va_kqkd_2021_2024__sheet_Bang_Can_Doi_Ke_Toan.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "Bang_Can_Doi_Ke_Toan"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_bctc_hop_nhat_bang_can_doi_va_kqkd_2021_2024__sheet_Chi_So_Tai_Chinh.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "Chi_So_Tai_Chinh"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_bctc_hop_nhat_bang_can_doi_va_kqkd_2021_2024__sheet_Ket_Qua_Kinh_Doanh.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "Ket_Qua_Kinh_Doanh"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_bieu_lai_suat_va_ty_gia_ngoai_te.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "Lai_Suat_Tiet_Kiem",
+      "Ty_Gia_20_Ngoai_Te",
+      "Bieu_Phi_Dich_Vu"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_bieu_lai_suat_va_ty_gia_ngoai_te__sheet_Bieu_Phi_Dich_Vu.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "Bieu_Phi_Dich_Vu"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_bieu_lai_suat_va_ty_gia_ngoai_te__sheet_Lai_Suat_Tiet_Kiem.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "Lai_Suat_Tiet_Kiem"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_bieu_lai_suat_va_ty_gia_ngoai_te__sheet_Ty_Gia_20_Ngoai_Te.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "Ty_Gia_20_Ngoai_Te"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_bieu_phi_tong_hop_the_va_digibank_toan_hang.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "Phi_The_Tin_Dung_Quoc_Te",
+      "Phi_The_Ghi_No"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_bieu_phi_tong_hop_the_va_digibank_toan_hang__sheet_Phi_The_Ghi_No.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "Phi_The_Ghi_No"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_bieu_phi_tong_hop_the_va_digibank_toan_hang__sheet_Phi_The_Tin_Dung_Quoc_Te.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "Phi_The_Tin_Dung_Quoc_Te"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_danh_muc_san_pham_cho_vay_va_lai_suat.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "Goi_Vay_Khach_Hang_Ca_Nhan"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__an_tam_kinh_doanh.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "an_tam_kinh_doanh"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__cau_hoi_chung.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "cau_hoi_chung"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__cho_vay_giay_to_co_gia.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "cho_vay_giay_to_co_gia"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__chuyen_tien_tu_viet_nam_ra_nuoc_ngoai.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "chuyen_tien_tu_viet_nam_ra_nuo"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__chuyen_va_nhan_tien_trong_nuoc.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "chuyen_va_nhan_tien_trong_nuoc"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__kinh_doanh_tai_loc.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "kinh_doanh_tai_loc"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__nang_cap_co_so_luu_tru_du_lich.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "nang_cap_co_so_luu_tru_du_lich"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__nhan_kieu_hoi_tai_viet_nam.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "nhan_kieu_hoi_tai_viet_nam"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__o_to.xlsx": {
+    "expected_min_chunks": 1,
+    "expected_sheets": [
+      "o_to"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__phone_banking.xlsx": {
+    "expected_min_chunks": 1,
+    "expected_sheets": [
+      "phone_banking"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__sms_banking.xlsx": {
+    "expected_min_chunks": 1,
+    "expected_sheets": [
+      "sms_banking"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__the_thanh_toan.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "the_thanh_toan"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__the_tin_dung.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "the_tin_dung"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__tich_diem.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "tich_diem"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__tieu_diem.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "tieu_diem"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__tin_chap_nguoi_lao_dong.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "tin_chap_nguoi_lao_dong"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__vay_mua_nha_dat.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "vay_mua_nha_dat"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__vay_mua_nha_du_an.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "vay_mua_nha_du_an"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__vay_tieu_dung_co_tai_san_bao_dam.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "vay_tieu_dung_co_tai_san_bao_d"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__vay_xay_sua_nha_o.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "vay_xay_sua_nha_o"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__vcb_digibank.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "vcb_digibank"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_subtopic__xay_moi_co_so_luu_tru.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "xay_moi_co_so_luu_tru"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_topic__cho_vay.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "cho_vay"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_topic__chuyển_và_nhận_tiền.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "chuyển_và_nhận_tiền"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_topic__ngân_hàng_số.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "ngân_hàng_số"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_topic__thẻ_ngân_hàng.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "thẻ_ngân_hàng"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_faq_topic__vcb_loyalty.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "vcb_loyalty"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_ma_tran_han_muc_giao_dich_theo_phuong_thuc_xac_thuc.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "Han_Muc_VCB_Digibank"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_phan_loai_du_no_tin_dung_va_co_cau_nhom_no.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "Co_Cau_Nhom_No_VCB"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_quy_che_tich_diem_va_danh_muc_doi_qua_rewards.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "He_So_Tich_Diem",
+      "Danh_Muc_Doi_Qua_Urbox"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_quy_che_tich_diem_va_danh_muc_doi_qua_rewards__sheet_Danh_Muc_Doi_Qua_Urbox.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "Danh_Muc_Doi_Qua_Urbox"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_quy_che_tich_diem_va_danh_muc_doi_qua_rewards__sheet_He_So_Tich_Diem.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "He_So_Tich_Diem"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_so_sanh_cac_goi_tai_khoan_thanh_toan_tich_hop.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "So_Sanh_Goi_Tai_Khoan"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_so_sanh_chi_tiet_cac_dong_the_tin_dung_ghi_no.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "The_Tin_Dung_Quoc_Te",
+      "The_Ghi_No_Debit"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_so_sanh_chi_tiet_cac_dong_the_tin_dung_ghi_no__sheet_The_Ghi_No_Debit.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "The_Ghi_No_Debit"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_so_sanh_chi_tiet_cac_dong_the_tin_dung_ghi_no__sheet_The_Tin_Dung_Quoc_Te.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "The_Tin_Dung_Quoc_Te"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_tong_hop_303_faq_nghiep_vu_ngan_hang.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "Toan_Bo_303_FAQ",
+      "Thong_Ke_Phan_Bo"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_tong_hop_303_faq_nghiep_vu_ngan_hang__sheet_Thong_Ke_Phan_Bo.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "Thong_Ke_Phan_Bo"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  },
+  "vcb_tong_hop_303_faq_nghiep_vu_ngan_hang__sheet_Toan_Bo_303_FAQ.xlsx": {
+    "expected_min_chunks": 2,
+    "expected_sheets": [
+      "Toan_Bo_303_FAQ"
+    ],
+    "expected_headers": [
+      "Sheet",
+      "Cột dữ liệu"
+    ]
+  }
+}

@@ -55,13 +55,15 @@ class TestDLAChunking(unittest.TestCase):
 
         # Kiểm tra tính toàn vẹn của Schema
         first_chunk = chunks[0]
-        required_keys = ["chunk_id", "source", "format", "chunk_type", "breadcrumb", "content", "raw_content", "char_length"]
+        required_keys = ["chunk_id", "source", "chunk_type", "breadcrumb", "content", "word_count"]
         for key in required_keys:
             self.assertIn(key, first_chunk, f"DOCX chunk thiếu key: {key}")
+        for forbidden in ["ref", "legal_ref", "raw_content", "char_length", "format"]:
+            self.assertNotIn(forbidden, first_chunk, f"DOCX chunk không được chứa trường thừa: {forbidden}")
 
-        self.assertEqual(first_chunk["format"], "docx")
+        self.assertEqual(first_chunk["source"], sample_docx.name)
         self.assertTrue(first_chunk["breadcrumb"], "DOCX chunk phải có breadcrumb!")
-        self.assertGreater(first_chunk["char_length"], 0)
+        self.assertGreater(first_chunk["word_count"], 0)
         print(f"\n[PASS] DOCX Chunker trích xuất thành công {len(chunks)} chunks từ {sample_docx.name}")
 
     def test_02_excel_chunking(self):
@@ -76,8 +78,10 @@ class TestDLAChunking(unittest.TestCase):
         self.assertGreater(len(chunks), 0, "ExcelChunker không sinh ra chunk nào!")
 
         first_chunk = chunks[0]
-        self.assertEqual(first_chunk["format"], "excel")
+        self.assertEqual(first_chunk["source"], sample_excel.name)
         self.assertEqual(first_chunk["chunk_type"], "excel_table")
+        for forbidden in ["ref", "legal_ref", "raw_content", "char_length", "format"]:
+            self.assertNotIn(forbidden, first_chunk, f"Excel chunk không được chứa trường thừa: {forbidden}")
         self.assertIn("Sheet:", first_chunk["breadcrumb"])
         self.assertIn("Cột dữ liệu:", first_chunk["content"])
         print(f"\n[PASS] Excel Chunker trích xuất thành công {len(chunks)} chunks từ {sample_excel.name}")
@@ -94,8 +98,10 @@ class TestDLAChunking(unittest.TestCase):
         self.assertGreater(len(chunks), 0, "PDFChunker không sinh ra chunk nào!")
 
         first_chunk = chunks[0]
-        self.assertEqual(first_chunk["format"], "pdf")
+        self.assertEqual(first_chunk["source"], sample_pdf.name)
         self.assertIn(first_chunk["chunk_type"], ["pdf_text", "pdf_ocr_scan", "pdf_table"])
+        for forbidden in ["ref", "legal_ref", "raw_content", "char_length", "format"]:
+            self.assertNotIn(forbidden, first_chunk, f"PDF chunk không được chứa trường thừa: {forbidden}")
         self.assertTrue("page_numbers" in first_chunk or "Trang" in first_chunk.get("breadcrumb", ""))
         print(f"\n[PASS] PDF Chunker trích xuất thành công {len(chunks)} chunks từ {sample_pdf.name}")
 
@@ -108,21 +114,21 @@ class TestDLAChunking(unittest.TestCase):
         if docx_files:
             c_docx = dla.chunk_file(docx_files[0])
             self.assertGreater(len(c_docx), 0)
-            self.assertEqual(c_docx[0]["format"], "docx")
+            self.assertEqual(c_docx[0]["source"], docx_files[0].name)
 
         # 2. Test định tuyến .xlsx
         excel_files = list(self.excel_dir.glob("*.xlsx"))
         if excel_files:
             c_excel = dla.chunk_file(excel_files[0])
             self.assertGreater(len(c_excel), 0)
-            self.assertEqual(c_excel[0]["format"], "excel")
+            self.assertEqual(c_excel[0]["source"], excel_files[0].name)
 
         # 3. Test định tuyến .pdf
         pdf_files = list(self.pdf_dir.glob("*.pdf"))
         if pdf_files:
             c_pdf = dla.chunk_file(pdf_files[0], max_pdf_pages=2)
             self.assertGreater(len(c_pdf), 0)
-            self.assertEqual(c_pdf[0]["format"], "pdf")
+            self.assertEqual(c_pdf[0]["source"], pdf_files[0].name)
 
         print("\n[PASS] Unified DLAChunker tự động định tuyến chính xác cả 3 định dạng!")
 

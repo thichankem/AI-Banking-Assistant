@@ -97,12 +97,11 @@ class CosineHNSWVectorStore:
                                 "chunk_id": chunk.get("chunk_id", str(idx)),
                                 "source": chunk.get("source", ""),
                                 "breadcrumb": chunk.get("breadcrumb", ""),
-                                "legal_ref": chunk.get("legal_ref", ""),
                                 "section_title": chunk.get("section_title", ""),
                                 "chunk_type": chunk.get("chunk_type", "text"),
                                 "canonical_questions": chunk.get("canonical_questions", []),
                                 "content": chunk.get("content", ""),
-                                "raw_content": chunk.get("raw_content", "")
+                                "word_count": chunk.get("word_count", 0)
                             }
                         )
                     )

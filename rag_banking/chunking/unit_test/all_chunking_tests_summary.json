@@ -1,0 +1,100 @@
+{
+  "timestamp": "2026-10-13T13:29:43.201033",
+  "total_nodes": 7,
+  "total_samples": 439,
+  "total_passed": 439,
+  "total_failed": 0,
+  "overall_accuracy_percent": 100.0,
+  "overall_status": "PASS",
+  "schema_policy": {
+    "source_required": true,
+    "forbidden_fields": [
+      "legal_ref",
+      "ref",
+      "raw_content",
+      "char_length",
+      "format"
+    ],
+    "legal_ref_removed": true,
+    "document_identifier_active": true
+  },
+  "nodes": [
+    {
+      "node_id": "Node 01",
+      "node_name": "Scan Detector",
+      "folder": "unit_test_scan_detector",
+      "status": "PASS",
+      "total_samples": 100,
+      "passed": 100,
+      "failed": 0,
+      "accuracy_percent": 100.0,
+      "duration_seconds": 15.0
+    },
+    {
+      "node_id": "Node 02",
+      "node_name": "OCR Layout Hierarchy Predictor",
+      "folder": "unit_test_ocr_layout_predictor",
+      "status": "PASS",
+      "total_samples": 66,
+      "passed": 66,
+      "failed": 0,
+      "accuracy_percent": 100.0,
+      "duration_seconds": 0.08
+    },
+    {
+      "node_id": "Node 03",
+      "node_name": "Scan Structure Reconstructor",
+      "folder": "unit_test_scan_structure_reconstructor",
+      "status": "PASS",
+      "total_samples": 55,
+      "passed": 55,
+      "failed": 0,
+      "accuracy_percent": 100.0,
+      "duration_seconds": 0.42
+    },
+    {
+      "node_id": "Node 04",
+      "node_name": "DOCX Layout-Aware Chunker",
+      "folder": "unit_test_docx_chunker",
+      "status": "PASS",
+      "total_samples": 60,
+      "passed": 60,
+      "failed": 0,
+      "accuracy_percent": 100.0,
+      "duration_seconds": 5.24
+    },
+    {
+      "node_id": "Node 05",
+      "node_name": "Excel Table Layout Chunker",
+      "folder": "unit_test_excel_chunker",
+      "status": "PASS",
+      "total_samples": 51,
+      "passed": 51,
+      "failed": 0,
+      "accuracy_percent": 100.0,
+      "duration_seconds": 0.8
+    },
+    {
+      "node_id": "Node 06",
+      "node_name": "Canonical Entity & Doc Identifier",
+      "folder": "unit_test_canonical_resolver",
+      "status": "PASS",
+      "total_samples": 52,
+      "passed": 52,
+      "failed": 0,
+      "accuracy_percent": 100.0,
+      "duration_seconds": 0.01
+    },
+    {
+      "node_id": "Node 07",
+      "node_name": "Multi-Format Router & Pipeline",
+      "folder": "unit_test_layout_aware_router",
+      "status": "PASS",
+      "total_samples": 55,
+      "passed": 55,
+      "failed": 0,
+      "accuracy_percent": 100.0,
+      "duration_seconds": 31.53
+    }
+  ]
+}

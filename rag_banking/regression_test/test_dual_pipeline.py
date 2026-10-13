@@ -75,7 +75,7 @@ def main():
         chunk = c["chunk"]
         print(f"Top {c['candidate_rank']}: RRF={c['rrf_score']} | DenseRank={c['dense_rank']} | BM25Rank={c['bm25_rank']}", flush=True)
         print(f"  + Nguồn: {chunk.get('source')} | Phân mục: {chunk.get('breadcrumb', '')[:60]}", flush=True)
-        print(f"  + Pháp lý: {chunk.get('legal_ref', 'N/A')}", flush=True)
+        print(f"  + Ref (Tài liệu): {chunk.get('ref', chunk.get('legal_ref', 'N/A'))}", flush=True)
 
     print("\n" + "=" * 65, flush=True)
     print("3. KẾT QUẢ BƯỚC 3: RERANKING (TINH LỌC TOP-3 CHUNKS)", flush=True)
@@ -84,7 +84,7 @@ def main():
         chunk = c["chunk"]
         print(f"Top {c['rerank_rank']} (Gốc: Top {c['original_hybrid_rank']}): FinalScore={c['final_rerank_score']}", flush=True)
         print(f"  + Canonical Matching: {c['canonical_matching_score']} | Lexical Overlap: {c['lexical_overlap_score']}", flush=True)
-        print(f"  + Nguồn: {chunk.get('source')} | Pháp lý: {chunk.get('legal_ref', 'N/A')}", flush=True)
+        print(f"  + Nguồn: {chunk.get('source')} | Ref: {chunk.get('ref', chunk.get('legal_ref', 'N/A'))}", flush=True)
 
     print("\n" + "=" * 65, flush=True)
     print("4. KẾT QUẢ BƯỚC 4: CONTEXT SYNTHESIZER (MARKDOWN & TOKEN BUDGET)", flush=True)

@@ -44,10 +44,10 @@ def _build_preview_markdown(title: str, description: str, sample_chunks: list) -
     for idx, c in enumerate(sample_chunks, start=1):
         lines.append(f"## Mẫu {idx:02d}: `{c.get('chunk_id')}`")
         lines.append(f"- **Tệp nguồn (Source)**: `{c.get('source')}`")
-        lines.append(f"- **Định dạng (Format)**: `{c.get('format', 'unknown')}` | **Loại (Type)**: `{c.get('chunk_type')}`")
+        lines.append(f"- **Loại (Type)**: `{c.get('chunk_type')}`")
         lines.append(f"- **Đường dẫn tiêu đề (Breadcrumb)**: {c.get('breadcrumb') or '(Trống)'}")
         lines.append(f"- **Phần mục (Section Title)**: {c.get('section_title') or '(Trống)'}")
-        lines.append(f"- **Độ dài ký tự**: {c.get('char_length', len(c.get('content', '')))} ký tự | **Số từ**: {c.get('word_count', 0)} từ")
+        lines.append(f"- **Số từ**: {c.get('word_count', len(c.get('content', '').split()))} từ")
         lines.append("")
         lines.append("```text")
         lines.append(c.get("content", ""))
@@ -210,7 +210,7 @@ def run_full_dataset_chunking(max_pages_per_pdf: int = 3):
 
         if c.get("breadcrumb", "").strip():
             has_breadcrumb_count += 1
-        if c.get("legal_ref", "").strip():
+        if (c.get("ref") or c.get("legal_ref", "")).strip():
             has_legal_ref_count += 1
 
     total_chunks = len(all_chunks)
@@ -233,6 +233,7 @@ def run_full_dataset_chunking(max_pages_per_pdf: int = 3):
         "quality_metrics": {
             "empty_chunks": empty_chunks_count,
             "breadcrumb_coverage_rate": f"{(has_breadcrumb_count / max(total_chunks, 1)) * 100:.1f}%",
+            "ref_coverage_rate": f"{(has_legal_ref_count / max(total_chunks, 1)) * 100:.1f}%",
             "legal_ref_coverage_rate": f"{(has_legal_ref_count / max(total_chunks, 1)) * 100:.1f}%",
             "under_80_words_pct": f"{(under_80 / max(total_chunks, 1)) * 100:.1f}%",
             "under_120_words_pct": f"{(under_120 / max(total_chunks, 1)) * 100:.1f}%",
