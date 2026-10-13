@@ -12,20 +12,13 @@ Bộ phân đoạn tài liệu Microsoft Word (.docx) ngân hàng nhận thức 
 """
 
 from __future__ import annotations
-
-import re
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Set, Tuple, Union
 
-try:
-    import docx
-    from docx.text.paragraph import Paragraph
-    from docx.table import Table, _Cell
-    from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
-    DOCX_AVAILABLE = True
-except ImportError:
-    DOCX_AVAILABLE = False
+import docx
+from docx.text.paragraph import Paragraph
+from docx.table import Table, _Cell
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 
 try:
     from ..unified_chunk.canonical_resolver import (
@@ -50,7 +43,7 @@ def _build_docx_chunk(
     breadcrumb: str,
     section_title: str,
     content: str
-) -> Dict[str, Any]:
+) -> dict:
     """Helper chuẩn hóa việc tạo đối tượng chunk DOCX, đảm bảo Schema tinh gọn."""
     return {
         "chunk_id": chunk_id,
@@ -80,19 +73,12 @@ class DOCXChunker:
         self.chunk_overlap = chunk_overlap
         self.table_rows_per_chunk = table_rows_per_chunk
 
-    def is_available(self) -> bool:
-        """Kiểm tra thư viện python-docx đã sẵn sàng hay chưa."""
-        return DOCX_AVAILABLE
-
-    def chunk_docx(self, docx_path: Union[str, Path]) -> List[Dict[str, Any]]:
+    def chunk_docx(self, docx_path: str | Path) -> list[dict]:
         """
         Đọc và phân đoạn toàn diện một tệp DOCX ngân hàng:
         Hỗ trợ heading in đậm không dùng style, bảng 2 tầng, textbox, ô gộp, bảng lồng nhau.
         """
         docx_path = Path(docx_path)
-        if not self.is_available():
-            raise ImportError("Vui lòng cài đặt thư viện 'python-docx' để xử lý tệp Word .docx!")
-
         if not docx_path.exists():
             print(f"[DOCX Chunker] Không tìm thấy tệp: {docx_path}")
             return []
@@ -103,12 +89,12 @@ class DOCXChunker:
             print(f"[DOCX Chunker] Không thể mở tệp {docx_path.name}: {e}")
             return []
 
-        chunks: List[Dict[str, Any]] = []
+        chunks: list[dict] = []
         chunk_counter = 0
 
         # Thứ bậc tiêu đề hoạt động: {1: "Tiêu đề lớn", 2: "Tiêu đề con", ...}
-        active_headers: Dict[int, str] = {}
-        text_buffer: List[str] = []
+        active_headers: dict[int, str] = {}
+        text_buffer: list[str] = []
 
         def get_current_breadcrumb() -> str:
             sorted_levels = sorted(active_headers.keys())
@@ -245,60 +231,88 @@ class DOCXChunker:
 
         return chunks
 
-    def _detect_heading_level(self, p: Paragraph, style_name: str, text: str) -> Optional[int]:
+    def _detect_heading_level(self, p: Paragraph, style_name: str, text: str) -> int | None:
         """
-        Nhận diện cấp độ tiêu đề kết hợp:
-        1. Word Styles chuẩn (Heading 1..4, Title, Subtitle).
-        2. Heuristic In Đậm (Bold) và Regex thể thức ngân hàng.
+        Nhận diện cấp độ tiêu đề tổng quát hoàn toàn dựa trên cấu trúc tài liệu & Typography (0% Rule-based Keywords):
+        1. Word Styles chuẩn (Heading 1..9, Title, Subtitle).
+        2. Thuộc tính OpenXML Outline Level (w:outlineLvl).
+        3. Thuộc tính hình thức văn bản: In đậm (Bold), chữ in hoa ngắn.
+        4. Ký hiệu phân cấp số học chuẩn quốc tế (Số La Mã, outline numbering đa tầng).
         """
         style_lower = style_name.lower()
 
-        # 1. Qua Style
+        # 1. Qua Style Word
         if "title" in style_lower:
             return 1
         if "subtitle" in style_lower:
             return 2
         if "heading" in style_lower:
-            m = re.search(r"\d+", style_name)
-            return int(m.group(0)) if m else 1
+            digits = [c for c in style_name if c.isdigit()]
+            return int("".join(digits)) if digits else 1
 
-        # 2. Heuristic: Kiểm tra xem đoạn văn bản có in đậm toàn bộ
+        # 2. Qua OpenXML Outline Level
+        try:
+            if hasattr(p, "_element") and p._element is not None:
+                pPr = p._element.pPr
+                if pPr is not None and hasattr(pPr, "outlineLvl") and pPr.outlineLvl is not None:
+                    lvl_val = pPr.outlineLvl.val
+                    if lvl_val is not None:
+                        return int(lvl_val) + 1
+        except Exception:
+            pass
+
+        first_line = text.split("\n")[0].strip()
+        tokens = first_line.split()
+        if not tokens or len(first_line) > 120:
+            return None
+
+        # 3. Phân tích định dạng in đậm toàn bộ dòng
         is_all_bold = False
         if p.runs:
             non_empty_runs = [r for r in p.runs if r.text.strip()]
             if non_empty_runs and all(r.bold for r in non_empty_runs):
                 is_all_bold = True
 
-        # 3. Qua Regex thể thức
-        first_line = text.split("\n")[0].strip()
-        if len(first_line) < 120:
-            if re.match(r"^(PHẦN|CHƯƠNG)\s+[IVXLCDM\d]+", first_line, re.IGNORECASE):
-                return 1
-            if re.match(r"^MỤC\s+[IVXLCDM\d]+", first_line, re.IGNORECASE):
-                return 2
-            if re.match(r"^Điều\s+\d+", first_line, re.IGNORECASE):
-                return 3
-            if re.match(r"^Câu\s+\d+[:.]", first_line, re.IGNORECASE):
-                return 3
-            if re.match(r"^(BIỂU PHÍ|QUY TẮC|THỎA THUẬN|QUY ĐỊNH|QUY CHẾ)", first_line, re.IGNORECASE):
-                return 2
-            if re.match(r"^Khoản\s+\d+", first_line, re.IGNORECASE):
-                return 4
+        # Ký hiệu số La Mã chuẩn quốc tế (I., II., III., IV., V., etc.)
+        first_tok_clean = tokens[0].rstrip(".:)-")
+        is_roman = first_tok_clean in ("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII")
 
-            if is_all_bold:
-                if re.match(r"^\d{1,2}\.\s+[A-ZÀ-Ỹ]", first_line):
-                    return 4
-                if re.match(r"^[a-zđ]\)\s+[A-ZÀ-Ỹ]", first_line):
-                    return 5
-                # Tiêu đề in hoa ngắn
-                if first_line.isupper() and 5 < len(first_line) < 80:
-                    return 2
+        # Đánh số phân cấp đa tầng (vd: 1.1, 1.1.1, 1., etc.)
+        num_clean = tokens[0].rstrip(".")
+        dot_count = num_clean.count(".")
+        is_multi_level_num = dot_count >= 1 and all(part.isdigit() for part in num_clean.split("."))
+        is_single_num = tokens[0].endswith(".") and tokens[0][:-1].isdigit()
+        is_letter_bullet = tokens[0].endswith(")") and len(tokens[0]) == 2 and tokens[0][0].isalpha()
+
+        if is_all_bold:
+            if is_roman and len(tokens) >= 2:
+                return 1
+            if first_line.isupper() and 3 < len(first_line) < 100:
+                return 2
+            if is_multi_level_num:
+                return min(2 + dot_count, 5)
+            if is_single_num:
+                return 3
+            if is_letter_bullet:
+                return 5
+            if 1 <= len(tokens) <= 15 and not first_line.endswith((".", ";", ":")):
+                return 2
+
+        # Tiêu đề không in đậm nhưng có đặc trưng cấu trúc nổi bật
+        if is_roman and len(tokens) >= 2 and (first_line.isupper() or not first_line.endswith((".", ";", ":"))):
+            return 1
+
+        if first_line.isupper() and 5 < len(first_line) < 80 and not first_line.endswith((".", ";", ":")):
+            return 2
+
+        if is_multi_level_num and len(tokens) >= 2 and not first_line.endswith((".", ";", ":")):
+            return min(2 + dot_count, 5)
 
         return None
 
-    def _extract_textbox_content(self, doc: docx.Document) -> List[str]:
+    def _extract_textbox_content(self, doc: docx.Document) -> list[str]:
         """Trích xuất nội dung văn bản bên trong Textbox (<w:txbxContent>)."""
-        textbox_texts: List[str] = []
+        textbox_texts: list[str] = []
         try:
             for el in doc.element.body.iter():
                 if el.tag.endswith("txbxContent"):
@@ -321,7 +335,7 @@ class DOCXChunker:
         breadcrumb: str,
         section_title: str,
         start_chunk_idx: int
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict]:
         """
         Trích xuất bảng biểu trong DOCX thành Linearized Table Chunks kèm tên cột:
         1. Nhận diện Header 2 tầng (Hierarchical Multi-level Header).
@@ -333,15 +347,15 @@ class DOCXChunker:
             return []
 
         header_names = self._detect_table_headers(table)
-        data_row_strs: List[str] = []
+        data_row_strs: list[str] = []
 
         start_row_idx = 2 if self._is_two_level_header(table) else 1
 
         for r_idx in range(start_row_idx, len(table.rows)):
             row = table.rows[r_idx]
             # Xử lý ô gộp: lọc bỏ cell trùng XML element
-            unique_cells: List[_Cell] = []
-            seen_tcs: Set[int] = set()
+            unique_cells: list[_Cell] = []
+            seen_tcs: set[int] = set()
             for cell in row.cells:
                 tc_id = id(cell._tc)
                 if tc_id not in seen_tcs:
@@ -366,7 +380,7 @@ class DOCXChunker:
             return []
 
         table_breadcrumb = f"{breadcrumb} > Bảng biểu" if breadcrumb else f"{docx_path.stem} > Bảng biểu"
-        table_chunks: List[Dict[str, Any]] = []
+        table_chunks: list[dict] = []
 
         # Chia bảng theo batch rows và lặp lại header ở mỗi chunk
         batch_size = self.table_rows_per_chunk
@@ -402,7 +416,7 @@ class DOCXChunker:
         has_row1_content = any(c != "" for c in row1_cells)
         return has_duplicates_or_empty and has_row1_content
 
-    def _detect_table_headers(self, table: Table) -> List[str]:
+    def _detect_table_headers(self, table: Table) -> list[str]:
         """Tự động xây dựng danh sách tên cột, hỗ trợ ghép header 2 tầng."""
         if not table.rows:
             return []

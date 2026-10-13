@@ -17,7 +17,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 # Thêm đường dẫn gốc dự án vào sys.path để import
 CURRENT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = CURRENT_DIR.parent.parent if CURRENT_DIR.name == "test" else CURRENT_DIR.parent
+PROJECT_ROOT = CURRENT_DIR.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -38,32 +38,31 @@ def run_test():
     print(f"[*] Đang nạp dữ liệu kiểm thử từ: {dataset_dir}")
     
     if dataset_dir == chunking_dir:
-        # Kiểm thử toàn diện 4 định dạng trong chunking_dataset:
-        # 1. Excel đa sheet (.xlsx)
+        # Kiểm thử toàn diện 2 định dạng cốt lõi trong chunking_dataset:
+        # 1. Word tài liệu cấu trúc (.docx)
         # 2. PDF số có bảng biểu (.pdf)
         # 3. PDF scan hình ảnh cần OCR (.pdf)
-        # 4. Markdown có header & FAQ (.md)
         target_docs = [
-            "vcb_bieu_lai_suat_va_ty_gia_ngoai_te.xlsx",
+            "vcb_md_15__tien_ich__bieu_lai_suat_tien_gui_va_ty_gia_20_ngoai_te.docx",
             "vcb_pdf_22_bieu_phi_the_tdqt_2026.pdf",
             "vcb_pdf_21_nq_hdqt_cctg_vcbs.pdf",
-            "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.md"
+            "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.docx"
         ]
         # Giới hạn 2 trang cho PDF dài để test nhanh
         pipeline.ingest_documents(dataset_dir=dataset_dir, filenames=target_docs, max_pdf_pages=2)
 
         # Danh sách câu hỏi kiểm thử cho chunking_dataset
         test_queries = [
-            # Test Case 1: Tra cứu Bảng Excel đa sheet (Excel Layout-Aware)
+            # Test Case 1: Tra cứu Biểu lãi suất và tỷ giá (DOCX Layout-Aware)
             "Lãi suất tiền gửi tiết kiệm VND tại quầy của Vietcombank kỳ hạn 12 tháng là bao nhiêu %/năm và tỷ giá USD mua chuyển khoản là bao nhiêu?",
 
             # Test Case 2: Tra cứu Digital PDF (PDF Layout-Aware & Table Extraction)
             "Theo biểu phí dịch vụ thẻ tín dụng quốc tế Vietcombank 2026, phí thường niên của thẻ chính Vietcombank Vibe là bao nhiêu VNĐ/năm?",
 
-            # Test Case 3: Tra cứu Scanned PDF với RapidOCR (PDF OCR Scan)
+            # Test Case 3: Tra cứu Scanned PDF với Tesseract OCR v5 (PDF OCR Scan)
             "Nghị quyết HĐQT số 28154/VCB-CLTKHDQT ngày 31/12/2025 phê duyệt nội dung gì liên quan đến chứng chỉ tiền gửi CCTG?",
 
-            # Test Case 4: Tra cứu Markdown FAQ & Điều khoản thẻ (Markdown Layout-Aware)
+            # Test Case 4: Tra cứu DOCX FAQ & Điều khoản thẻ (DOCX Layout-Aware)
             "Khi bị mất thẻ tín dụng hoặc phát hiện giao dịch thẻ lạ, khách hàng cần thực hiện những bước khẩn cấp nào?"
         ]
     else:

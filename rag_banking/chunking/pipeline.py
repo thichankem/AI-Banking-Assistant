@@ -6,16 +6,14 @@ phục vụ hệ thống AI Banking Assistant (Vietcombank).
 
 Cấu trúc phân hệ chuyên trách:
 1. `DOCXChunker`: Phân tích AST Heading, Table Atomicity, Header 2 tầng, Section-Length-Aware.
-2. `PDFChunker`: ScanDetector, RapidOCR ONNX, Lọc mộc đỏ HSV, OCRLayoutHierarchyPredictor (0% Regex),
+2. `PDFChunker`: ScanDetector, Tesseract OCR v5, Lọc mộc đỏ HSV, OCRLayoutHierarchyPredictor (0% Regex),
    ScanStructureReconstructor (State Machine BreadcrumbTracker).
-3. `ExcelChunker`: Bảng ma trận đa sheet, tuyến tính hóa "Cột: Giá trị", row batching.
-4. `LayoutAwareChunker`: Bộ điều phối trung tâm tự động nhận diện phần mở rộng tệp.
+3. `LayoutAwareChunker`: Bộ điều phối trung tâm tự động nhận diện phần mở rộng tệp (.docx, .pdf).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple, Union
 
 from .docx_chunker import DOCXChunker
 from .pdf_chunker import (
@@ -28,7 +26,6 @@ from .pdf_chunker import (
 from .unified_chunk import (
     LayoutAwareChunker,
     DLAChunker,
-    ExcelChunker,
     BreadcrumbsChunker,
     DocumentStructureChunker
 )
@@ -44,8 +41,7 @@ class ChunkingPipeline:
         self,
         max_chunk_size: int = 800,
         min_section_size: int = 120,
-        chunk_overlap: int = 100,
-        excel_rows_per_chunk: int = 3
+        chunk_overlap: int = 100
     ):
         self.max_chunk_size = max_chunk_size
         self.min_section_size = min_section_size
@@ -55,14 +51,12 @@ class ChunkingPipeline:
         self.orchestrator = LayoutAwareChunker(
             max_chunk_size=max_chunk_size,
             min_section_size=min_section_size,
-            chunk_overlap=chunk_overlap,
-            excel_rows_per_chunk=excel_rows_per_chunk
+            chunk_overlap=chunk_overlap
         )
 
         # Truy cập trực tiếp các sub-chunker chuyên biệt khi cần
         self.docx_chunker = self.orchestrator.docx_chunker
         self.pdf_chunker = self.orchestrator.pdf_chunker
-        self.excel_chunker = self.orchestrator.excel_chunker
         self.structure_chunker = DocumentStructureChunker(
             chunk_size=max_chunk_size // 2,
             min_section_size=min_section_size,
@@ -71,40 +65,36 @@ class ChunkingPipeline:
 
     def process_file(
         self,
-        file_path: Union[str, Path],
-        max_pdf_pages: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
+        file_path: str | Path,
+        max_pdf_pages: int | None = None
+    ) -> list[dict]:
         """
-        Xử lý phân đoạn tự động cho một tệp bất kỳ (.docx, .pdf, .xlsx, .md).
+        Xử lý phân đoạn tự động cho một tệp bất kỳ (.docx, .pdf).
         """
         return self.orchestrator.chunk_file(file_path, max_pdf_pages=max_pdf_pages)
 
     def process_dataset(
         self,
-        dataset_dir: Union[str, Path],
-        output_dir: Optional[Union[str, Path]] = None,
-        max_pdf_pages: Optional[int] = 3,
-        include_excel: bool = False,
-        include_md: bool = False
-    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        dataset_dir: str | Path,
+        output_dir: str | Path | None = None,
+        max_pdf_pages: int | None = 3
+    ) -> tuple[list[dict], dict]:
         """
         Chạy toàn bộ dataset tài liệu ngân hàng theo lô, thu thập thống kê DLA và xuất artifacts.
         """
         return self.orchestrator.chunk_dataset(
             dataset_dir=dataset_dir,
             output_dir=output_dir,
-            max_pdf_pages=max_pdf_pages,
-            include_excel=include_excel,
-            include_md=include_md
+            max_pdf_pages=max_pdf_pages
         )
 
     def process_directory(
         self,
-        dir_path: Union[str, Path],
-        extensions: Optional[List[str]] = None,
-        max_files: Optional[int] = None,
-        max_pdf_pages: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
+        dir_path: str | Path,
+        extensions: list[str] | None = None,
+        max_files: int | None = None,
+        max_pdf_pages: int | None = None
+    ) -> list[dict]:
         """
         Xử lý phân đoạn toàn bộ tệp trong thư mục theo danh sách phần mở rộng chỉ định.
         """
@@ -117,10 +107,10 @@ class ChunkingPipeline:
 
 
 def run_chunking_pipeline(
-    dataset_dir: Union[str, Path],
-    output_dir: Optional[Union[str, Path]] = None,
+    dataset_dir: str | Path,
+    output_dir: str | Path | None = None,
     max_pdf_pages: int = 3
-) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+) -> tuple[list[dict], dict]:
     """Hàm tiện ích nhanh khởi chạy Phase 1 Chunking Pipeline."""
     pipeline = ChunkingPipeline()
     return pipeline.process_dataset(

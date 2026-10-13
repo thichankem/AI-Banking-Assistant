@@ -19,17 +19,8 @@ Nguyên lý hoạt động 3 điều kiện:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Tuple, Dict, Any, Union, Optional
 
-try:
-    import pymupdf as fitz
-    PYMUPDF_AVAILABLE = True
-except ImportError:
-    try:
-        import fitz
-        PYMUPDF_AVAILABLE = True
-    except ImportError:
-        PYMUPDF_AVAILABLE = False
+import pymupdf as fitz
 
 try:
     from ..unified_chunk.canonical_resolver import is_valid_vietnamese_text, count_words
@@ -38,10 +29,10 @@ except (ImportError, ValueError):
 
 
 def detect_is_scanned_page(
-    page: Any,
+    page: object,
     image_area_ratio_threshold: float = 0.40,
     min_word_threshold: int = 30
-) -> Tuple[bool, Dict[str, Any]]:
+) -> tuple[bool, dict]:
     """
     Hàm phân loại độc lập: Kiểm tra một trang PDF là Trang Scan (Scanned) hay Trang Số (Digital).
 
@@ -108,17 +99,17 @@ def detect_is_scanned_page(
     return is_scanned, metrics
 
 
-def is_scanned_page(page: Any, image_area_ratio_threshold: float = 0.40) -> bool:
+def is_scanned_page(page: object, image_area_ratio_threshold: float = 0.40) -> bool:
     """Hàm tiện ích nhanh trả về True nếu là bản scan, False nếu là văn bản số."""
     is_scanned, _ = detect_is_scanned_page(page, image_area_ratio_threshold=image_area_ratio_threshold)
     return is_scanned
 
 
 def detect_pdf_file_scan_status(
-    pdf_path: Union[str, Path],
-    max_pages: Optional[int] = None,
+    pdf_path: str | Path,
+    max_pages: int | None = None,
     image_area_ratio_threshold: float = 0.40
-) -> Dict[str, Any]:
+) -> dict:
     """
     Kiểm tra toàn diện trạng thái scan của một tệp PDF (hỗ trợ file đa trang):
     Trả về tỷ lệ trang scan, danh sách từng trang và kết luận tài liệu scan chủ đạo hay không.
@@ -127,8 +118,6 @@ def detect_pdf_file_scan_status(
     if not pdf_path.exists():
         raise FileNotFoundError(f"Không tìm thấy tệp: {pdf_path}")
 
-    if not PYMUPDF_AVAILABLE:
-        raise ImportError("Vui lòng cài đặt 'pymupdf' để sử dụng bộ nhận diện Scan Detector!")
 
     doc = fitz.open(str(pdf_path))
     total_pages = len(doc)
@@ -174,11 +163,11 @@ class ScanDetector:
         self.image_area_ratio_threshold = image_area_ratio_threshold
         self.min_word_threshold = min_word_threshold
 
-    def is_scanned_page(self, page: Any) -> bool:
+    def is_scanned_page(self, page: object) -> bool:
         """Kiểm tra nhanh trang scan."""
         return is_scanned_page(page, image_area_ratio_threshold=self.image_area_ratio_threshold)
 
-    def detect_page(self, page: Any) -> Tuple[bool, Dict[str, Any]]:
+    def detect_page(self, page: object) -> tuple[bool, dict]:
         """Phân tích chi tiết trang scan."""
         return detect_is_scanned_page(
             page,
@@ -188,9 +177,9 @@ class ScanDetector:
 
     def detect_file(
         self,
-        pdf_path: Union[str, Path],
-        max_pages: Optional[int] = None
-    ) -> Dict[str, Any]:
+        pdf_path: str | Path,
+        max_pages: int | None = None
+    ) -> dict:
         """Phân tích toàn bộ tệp PDF đa trang."""
         return detect_pdf_file_scan_status(
             pdf_path,

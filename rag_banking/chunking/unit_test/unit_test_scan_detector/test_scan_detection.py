@@ -44,10 +44,7 @@ for p in [CURRENT_DIR] + list(CURRENT_DIR.parents):
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-try:
-    import pymupdf as fitz
-except ImportError:
-    import fitz
+import pymupdf as fitz
 
 from rag_banking.chunking.pdf_chunker.scan_detector import (
     detect_is_scanned_page,

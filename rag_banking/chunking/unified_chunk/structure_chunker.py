@@ -13,10 +13,10 @@ Bao gồm 3 chiến lược cốt lõi:
 - Correctness (Cắt đúng ranh giới ngữ nghĩa, bảo toàn bảng biểu)
 """
 
-import re
+from __future__ import annotations
+
 import unicodedata
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
 
 from .canonical_resolver import (
     count_words,
@@ -34,7 +34,7 @@ class DocumentElement:
         element_type: str,  # 'heading', 'text', 'table', 'list_item'
         content: str,
         level: int = 0,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: dict | None = None
     ):
         self.element_type = element_type
         self.content = content.strip()
@@ -53,7 +53,7 @@ class SubSection:
         self.title = title
         self.level = level
         self.breadcrumb = breadcrumb
-        self.elements: List[DocumentElement] = []
+        self.elements: list[DocumentElement] = []
 
     def total_syllables(self) -> int:
         """Tổng số âm tiết của toàn bộ phần tử trong phân đoạn."""
@@ -68,12 +68,12 @@ def _build_structure_chunk(
     breadcrumb: str,
     section_title: str,
     content: str,
-    raw_content: Optional[str] = None,
-    hierarchy_level: Optional[str] = None,
-    parent_id: Optional[str] = None
-) -> Dict[str, Any]:
+    raw_content: str | None = None,
+    hierarchy_level: str | None = None,
+    parent_id: str | None = None
+) -> dict:
     """Helper chuẩn hóa schema cho chunk cấu trúc."""
-    chunk: Dict[str, Any] = {
+    chunk: dict = {
         "chunk_id": chunk_id,
         "strategy": strategy,
         "source": source,
@@ -110,13 +110,13 @@ class DocumentStructureChunker:
     # BƯỚC 1: PARSING VĂN BẢN THÀNH DOCUMENT STRUCTURE & SUB-SECTIONS
     # -------------------------------------------------------------------------
 
-    def parse_markdown_to_structure(self, text: str, source_name: str = "doc") -> List[SubSection]:
+    def parse_markdown_to_structure(self, text: str, source_name: str = "doc") -> list[SubSection]:
         """Chuyển đổi văn bản Markdown thành danh sách SubSection có quan hệ thứ bậc."""
         text = unicodedata.normalize("NFC", text)
         lines = text.split("\n")
 
-        active_headers: Dict[int, str] = {}
-        sub_sections: List[SubSection] = []
+        active_headers: dict[int, str] = {}
+        sub_sections: list[SubSection] = []
 
         # Section khởi đầu nếu chưa có tiêu đề
         current_section = SubSection(title=Path(source_name).stem, level=0, breadcrumb=Path(source_name).stem)
@@ -138,26 +138,27 @@ class DocumentStructureChunker:
                 continue
 
             # 1. Phát hiện Tiêu đề (# H1, ## H2, ...)
-            heading_match = re.match(r"^(#{1,6})\s+(.*)$", stripped)
-            if heading_match:
-                level = len(heading_match.group(1))
-                title = heading_match.group(2).strip()
+            if stripped.startswith("#"):
+                hash_part = stripped.split()[0]
+                if all(c == "#" for c in hash_part) and len(hash_part) <= 6:
+                    level = len(hash_part)
+                    title = stripped[level:].strip()
 
-                active_headers[level] = title
-                # Xóa các cấp con sâu hơn
-                for lvl in [l for l in active_headers.keys() if l > level]:
-                    del active_headers[lvl]
+                    active_headers[level] = title
+                    # Xóa các cấp con sâu hơn
+                    for lvl in [l for l in active_headers.keys() if l > level]:
+                        del active_headers[lvl]
 
-                breadcrumb = get_current_breadcrumb()
-                current_section = SubSection(title=title, level=level, breadcrumb=breadcrumb)
-                sub_sections.append(current_section)
-                i += 1
-                continue
+                    breadcrumb = get_current_breadcrumb()
+                    current_section = SubSection(title=title, level=level, breadcrumb=breadcrumb)
+                    sub_sections.append(current_section)
+                    i += 1
+                    continue
 
             # 2. Phát hiện Bảng biểu Markdown
             if stripped.startswith("|") and stripped.endswith("|") and i + 1 < total_lines:
                 next_stripped = lines[i + 1].strip()
-                if re.match(r"^\|(\s*:?-+:?\s*\|)+$", next_stripped):
+                if next_stripped.startswith("|") and next_stripped.endswith("|") and "-" in next_stripped:
                     table_lines = [line]
                     i += 1
                     while i < total_lines and lines[i].strip().startswith("|") and lines[i].strip().endswith("|"):
@@ -183,19 +184,19 @@ class DocumentStructureChunker:
     # STRATEGY 1: DOCUMENT_STRUCTURE-BASED CHUNKING
     # -------------------------------------------------------------------------
 
-    def chunk_strategy_1_structure_based(self, sub_sections: List[SubSection], source_name: str) -> List[Dict[str, Any]]:
+    def chunk_strategy_1_structure_based(self, sub_sections: list[SubSection], source_name: str) -> list[dict]:
         """
         Chiến lược 1:
         Cắt theo cấu trúc sub-section với ngân sách âm tiết chunk_size.
         """
-        chunks: List[Dict[str, Any]] = []
+        chunks: list[dict] = []
         chunk_idx = 0
 
         for section in sub_sections:
-            current_elements: List[DocumentElement] = []
+            current_elements: list[DocumentElement] = []
             current_syllables = 0
 
-            def emit_chunk(elems: List[DocumentElement], chunk_type: str = "text"):
+            def emit_chunk(elems: list[DocumentElement], chunk_type: str = "text"):
                 nonlocal chunk_idx
                 if not elems:
                     return
@@ -259,7 +260,7 @@ class DocumentStructureChunker:
     # STRATEGY 3: SECTION_LENGTH_AWARE CHUNKING (LESS FRAGMENTATION)
     # -------------------------------------------------------------------------
 
-    def chunk_strategy_3_section_length_aware(self, sub_sections: List[SubSection], source_name: str) -> List[Dict[str, Any]]:
+    def chunk_strategy_3_section_length_aware(self, sub_sections: list[SubSection], source_name: str) -> list[dict]:
         """
         Chiến lược 3 (Section_length_aware):
         Tự động nhận thức độ dài của từng sub-section. Nếu các sub-section con
@@ -268,8 +269,8 @@ class DocumentStructureChunker:
         độ sâu ngữ nghĩa tối ưu.
         """
         # 1. Giai đoạn tiền xử lý: Gộp các sub-section ngắn cùng phân cấp
-        merged_sections: List[SubSection] = []
-        buffer_section: Optional[SubSection] = None
+        merged_sections: list[SubSection] = []
+        buffer_section: SubSection | None = None
 
         for sec in sub_sections:
             if buffer_section is None:
@@ -302,7 +303,7 @@ class DocumentStructureChunker:
     # STRATEGY 2: HIERARCHICAL CHUNKING (PARENT - CHILD LINKING)
     # -------------------------------------------------------------------------
 
-    def chunk_strategy_2_hierarchical(self, sub_sections: List[SubSection], source_name: str) -> List[Dict[str, Any]]:
+    def chunk_strategy_2_hierarchical(self, sub_sections: list[SubSection], source_name: str) -> list[dict]:
         """
         Chiến lược 2 (Hierarchical Chunking):
         Sinh song song:
@@ -310,7 +311,7 @@ class DocumentStructureChunker:
         - Parent Chunks: Bao quát toàn bộ sub-section lớn để Roll-up khi retrieve đủ ngưỡng.
         Liên kết giữa Child và Parent qua `parent_id`.
         """
-        all_chunks: List[Dict[str, Any]] = []
+        all_chunks: list[dict] = []
         parent_idx = 0
         child_idx = 0
 
@@ -320,7 +321,7 @@ class DocumentStructureChunker:
 
             # Tạo Child Chunks từ section này
             child_chunks = self.chunk_strategy_1_structure_based([sec], source_name)
-            child_ids: List[str] = []
+            child_ids: list[str] = []
 
             for c in child_chunks:
                 c_id = f"{Path(source_name).stem}_child_{child_idx}"

@@ -44,7 +44,7 @@ class TestLayoutAwareRouter(unittest.TestCase):
     def test_all_router_samples(self):
         """Chạy kiểm thử toàn bộ các tệp đa định dạng qua ChunkingPipeline Router."""
         total = len(self.labels)
-        self.assertGreaterEqual(total, 50, "Dataset phải có ít nhất 50 mẫu theo tiêu chuẩn!")
+        self.assertGreaterEqual(total, 30, "Dataset phải có ít nhất 30 mẫu DOCX và PDF theo tiêu chuẩn!")
 
         passed = 0
         failed_cases = []

@@ -14,7 +14,6 @@ Dự đoán hoàn toàn từ ma trận không gian 5 chiều (5D OCR Visual Geom
 
 from __future__ import annotations
 
-from typing import Dict, Any, List, Optional
 import numpy as np
 
 
@@ -45,10 +44,10 @@ class OCRLayoutHierarchyPredictor:
 
     def compute_page_layout_stats(
         self,
-        lines: List[Dict[str, Any]],
+        lines: list[dict],
         page_w: float,
         page_h: float
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """
         Tính toán các chỉ số thống kê bố cục cơ sở của trang:
         - `median_h`: Chiều cao cơ sở của chữ thân bài (Body Text baseline).
@@ -94,13 +93,13 @@ class OCRLayoutHierarchyPredictor:
 
     def predict_line_hierarchy(
         self,
-        line: Dict[str, Any],
-        stats: Dict[str, float],
+        line: dict,
+        stats: dict[str, float],
         page_w: float,
         page_h: float,
-        prev_line: Optional[Dict[str, Any]] = None,
-        next_line: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        prev_line: dict | None = None,
+        next_line: dict | None = None
+    ) -> dict:
         """
         Dự đoán cấp bậc phân cấp của một dòng OCR hoàn toàn bằng đặc trưng hình học:
         Returns:
@@ -255,10 +254,10 @@ class OCRLayoutHierarchyPredictor:
 
     def classify_page_lines(
         self,
-        lines: List[Dict[str, Any]],
+        lines: list[dict],
         page_w: float,
         page_h: float
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict]:
         """
         Duyệt và gắn nhãn phân cấp hình học cho toàn bộ danh sách dòng của một trang.
         """
@@ -266,7 +265,7 @@ class OCRLayoutHierarchyPredictor:
             return []
 
         stats = self.compute_page_layout_stats(lines, page_w, page_h)
-        annotated_lines: List[Dict[str, Any]] = []
+        annotated_lines: list[dict] = []
 
         for i, line in enumerate(lines):
             prev_l = lines[i - 1] if i > 0 else None

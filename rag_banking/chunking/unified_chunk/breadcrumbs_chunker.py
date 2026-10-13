@@ -7,7 +7,6 @@ Chuyên trách phân tách tài liệu ngân hàng & pháp lý mà vẫn bảo t
 4. Breadcrumbs Prepended Content: Gắn tiền tố đường dẫn vào nội dung chunk để vector nhúng và BM25 bắt trọn vẹn ngữ cảnh.
 """
 
-import re
 from pathlib import Path
 
 class BreadcrumbsChunker:
@@ -118,30 +117,35 @@ class BreadcrumbsChunker:
             stripped = line.strip()
 
             # 1. Phát hiện Markdown Header (#, ##, ###, ####)
-            header_match = re.match(r"^(#{1,6})\s+(.*)$", stripped)
-            if header_match:
+            if stripped.startswith("#"):
+                hash_part = stripped.split()[0]
+                if all(c == "#" for c in hash_part) and len(hash_part) <= 6:
+                    flush_buffer()
+                    level = len(hash_part)
+                    title = stripped[level:].strip()
+
+                    # Kiểm tra xem tiêu đề có phải là câu hỏi chuẩn không (dấu chấm hỏi ?)
+                    if title.endswith("?") or ("?" in title and len(title) < 150):
+                        current_canonical_questions.append(title)
+
+                    hierarchy[level] = title
+                    # Xóa các cấp con sâu hơn
+                    for k in list(hierarchy.keys()):
+                        if k > level:
+                            del hierarchy[k]
+                    i += 1
+                    continue
+
+            # 2. Phát hiện cấu trúc thứ bậc / tiêu đề in đậm / outline numbering
+            clean_s = stripped.replace("*", "").strip()
+            s_tokens = clean_s.split()
+            first_tok_clean = s_tokens[0].rstrip(".:)-") if s_tokens else ""
+            is_roman = first_tok_clean in ("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII")
+            is_bold_title = (stripped.startswith("**") and stripped.endswith("**") and len(clean_s) < 120)
+            is_outline = (s_tokens and len(clean_s) < 120 and (is_roman or s_tokens[0].rstrip(".").count(".") >= 1 or (s_tokens[0].endswith(".") and s_tokens[0][:-1].isdigit())) and len(s_tokens) >= 2)
+            if is_bold_title or is_outline:
                 flush_buffer()
-                level = len(header_match.group(1))
-                title = header_match.group(2).strip()
-
-                # Kiểm tra xem tiêu đề có phải là câu hỏi chuẩn không (ví dụ: '### Câu 1: ...' hoặc '### Q: ...')
-                faq_q_match = re.search(r"(?:Câu\s*\d+|Hỏi|Q\d*)\s*[:\.\-]\s*(.+)", title, re.IGNORECASE)
-                if faq_q_match:
-                    current_canonical_questions.append(faq_q_match.group(1).strip())
-
-                hierarchy[level] = title
-                # Xóa các cấp con sâu hơn
-                for k in list(hierarchy.keys()):
-                    if k > level:
-                        del hierarchy[k]
-                i += 1
-                continue
-
-            # 2. Phát hiện Điều khoản pháp lý (Điều X, Chương Y) ở dạng chữ hoa hoặc in đậm
-            legal_title_match = re.match(r"^(\*{0,2}(?:Điều|Chương|Mục)\s+\d+[a-zA-Z]?[\.\:]?\s*[^\*\n]+(?:\*{0,2}))", stripped, re.IGNORECASE)
-            if legal_title_match and len(stripped) < 120:
-                flush_buffer()
-                title = legal_title_match.group(1).replace("*", "").strip()
+                title = clean_s
                 hierarchy[4] = title
                 for k in list(hierarchy.keys()):
                     if k > 4:
@@ -150,10 +154,11 @@ class BreadcrumbsChunker:
                 i += 1
                 continue
 
-            # 3. Phát hiện câu hỏi chuẩn trong thân bài: '**Hỏi:** ...' hoặc '**Câu hỏi:** ...'
-            inline_q_match = re.search(r"\*\*(?:Hỏi|Câu hỏi|Q)\s*:\*\*\s*(.+)", stripped, re.IGNORECASE)
-            if inline_q_match:
-                current_canonical_questions.append(inline_q_match.group(1).strip())
+            # 3. Phát hiện câu hỏi trong thân bài: '**Prefix:** ...?'
+            if stripped.startswith("**") and ":**" in stripped:
+                after_colon = stripped.split(":**", 1)[1].strip()
+                if after_colon.endswith("?") or "?" in after_colon:
+                    current_canonical_questions.append(after_colon)
 
             # 4. Phát hiện đường phân cách ngang
             if stripped in ["---", "***", "___"]:

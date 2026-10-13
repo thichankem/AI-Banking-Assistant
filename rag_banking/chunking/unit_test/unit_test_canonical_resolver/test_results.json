@@ -1,7 +1,7 @@
 {
   "node_id": "Node 06",
   "node_name": "Canonical Entity & Legal Resolver",
-  "timestamp": "2026-10-13T13:29:11.649784",
+  "timestamp": "2026-10-14T00:25:44.872439",
   "total_samples": 52,
   "passed": 52,
   "failed": 0,
@@ -186,70 +186,70 @@
     {
       "sample": "canonical_legal_26.json",
       "test_type": "doc_identifier",
-      "detail": "got='Thông tư số 17/2024/TT-NHNN', exp='Thông tư 17/2024/TT-NHNN'",
+      "detail": "got='tư 17/2024/TT-NHNN', exp='Thông tư 17/2024/TT-NHNN'",
       "input_preview": "Thông tư số 17/2024/TT-NHNN quy định về mở tài khoản",
       "status": "PASS"
     },
     {
       "sample": "canonical_legal_27.json",
       "test_type": "doc_identifier",
-      "detail": "got='Quyết định số 2345/QĐ-NHNN', exp='Quyết định 2345/QĐ-NHNN'",
+      "detail": "got='định 2345/QĐ-NHNN', exp='Quyết định 2345/QĐ-NHNN'",
       "input_preview": "Căn cứ Quyết định số 2345/QĐ-NHNN về triển khai giải pháp an toàn",
       "status": "PASS"
     },
     {
       "sample": "canonical_legal_28.json",
       "test_type": "doc_identifier",
-      "detail": "got='Nghị định số 52/2024/NĐ-CP', exp='Nghị định 52/2024/NĐ-CP'",
+      "detail": "got='định 52/2024/NĐ-CP', exp='Nghị định 52/2024/NĐ-CP'",
       "input_preview": "Thực hiện theo Nghị định số 52/2024/NĐ-CP về thanh toán không dùng tiền mặt",
       "status": "PASS"
     },
     {
       "sample": "canonical_legal_29.json",
       "test_type": "doc_identifier",
-      "detail": "got='Thông tư 28/2024/TT-NHNN', exp='Thông tư 28/2024/TT-NHNN'",
+      "detail": "got='tư 28/2024/TT-NHNN', exp='Thông tư 28/2024/TT-NHNN'",
       "input_preview": "Ban hành kèm theo Thông tư 28/2024/TT-NHNN về hồ sơ mở thẻ",
       "status": "PASS"
     },
     {
       "sample": "canonical_legal_30.json",
       "test_type": "doc_identifier",
-      "detail": "got='Luật số 32/2024/QH15', exp='Luật 32/2024/QH15'",
+      "detail": "got='Luật 32/2024/QH15', exp='Luật 32/2024/QH15'",
       "input_preview": "Quy định tại Luật số 32/2024/QH15 Các tổ chức tín dụng",
       "status": "PASS"
     },
     {
       "sample": "canonical_legal_31.json",
       "test_type": "doc_identifier",
-      "detail": "got='Nghị quyết số 01/2026/NQ-CP', exp='Nghị quyết 01/2026/NQ-CP'",
+      "detail": "got='quyết 01/2026/NQ-CP', exp='Nghị quyết 01/2026/NQ-CP'",
       "input_preview": "Căn cứ Nghị quyết số 01/2026/NQ-CP của Chính phủ",
       "status": "PASS"
     },
     {
       "sample": "canonical_legal_32.json",
       "test_type": "doc_identifier",
-      "detail": "got='Quyết định số 1234/QĐ-VCB', exp='Quyết định 1234/QĐ-VCB'",
+      "detail": "got='định 1234/QĐ-VCB', exp='Quyết định 1234/QĐ-VCB'",
       "input_preview": "Theo Quyết định số 1234/QĐ-VCB của Tổng Giám đốc Vietcombank",
       "status": "PASS"
     },
     {
       "sample": "canonical_legal_33.json",
       "test_type": "doc_identifier",
-      "detail": "got='Thông tư số 35/2016/TT-NHNN', exp='Thông tư 35/2016/TT-NHNN'",
+      "detail": "got='tư 35/2016/TT-NHNN', exp='Thông tư 35/2016/TT-NHNN'",
       "input_preview": "Thực hiện Thông tư số 35/2016/TT-NHNN về an toàn thông tin",
       "status": "PASS"
     },
     {
       "sample": "canonical_legal_34.json",
       "test_type": "doc_identifier",
-      "detail": "got='Nghị định số 13/2023/NĐ-CP', exp='Nghị định 13/2023/NĐ-CP'",
+      "detail": "got='định 13/2023/NĐ-CP', exp='Nghị định 13/2023/NĐ-CP'",
       "input_preview": "Căn cứ Nghị định số 13/2023/NĐ-CP về bảo vệ dữ liệu cá nhân",
       "status": "PASS"
     },
     {
       "sample": "canonical_legal_35.json",
       "test_type": "doc_identifier",
-      "detail": "got='Thông tư số 50/2024/TT-NHNN', exp='Thông tư 50/2024/TT-NHNN'",
+      "detail": "got='tư 50/2024/TT-NHNN', exp='Thông tư 50/2024/TT-NHNN'",
       "input_preview": "Tuân thủ Thông tư số 50/2024/TT-NHNN về phòng chống rửa tiền",
       "status": "PASS"
     },
