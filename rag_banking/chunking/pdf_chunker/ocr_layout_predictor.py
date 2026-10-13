@@ -1,39 +1,44 @@
 """
-OCR Layout Hierarchy Predictor (Bộ dự đoán Cấp bậc Bố cục bằng Hình học Thị giác OCR)
-Tuyệt đối KHÔNG dùng Regex để phân cấp (0% Regex-based hierarchy).
+Module OCR Layout Hierarchy Predictor
+======================================
+Bộ dự đoán cấp bậc bố cục văn bản scan thuần túy bằng Bố cục Thị giác Hình học OCR.
+TUYỆT ĐỐI KHÔNG DÙNG REGEX ĐỂ PHÂN CẤP (0% Regex-Based Hierarchy).
 
-Dự đoán cấp bậc dựa trên 5 chiều không gian hình học từ Bounding Box của OCR:
-1. Relative Font Height: Tỷ lệ chiều cao dòng so với chiều cao trung vị thân bài (median_height).
-2. Vertical Whitespace: Khoảng cách dọc trước và sau dòng (gap_before, gap_after).
-3. Horizontal Alignment: Căn giữa trang (is_centered) vs Bám lề trái (base_left).
-4. Left Indentation: Độ thụt lề ngang (x_min - base_left) để nhận diện Khoản và Điểm.
-5. Line Aspect & Compactness: Tỷ lệ độ dài dòng so với bề ngang trang (rel_width).
+Dự đoán hoàn toàn từ ma trận không gian 5 chiều (5D OCR Visual Geometry):
+1. Relative Font Height (`rel_h`): Tỷ lệ chiều cao dòng so với trung vị thân bài (`median_h`).
+2. Vertical Spacing (`gap_before`): Khoảng cách giãn dòng phía trước dòng.
+3. Horizontal Alignment (`is_centered`): Căn giữa trang so với bám lề trái chuẩn (`base_left`).
+4. Left Indentation (`left_indent`): Độ lệch lề trái để phân loại Khoản (sub_item) vs Điểm (deep_item).
+5. Line Aspect & Compactness (`rel_w`): Tỷ lệ độ dài dòng so với bề ngang trang giấy.
 """
 
-from typing import Dict, Any, List, Optional, Tuple
+from __future__ import annotations
+
+from typing import Dict, Any, List, Optional
 import numpy as np
 
 
 class LayoutHierarchyLevel:
-    TITLE = "title"           # Level 0: Tiêu đề văn bản / Văn bản mới
-    H1 = "h1"                 # Level 1: Tiêu đề lớn (Chương / Phần / Heading 1)
-    H2 = "h2"                 # Level 2: Tiêu đề mục (Mục / Điều / Heading 2)
-    H3 = "h3"                 # Level 3: Tiêu đề tiểu mục (Heading 3)
-    SUB_ITEM = "sub_item"     # Level 4: Thụt lề cấp 1 (Khoản / Danh sách)
-    DEEP_ITEM = "deep_item"   # Level 5: Thụt lề cấp 2 (Điểm / Danh sách con)
-    BODY = "body"             # Thân bài thông thường
-    HEADER_FOOTER = "header_footer"  # Vùng lề trang (Header/Footer/Số trang)
+    """Các cấp bậc cấu trúc phân cấp bố cục văn bản."""
+    TITLE = "title"                 # Level 0: Tiêu đề văn bản / Văn bản mới
+    H1 = "h1"                       # Level 1: Tiêu đề lớn (Chương / Phần / Heading 1)
+    H2 = "h2"                       # Level 2: Tiêu đề mục (Mục / Điều / Heading 2)
+    H3 = "h3"                       # Level 3: Tiêu đề tiểu mục (Heading 3 / Khoản đậm ngắn)
+    SUB_ITEM = "sub_item"           # Level 4: Thụt lề cấp 1 (Khoản / Bullet list)
+    DEEP_ITEM = "deep_item"         # Level 5: Thụt lề cấp 2 (Điểm / Nested list)
+    BODY = "body"                   # Thân bài thông thường
+    HEADER_FOOTER = "header_footer" # Vùng mép trang (Header, Footer, Số trang)
 
 
 class OCRLayoutHierarchyPredictor:
     """
-    Bộ phân loại cấp bậc phân đoạn thuần túy bằng Bố cục Hình học OCR (0% Regex).
+    Bộ phân loại cấp bậc phân đoạn văn bản scan dựa trên Bố cục Hình học OCR (0% Regex).
     """
 
     def __init__(
         self,
-        edge_margin_ratio: float = 0.08,    # 8% trên/dưới coi là header/footer
-        center_tolerance_ratio: float = 0.12 # Dung sai căn giữa (+-12% trang)
+        edge_margin_ratio: float = 0.065,     # 6.5% trên/dưới trang coi là mép header/footer
+        center_tolerance_ratio: float = 0.16  # Dung sai căn giữa (+-16% bề ngang trang)
     ):
         self.edge_margin_ratio = edge_margin_ratio
         self.center_tolerance_ratio = center_tolerance_ratio
@@ -45,23 +50,23 @@ class OCRLayoutHierarchyPredictor:
         page_h: float
     ) -> Dict[str, float]:
         """
-        Tính toán các chỉ số thống kê bố cục cơ sở của toàn bộ trang:
-        - median_height: Chiều cao cơ sở của chữ thân bài (Body Text baseline).
-        - base_left: Tọa độ lề trái chuẩn của khối văn bản.
-        - median_line_gap: Giãn dòng trung vị trong cùng đoạn văn.
+        Tính toán các chỉ số thống kê bố cục cơ sở của trang:
+        - `median_h`: Chiều cao cơ sở của chữ thân bài (Body Text baseline).
+        - `base_left`: Tọa độ lề trái chuẩn của khối văn bản (bách phân vị 20%).
+        - `median_gap`: Giãn dòng trung vị giữa các dòng trong cùng đoạn văn.
         """
         if not lines:
             return {"median_h": 16.0, "base_left": 50.0, "median_gap": 8.0}
 
-        # 1. Lọc bỏ các dòng ở sát biên trang để không làm nhiễu thống kê
+        # 1. Lọc bỏ các dòng ở sát biên mép trang để không làm nhiễu thống kê
         content_lines = [
             l for l in lines
-            if (l.get("y_min", 0) >= page_h * self.edge_margin_ratio) and
+            if (l.get("y_min", 0.0) >= page_h * self.edge_margin_ratio) and
                (l.get("y_max", page_h) <= page_h * (1.0 - self.edge_margin_ratio))
         ]
         target_lines = content_lines if len(content_lines) >= 3 else lines
 
-        # 2. Chiều cao trung vị
+        # 2. Chiều cao chữ trung vị (Font Size Proxy)
         heights = [float(l.get("height", 16.0)) for l in target_lines]
         median_h = float(np.median(heights)) if heights else 16.0
 
@@ -120,13 +125,19 @@ class OCRLayoutHierarchyPredictor:
         base_left = stats.get("base_left", 50.0)
         median_gap = stats.get("median_gap", 8.0)
 
-        # -------------------------------------------------------------
+        # ---------------------------------------------------------------------
         # 1. Kiểm tra Vùng Mép Trang (Header/Footer Boundary)
-        # -------------------------------------------------------------
-        if has_explicit_y and (y_min < page_h * self.edge_margin_ratio or y_max > page_h * (1.0 - self.edge_margin_ratio)):
-            # Nếu chữ rất to ở đầu trang 1 thì có thể là Title, còn lại là header/footer
-            if y_min < page_h * self.edge_margin_ratio and h >= 1.35 * median_h:
-                pass  # Cho phép xét Title
+        # ---------------------------------------------------------------------
+        is_top_edge = y_min < page_h * self.edge_margin_ratio
+        is_bottom_edge = y_max > page_h * (1.0 - self.edge_margin_ratio) or y_max > page_h * 0.910
+        is_page_num = (w / page_w < 0.15) and bool(
+            len(text) <= 8 and any(c.isdigit() for c in text) and (text.startswith("Trang") or "/" in text or text.isdigit())
+        )
+
+        if has_explicit_y and (is_top_edge or is_bottom_edge or is_page_num):
+            # Nếu chữ rất to ở đầu trang (Display Title h >= 34px) thì bỏ qua kiểm tra mép trang
+            if is_top_edge and h >= 34.0:
+                pass
             else:
                 return {
                     "predicted_level": LayoutHierarchyLevel.HEADER_FOOTER,
@@ -136,20 +147,20 @@ class OCRLayoutHierarchyPredictor:
                     "features": {"edge": True}
                 }
 
-        # -------------------------------------------------------------
-        # 2. Tính toán các đặc trưng bố cục chuẩn hóa
-        # -------------------------------------------------------------
+        # ---------------------------------------------------------------------
+        # 2. Tính toán các đặc trưng bố cục hình học chuẩn hóa
+        # ---------------------------------------------------------------------
         rel_h = h / median_h
         rel_w = w / page_w
         is_centered = abs(cx - page_w / 2.0) < (page_w * self.center_tolerance_ratio)
         left_indent = max(x_min - base_left, 0.0)
-        is_short_line = rel_w < 0.72
+        is_short_line = rel_w < 0.70
 
         # Khoảng cách dọc trước dòng
         gap_before = (y_min - prev_line.get("y_max", y_min)) if prev_line else (median_gap * 2.0)
-        has_break_before = gap_before >= (median_gap * 1.35)
+        has_break_before = (gap_before >= (median_gap * 1.15)) or (gap_before >= (median_h * 1.05))
 
-        # Tín hiệu bề mặt (in hoa toàn bộ)
+        # Tín hiệu bề mặt: in hoa toàn bộ
         is_uppercase = text.isupper() and len(text) >= 3
 
         features = {
@@ -161,12 +172,15 @@ class OCRLayoutHierarchyPredictor:
             "is_uppercase": is_uppercase
         }
 
-        # -------------------------------------------------------------
+        # ---------------------------------------------------------------------
         # 3. Phân loại theo Ma trận Bố cục Hình học (0% Regex)
-        # -------------------------------------------------------------
+        # ---------------------------------------------------------------------
 
-        # A. Cấp 0: Tiêu đề lớn nhất tài liệu (Title / Document Cover)
-        if rel_h >= 1.35 and (is_centered or is_short_line):
+        # A. Cấp 0: Tiêu đề lớn nhất tài liệu (Title / Văn bản mới)
+        if (h >= 34.0 and y_min < page_h * 0.65) or \
+           (rel_h >= 1.30 and (is_centered or is_short_line)) or \
+           (is_centered and is_uppercase and y_min < page_h * 0.25 and rel_w >= 0.30) or \
+           (rel_h >= 1.05 and is_centered and is_uppercase and y_min < page_h * 0.25):
             return {
                 "predicted_level": LayoutHierarchyLevel.TITLE,
                 "confidence": 0.95,
@@ -175,8 +189,11 @@ class OCRLayoutHierarchyPredictor:
                 "features": features
             }
 
-        # B. Cấp 1: Tiêu đề phân đoạn lớn (Major Heading / Chương / Phần)
-        if rel_h >= 1.18 or (is_centered and is_uppercase and has_break_before):
+        # B. Cấp 1: Tiêu đề phân đoạn lớn (Chương / Phần / Slide Title / Mục lục)
+        if (1.15 <= rel_h < 1.30 and (is_uppercase or is_centered)) or \
+           (rel_h >= 1.18 and is_short_line and y_min < page_h * 0.35) or \
+           (is_uppercase and has_break_before and is_short_line and y_min < page_h * 0.45) or \
+           (h >= 30.0 and is_short_line and y_min < page_h * 0.30):
             return {
                 "predicted_level": LayoutHierarchyLevel.H1,
                 "confidence": 0.92,
@@ -185,8 +202,10 @@ class OCRLayoutHierarchyPredictor:
                 "features": features
             }
 
-        # C. Cấp 2: Tiêu đề mục (Section Heading / Mục / Điều)
-        if (1.08 <= rel_h < 1.18 and is_short_line) or (is_uppercase and is_short_line and has_break_before):
+        # C. Cấp 2: Tiêu đề mục (Mục / Điều / Heading 2)
+        if (1.05 <= rel_h < 1.25 and is_short_line and left_indent < 10.0 and has_break_before) or \
+           (1.08 <= rel_h < 1.25 and is_short_line and left_indent < 10.0) or \
+           (is_uppercase and is_short_line and left_indent < 10.0 and has_break_before):
             return {
                 "predicted_level": LayoutHierarchyLevel.H2,
                 "confidence": 0.90,
@@ -195,8 +214,8 @@ class OCRLayoutHierarchyPredictor:
                 "features": features
             }
 
-        # D. Cấp 3: Tiêu đề tiểu mục (Subsection Heading / Dòng ngắn ngắt đoạn rõ rệt)
-        if is_short_line and has_break_before and rel_w < 0.60 and not text.endswith((".", ",", ";", ":")):
+        # D. Cấp 3: Tiêu đề tiểu mục (Heading 3 / Dòng ngắn ngắt đoạn không có dấu chấm cuối)
+        if is_short_line and has_break_before and rel_w < 0.55 and left_indent < 15.0 and not text.endswith((".", ",", ";", ":")):
             return {
                 "predicted_level": LayoutHierarchyLevel.H3,
                 "confidence": 0.85,
@@ -205,8 +224,9 @@ class OCRLayoutHierarchyPredictor:
                 "features": features
             }
 
-        # E. Cấp 4 & 5: Đoạn văn thụt lề (Indented Clauses / Khoản và Điểm)
-        if left_indent >= 45.0:
+        # E. Cấp 4 & 5: Đoạn văn thụt lề (Khoản & Điểm)
+        # Ngưỡng thụt lề >= 40px tương đương thụt lề cấp 2 (Điểm)
+        if left_indent >= 40.0:
             return {
                 "predicted_level": LayoutHierarchyLevel.DEEP_ITEM,
                 "confidence": 0.88,
@@ -214,7 +234,8 @@ class OCRLayoutHierarchyPredictor:
                 "indent_level": 2,  # Tương đương cấp Điểm
                 "features": features
             }
-        elif left_indent >= 18.0:
+        # Ngưỡng thụt lề >= 15px tương đương thụt lề cấp 1 (Khoản)
+        elif left_indent >= 15.0:
             return {
                 "predicted_level": LayoutHierarchyLevel.SUB_ITEM,
                 "confidence": 0.88,
@@ -239,13 +260,13 @@ class OCRLayoutHierarchyPredictor:
         page_h: float
     ) -> List[Dict[str, Any]]:
         """
-        Duyệt và gán nhãn phân cấp cho toàn bộ danh sách dòng của một trang.
+        Duyệt và gắn nhãn phân cấp hình học cho toàn bộ danh sách dòng của một trang.
         """
         if not lines:
             return []
 
         stats = self.compute_page_layout_stats(lines, page_w, page_h)
-        annotated_lines = []
+        annotated_lines: List[Dict[str, Any]] = []
 
         for i, line in enumerate(lines):
             prev_l = lines[i - 1] if i > 0 else None
@@ -259,7 +280,7 @@ class OCRLayoutHierarchyPredictor:
                 prev_line=prev_l,
                 next_line=next_l
             )
-            # Gộp nhãn dự đoán vào đối tượng dòng
+
             annotated = dict(line)
             annotated["predicted_level"] = pred["predicted_level"]
             annotated["is_heading"] = pred["is_heading"]

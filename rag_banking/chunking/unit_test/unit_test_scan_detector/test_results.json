@@ -1,0 +1,1319 @@
+{
+  "node_id": "Node 01",
+  "node_name": "Scan Detector",
+  "timestamp": "2026-10-13T13:29:05.002473",
+  "total_samples": 100,
+  "passed": 100,
+  "failed": 0,
+  "accuracy_percent": 100.0,
+  "f1_score_percent": 100.0,
+  "status": "PASS",
+  "summary": {
+    "true_positives": 50,
+    "true_negatives": 50,
+    "false_positives": 0,
+    "false_negatives": 0
+  },
+  "results": [
+    {
+      "file_name": "scan_page_001.pdf",
+      "relative_path": "dataset/scanned/scan_page_001.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_002.pdf",
+      "relative_path": "dataset/scanned/scan_page_002.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_003.pdf",
+      "relative_path": "dataset/scanned/scan_page_003.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_004.pdf",
+      "relative_path": "dataset/scanned/scan_page_004.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_005.pdf",
+      "relative_path": "dataset/scanned/scan_page_005.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_006.pdf",
+      "relative_path": "dataset/scanned/scan_page_006.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_007.pdf",
+      "relative_path": "dataset/scanned/scan_page_007.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_008.pdf",
+      "relative_path": "dataset/scanned/scan_page_008.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_009.pdf",
+      "relative_path": "dataset/scanned/scan_page_009.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_010.pdf",
+      "relative_path": "dataset/scanned/scan_page_010.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_011.pdf",
+      "relative_path": "dataset/scanned/scan_page_011.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_012.pdf",
+      "relative_path": "dataset/scanned/scan_page_012.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_013.pdf",
+      "relative_path": "dataset/scanned/scan_page_013.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_014.pdf",
+      "relative_path": "dataset/scanned/scan_page_014.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_015.pdf",
+      "relative_path": "dataset/scanned/scan_page_015.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_016.pdf",
+      "relative_path": "dataset/scanned/scan_page_016.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_017.pdf",
+      "relative_path": "dataset/scanned/scan_page_017.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_018.pdf",
+      "relative_path": "dataset/scanned/scan_page_018.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_019.pdf",
+      "relative_path": "dataset/scanned/scan_page_019.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_020.pdf",
+      "relative_path": "dataset/scanned/scan_page_020.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (77.58%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_021.pdf",
+      "relative_path": "dataset/scanned/scan_page_021.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (78.03%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_022.pdf",
+      "relative_path": "dataset/scanned/scan_page_022.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_023.pdf",
+      "relative_path": "dataset/scanned/scan_page_023.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_024.pdf",
+      "relative_path": "dataset/scanned/scan_page_024.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_025.pdf",
+      "relative_path": "dataset/scanned/scan_page_025.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_026.pdf",
+      "relative_path": "dataset/scanned/scan_page_026.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_027.pdf",
+      "relative_path": "dataset/scanned/scan_page_027.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_028.pdf",
+      "relative_path": "dataset/scanned/scan_page_028.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_029.pdf",
+      "relative_path": "dataset/scanned/scan_page_029.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_030.pdf",
+      "relative_path": "dataset/scanned/scan_page_030.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_031.pdf",
+      "relative_path": "dataset/scanned/scan_page_031.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_032.pdf",
+      "relative_path": "dataset/scanned/scan_page_032.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (78.03%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_033.pdf",
+      "relative_path": "dataset/scanned/scan_page_033.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_034.pdf",
+      "relative_path": "dataset/scanned/scan_page_034.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (99.87%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_035.pdf",
+      "relative_path": "dataset/scanned/scan_page_035.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (99.87%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_036.pdf",
+      "relative_path": "dataset/scanned/scan_page_036.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (99.87%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_037.pdf",
+      "relative_path": "dataset/scanned/scan_page_037.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_038.pdf",
+      "relative_path": "dataset/scanned/scan_page_038.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_039.pdf",
+      "relative_path": "dataset/scanned/scan_page_039.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (2) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_040.pdf",
+      "relative_path": "dataset/scanned/scan_page_040.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_041.pdf",
+      "relative_path": "dataset/scanned/scan_page_041.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_042.pdf",
+      "relative_path": "dataset/scanned/scan_page_042.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_043.pdf",
+      "relative_path": "dataset/scanned/scan_page_043.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_044.pdf",
+      "relative_path": "dataset/scanned/scan_page_044.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_045.pdf",
+      "relative_path": "dataset/scanned/scan_page_045.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_046.pdf",
+      "relative_path": "dataset/scanned/scan_page_046.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_047.pdf",
+      "relative_path": "dataset/scanned/scan_page_047.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_048.pdf",
+      "relative_path": "dataset/scanned/scan_page_048.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_049.pdf",
+      "relative_path": "dataset/scanned/scan_page_049.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "scan_page_050.pdf",
+      "relative_path": "dataset/scanned/scan_page_050.pdf",
+      "is_scanned_expected": true,
+      "is_scanned_predicted": true,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "image_area_ratio (100.00%) >= 40% và word_count (0) < 30"
+      }
+    },
+    {
+      "file_name": "digital_page_001.pdf",
+      "relative_path": "dataset/digital/digital_page_001.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_002.pdf",
+      "relative_path": "dataset/digital/digital_page_002.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_003.pdf",
+      "relative_path": "dataset/digital/digital_page_003.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_004.pdf",
+      "relative_path": "dataset/digital/digital_page_004.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_005.pdf",
+      "relative_path": "dataset/digital/digital_page_005.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_006.pdf",
+      "relative_path": "dataset/digital/digital_page_006.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_007.pdf",
+      "relative_path": "dataset/digital/digital_page_007.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_008.pdf",
+      "relative_path": "dataset/digital/digital_page_008.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_009.pdf",
+      "relative_path": "dataset/digital/digital_page_009.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_010.pdf",
+      "relative_path": "dataset/digital/digital_page_010.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_011.pdf",
+      "relative_path": "dataset/digital/digital_page_011.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_012.pdf",
+      "relative_path": "dataset/digital/digital_page_012.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_013.pdf",
+      "relative_path": "dataset/digital/digital_page_013.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_014.pdf",
+      "relative_path": "dataset/digital/digital_page_014.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_015.pdf",
+      "relative_path": "dataset/digital/digital_page_015.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_016.pdf",
+      "relative_path": "dataset/digital/digital_page_016.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_017.pdf",
+      "relative_path": "dataset/digital/digital_page_017.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_018.pdf",
+      "relative_path": "dataset/digital/digital_page_018.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_019.pdf",
+      "relative_path": "dataset/digital/digital_page_019.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_020.pdf",
+      "relative_path": "dataset/digital/digital_page_020.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_021.pdf",
+      "relative_path": "dataset/digital/digital_page_021.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_022.pdf",
+      "relative_path": "dataset/digital/digital_page_022.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_023.pdf",
+      "relative_path": "dataset/digital/digital_page_023.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_024.pdf",
+      "relative_path": "dataset/digital/digital_page_024.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_025.pdf",
+      "relative_path": "dataset/digital/digital_page_025.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_026.pdf",
+      "relative_path": "dataset/digital/digital_page_026.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_027.pdf",
+      "relative_path": "dataset/digital/digital_page_027.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_028.pdf",
+      "relative_path": "dataset/digital/digital_page_028.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_029.pdf",
+      "relative_path": "dataset/digital/digital_page_029.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_030.pdf",
+      "relative_path": "dataset/digital/digital_page_030.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_031.pdf",
+      "relative_path": "dataset/digital/digital_page_031.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_032.pdf",
+      "relative_path": "dataset/digital/digital_page_032.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_033.pdf",
+      "relative_path": "dataset/digital/digital_page_033.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_034.pdf",
+      "relative_path": "dataset/digital/digital_page_034.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_035.pdf",
+      "relative_path": "dataset/digital/digital_page_035.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_036.pdf",
+      "relative_path": "dataset/digital/digital_page_036.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_037.pdf",
+      "relative_path": "dataset/digital/digital_page_037.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_038.pdf",
+      "relative_path": "dataset/digital/digital_page_038.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_039.pdf",
+      "relative_path": "dataset/digital/digital_page_039.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_040.pdf",
+      "relative_path": "dataset/digital/digital_page_040.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_041.pdf",
+      "relative_path": "dataset/digital/digital_page_041.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_042.pdf",
+      "relative_path": "dataset/digital/digital_page_042.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_043.pdf",
+      "relative_path": "dataset/digital/digital_page_043.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_044.pdf",
+      "relative_path": "dataset/digital/digital_page_044.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_045.pdf",
+      "relative_path": "dataset/digital/digital_page_045.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_046.pdf",
+      "relative_path": "dataset/digital/digital_page_046.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_047.pdf",
+      "relative_path": "dataset/digital/digital_page_047.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_048.pdf",
+      "relative_path": "dataset/digital/digital_page_048.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_049.pdf",
+      "relative_path": "dataset/digital/digital_page_049.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    },
+    {
+      "file_name": "digital_page_050.pdf",
+      "relative_path": "dataset/digital/digital_page_050.pdf",
+      "is_scanned_expected": false,
+      "is_scanned_predicted": false,
+      "status": "PASS",
+      "metrics": {
+        "text_chars": 0,
+        "images_count": 0,
+        "image_area_ratio": 0.0,
+        "reason": "digital_text"
+      }
+    }
+  ]
+}

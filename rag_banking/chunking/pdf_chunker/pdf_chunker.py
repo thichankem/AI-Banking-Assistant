@@ -35,16 +35,25 @@ except ImportError:
 
 from .ocr_extractor import OCRExtractor
 from .scan_structure_reconstructor import ScanStructureReconstructor, KHOAN_REGEX, DIEM_REGEX
-from .canonical_resolver import (
-    count_words,
-    count_syllables_vietnamese,
-    extract_canonical_legal_ref,
-    split_sentences_banking,
-    group_sentences_banking,
-    clean_and_dehyphenate_text,
-    is_valid_vietnamese_text,
-    detect_and_remove_headers_footers
-)
+from .scan_detector import detect_is_scanned_page
+try:
+    from ..unified_chunk.canonical_resolver import (
+        count_words,
+        split_sentences_banking,
+        group_sentences_banking,
+        clean_and_dehyphenate_text,
+        is_valid_vietnamese_text,
+        detect_and_remove_headers_footers
+    )
+except (ImportError, ValueError):
+    from rag_banking.chunking.unified_chunk.canonical_resolver import (
+        count_words,
+        split_sentences_banking,
+        group_sentences_banking,
+        clean_and_dehyphenate_text,
+        is_valid_vietnamese_text,
+        detect_and_remove_headers_footers
+    )
 
 
 class PDFChunker:
@@ -193,26 +202,12 @@ class PDFChunker:
         page_area: float
     ) -> Tuple[str, str, float, Optional[List[Dict[str, Any]]]]:
         """Nhận diện trang scan hay văn bản số và trích xuất nội dung phù hợp."""
-        img_list = page.get_images()
-        total_img_area = 0.0
-        for img in img_list:
-            try:
-                for bbox in page.get_image_rects(img[0]):
-                    total_img_area += (bbox.width * bbox.height)
-            except Exception:
-                pass
-        img_area_ratio = min(total_img_area / page_area, 1.0)
-
-        digital_text = page.get_text("text").strip()
-        is_valid_vn = is_valid_vietnamese_text(digital_text)
-        word_count = count_words(digital_text)
-
-        # Tiêu chí nhận diện cần chạy OCR
-        needs_ocr = (
-            (img_area_ratio >= self.image_area_ratio_threshold and word_count < 30)
-            or (word_count > 10 and not is_valid_vn)
-            or (len(digital_text) < 20 and len(img_list) > 0)
+        # 1. Nhận diện trang scan bằng ScanDetector chuyên biệt
+        needs_ocr, metrics = detect_is_scanned_page(
+            page=page,
+            image_area_ratio_threshold=self.image_area_ratio_threshold
         )
+        digital_text = page.get_text("text").strip()
 
         if needs_ocr and self.ocr_extractor.is_available():
             img_np = self.ocr_extractor.render_pdf_page_300dpi(pdf_path, page_idx=page_idx)
@@ -298,8 +293,6 @@ class PDFChunker:
 
             breadcrumb = get_breadcrumb()
             section_title = get_section_title()
-            legal_ref = extract_canonical_legal_ref(breadcrumb, combined_text, source_name=pdf_path.name)
-
             # Cắt nhỏ nếu dài hơn max_chunk_size
             if len(combined_text) <= self.max_chunk_size:
                 sub_parts = [combined_text]
@@ -314,7 +307,6 @@ class PDFChunker:
                     chunk_type=chunk_type,
                     breadcrumb=breadcrumb,
                     section_title=section_title,
-                    legal_ref=legal_ref,
                     pages_involved=pages_involved,
                     content_text=part,
                     ocr_confidence=avg_ocr_conf
@@ -359,12 +351,11 @@ class PDFChunker:
         chunk_type: str,
         breadcrumb: str,
         section_title: str,
-        legal_ref: str,
         pages_involved: List[int],
         content_text: str,
         ocr_confidence: float
     ) -> Dict[str, Any]:
-        """Tạo đối tượng chunk digital hoàn chỉnh với metadata đồng nhất."""
+        """Tạo đối tượng chunk digital hoàn chỉnh với metadata tinh gọn."""
         m_khoan = KHOAN_REGEX.search(content_text)
         khoan_val = int(m_khoan.group(1)) if m_khoan else None
 
@@ -376,16 +367,11 @@ class PDFChunker:
         b_src = "regex+layout" if ("Điều" in breadcrumb or "Chương" in breadcrumb) else "page_fallback"
 
         header_prefix = f"[Breadcrumbs: {breadcrumb}]"
-        sub_legal = extract_canonical_legal_ref(breadcrumb, content_text, source_name=pdf_path.name) or legal_ref
-        if sub_legal:
-            header_prefix += f"\n[Pháp lý: {sub_legal}]"
-
         full_content = f"{header_prefix}\n{content_text}"
 
         item = {
             "chunk_id": f"{pdf_path.stem}_pdf_c{chunk_idx}",
             "source": pdf_path.name,
-            "format": "pdf",
             "chunk_type": chunk_type,
             "breadcrumb": breadcrumb,
             "breadcrumb_source": b_src,
@@ -394,15 +380,11 @@ class PDFChunker:
             "page_start": page_start,
             "page_end": page_end,
             "page_numbers": pages_involved,
-            "legal_ref": sub_legal,
             "khoan": khoan_val,
             "diem": diem_val,
             "section_title": section_title,
             "content": full_content,
-            "raw_content": content_text,
-            "char_length": len(full_content),
-            "word_count": count_words(full_content),
-            "syllable_count": count_syllables_vietnamese(full_content)
+            "word_count": count_words(full_content)
         }
         if chunk_type == "pdf_ocr_scan":
             item["ocr_confidence"] = ocr_confidence
@@ -445,7 +427,6 @@ class PDFChunker:
         header_names = [name if name else f"Cột_{i+1}" for i, name in enumerate(raw_header)]
 
         data_rows: List[str] = []
-        raw_rows: List[str] = []
 
         for r_idx, row in enumerate(table_data[1:], start=1):
             cleaned_cells = [str(c).strip().replace("\n", " ") if c is not None else "" for c in row]
@@ -459,7 +440,6 @@ class PDFChunker:
 
             row_str = " | ".join(row_items)
             data_rows.append(f"* Hàng {r_idx}: {row_str}")
-            raw_rows.append(row_str)
 
         if not data_rows:
             return []
@@ -470,25 +450,18 @@ class PDFChunker:
 
         for i in range(0, len(data_rows), batch_size):
             batch_data = data_rows[i:i + batch_size]
-            batch_raw = raw_rows[i:i + batch_size]
 
             content = (
                 f"[Breadcrumbs: {table_breadcrumb}]\n"
                 f"Cột dữ liệu: {', '.join(header_names)}\n"
                 f"Chi tiết từng hàng:\n" + "\n".join(batch_data)
             )
-            raw_content = "\n".join(batch_raw)
-            legal_ref = extract_canonical_legal_ref(table_breadcrumb, raw_content, source_name=pdf_path.name)
-            if legal_ref:
-                content = f"[Pháp lý: {legal_ref}]\n{content}"
 
             chunks.append({
                 "chunk_id": f"{pdf_path.stem}_pdf_tbl_{start_idx + len(chunks)}",
                 "source": pdf_path.name,
-                "format": "pdf",
                 "chunk_type": "pdf_table",
                 "breadcrumb": table_breadcrumb,
-                "legal_ref": legal_ref,
                 "section_title": f"Bảng biểu Trang {page_num}",
                 "page_numbers": [page_num],
                 "page_start": page_num,
@@ -497,10 +470,7 @@ class PDFChunker:
                 "breadcrumb_confidence": 1.0,
                 "heading_ocr_confidence": 1.0,
                 "content": content,
-                "raw_content": raw_content,
-                "char_length": len(content),
-                "word_count": count_words(content),
-                "syllable_count": count_syllables_vietnamese(content)
+                "word_count": count_words(content)
             })
 
         return chunks

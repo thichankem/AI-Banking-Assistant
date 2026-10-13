@@ -77,27 +77,26 @@ class ContextSynthesizer:
             chunk = item.get("chunk", item)
             source = chunk.get("source", "Tài liệu nghiệp vụ Vietcombank")
             breadcrumb = chunk.get("breadcrumb", "Quy định chung")
-            raw_content = chunk.get("raw_content", chunk.get("content", ""))
-            legal_ref = chunk.get("legal_ref", "")
+            content_text = chunk.get("content", "")
 
             # Trích xuất toàn bộ các thẻ căn cứ pháp lý
-            found_tags = self.extract_legal_tags(f"{breadcrumb}\n{raw_content}", default_ref=legal_ref)
+            found_tags = self.extract_legal_tags(f"{breadcrumb}\n{content_text}", default_ref=source)
             for tag in found_tags:
                 if tag not in all_legal_citations:
                     all_legal_citations.append(tag)
 
-            legal_display = ", ".join(found_tags) if found_tags else "[Quy chuẩn nghiệp vụ]"
+            legal_display = ", ".join(found_tags) if found_tags else f"[{source}]"
             sources.add(source)
 
             # Ước tính token của block này
             block_header = (
-                f"### [TRÍCH DẪN {idx}] Nguồn: {source}\n"
-                f"- **Tham chiếu pháp lý:** `{legal_display}`\n"
+                f"### [TRÍCH DẪN {idx}] Nguồn tài liệu: {source}\n"
+                f"- **Tham chiếu văn bản:** `{legal_display}`\n"
                 f"- **Đường dẫn phân cấp (Breadcrumbs):** `{breadcrumb}`\n"
                 f"- **Nội dung xác thực:**\n"
             )
             header_tokens = self.estimate_tokens(block_header)
-            content_tokens = self.estimate_tokens(raw_content)
+            content_tokens = self.estimate_tokens(content_text)
 
             # Kiểm tra giới hạn token
             if current_token_count + header_tokens + content_tokens > budget:
@@ -105,14 +104,14 @@ class ContextSynthesizer:
                 remaining_tokens = budget - current_token_count - header_tokens
                 if remaining_tokens > 100:
                     allowed_chars = int(remaining_tokens * 3.5)
-                    truncated_content = raw_content[:allowed_chars] + "\n... [Đoạn trích được rút gọn theo giới hạn token bảo đảm an toàn]."
+                    truncated_content = content_text[:allowed_chars] + "\n... [Đoạn trích được rút gọn theo giới hạn token bảo đảm an toàn]."
                     full_block = f"{block_header}{truncated_content}\n"
                     formatted_blocks.append(full_block)
                     current_token_count += self.estimate_tokens(full_block)
                     chunks_used += 1
                 break
             else:
-                full_block = f"{block_header}{raw_content}\n"
+                full_block = f"{block_header}{content_text}\n"
                 formatted_blocks.append(full_block)
                 current_token_count += header_tokens + content_tokens
                 chunks_used += 1

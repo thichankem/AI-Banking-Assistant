@@ -1,29 +1,34 @@
 """
-Tái tạo Cấu trúc Văn bản Scan (Scan Structure Reconstructor)
-Dựng lại cây phân cấp bố cục cho tài liệu scan ngân hàng THUẦN TÚY BẰNG ĐẶC TRƯNG HÌNH HỌC OCR:
+Module Scan Structure Reconstructor
+====================================
+Tái tạo cấu trúc cây phân cấp văn bản scan ngân hàng THUẦN TÚY BẰNG ĐẶC TRƯNG HÌNH HỌC OCR.
 TUYỆT ĐỐI KHÔNG DÙNG REGEX ĐỂ PHÂN CẤP (0% Regex-Based Hierarchy).
 
-Dự đoán hoàn toàn từ các đặc trưng thị giác & không gian do OCR trích xuất:
-1. Font Size Proxy: Tỷ lệ chiều cao dòng so với trung vị thân bài (height / median_height).
-2. Vertical Spacing: Khoảng cách dọc trước/sau dòng (gap_before, gap_after).
-3. Horizontal Positioning: Căn giữa trang (is_centered) vs Bám lề chuẩn (base_left).
-4. Indentation Analysis: Đo độ lệch lề trái (left_indent) để nhận diện Khoản và Điểm.
-5. State machine giữ stack qua các trang (BreadcrumbTracker) dựa trên Level dự đoán của OCR.
+Các thành phần cốt lõi:
+1. `BreadcrumbTracker`: State machine quản lý stack phả hệ phân cấp tài liệu xuyên trang (title -> h1 -> h2 -> h3).
+2. `TOCVerifier`: Bộ phân tích và đối soát Mục lục (Table of Contents) ở 3 trang đầu.
+3. `ScanStructureReconstructor`: Trình tái cấu trúc văn bản scan hoàn chỉnh, lọc Header/Footer và đóng gói chunks chuẩn DLA.
 """
+
+from __future__ import annotations
 
 import re
 from typing import Dict, Any, List, Optional, Tuple, Set
 import numpy as np
 
-# Các hằng số tương thích ngược (Deprecated - khuyên dùng OCR layout features)
-KHOAN_REGEX = re.compile(r"(?:^|\n)\s*(\d{1,2})\.\s+[A-ZÀ-Ỹ0-9]")
-DIEM_REGEX = re.compile(r"(?:^|\n)\s*([a-zđ])\)\s+[A-ZÀ-Ỹ0-9a-zà-ỹ]")
-
 from .ocr_layout_predictor import (
     OCRLayoutHierarchyPredictor,
     LayoutHierarchyLevel
 )
-from .canonical_resolver import strip_vietnamese_accents
+
+try:
+    from ..unified_chunk.canonical_resolver import strip_vietnamese_accents
+except (ImportError, ValueError):
+    from rag_banking.chunking.unified_chunk.canonical_resolver import strip_vietnamese_accents
+
+# Biểu thức chính quy hỗ trợ tương thích ngược
+KHOAN_REGEX: re.Pattern = re.compile(r"(?:^|\n)\s*(\d{1,2})\.\s+[A-ZÀ-Ỹ0-9]")
+DIEM_REGEX: re.Pattern = re.compile(r"(?:^|\n)\s*([a-zđ])\)\s+[A-ZÀ-Ỹ0-9a-zà-ỹ]")
 
 
 def fix_num(raw_str: str) -> int:
@@ -34,7 +39,7 @@ def fix_num(raw_str: str) -> int:
 
 
 # =============================================================================
-# STATE MACHINE QUẢN LÝ BREADCRUMB QUA CÁC TRANG DỰA TRÊN DỰ ĐOÁN OCR
+# 1. STATE MACHINE QUẢN LÝ BREADCRUMB QUA CÁC TRANG DỰA TRÊN DỰ ĐOÁN OCR
 # =============================================================================
 
 class BreadcrumbTracker:
@@ -42,7 +47,6 @@ class BreadcrumbTracker:
     State machine duy trì stack phả hệ phân cấp tài liệu scan qua các trang.
     Phân cấp được điều khiển hoàn toàn bởi nhãn dự đoán hình học OCR:
     title -> h1 -> h2 -> h3.
-    Thụt lề (sub_item / deep_item) được lưu vào metadata riêng biệt của chunk.
     """
     ORDER = ["title", "h1", "h2", "h3"]
     KIND_ALIASES = {
@@ -92,13 +96,6 @@ class BreadcrumbTracker:
         if number is not None:
             self.last_dieu = number
 
-    def on_visual_heading(self, label: str, score: float = 0.85) -> None:
-        """Dự phòng hình học: Dòng chữ lớn độc lập."""
-        self.on_heading("h2", label, score=score, source="ocr_geometry_prediction")
-
-    def set_table_caption(self, caption: str) -> None:
-        """Gắn tiêu đề/caption của bảng scan vào cuối breadcrumb."""
-        self.current_caption = caption
 
     def reset_for_new_doc(self, new_doc_title: str) -> None:
         """Reset toàn bộ stack khi phát hiện văn bản mới ghép trong file PDF."""
@@ -137,7 +134,7 @@ class BreadcrumbTracker:
 
 
 # =============================================================================
-# BỘ KIỂM CHỨNG MỤC LỤC (TOC VERIFIER) - ĐỐI CHIẾU TIÊU ĐỀ
+# 2. BỘ KIỂM CHỨNG MỤC LỤC (TOC VERIFIER) - ĐỐI CHIẾU TIÊU ĐỀ
 # =============================================================================
 
 class TOCVerifier:
@@ -151,8 +148,8 @@ class TOCVerifier:
         self.expected_dieus: Dict[int, str] = {}
         self.toc_pages: Set[int] = set()
 
-    def parse_toc_page(self, lines: List[Dict[str, Any]], page_idx: int = 0) -> bool:
-        """Nhận diện trang mục lục và thu thập outline tiêu đề."""
+    def parse_toc_page(self, lines: List[Dict[str, Any]], page_idx: int = 1) -> bool:
+        """Nhận diện trang mục lục và thu thập outline tiêu đề (page_idx 1-indexed)."""
         if not lines:
             return False
 
@@ -192,7 +189,7 @@ class TOCVerifier:
 
 
 # =============================================================================
-# TRÌNH TÁI TẠO CẤU TRÚC VĂN BẢN SCAN CHÍNH (OCR GEOMETRIC DLA)
+# 3. TRÌNH TÁI TẠO CẤU TRÚC VĂN BẢN SCAN CHÍNH (OCR GEOMETRIC DLA)
 # =============================================================================
 
 class ScanStructureReconstructor:
@@ -221,7 +218,7 @@ class ScanStructureReconstructor:
         for page_lines in pages_lines:
             seen_on_this_page = set()
             for l in page_lines:
-                norm = "".join(c for c in l["text"].strip().lower() if not c.isdigit())
+                norm = "".join(c for c in l.get("text", "").strip().lower() if not c.isdigit())
                 if len(norm) > 5 and norm not in seen_on_this_page:
                     text_page_counts[norm] = text_page_counts.get(norm, 0) + 1
                     seen_on_this_page.add(norm)
@@ -233,7 +230,7 @@ class ScanStructureReconstructor:
                 page_h = l.get("page_height", 1000.0)
                 y_min = l.get("y_min", 0.0)
                 y_max = l.get("y_max", 0.0)
-                norm = "".join(c for c in l["text"].strip().lower() if not c.isdigit())
+                norm = "".join(c for c in l.get("text", "").strip().lower() if not c.isdigit())
 
                 is_edge_y = (y_min < 0.08 * page_h) or (y_max > 0.92 * page_h)
                 is_repetitive = total_pages >= 3 and (text_page_counts.get(norm, 0) >= total_pages * 0.5)
@@ -260,7 +257,7 @@ class ScanStructureReconstructor:
         Dự đoán Heading THUẦN TÚY BẰNG BỐ CỤC HÌNH HỌC OCR (0% Regex):
         Sử dụng OCRLayoutHierarchyPredictor tính toán font size, căn giữa, khoảng cách đứng.
         """
-        text = line["text"].strip()
+        text = line.get("text", "").strip()
         score = line.get("score", 0.85)
         page_h = line.get("page_height", 1000.0)
 
@@ -282,7 +279,6 @@ class ScanStructureReconstructor:
         level = pred["predicted_level"]
         is_heading = pred["is_heading"]
 
-        # Nếu không phải là một Heading theo bố cục OCR
         if not is_heading:
             return None
 
@@ -329,7 +325,7 @@ class ScanStructureReconstructor:
         if not buffer_lines:
             return None
 
-        text_content = "\n".join(l["text"] for l in buffer_lines).strip()
+        text_content = "\n".join(l.get("text", "") for l in buffer_lines).strip()
         if not text_content:
             return None
 
@@ -351,7 +347,6 @@ class ScanStructureReconstructor:
         return {
             "chunk_id": f"{source_name}_scan_c{chunk_idx}",
             "source": source_name,
-            "format": "pdf",
             "chunk_type": "pdf_ocr_scan",
             "breadcrumb": breadcrumb,
             "breadcrumb_source": b_source,
@@ -364,9 +359,7 @@ class ScanStructureReconstructor:
             "section_title": section_label,
             "indent_level": max_indent,
             "content": full_chunk_text,
-            "raw_content": text_content,
-            "word_count": word_count,
-            "char_length": len(full_chunk_text)
+            "word_count": word_count
         }
 
     def reconstruct_document_chunks(
@@ -378,18 +371,18 @@ class ScanStructureReconstructor:
     ) -> List[Dict[str, Any]]:
         """
         Quy trình chuẩn hóa và phân đoạn toàn bộ tài liệu scan bằng OCR Layout Analysis:
-        1. Parse Mục lục TOC ở các trang đầu.
-        2. Lọc Header/Footer.
-        3. Dự đoán phân cấp từng dòng bằng OCRLayoutHierarchyPredictor (0% Regex).
-        4. Điều khiển State Machine cập nhật Breadcrumbs.
+        1. Parse Mục lục TOC ở 3 trang đầu (1-indexed).
+        2. Lọc Header/Footer lặp lại.
+        3. Phân loại bố cục từng dòng bằng OCRLayoutHierarchyPredictor (0% Regex).
+        4. Cập nhật State Machine BreadcrumbTracker.
         5. Đóng gói chunk đạt chuẩn Section-Length-Aware.
         """
         if not pages_lines:
             return []
 
-        # 1. Parse Mục lục TOC ở 3 trang đầu
+        # 1. Parse Mục lục TOC ở 3 trang đầu (chú ý page_idx 1-indexed)
         for page_idx in range(min(3, len(pages_lines))):
-            self.toc_verifier.parse_toc_page(pages_lines[page_idx], page_idx=page_idx)
+            self.toc_verifier.parse_toc_page(pages_lines[page_idx], page_idx=page_idx + 1)
 
         # 2. Lọc Header/Footer
         cleaned_pages = self.filter_header_footer_lines(pages_lines)
@@ -419,13 +412,13 @@ class ScanStructureReconstructor:
                 page_h=page_h
             )
 
-            for i, line in enumerate(annotated_lines):
+            for line in annotated_lines:
                 is_heading = line.get("is_heading", False)
                 pred_level = line.get("predicted_level", LayoutHierarchyLevel.BODY)
 
                 # Khi OCR dự đoán đây là một Heading (title, h1, h2, h3)
                 if is_heading:
-                    # Flush buffer văn bản trước đó nếu đã đạt độ dài
+                    # Flush buffer văn bản trước đó nếu có
                     if buffer_lines:
                         chunk_obj = self._build_scan_chunk(
                             buffer_lines=buffer_lines,
@@ -442,7 +435,7 @@ class ScanStructureReconstructor:
                     # Cập nhật State Machine
                     self.tracker.on_heading(
                         kind=pred_level,
-                        label=line["text"],
+                        label=line.get("text", ""),
                         score=line.get("score", 0.90),
                         source="ocr_geometry_prediction"
                     )
@@ -471,7 +464,7 @@ class ScanStructureReconstructor:
                     buffer_lines = []
                     buffer_page_start = page_idx
 
-        # Flush phần còn lại cuối cùng
+        # Flush buffer còn lại cuối cùng
         if buffer_lines:
             chunk_obj = self._build_scan_chunk(
                 buffer_lines=buffer_lines,

@@ -1,0 +1,596 @@
+{
+  "real_page_06_title.png": {
+    "expected_level": "title",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề tài liệu / Slide bìa lớn nhất (Font to, căn giữa hoặc dòng ngắn nổi bật)",
+    "target_text": "HƯỚNG DẪN SỬ DỤNG DỊCH VỤ NGÂN HÀNG ĐIỆN TỬ",
+    "source_pdf": "vcb_slide_04_ibanking_tong_quan_va_dieu_kien_su_dung.pdf (p.1)",
+    "json_ref": "real_page_06_title.json"
+  },
+  "real_page_08_title.png": {
+    "expected_level": "title",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề tài liệu / Slide bìa lớn nhất (Font to, căn giữa hoặc dòng ngắn nổi bật)",
+    "target_text": "HƯỚNG DẪN SỬ DỤNG DỊCH VỤ NGÂN HÀNG ĐIỆN TỬ",
+    "source_pdf": "vcb_slide_48_quy_che_dieu_kien_phap_ly_giao_dich_dien_tu.pdf (p.1)",
+    "json_ref": "real_page_08_title.json"
+  },
+  "real_page_52_body.png": {
+    "expected_level": "body",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Đoạn văn thân bài thông thường bám lề chuẩn, font cơ sở",
+    "target_text": "rút tiền mặt/thanh toán hàng hóa dịch vụ/chuyển khoản...",
+    "source_pdf": "vcb_pdf_28_dieu_kien_dieu_khoan_the_ghi_no.pdf (p.5)",
+    "json_ref": "real_page_52_body.json"
+  },
+  "real_page_63_header_footer.png": {
+    "expected_level": "header_footer",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Vùng mép trang (Running Header đầu trang hoặc Footer số trang chân trang)",
+    "target_text": "12. Thẻ không tiếp xúc (thẻ contactless): là Thẻ sử dụng phương thức giao tiếp không tiếp xúc giữa",
+    "source_pdf": "vcb_pdf_28_dieu_kien_dieu_khoan_the_ghi_no.pdf (p.2)",
+    "json_ref": "real_page_63_header_footer.json"
+  },
+  "real_page_66_header_footer.png": {
+    "expected_level": "header_footer",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Vùng mép trang (Running Header đầu trang hoặc Footer số trang chân trang)",
+    "target_text": "HƯỚNG DẪN SỬ DỤNG VCB – iB@nking CHO KHÁCH HÀNG TỔ CHỨC",
+    "source_pdf": "vcb_slide_04_ibanking_tong_quan_va_dieu_kien_su_dung.pdf (p.3)",
+    "json_ref": "real_page_66_header_footer.json"
+  },
+  "real_page_04_title.png": {
+    "expected_level": "title",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề tài liệu / Slide bìa lớn nhất (Font to, căn giữa hoặc dòng ngắn nổi bật)",
+    "target_text": "QUY TẮC VÀ ĐIỀU KHOẢN",
+    "source_pdf": "vcb_pdf_33_quy_tac_fwd_vung_uoc_mo.pdf (p.1)",
+    "json_ref": "real_page_04_title.json"
+  },
+  "real_page_35_sub_item.png": {
+    "expected_level": "sub_item",
+    "expected_heading": false,
+    "expected_indent": 1,
+    "visual_role": "Khoản / List item cấp 1 thụt lề (Left indent 15px - 40px)",
+    "target_text": "TK. Phương thức đối chiếu khớp đúng giấy tờ tùy thân và thông tin sinh trắc học theo khả năng cung ứng",
+    "source_pdf": "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen.pdf (p.3)",
+    "json_ref": "real_page_35_sub_item.json"
+  },
+  "real_page_54_body.png": {
+    "expected_level": "body",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Đoạn văn thân bài thông thường bám lề chuẩn, font cơ sở",
+    "target_text": "CHỨC NĂNG DÀNH CHO MÃ QUẢN TRỊ ..................................................................................................................... 107",
+    "source_pdf": "vcb_slide_26_hdsd_he_thong_giao_dien_tong_quan.pdf (p.4)",
+    "json_ref": "real_page_54_body.json"
+  },
+  "real_page_64_header_footer.png": {
+    "expected_level": "header_footer",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Vùng mép trang (Running Header đầu trang hoặc Footer số trang chân trang)",
+    "target_text": "2/14",
+    "source_pdf": "vcb_pdf_33_quy_tac_fwd_vung_uoc_mo.pdf (p.2)",
+    "json_ref": "real_page_64_header_footer.json"
+  },
+  "real_page_68_header_footer.png": {
+    "expected_level": "header_footer",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Vùng mép trang (Running Header đầu trang hoặc Footer số trang chân trang)",
+    "target_text": "HƯỚNG DẪN SỬ DỤNG VCB – iB@nking CHO KHÁCH HÀNG TỔ CHỨC",
+    "source_pdf": "vcb_slide_48_quy_che_dieu_kien_phap_ly_giao_dich_dien_tu.pdf (p.2)",
+    "json_ref": "real_page_68_header_footer.json"
+  },
+  "real_page_07_title.png": {
+    "expected_level": "title",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề tài liệu / Slide bìa lớn nhất (Font to, căn giữa hoặc dòng ngắn nổi bật)",
+    "target_text": "HƯỚNG DẪN SỬ DỤNG DỊCH VỤ NGÂN HÀNG ĐIỆN TỬ",
+    "source_pdf": "vcb_slide_26_hdsd_he_thong_giao_dien_tong_quan.pdf (p.1)",
+    "json_ref": "real_page_07_title.json"
+  },
+  "real_page_29_h3.png": {
+    "expected_level": "h3",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề tiểu mục (Heading 3 / Dòng ngắt đoạn không có dấu câu kết)",
+    "target_text": "OTP, Quý khách vui lòng chọn nút Kích hoạt để",
+    "source_pdf": "vcb_slide_27_hdsd_quan_ly_han_muc_giao_dich.pdf (p.3)",
+    "json_ref": "real_page_29_h3.json"
+  },
+  "real_page_48_deep_item.png": {
+    "expected_level": "deep_item",
+    "expected_heading": false,
+    "expected_indent": 2,
+    "visual_role": "Điểm / Nested list item cấp 2 thụt lề sâu (Left indent >= 40px)",
+    "target_text": "Đối với mã Kế toán trưởng và Chủ tài khoản",
+    "source_pdf": "vcb_slide_49_quy_che_an_toan_bao_mat_va_phong_ngua_gian_lan.pdf (p.4)",
+    "json_ref": "real_page_48_deep_item.json"
+  },
+  "real_page_55_body.png": {
+    "expected_level": "body",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Đoạn văn thân bài thông thường bám lề chuẩn, font cơ sở",
+    "target_text": "CHO MÃ KẾ TOÁN VIÊN",
+    "source_pdf": "vcb_slide_27_hdsd_quan_ly_han_muc_giao_dich.pdf (p.4)",
+    "json_ref": "real_page_55_body.json"
+  },
+  "real_page_01_title.png": {
+    "expected_level": "title",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề tài liệu / Slide bìa lớn nhất (Font to, căn giữa hoặc dòng ngắn nổi bật)",
+    "target_text": "BIỂU PHÍ DỊCH VỤ VÀ LÃI SUẤT THẺ TÍN DỤNG QUỐC TẾ",
+    "source_pdf": "vcb_pdf_22_bieu_phi_the_tdqt_2026.pdf (p.1)",
+    "json_ref": "real_page_01_title.json"
+  },
+  "real_page_09_h1.png": {
+    "expected_level": "h1",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề phân đoạn lớn / Chương / Mục lục / Slide Title (Heading 1)",
+    "target_text": "1. Khách hàng (KH): là cá nhân mở tài khoản thanh toán Vietcombank (VCB) trên kênh trực tuyến.",
+    "source_pdf": "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen.pdf (p.1)",
+    "json_ref": "real_page_09_h1.json"
+  },
+  "real_page_14_h1.png": {
+    "expected_level": "h1",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề phân đoạn lớn / Chương / Mục lục / Slide Title (Heading 1)",
+    "target_text": "Lần đầu tiên Quý khách sử dụng VCB-iB@nking",
+    "source_pdf": "vcb_slide_49_quy_che_an_toan_bao_mat_va_phong_ngua_gian_lan.pdf (p.2)",
+    "json_ref": "real_page_14_h1.json"
+  },
+  "real_page_16_h1.png": {
+    "expected_level": "h1",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề phân đoạn lớn / Chương / Mục lục / Slide Title (Heading 1)",
+    "target_text": "B. QUYỀN LỢI NÂNG CAO",
+    "source_pdf": "vcb_pdf_33_quy_tac_fwd_vung_uoc_mo.pdf (p.3)",
+    "json_ref": "real_page_16_h1.json"
+  },
+  "real_page_17_h2.png": {
+    "expected_level": "h2",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề mục (Điều / Mục / Heading 2 ngắn bám lề có ngắt dòng)",
+    "target_text": "Điều 1.",
+    "source_pdf": "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen.pdf (p.1)",
+    "json_ref": "real_page_17_h2.json"
+  },
+  "real_page_18_h2.png": {
+    "expected_level": "h2",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề mục (Điều / Mục / Heading 2 ngắn bám lề có ngắt dòng)",
+    "target_text": "Điều 2.",
+    "source_pdf": "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen.pdf (p.2)",
+    "json_ref": "real_page_18_h2.json"
+  },
+  "real_page_30_h3.png": {
+    "expected_level": "h3",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề tiểu mục (Heading 3 / Dòng ngắt đoạn không có dấu câu kết)",
+    "target_text": "Đăng nhập",
+    "source_pdf": "vcb_slide_48_quy_che_dieu_kien_phap_ly_giao_dich_dien_tu.pdf (p.4)",
+    "json_ref": "real_page_30_h3.json"
+  },
+  "real_page_32_h3.png": {
+    "expected_level": "h3",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề tiểu mục (Heading 3 / Dòng ngắt đoạn không có dấu câu kết)",
+    "target_text": "Các chức năng quản lý",
+    "source_pdf": "vcb_slide_50_quy_che_quy_trinh_tra_soat_khieu_nai.pdf (p.4)",
+    "json_ref": "real_page_32_h3.json"
+  },
+  "real_page_34_sub_item.png": {
+    "expected_level": "sub_item",
+    "expected_heading": false,
+    "expected_indent": 1,
+    "visual_role": "Khoản / List item cấp 1 thụt lề (Left indent 15px - 40px)",
+    "target_text": "công tại thời điểm giao dịch, được xác thực thực thể sống và được đối chiếu khớp đúng với dữ liệu STH được",
+    "source_pdf": "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen.pdf (p.2)",
+    "json_ref": "real_page_34_sub_item.json"
+  },
+  "real_page_41_deep_item.png": {
+    "expected_level": "deep_item",
+    "expected_heading": false,
+    "expected_indent": 2,
+    "visual_role": "Điểm / Nested list item cấp 2 thụt lề sâu (Left indent >= 40px)",
+    "target_text": "Quyền và nghĩa vụ của KH:",
+    "source_pdf": "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen.pdf (p.2)",
+    "json_ref": "real_page_41_deep_item.json"
+  },
+  "real_page_47_deep_item.png": {
+    "expected_level": "deep_item",
+    "expected_heading": false,
+    "expected_indent": 2,
+    "visual_role": "Điểm / Nested list item cấp 2 thụt lề sâu (Left indent >= 40px)",
+    "target_text": "Tên truy cập: được in trên bản đăng ký sử dụng dịch vụ của quý",
+    "source_pdf": "vcb_slide_48_quy_che_dieu_kien_phap_ly_giao_dich_dien_tu.pdf (p.4)",
+    "json_ref": "real_page_47_deep_item.json"
+  },
+  "real_page_49_body.png": {
+    "expected_level": "body",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Đoạn văn thân bài thông thường bám lề chuẩn, font cơ sở",
+    "target_text": "1.1 Hạng chuẩn",
+    "source_pdf": "vcb_pdf_22_bieu_phi_the_tdqt_2026.pdf (p.7)",
+    "json_ref": "real_page_49_body.json"
+  },
+  "real_page_50_body.png": {
+    "expected_level": "body",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Đoạn văn thân bài thông thường bám lề chuẩn, font cơ sở",
+    "target_text": "2.1 Thẻ Vietcombank Visa Infinite",
+    "source_pdf": "vcb_pdf_22_bieu_phi_the_tdqt_2026.pdf (p.1)",
+    "json_ref": "real_page_50_body.json"
+  },
+  "real_page_53_body.png": {
+    "expected_level": "body",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Đoạn văn thân bài thông thường bám lề chuẩn, font cơ sở",
+    "target_text": "Ngay sau khi một trong các quyền lợi trên được chi trả, Hợp đồng bảo hiểm sẽ tự động chấm",
+    "source_pdf": "vcb_pdf_33_quy_tac_fwd_vung_uoc_mo.pdf (p.5)",
+    "json_ref": "real_page_53_body.json"
+  },
+  "real_page_56_body.png": {
+    "expected_level": "body",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Đoạn văn thân bài thông thường bám lề chuẩn, font cơ sở",
+    "target_text": "A – Truy vấn thông tin",
+    "source_pdf": "vcb_slide_48_quy_che_dieu_kien_phap_ly_giao_dich_dien_tu.pdf (p.5)",
+    "json_ref": "real_page_56_body.json"
+  },
+  "real_page_57_body.png": {
+    "expected_level": "body",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Đoạn văn thân bài thông thường bám lề chuẩn, font cơ sở",
+    "target_text": "2. Chuyển khoản",
+    "source_pdf": "vcb_slide_49_quy_che_an_toan_bao_mat_va_phong_ngua_gian_lan.pdf (p.5)",
+    "json_ref": "real_page_57_body.json"
+  },
+  "real_page_58_body.png": {
+    "expected_level": "body",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Đoạn văn thân bài thông thường bám lề chuẩn, font cơ sở",
+    "target_text": "hưởng định sẵn",
+    "source_pdf": "vcb_slide_50_quy_che_quy_trinh_tra_soat_khieu_nai.pdf (p.5)",
+    "json_ref": "real_page_58_body.json"
+  },
+  "real_page_62_header_footer.png": {
+    "expected_level": "header_footer",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Vùng mép trang (Running Header đầu trang hoặc Footer số trang chân trang)",
+    "target_text": "Mẫu số 02",
+    "source_pdf": "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen.pdf (p.2)",
+    "json_ref": "real_page_62_header_footer.json"
+  },
+  "real_page_24_h2.png": {
+    "expected_level": "h2",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề mục (Điều / Mục / Heading 2 ngắn bám lề có ngắt dòng)",
+    "target_text": "2.",
+    "source_pdf": "vcb_pdf_33_quy_tac_fwd_vung_uoc_mo.pdf (p.4)",
+    "json_ref": "real_page_24_h2.json"
+  },
+  "real_page_39_sub_item.png": {
+    "expected_level": "sub_item",
+    "expected_heading": false,
+    "expected_indent": 1,
+    "visual_role": "Khoản / List item cấp 1 thụt lề (Left indent 15px - 40px)",
+    "target_text": "Thiết lập hạn mức chuyển khoản cho từng mã Kế toán viên trong 01",
+    "source_pdf": "vcb_slide_49_quy_che_an_toan_bao_mat_va_phong_ngua_gian_lan.pdf (p.3)",
+    "json_ref": "real_page_39_sub_item.json"
+  },
+  "real_page_45_deep_item.png": {
+    "expected_level": "deep_item",
+    "expected_heading": false,
+    "expected_indent": 2,
+    "visual_role": "Điểm / Nested list item cấp 2 thụt lề sâu (Left indent >= 40px)",
+    "target_text": "(carcinoma-in-situ) và các khối u có kết quả mô học được mô tả là tiền ung thư",
+    "source_pdf": "vcb_pdf_33_quy_tac_fwd_vung_uoc_mo.pdf (p.11)",
+    "json_ref": "real_page_45_deep_item.json"
+  },
+  "real_page_46_deep_item.png": {
+    "expected_level": "deep_item",
+    "expected_heading": false,
+    "expected_indent": 2,
+    "visual_role": "Điểm / Nested list item cấp 2 thụt lề sâu (Left indent >= 40px)",
+    "target_text": "của não.",
+    "source_pdf": "vcb_pdf_33_quy_tac_fwd_vung_uoc_mo.pdf (p.12)",
+    "json_ref": "real_page_46_deep_item.json"
+  },
+  "real_page_51_body.png": {
+    "expected_level": "body",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Đoạn văn thân bài thông thường bám lề chuẩn, font cơ sở",
+    "target_text": "VCB có quyền:",
+    "source_pdf": "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen.pdf (p.4)",
+    "json_ref": "real_page_51_body.json"
+  },
+  "real_page_27_h3.png": {
+    "expected_level": "h3",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề tiểu mục (Heading 3 / Dòng ngắt đoạn không có dấu câu kết)",
+    "target_text": "6.1 Thẻ Visa Infinite",
+    "source_pdf": "vcb_pdf_22_bieu_phi_the_tdqt_2026.pdf (p.3)",
+    "json_ref": "real_page_27_h3.json"
+  },
+  "real_page_33_sub_item.png": {
+    "expected_level": "sub_item",
+    "expected_heading": false,
+    "expected_indent": 1,
+    "visual_role": "Khoản / List item cấp 1 thụt lề (Left indent 15px - 40px)",
+    "target_text": "23 Lãi suất thẻ tín dụng",
+    "source_pdf": "vcb_pdf_22_bieu_phi_the_tdqt_2026.pdf (p.5)",
+    "json_ref": "real_page_33_sub_item.json"
+  },
+  "real_page_10_h1.png": {
+    "expected_level": "header_footer",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Vùng mép trang (Running Header đầu trang hoặc Footer số trang chân trang)",
+    "target_text": "12. Thẻ không tiếp xúc (thẻ contactless): là Thẻ sử dụng phương thức giao tiếp không tiếp xúc giữa",
+    "source_pdf": "vcb_pdf_28_dieu_kien_dieu_khoan_the_ghi_no.pdf (p.2)",
+    "json_ref": "real_page_10_h1.json"
+  },
+  "real_page_19_h2.png": {
+    "expected_level": "header_footer",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Vùng mép trang (Running Header đầu trang hoặc Footer số trang chân trang)",
+    "target_text": "30. Phương thức xác thực chủ thẻ: là phương thức được Vietcombank sử dụng để xác định chính xác",
+    "source_pdf": "vcb_pdf_28_dieu_kien_dieu_khoan_the_ghi_no.pdf (p.3)",
+    "json_ref": "real_page_19_h2.json"
+  },
+  "real_page_20_h2.png": {
+    "expected_level": "header_footer",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Vùng mép trang (Running Header đầu trang hoặc Footer số trang chân trang)",
+    "target_text": "47. Ngày cập nhật vào hệ thống: là ngày giao dịch thẻ được cập nhật vào hệ thống quản lý thẻ của",
+    "source_pdf": "vcb_pdf_28_dieu_kien_dieu_khoan_the_ghi_no.pdf (p.4)",
+    "json_ref": "real_page_20_h2.json"
+  },
+  "real_page_21_h2.png": {
+    "expected_level": "title",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề tài liệu / Slide bìa lớn nhất (Font to, căn giữa hoặc dòng ngắn nổi bật)",
+    "target_text": "Truy cập chương trình VCB-iB@nking: tại địa chỉ www.vietcombank.com.vn",
+    "source_pdf": "vcb_slide_48_quy_che_dieu_kien_phap_ly_giao_dich_dien_tu.pdf (p.3)",
+    "json_ref": "real_page_21_h2.json"
+  },
+  "real_page_36_sub_item.png": {
+    "expected_level": "header_footer",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Vùng mép trang (Running Header đầu trang hoặc Footer số trang chân trang)",
+    "target_text": "30. Phương thức xác thực chủ thẻ: là phương thức được Vietcombank sử dụng để xác định chính xác",
+    "source_pdf": "vcb_pdf_28_dieu_kien_dieu_khoan_the_ghi_no.pdf (p.3)",
+    "json_ref": "real_page_36_sub_item.json"
+  },
+  "real_page_37_sub_item.png": {
+    "expected_level": "header_footer",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Vùng mép trang (Running Header đầu trang hoặc Footer số trang chân trang)",
+    "target_text": "47. Ngày cập nhật vào hệ thống: là ngày giao dịch thẻ được cập nhật vào hệ thống quản lý thẻ của",
+    "source_pdf": "vcb_pdf_28_dieu_kien_dieu_khoan_the_ghi_no.pdf (p.4)",
+    "json_ref": "real_page_37_sub_item.json"
+  },
+  "real_page_38_sub_item.png": {
+    "expected_level": "title",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề tài liệu / Slide bìa lớn nhất (Font to, căn giữa hoặc dòng ngắn nổi bật)",
+    "target_text": "Truy cập chương trình VCB-iB@nking: tại địa chỉ www.vietcombank.com.vn",
+    "source_pdf": "vcb_slide_48_quy_che_dieu_kien_phap_ly_giao_dich_dien_tu.pdf (p.3)",
+    "json_ref": "real_page_38_sub_item.json"
+  },
+  "real_page_43_deep_item.png": {
+    "expected_level": "header_footer",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Vùng mép trang (Running Header đầu trang hoặc Footer số trang chân trang)",
+    "target_text": "30. Phương thức xác thực chủ thẻ: là phương thức được Vietcombank sử dụng để xác định chính xác",
+    "source_pdf": "vcb_pdf_28_dieu_kien_dieu_khoan_the_ghi_no.pdf (p.3)",
+    "json_ref": "real_page_43_deep_item.json"
+  },
+  "real_page_44_deep_item.png": {
+    "expected_level": "body",
+    "expected_heading": false,
+    "expected_indent": 0,
+    "visual_role": "Đoạn văn thân bài thông thường bám lề chuẩn, font cơ sở",
+    "target_text": "Vietcombank.",
+    "source_pdf": "vcb_pdf_28_dieu_kien_dieu_khoan_the_ghi_no.pdf (p.4)",
+    "json_ref": "real_page_44_deep_item.json"
+  },
+  "real_page_11_h1.png": {
+    "expected_level": "title",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề tài liệu / Slide bìa lớn nhất (Font to, căn giữa hoặc dòng ngắn nổi bật)",
+    "target_text": "Nội dung",
+    "source_pdf": "vcb_slide_04_ibanking_tong_quan_va_dieu_kien_su_dung.pdf (p.2)",
+    "json_ref": "real_page_11_h1.json"
+  },
+  "real_page_13_h1.png": {
+    "expected_level": "title",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề tài liệu / Slide bìa lớn nhất (Font to, căn giữa hoặc dòng ngắn nổi bật)",
+    "target_text": "Nội dung",
+    "source_pdf": "vcb_slide_48_quy_che_dieu_kien_phap_ly_giao_dich_dien_tu.pdf (p.2)",
+    "json_ref": "real_page_13_h1.json"
+  },
+  "real_page_28_h3.png": {
+    "expected_level": "sub_item",
+    "expected_heading": false,
+    "expected_indent": 1,
+    "visual_role": "Khoản / List item cấp 1 thụt lề (Left indent 15px - 40px)",
+    "target_text": "BÁN NGOẠI TỆ ............................................................................................................................................................... 79",
+    "source_pdf": "vcb_slide_26_hdsd_he_thong_giao_dien_tong_quan.pdf (p.3)",
+    "json_ref": "real_page_28_h3.json"
+  },
+  "real_page_42_deep_item.png": {
+    "expected_level": "h1",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề phân đoạn lớn / Chương / Mục lục / Slide Title (Heading 1)",
+    "target_text": "11. Đảm bảo có đủ tiền trên TK để thực hiện các lệnh thanh toán đã lập. Trường hợp có thỏa thuận thấu chi với",
+    "source_pdf": "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen.pdf (p.3)",
+    "json_ref": "real_page_42_deep_item.json"
+  },
+  "real_page_67_header_footer.png": {
+    "expected_level": "sub_item",
+    "expected_heading": false,
+    "expected_indent": 1,
+    "visual_role": "Khoản / List item cấp 1 thụt lề (Left indent 15px - 40px)",
+    "target_text": "BÁN NGOẠI TỆ ............................................................................................................................................................... 79",
+    "source_pdf": "vcb_slide_26_hdsd_he_thong_giao_dien_tong_quan.pdf (p.3)",
+    "json_ref": "real_page_67_header_footer.json"
+  },
+  "real_page_03_title.png": {
+    "expected_level": "h1",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề phân đoạn lớn / Chương / Mục lục / Slide Title (Heading 1)",
+    "target_text": "A. CÁC QUY ĐỊNH CHUNG",
+    "source_pdf": "vcb_pdf_28_dieu_kien_dieu_khoan_the_ghi_no.pdf (p.1)",
+    "json_ref": "real_page_03_title.json"
+  },
+  "real_page_12_h1.png": {
+    "expected_level": "deep_item",
+    "expected_heading": false,
+    "expected_indent": 2,
+    "visual_role": "Điểm / Nested list item cấp 2 thụt lề sâu (Left indent >= 40px)",
+    "target_text": "THÔNG TIN TÀI KHOẢN .............................................................................................................................................. 10",
+    "source_pdf": "vcb_slide_26_hdsd_he_thong_giao_dien_tong_quan.pdf (p.2)",
+    "json_ref": "real_page_12_h1.json"
+  },
+  "real_page_15_h1.png": {
+    "expected_level": "deep_item",
+    "expected_heading": false,
+    "expected_indent": 2,
+    "visual_role": "Điểm / Nested list item cấp 2 thụt lề sâu (Left indent >= 40px)",
+    "target_text": "Mã số thuê",
+    "source_pdf": "vcb_slide_50_quy_che_quy_trinh_tra_soat_khieu_nai.pdf (p.2)",
+    "json_ref": "real_page_15_h1.json"
+  },
+  "real_page_23_h2.png": {
+    "expected_level": "h3",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề tiểu mục (Heading 3 / Dòng ngắt đoạn không có dấu câu kết)",
+    "target_text": "In chứng từ giao dịch",
+    "source_pdf": "vcb_slide_50_quy_che_quy_trinh_tra_soat_khieu_nai.pdf (p.3)",
+    "json_ref": "real_page_23_h2.json"
+  },
+  "real_page_31_h3.png": {
+    "expected_level": "deep_item",
+    "expected_heading": false,
+    "expected_indent": 2,
+    "visual_role": "Điểm / Nested list item cấp 2 thụt lề sâu (Left indent >= 40px)",
+    "target_text": "Đối với mã Kế toán trưởng và Chủ tài khoản",
+    "source_pdf": "vcb_slide_49_quy_che_an_toan_bao_mat_va_phong_ngua_gian_lan.pdf (p.4)",
+    "json_ref": "real_page_31_h3.json"
+  },
+  "real_page_40_sub_item.png": {
+    "expected_level": "h3",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề tiểu mục (Heading 3 / Dòng ngắt đoạn không có dấu câu kết)",
+    "target_text": "In chứng từ giao dịch",
+    "source_pdf": "vcb_slide_50_quy_che_quy_trinh_tra_soat_khieu_nai.pdf (p.3)",
+    "json_ref": "real_page_40_sub_item.json"
+  },
+  "real_page_02_title.png": {
+    "expected_level": "h2",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề mục (Điều / Mục / Heading 2 ngắn bám lề có ngắt dòng)",
+    "target_text": "Điều 1.",
+    "source_pdf": "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen.pdf (p.1)",
+    "json_ref": "real_page_02_title.json"
+  },
+  "real_page_25_h3.png": {
+    "expected_level": "h1",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề phân đoạn lớn / Chương / Mục lục / Slide Title (Heading 1)",
+    "target_text": "(Có hiệu lực từ ngày 22/01/2026)",
+    "source_pdf": "vcb_pdf_22_bieu_phi_the_tdqt_2026.pdf (p.1)",
+    "json_ref": "real_page_25_h3.json"
+  },
+  "real_page_26_h3.png": {
+    "expected_level": "h1",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề phân đoạn lớn / Chương / Mục lục / Slide Title (Heading 1)",
+    "target_text": "STT",
+    "source_pdf": "vcb_pdf_22_bieu_phi_the_tdqt_2026.pdf (p.2)",
+    "json_ref": "real_page_26_h3.json"
+  },
+  "real_page_59_header_footer.png": {
+    "expected_level": "sub_item",
+    "expected_heading": false,
+    "expected_indent": 1,
+    "visual_role": "Khoản / List item cấp 1 thụt lề (Left indent 15px - 40px)",
+    "target_text": "1 Phí phát hành (*)",
+    "source_pdf": "vcb_pdf_22_bieu_phi_the_tdqt_2026.pdf (p.1)",
+    "json_ref": "real_page_59_header_footer.json"
+  },
+  "real_page_60_header_footer.png": {
+    "expected_level": "h1",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề phân đoạn lớn / Chương / Mục lục / Slide Title (Heading 1)",
+    "target_text": "STT",
+    "source_pdf": "vcb_pdf_22_bieu_phi_the_tdqt_2026.pdf (p.2)",
+    "json_ref": "real_page_60_header_footer.json"
+  },
+  "real_page_22_h2.png": {
+    "expected_level": "h3",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề tiểu mục (Heading 3 / Dòng ngắt đoạn không có dấu câu kết)",
+    "target_text": "2. Thiết lập hạn mức chuyển khoản cho các mã Kế toán viên",
+    "source_pdf": "vcb_slide_49_quy_che_an_toan_bao_mat_va_phong_ngua_gian_lan.pdf (p.3)",
+    "json_ref": "real_page_22_h2.json"
+  },
+  "real_page_61_header_footer.png": {
+    "expected_level": "h2",
+    "expected_heading": true,
+    "expected_indent": 0,
+    "visual_role": "Tiêu đề mục (Điều / Mục / Heading 2 ngắn bám lề có ngắt dòng)",
+    "target_text": "11.1 Thẻ Vietcombank Viettravel Visa",
+    "source_pdf": "vcb_pdf_22_bieu_phi_the_tdqt_2026.pdf (p.3)",
+    "json_ref": "real_page_61_header_footer.json"
+  }
+}
