@@ -84,11 +84,10 @@ class TestCanonicalResolver(unittest.TestCase):
                 detail = f"got='{cleaned}', exp='{exp_text}'"
 
             elif test_type in ["doc_identifier", "document_identifier", "legal_ref"]:
-                import re
                 doc_id = extract_document_identifier("", text)
                 exp_id = label_info["expected_identifier"]
-                clean_doc = re.sub(r"\bsố\s+", "", doc_id, flags=re.IGNORECASE).strip().lower()
-                clean_exp = re.sub(r"\bsố\s+", "", exp_id, flags=re.IGNORECASE).strip().lower()
+                clean_doc = doc_id.lower().replace("số ", "").strip()
+                clean_exp = exp_id.lower().replace("số ", "").strip()
                 is_success = (clean_exp in clean_doc) or (clean_doc in clean_exp)
                 detail = f"got='{doc_id}', exp='{exp_id}'"
 

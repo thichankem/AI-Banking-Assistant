@@ -3,7 +3,7 @@ Script Kiểm thử Toàn diện Chunking trên toàn bộ Dataset (AI Banking A
 Thực hiện:
 1. Đọc và phân đoạn 100% tất cả 50 tệp Markdown (.md) -> Layout-Aware Headers, AST, Tables, Bullets
 2. Đọc và phân đoạn 100% tất cả 10 tệp Excel (.xlsx) đa sheet -> Multi-sheet Linearized table rows
-3. Đọc và phân đoạn 100% tất cả 50 tệp PDF (bao gồm cả PDF kỹ thuật số và PDF scan qua RapidOCR)
+3. Đọc và phân đoạn 100% tất cả 50 tệp PDF (bao gồm cả PDF kỹ thuật số và PDF scan qua Tesseract OCR v5)
 4. Phân tích định lượng thống kê: phân bố kích thước, loại chunk, độ phủ breadcrumb
 5. Lưu trữ và xuất kết quả toàn diện vào:
    - rag_banking/chunking/chunking_dataset/output_dataset/
@@ -169,7 +169,7 @@ def run_full_chunking_test(max_pages_per_large_pdf=3):
     print(f"    [Xong Excel] {len(excel_chunks)} chunks trong {time_excel:.2f}s ({category_stats['excel']['speed_chunks_per_sec']} chunks/s)")
 
     # 4. Xử lý 100% PDF files (Hỗ trợ cả Digital lẫn Scanned OCR)
-    print(f"\n -> [3/3] Đang chunking toàn bộ 50 tệp PDF (Digital & RapidOCR Scan, tối đa {max_pages_per_large_pdf} trang/báo cáo lớn)...")
+    print(f"\n -> [3/3] Đang chunking toàn bộ 50 tệp PDF (Digital & Tesseract OCR v5 Scan, tối đa {max_pages_per_large_pdf} trang/báo cáo lớn)...")
     start_pdf = time.time()
     pdf_chunks = []
     for idx, f in enumerate(pdf_files, start=1):
@@ -337,8 +337,8 @@ def run_full_chunking_test(max_pages_per_large_pdf=3):
 
     with open(output_dir / "samples_preview" / "preview_pdf_ocr_scan_chunks.md", "w", encoding="utf-8") as f:
         f.write(_build_preview_markdown(
-            "MẪU CHUNKING TỪ ĐỊNH DẠNG PDF SCAN (RAPIDOCR ONNX ENGINE)",
-            "Minh họa khả năng tự động nhận diện trang scan/ảnh và kích hoạt RapidOCR tiếng Việt offline để đọc văn bản và số liệu.",
+            "MẪU CHUNKING TỪ ĐỊNH DẠNG PDF SCAN (TESSERACT OCR V5 ENGINE)",
+            "Minh họa khả năng tự động nhận diện trang scan/ảnh và kích hoạt Tesseract OCR v5 tiếng Việt offline để đọc văn bản và số liệu.",
             sample_pdf_ocr
         ))
     print(f"  [4/8] Đã tạo 4 tệp Markdown trực quan kiểm tra mẫu trong samples_preview/")
@@ -391,7 +391,7 @@ output_dataset/
     ├── preview_markdown_chunks.md       # Mẫu trích xuất Markdown (Breadcrumbs & Tables)
     ├── preview_excel_chunks.md          # Mẫu trích xuất Excel (Linearized Rows)
     ├── preview_pdf_digital_chunks.md    # Mẫu trích xuất PDF văn bản số
-    └── preview_pdf_ocr_scan_chunks.md   # Mẫu trích xuất PDF scan qua RapidOCR
+    └── preview_pdf_ocr_scan_chunks.md   # Mẫu trích xuất PDF scan qua Tesseract OCR v5
 ```
 
 ---
@@ -403,7 +403,7 @@ output_dataset/
 | `text` | {type_counts.get('text', 0)} | {(type_counts.get('text', 0)/total_chunks)*100:.1f}% | Đoạn văn bản thông thường gắn tiền tố Header Breadcrumb |
 | `pdf_text` | {type_counts.get('pdf_text', 0)} | {(type_counts.get('pdf_text', 0)/total_chunks)*100:.1f}% | Trang PDF kỹ thuật số trích xuất qua pypdf |
 | `excel_table` | {type_counts.get('excel_table', 0)} | {(type_counts.get('excel_table', 0)/total_chunks)*100:.1f}% | Bảng biểu Excel làm phẳng kèm ngữ cảnh tên cột |
-| `pdf_ocr_scan` | {type_counts.get('pdf_ocr_scan', 0)} | {(type_counts.get('pdf_ocr_scan', 0)/total_chunks)*100:.1f}% | Trang PDF scan/ảnh nhận diện qua mô hình RapidOCR |
+| `pdf_ocr_scan` | {type_counts.get('pdf_ocr_scan', 0)} | {(type_counts.get('pdf_ocr_scan', 0)/total_chunks)*100:.1f}% | Trang PDF scan/ảnh nhận diện qua mô hình Tesseract OCR v5 |
 | `table_item` | {type_counts.get('table_item', 0)} | {(type_counts.get('table_item', 0)/total_chunks)*100:.1f}% | Các mục thuộc tính có cấu trúc (Structured bullet table) |
 | `table` | {type_counts.get('table', 0)} | {(type_counts.get('table', 0)/total_chunks)*100:.1f}% | Bảng biểu Markdown trích xuất nguyên khối |
 

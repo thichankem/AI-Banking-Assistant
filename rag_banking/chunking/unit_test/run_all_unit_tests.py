@@ -6,9 +6,8 @@ Bao gồm:
 - Node 02: OCR Layout Hierarchy Predictor (unit_test_ocr_layout_predictor) - 66 mẫu Bố cục hình học
 - Node 03: Scan Structure Reconstructor (unit_test_scan_structure_reconstructor) - 55 tài liệu Scan DLA
 - Node 04: DOCX Layout-Aware Chunker (unit_test_docx_chunker) - 60 tài liệu DOCX
-- Node 05: Excel Table Layout Chunker (unit_test_excel_chunker) - 51 tài liệu Excel
-- Node 06: Canonical Entity & Document Identifier Resolver (unit_test_canonical_resolver) - 52 mẫu NLP
-- Node 07: Multi-Format Layout-Aware Router (unit_test_layout_aware_router) - 55 tài liệu đa định dạng
+- Node 05: Canonical Entity & Document Identifier Resolver (unit_test_canonical_resolver) - 52 mẫu NLP
+- Node 06: Multi-Format Layout-Aware Router (unit_test_layout_aware_router) - 30 tài liệu DOCX & PDF
 
 Xác thực:
 - 100% mẫu kiểm thử đạt kết quả kỳ vọng.
@@ -36,15 +35,14 @@ for p in [CURRENT_DIR] + list(CURRENT_DIR.parents):
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# Danh sách 7 module test theo thứ tự luồng xử lý
+# Danh sách 6 module test theo thứ tự luồng xử lý (DOCX & PDF Core)
 TEST_MODULES = [
     ("Node 01", "Scan Detector", "unit_test_scan_detector", "test_scan_detection"),
     ("Node 02", "OCR Layout Hierarchy Predictor", "unit_test_ocr_layout_predictor", "test_ocr_layout_predictor"),
     ("Node 03", "Scan Structure Reconstructor", "unit_test_scan_structure_reconstructor", "test_scan_structure_reconstructor"),
     ("Node 04", "DOCX Layout-Aware Chunker", "unit_test_docx_chunker", "test_docx_chunker"),
-    ("Node 05", "Excel Table Layout Chunker", "unit_test_excel_chunker", "test_excel_chunker"),
-    ("Node 06", "Canonical Entity & Doc Identifier", "unit_test_canonical_resolver", "test_canonical_resolver"),
-    ("Node 07", "Multi-Format Router & Pipeline", "unit_test_layout_aware_router", "test_layout_aware_router"),
+    ("Node 05", "Canonical Entity & Doc Identifier", "unit_test_canonical_resolver", "test_canonical_resolver"),
+    ("Node 06", "Layout-Aware Router & Pipeline", "unit_test_layout_aware_router", "test_layout_aware_router"),
 ]
 
 

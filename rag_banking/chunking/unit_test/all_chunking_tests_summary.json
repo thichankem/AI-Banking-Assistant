@@ -1,8 +1,8 @@
 {
-  "timestamp": "2026-10-13T13:29:43.201033",
-  "total_nodes": 7,
-  "total_samples": 439,
-  "total_passed": 439,
+  "timestamp": "2026-10-14T00:25:57.006830",
+  "total_nodes": 6,
+  "total_samples": 363,
+  "total_passed": 363,
   "total_failed": 0,
   "overall_accuracy_percent": 100.0,
   "overall_status": "PASS",
@@ -28,7 +28,7 @@
       "passed": 100,
       "failed": 0,
       "accuracy_percent": 100.0,
-      "duration_seconds": 15.0
+      "duration_seconds": 9.07
     },
     {
       "node_id": "Node 02",
@@ -39,7 +39,7 @@
       "passed": 66,
       "failed": 0,
       "accuracy_percent": 100.0,
-      "duration_seconds": 0.08
+      "duration_seconds": 0.04
     },
     {
       "node_id": "Node 03",
@@ -50,7 +50,7 @@
       "passed": 55,
       "failed": 0,
       "accuracy_percent": 100.0,
-      "duration_seconds": 0.42
+      "duration_seconds": 0.24
     },
     {
       "node_id": "Node 04",
@@ -61,21 +61,10 @@
       "passed": 60,
       "failed": 0,
       "accuracy_percent": 100.0,
-      "duration_seconds": 5.24
+      "duration_seconds": 2.93
     },
     {
       "node_id": "Node 05",
-      "node_name": "Excel Table Layout Chunker",
-      "folder": "unit_test_excel_chunker",
-      "status": "PASS",
-      "total_samples": 51,
-      "passed": 51,
-      "failed": 0,
-      "accuracy_percent": 100.0,
-      "duration_seconds": 0.8
-    },
-    {
-      "node_id": "Node 06",
       "node_name": "Canonical Entity & Doc Identifier",
       "folder": "unit_test_canonical_resolver",
       "status": "PASS",
@@ -86,15 +75,15 @@
       "duration_seconds": 0.01
     },
     {
-      "node_id": "Node 07",
-      "node_name": "Multi-Format Router & Pipeline",
+      "node_id": "Node 06",
+      "node_name": "Layout-Aware Router & Pipeline",
       "folder": "unit_test_layout_aware_router",
       "status": "PASS",
-      "total_samples": 55,
-      "passed": 55,
+      "total_samples": 30,
+      "passed": 30,
       "failed": 0,
       "accuracy_percent": 100.0,
-      "duration_seconds": 31.53
+      "duration_seconds": 12.11
     }
   ]
 }

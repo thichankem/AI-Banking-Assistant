@@ -2,7 +2,7 @@
 Kịch bản Thực thi Chunking Toàn diện Dataset (AI Banking Assistant)
 Áp dụng thuật toán DLA (Document Layout Analysis) cho cả 3 luồng:
 1. DOCX: 50 tệp (.docx) -> Thứ bậc Heading H1-H4, Tables, Bullets, Lists, Paragraphs
-2. PDF:  50 tệp (.pdf)  -> Văn bản số Digital + Tự động RapidOCR tiếng Việt cho bản scan
+2. PDF:  50 tệp (.pdf)  -> Văn bản số Digital + Tự động Tesseract OCR v5 tiếng Việt cho bản scan
 3. Excel: 10 tệp (.xlsx) -> Đa sheet, Header detection, Linearized Table Rows
 (Kèm 50 tệp Markdown .md)
 
@@ -152,7 +152,7 @@ def run_full_dataset_chunking(max_pages_per_pdf: int = 3):
 
     # 3. Xử lý Luồng 2: PDF (.pdf)
     if pdf_files:
-        print(f" -> [2/2] Đang chunking {len(pdf_files)} tệp PDF (Digital & RapidOCR Scan, tối đa {max_pages_per_pdf} trang/file)...")
+        print(f" -> [2/2] Đang chunking {len(pdf_files)} tệp PDF (Digital & Tesseract OCR v5 Scan, tối đa {max_pages_per_pdf} trang/file)...")
         start_pdf = time.time()
         for idx, f in enumerate(pdf_files, start=1):
             try:
@@ -335,8 +335,8 @@ def run_full_dataset_chunking(max_pages_per_pdf: int = 3):
     if sample_pdf_ocr:
         with open(output_dir / "samples_preview" / "preview_pdf_ocr_scan_chunks.md", "w", encoding="utf-8") as f:
             f.write(_build_preview_markdown(
-                "MẪU CHUNKING TỪ ĐỊNH DẠNG PDF SCAN (RAPIDOCR ONNX ENGINE)",
-                "Minh họa tự động nhận diện trang scan/ảnh và kích hoạt RapidOCR tiếng Việt offline.",
+                "MẪU CHUNKING TỪ ĐỊNH DẠNG PDF SCAN (TESSERACT OCR V5 ENGINE)",
+                "Minh họa tự động nhận diện trang scan/ảnh và kích hoạt Tesseract OCR v5 tiếng Việt offline.",
                 sample_pdf_ocr
             ))
 

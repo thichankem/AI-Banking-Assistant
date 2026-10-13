@@ -106,7 +106,15 @@ class BankingRAGPipeline:
         self.indexed_chunks = []
         print("[Hệ thống] Toàn bộ 5 phân hệ đã sẵn sàng hoạt động!\n")
 
-    def ingest_documents(self, dataset_dir=None, max_files=None, extensions=None, use_dla=True):
+    def ingest_documents(
+        self,
+        dataset_dir=None,
+        max_files=None,
+        extensions=None,
+        use_dla=True,
+        filenames=None,
+        max_pdf_pages=None
+    ):
         """
         Pha Ingestion & Dual-Indexing:
         1. Phân đoạn bảo toàn theo dạng Breadcrumbs / DLA (hỗ trợ .docx, .pdf, .xlsx, .md)
@@ -124,9 +132,27 @@ class BankingRAGPipeline:
 
         # Bước A: Phân đoạn (DLA hoặc Breadcrumbs)
         t0 = time.time()
-        if use_dla:
+        if filenames:
+            print(f" -> [Ingestion] Đang phân đoạn danh sách chỉ định {len(filenames)} tệp...")
+            chunks = []
+            for fname in filenames:
+                fpaths = list(target_dir.rglob(fname)) if not (target_dir / fname).exists() else [target_dir / fname]
+                if fpaths:
+                    fpath = fpaths[0]
+                    if use_dla:
+                        c_list = self.dla_chunker.chunk_file(fpath, max_pdf_pages=max_pdf_pages)
+                    else:
+                        text = fpath.read_text(encoding="utf-8", errors="ignore")
+                        c_list = self.chunker.chunk_text(text, source_name=fpath.name)
+                    chunks.extend(c_list)
+        elif use_dla:
             print(" -> [Ingestion] Đang phân đoạn theo DLA Layout-Aware (DOCX, PDF, Excel, MD)...")
-            chunks = self.dla_chunker.chunk_directory(target_dir, extensions=target_exts, max_files=max_files)
+            chunks = self.dla_chunker.chunk_directory(
+                target_dir,
+                extensions=target_exts,
+                max_files=max_files,
+                max_pdf_pages=max_pdf_pages
+            )
         else:
             print(" -> [Ingestion] Đang phân đoạn tài liệu bảo toàn dạng Breadcrumbs & Pháp lý...")
             chunks = self.chunker.chunk_directory(target_dir, max_files=max_files, extensions=target_exts)
@@ -257,6 +283,7 @@ class BankingRAGPipeline:
             "step1_parsed_query": parsed_query,
             "step2_candidates_top5": candidates_top5,
             "step3_top3_chunks": top3_chunks,
+            "retrieved_chunks": candidates_top5,
             "step4_synthesized_context": synthesized_context,
             "step5_serving_result": serving_result,
             "answer": serving_result["answer"],
@@ -272,7 +299,7 @@ class BankingRAGPipeline:
             }
         }
 
-    def ask(self, query: str) -> Dict[str, Any]:
+    def ask(self, query: str, top_k: Optional[int] = None) -> Dict[str, Any]:
         """Giao diện gọi nhanh cho người dùng"""
         return self.run_pipeline(query)
 

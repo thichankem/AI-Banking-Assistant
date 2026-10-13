@@ -5,8 +5,8 @@ và Breadcrumbs Chunking phục vụ RAG Banking.
 
 Cấu trúc phân hệ (3 sub-folders):
 1. docx_chunker/   : Phân đoạn tệp Word (.docx) theo AST heading, table atomicity, header 2 tầng
-2. pdf_chunker/    : Phân đoạn tệp PDF số & scan RapidOCR ONNX, phân cấp hình học OCR (0% Regex)
-3. unified_chunk/  : Bộ điều phối LayoutAwareChunker, canonical_resolver, structure_chunker, excel_chunker
+2. pdf_chunker/    : Phân đoạn tệp PDF số & scan Tesseract OCR v5, phân cấp hình học OCR (0% Regex)
+3. unified_chunk/  : Bộ điều phối LayoutAwareChunker, canonical_resolver, structure_chunker (chuyên biệt DOCX & PDF)
 
 Cùng bộ điều phối Pipeline cấp cao:
 - pipeline.py      : ChunkingPipeline & run_chunking_pipeline
@@ -29,7 +29,6 @@ from .pdf_chunker import (
 from .unified_chunk import (
     LayoutAwareChunker,
     DLAChunker,
-    ExcelChunker,
     BreadcrumbsChunker,
     DocumentStructureChunker,
     count_words,
@@ -57,7 +56,6 @@ _LEGACY_MODULE_MAP = {
     "breadcrumbs_chunker": ".unified_chunk.breadcrumbs_chunker",
     "canonical_resolver": ".unified_chunk.canonical_resolver",
     "structure_chunker": ".unified_chunk.structure_chunker",
-    "excel_chunker": ".unified_chunk.excel_chunker",
 }
 
 for _sub_name, _sub_rel_path in _LEGACY_MODULE_MAP.items():
@@ -85,7 +83,6 @@ __all__ = [
     "DLAChunker",
     "BreadcrumbsChunker",
     "DocumentStructureChunker",
-    "ExcelChunker",
     # DOCX Subsystem
     "DOCXChunker",
     # PDF Subsystem

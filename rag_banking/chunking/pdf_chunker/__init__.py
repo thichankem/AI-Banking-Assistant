@@ -1,6 +1,6 @@
 """
 PDF Chunker Module
-Chuyên trách phân đoạn tệp PDF số (Digital) và scan mộc đỏ qua RapidOCR ONNX & Phân cấp Hình học (0% Regex).
+Chuyên trách phân đoạn tệp PDF số (Digital) và scan mộc đỏ qua Tesseract OCR v5 & Phân cấp Hình học (0% Regex).
 """
 
 from .pdf_chunker import PDFChunker
@@ -13,10 +13,12 @@ from .scan_detector import (
     detect_pdf_file_scan_status,
     ScanDetector
 )
+from .vision_table_extractor import LocalVisionTableExtractor
 
 __all__ = [
     "PDFChunker",
     "OCRExtractor",
+    "LocalVisionTableExtractor",
     "OCRLayoutHierarchyPredictor",
     "LayoutHierarchyLevel",
     "ScanStructureReconstructor",

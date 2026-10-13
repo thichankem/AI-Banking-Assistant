@@ -19,7 +19,7 @@ rag_banking/
 │   ├── __init__.py
 │   ├── layout_aware_chunker.py   # Document Layout-Aware Chunking điều phối chung (.md, .pdf, .xlsx)
 │   ├── pdf_chunker.py            # PDF Chunker: Phân biệt PDF số & PDF scan ảnh, bảo toàn cấu trúc trang
-│   ├── ocr_extractor.py          # RapidOCR (ONNX CPU): Nhận diện chữ tiếng Việt từ PDF scan 100% offline
+│   ├── ocr_extractor.py          # Tesseract OCR v5: Nhận diện chữ tiếng Việt từ PDF scan 100% offline
 │   └── excel_chunker.py          # Excel Chunker: Đọc đa sheet .xlsx, làm phẳng từng dòng dữ liệu (Linearized)
 │
 ├── embeddings/                   # [2] Mã hóa Vector Ngữ nghĩa (Dense Vector)
@@ -57,7 +57,7 @@ rag_banking/
   * **Table Extraction**: Phát hiện **Markdown pipe table** (`| Col 1 | Col 2 |`) và chuyển hóa thành cấu trúc bảng tự chứa đầy đủ tên cột cho từng dòng dữ liệu (`Linearized Table Rows`).
   * **Structured Key-Value**: Giữ nguyên vẹn block thông tin tài chính (lãi suất, hạn mức, phí) thành 1 `table_item` chunk riêng biệt.
 * **Scanned PDF with Offline OCR**:
-  * Tự động kiểm tra mật độ ký tự số trên trang PDF. Nếu phát hiện trang scan (dưới 40 ký tự), tự động kích hoạt `RapidOCR` trên nền `ONNX Runtime` và `pypdfium2` để trích xuất chữ và con số chính xác 98%+ từ báo cáo scan và văn bản có dấu mộc đỏ.
+  * Tự động kiểm tra mật độ ký tự số trên trang PDF. Nếu phát hiện trang scan (dưới 40 ký tự), tự động kích hoạt `Tesseract OCR v5` kết hợp xử lý ảnh OpenCV để trích xuất chữ và con số chính xác 98%+ từ báo cáo scan và văn bản có dấu mộc đỏ.
   * Hoạt động 100% offline nội bộ, không phụ thuộc cloud API.
 * **Excel Multi-Sheet Table Linearization**:
   * Đọc toàn bộ các sheet từ file `.xlsx` qua `openpyxl`.

@@ -27,7 +27,6 @@ from rag_banking.config import Config
 from rag_banking.chunking import (
     DOCXChunker,
     PDFChunker,
-    ExcelChunker,
     LayoutAwareChunker,
     DLAChunker
 )
@@ -40,7 +39,6 @@ class TestDLAChunking(unittest.TestCase):
         cls.dataset_dir = cls.config.CHUNKING_DATASET_DIR
         cls.docx_dir = cls.dataset_dir / "docx"
         cls.pdf_dir = cls.dataset_dir / "pdf"
-        cls.excel_dir = cls.dataset_dir / "excel"
 
     def test_01_docx_chunking(self):
         """Kiểm tra DOCXChunker trên tệp Word thực tế của Vietcombank."""
@@ -66,25 +64,12 @@ class TestDLAChunking(unittest.TestCase):
         self.assertGreater(first_chunk["word_count"], 0)
         print(f"\n[PASS] DOCX Chunker trích xuất thành công {len(chunks)} chunks từ {sample_docx.name}")
 
-    def test_02_excel_chunking(self):
-        """Kiểm tra ExcelChunker trên tệp ma trận Excel thực tế."""
-        excel_files = list(self.excel_dir.glob("*.xlsx"))
-        self.assertTrue(len(excel_files) > 0, "Không tìm thấy tệp .xlsx trong dataset!")
-
-        sample_excel = excel_files[0]
-        chunker = ExcelChunker(rows_per_chunk=3)
-        chunks = chunker.chunk_excel(sample_excel)
-
-        self.assertGreater(len(chunks), 0, "ExcelChunker không sinh ra chunk nào!")
-
-        first_chunk = chunks[0]
-        self.assertEqual(first_chunk["source"], sample_excel.name)
-        self.assertEqual(first_chunk["chunk_type"], "excel_table")
-        for forbidden in ["ref", "legal_ref", "raw_content", "char_length", "format"]:
-            self.assertNotIn(forbidden, first_chunk, f"Excel chunk không được chứa trường thừa: {forbidden}")
-        self.assertIn("Sheet:", first_chunk["breadcrumb"])
-        self.assertIn("Cột dữ liệu:", first_chunk["content"])
-        print(f"\n[PASS] Excel Chunker trích xuất thành công {len(chunks)} chunks từ {sample_excel.name}")
+    def test_02_format_guardrail(self):
+        """Kiểm tra cơ chế bảo vệ định dạng: Chỉ hỗ trợ DOCX và PDF."""
+        dla = DLAChunker()
+        unsupported_res = dla.chunk_file("test_matrix.xlsx")
+        self.assertEqual(unsupported_res, [], "LayoutAwareChunker phải từ chối các định dạng không phải docx/pdf!")
+        print("\n[PASS] Format Guardrail xác thực thành công: Chỉ hỗ trợ DOCX và PDF.")
 
     def test_03_pdf_chunking(self):
         """Kiểm tra PDFChunker trên tệp PDF thực tế (Digital hoặc OCR Scan)."""
@@ -106,7 +91,7 @@ class TestDLAChunking(unittest.TestCase):
         print(f"\n[PASS] PDF Chunker trích xuất thành công {len(chunks)} chunks từ {sample_pdf.name}")
 
     def test_04_unified_dla_chunker(self):
-        """Kiểm tra LayoutAwareChunker (DLAChunker) tự động định tuyến theo extension."""
+        """Kiểm tra LayoutAwareChunker (DLAChunker) tự động định tuyến theo extension (.docx, .pdf)."""
         dla = DLAChunker(max_chunk_size=800, chunk_overlap=100)
 
         # 1. Test định tuyến .docx
@@ -116,21 +101,14 @@ class TestDLAChunking(unittest.TestCase):
             self.assertGreater(len(c_docx), 0)
             self.assertEqual(c_docx[0]["source"], docx_files[0].name)
 
-        # 2. Test định tuyến .xlsx
-        excel_files = list(self.excel_dir.glob("*.xlsx"))
-        if excel_files:
-            c_excel = dla.chunk_file(excel_files[0])
-            self.assertGreater(len(c_excel), 0)
-            self.assertEqual(c_excel[0]["source"], excel_files[0].name)
-
-        # 3. Test định tuyến .pdf
+        # 2. Test định tuyến .pdf
         pdf_files = list(self.pdf_dir.glob("*.pdf"))
         if pdf_files:
             c_pdf = dla.chunk_file(pdf_files[0], max_pdf_pages=2)
             self.assertGreater(len(c_pdf), 0)
             self.assertEqual(c_pdf[0]["source"], pdf_files[0].name)
 
-        print("\n[PASS] Unified DLAChunker tự động định tuyến chính xác cả 3 định dạng!")
+        print("\n[PASS] Unified DLAChunker tự động định tuyến chính xác 2 định dạng cốt lõi: DOCX & PDF!")
 
     def test_05_document_structure_chunker_strategies(self):
         """Kiểm tra DocumentStructureChunker với 3 chiến lược: Structure, Hierarchical, Section-Length-Aware."""

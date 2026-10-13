@@ -12,8 +12,6 @@ Các thành phần cốt lõi:
 
 from __future__ import annotations
 
-import re
-from typing import Dict, Any, List, Optional, Tuple, Set
 import numpy as np
 
 from .ocr_layout_predictor import (
@@ -25,11 +23,6 @@ try:
     from ..unified_chunk.canonical_resolver import strip_vietnamese_accents
 except (ImportError, ValueError):
     from rag_banking.chunking.unified_chunk.canonical_resolver import strip_vietnamese_accents
-
-# Biểu thức chính quy hỗ trợ tương thích ngược
-KHOAN_REGEX: re.Pattern = re.compile(r"(?:^|\n)\s*(\d{1,2})\.\s+[A-ZÀ-Ỹ0-9]")
-DIEM_REGEX: re.Pattern = re.compile(r"(?:^|\n)\s*([a-zđ])\)\s+[A-ZÀ-Ỹ0-9a-zà-ỹ]")
-
 
 def fix_num(raw_str: str) -> int:
     """Khắc phục các lỗi OCR thường gặp trong ký số (O, o, l, I -> 0, 1)."""
@@ -59,11 +52,11 @@ class BreadcrumbTracker:
 
     def __init__(self, doc_title: str):
         self.doc_title = doc_title
-        self.stack: Dict[str, str] = {}
-        self.scores: Dict[str, float] = {}
-        self.last_kind: Optional[str] = None
+        self.stack: dict[str, str] = {}
+        self.scores: dict[str, float] = {}
+        self.last_kind: str | None = None
         self.source: str = "page_fallback"
-        self.current_caption: Optional[str] = None
+        self.current_caption: str | None = None
         self.last_dieu: int = 0
 
     def _normalize_kind(self, kind: str) -> str:
@@ -75,7 +68,7 @@ class BreadcrumbTracker:
         self,
         kind: str,
         label: str,
-        number: Optional[int] = None,
+        number: int | None = None,
         score: float = 1.0,
         source: str = "ocr_geometry_prediction"
     ) -> None:
@@ -107,7 +100,7 @@ class BreadcrumbTracker:
         self.source = "page_fallback"
         self.current_caption = None
 
-    def path(self, page_num: int) -> Tuple[str, str, float]:
+    def path(self, page_num: int) -> tuple[str, str, float]:
         """
         Trả về đường dẫn breadcrumb, nguồn trích xuất và điểm tin cậy:
         Returns:
@@ -145,10 +138,10 @@ class TOCVerifier:
 
     def __init__(self):
         self.toc_found: bool = False
-        self.expected_dieus: Dict[int, str] = {}
-        self.toc_pages: Set[int] = set()
+        self.expected_dieus: dict[int, str] = {}
+        self.toc_pages: set[int] = set()
 
-    def parse_toc_page(self, lines: List[Dict[str, Any]], page_idx: int = 1) -> bool:
+    def parse_toc_page(self, lines: list[dict], page_idx: int = 1) -> bool:
         """Nhận diện trang mục lục và thu thập outline tiêu đề (page_idx 1-indexed)."""
         if not lines:
             return False
@@ -173,7 +166,7 @@ class TOCVerifier:
 
         return self.toc_found
 
-    def verify_dieu(self, dieu_num: int, ocr_title: str) -> Tuple[bool, str, float]:
+    def verify_dieu(self, dieu_num: int, ocr_title: str) -> tuple[bool, str, float]:
         """Đối chiếu tên tiêu đề với mục lục."""
         if not self.toc_found or dieu_num not in self.expected_dieus:
             return False, ocr_title, 0.0
@@ -206,14 +199,14 @@ class ScanStructureReconstructor:
 
     def filter_header_footer_lines(
         self,
-        pages_lines: List[List[Dict[str, Any]]]
-    ) -> List[List[Dict[str, Any]]]:
+        pages_lines: list[list[dict]]
+    ) -> list[list[dict]]:
         """
         Loại bỏ Header/Footer bằng vị trí tọa độ vùng biên 8% trên/dưới
         và các dòng lặp lại tần suất cao qua các trang.
         """
         total_pages = len(pages_lines)
-        text_page_counts: Dict[str, int] = {}
+        text_page_counts: dict[str, int] = {}
 
         for page_lines in pages_lines:
             seen_on_this_page = set()
@@ -223,9 +216,9 @@ class ScanStructureReconstructor:
                     text_page_counts[norm] = text_page_counts.get(norm, 0) + 1
                     seen_on_this_page.add(norm)
 
-        cleaned_pages: List[List[Dict[str, Any]]] = []
+        cleaned_pages: list[list[dict]] = []
         for page_lines in pages_lines:
-            page_clean: List[Dict[str, Any]] = []
+            page_clean: list[dict] = []
             for l in page_lines:
                 page_h = l.get("page_height", 1000.0)
                 y_min = l.get("y_min", 0.0)
@@ -248,11 +241,11 @@ class ScanStructureReconstructor:
 
     def detect_heading(
         self,
-        line: Dict[str, Any],
+        line: dict,
         median_h: float,
         page_w: float,
-        next_line: Optional[Dict[str, Any]] = None
-    ) -> Optional[Dict[str, Any]]:
+        next_line: dict | None = None
+    ) -> dict | None:
         """
         Dự đoán Heading THUẦN TÚY BẰNG BỐ CỤC HÌNH HỌC OCR (0% Regex):
         Sử dụng OCRLayoutHierarchyPredictor tính toán font size, căn giữa, khoảng cách đứng.
@@ -315,12 +308,12 @@ class ScanStructureReconstructor:
 
     def _build_scan_chunk(
         self,
-        buffer_lines: List[Dict[str, Any]],
+        buffer_lines: list[dict],
         source_name: str,
         chunk_idx: int,
         page_start: int,
         page_end: int
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict | None:
         """Đóng gói các dòng văn bản đệm thành đối tượng Chunk hoàn chỉnh kèm metadata hình học."""
         if not buffer_lines:
             return None
@@ -364,11 +357,11 @@ class ScanStructureReconstructor:
 
     def reconstruct_document_chunks(
         self,
-        pages_lines: List[List[Dict[str, Any]]],
+        pages_lines: list[list[dict]],
         source_name: str,
         max_chunk_size: int = 800,
         min_section_size: int = 120
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict]:
         """
         Quy trình chuẩn hóa và phân đoạn toàn bộ tài liệu scan bằng OCR Layout Analysis:
         1. Parse Mục lục TOC ở 3 trang đầu (1-indexed).
@@ -387,10 +380,10 @@ class ScanStructureReconstructor:
         # 2. Lọc Header/Footer
         cleaned_pages = self.filter_header_footer_lines(pages_lines)
 
-        chunks: List[Dict[str, Any]] = []
+        chunks: list[dict] = []
         chunk_counter = 0
 
-        buffer_lines: List[Dict[str, Any]] = []
+        buffer_lines: list[dict] = []
         buffer_page_start = 1
         buffer_page_end = 1
 
@@ -475,5 +468,19 @@ class ScanStructureReconstructor:
             )
             if chunk_obj:
                 chunks.append(chunk_obj)
+
+        # Fallback an toàn: Nếu tài liệu toàn tiêu đề / slide bìa không có dòng body
+        if not chunks:
+            all_lines = [l for page in cleaned_pages for l in page if l.get("text", "").strip()]
+            if all_lines:
+                chunk_obj = self._build_scan_chunk(
+                    buffer_lines=all_lines,
+                    source_name=source_name,
+                    chunk_idx=0,
+                    page_start=1,
+                    page_end=max(len(cleaned_pages), 1)
+                )
+                if chunk_obj:
+                    chunks.append(chunk_obj)
 
         return chunks

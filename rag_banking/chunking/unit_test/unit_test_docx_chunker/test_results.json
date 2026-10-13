@@ -1,7 +1,7 @@
 {
   "node_id": "Node 04",
   "node_name": "DOCX Layout-Aware Chunker",
-  "timestamp": "2026-10-13T13:29:10.794187",
+  "timestamp": "2026-10-14T00:25:44.850917",
   "total_samples": 60,
   "passed": 60,
   "failed": 0,
@@ -177,7 +177,7 @@
     },
     {
       "sample": "vcb_md_02__phap_ly__the_le_chi_tiet_chuong_trinh_vcb_loyalty.docx",
-      "chunks_count": 61,
+      "chunks_count": 58,
       "expected_min_chunks": 3,
       "has_table": false,
       "table_chunks_count": 0,
@@ -194,7 +194,7 @@
     },
     {
       "sample": "vcb_md_03__phap_ly__dieu_kien_dieu_khoan_mo_tai_khoan_truc_tuyen_ekyc.docx",
-      "chunks_count": 61,
+      "chunks_count": 63,
       "expected_min_chunks": 3,
       "has_table": false,
       "table_chunks_count": 0,
@@ -211,7 +211,7 @@
     },
     {
       "sample": "vcb_md_04__faq__ngan_hang_so_vcb_digibank_va_smart_otp.docx",
-      "chunks_count": 52,
+      "chunks_count": 55,
       "expected_min_chunks": 3,
       "has_table": false,
       "table_chunks_count": 0,
@@ -228,7 +228,7 @@
     },
     {
       "sample": "vcb_md_05__phap_ly__dieu_kien_dieu_khoan_mo_va_su_dung_tai_khoan_khcn.docx",
-      "chunks_count": 57,
+      "chunks_count": 60,
       "expected_min_chunks": 3,
       "has_table": false,
       "table_chunks_count": 0,
@@ -262,7 +262,7 @@
     },
     {
       "sample": "vcb_md_07__faq__vcb_loyalty_tich_diem_va_doi_qua.docx",
-      "chunks_count": 29,
+      "chunks_count": 30,
       "expected_min_chunks": 3,
       "has_table": false,
       "table_chunks_count": 0,
@@ -296,7 +296,7 @@
     },
     {
       "sample": "vcb_md_09__phap_ly__the_le_chuong_trinh_uu_dai_urbox_evergreen_visa.docx",
-      "chunks_count": 36,
+      "chunks_count": 37,
       "expected_min_chunks": 3,
       "has_table": false,
       "table_chunks_count": 0,
@@ -307,7 +307,7 @@
       "sample_breadcrumbs": [
         "THỂ LỆ CHƯƠNG TRÌNH ƯU ĐÃI ĐẶC QUYỀN ẨM THỰC VÀ MUA SẮM URBOX EVERGREEN DÀNH CHO CHỦ THẺ VIETCOMBANK VISA",
         "THỂ LỆ CHƯƠNG TRÌNH ƯU ĐÃI ĐẶC QUYỀN ẨM THỰC VÀ MUA SẮM URBOX EVERGREEN DÀNH CHO CHỦ THẺ VIETCOMBANK VISA",
-        "THỂ LỆ CHƯƠNG TRÌNH ƯU ĐÃI ĐẶC QUYỀN ẨM THỰC VÀ MUA SẮM URBOX EVERGREEN DÀNH CHO CHỦ THẺ VIETCOMBANK VISA"
+        "THỂ LỆ CHƯƠNG TRÌNH ƯU ĐÃI ĐẶC QUYỀN ẨM THỰC VÀ MUA SẮM URBOX EVERGREEN DÀNH CHO CHỦ THẺ VIETCOMBANK VISA > ẨM THỰC"
       ],
       "status": "PASS"
     },
@@ -323,7 +323,7 @@
       "table_headers_ok": true,
       "sample_breadcrumbs": [
         "TÀI LIỆU QUY CHUẨN SẢN PHẨM: THẺ TÍN DỤNG QUỐC TẾ VIETCOMBANK VIBE PLATINUM > PHẦN 1: THÔNG TIN TỔNG QUAN VÀ ĐỊNH VỊ SẢN PHẨM > 1.1. Thông tin chung về thẻ",
-        "TÀI LIỆU QUY CHUẨN SẢN PHẨM: THẺ TÍN DỤNG QUỐC TẾ VIETCOMBANK VIBE PLATINUM > PHẦN 2: ĐẶC QUYỀN VÀ CHƯƠNG TRÌNH ĐIỂM THƯỞNG (VCB LOYALTY) > 2.1. Cơ chế tích lũy điểm thưởng VCB Loyalty chi tiết",
+        "TÀI LIỆU QUY CHUẨN SẢN PHẨM: THẺ TÍN DỤNG QUỐC TẾ VIETCOMBANK VIBE PLATINUM > PHẦN 1: THÔNG TIN TỔNG QUAN VÀ ĐỊNH VỊ SẢN PHẨM > 1.1. Thông tin chung về thẻ",
         "TÀI LIỆU QUY CHUẨN SẢN PHẨM: THẺ TÍN DỤNG QUỐC TẾ VIETCOMBANK VIBE PLATINUM > PHẦN 2: ĐẶC QUYỀN VÀ CHƯƠNG TRÌNH ĐIỂM THƯỞNG (VCB LOYALTY) > 2.1. Cơ chế tích lũy điểm thưởng VCB Loyalty chi tiết"
       ],
       "status": "PASS"
@@ -364,7 +364,7 @@
     },
     {
       "sample": "vcb_md_13__phap_ly__bieu_phi_va_lai_suat_the_tin_dung_quoc_te.docx",
-      "chunks_count": 10,
+      "chunks_count": 9,
       "expected_min_chunks": 3,
       "has_table": false,
       "table_chunks_count": 0,
@@ -373,9 +373,9 @@
       "breadcrumbs_ok": true,
       "table_headers_ok": true,
       "sample_breadcrumbs": [
-        "BIỂU PHÍ DỊCH VỤ VÀ LÃI SUẤT THẺ TÍN DỤNG QUỐC TẾ ÁP DỤNG CHO KHÁCH HÀNG CÁ NHÂN VIETCOMBANK",
-        "BIỂU PHÍ DỊCH VỤ VÀ LÃI SUẤT THẺ TÍN DỤNG QUỐC TẾ ÁP DỤNG CHO KHÁCH HÀNG CÁ NHÂN VIETCOMBANK",
-        "BIỂU PHÍ DỊCH VỤ VÀ LÃI SUẤT THẺ TÍN DỤNG QUỐC TẾ ÁP DỤNG CHO KHÁCH HÀNG CÁ NHÂN VIETCOMBANK"
+        "BIỂU PHÍ DỊCH VỤ VÀ LÃI SUẤT THẺ TÍN DỤNG QUỐC TẾ ÁP DỤNG CHO KHÁCH HÀNG CÁ NHÂN VIETCOMBANK > 2.3.1 Thẻ chính 800.000 VNĐ/thẻ/năm 2.3.2 Thẻ phụ 500.000 VNĐ/thẻ/năm 2.4 Phí thường niên thẻ Vietcombank Vibe\n2.4.1 Thẻ chính 400.000 VNĐ/thẻ/năm 2.4.2 Thẻ phụ 200.000 VNĐ/thẻ/năm 2.5 Thẻ Vietcombank Visa, JCB, Mastercard\n2.5.1 Thẻ chính 200.000 VNĐ/thẻ/năm 2.5.2 Thẻ phụ 100.000 VNĐ/thẻ/năm 2.6 Thẻ Vietcombank American Express",
+        "BIỂU PHÍ DỊCH VỤ VÀ LÃI SUẤT THẺ TÍN DỤNG QUỐC TẾ ÁP DỤNG CHO KHÁCH HÀNG CÁ NHÂN VIETCOMBANK > 2.3.1 Thẻ chính 800.000 VNĐ/thẻ/năm 2.3.2 Thẻ phụ 500.000 VNĐ/thẻ/năm 2.4 Phí thường niên thẻ Vietcombank Vibe\n2.4.1 Thẻ chính 400.000 VNĐ/thẻ/năm 2.4.2 Thẻ phụ 200.000 VNĐ/thẻ/năm 2.5 Thẻ Vietcombank Visa, JCB, Mastercard\n2.5.1 Thẻ chính 200.000 VNĐ/thẻ/năm 2.5.2 Thẻ phụ 100.000 VNĐ/thẻ/năm 2.6 Thẻ Vietcombank American Express",
+        "BIỂU PHÍ DỊCH VỤ VÀ LÃI SUẤT THẺ TÍN DỤNG QUỐC TẾ ÁP DỤNG CHO KHÁCH HÀNG CÁ NHÂN VIETCOMBANK > 2.3.1 Thẻ chính 800.000 VNĐ/thẻ/năm 2.3.2 Thẻ phụ 500.000 VNĐ/thẻ/năm 2.4 Phí thường niên thẻ Vietcombank Vibe\n2.4.1 Thẻ chính 400.000 VNĐ/thẻ/năm 2.4.2 Thẻ phụ 200.000 VNĐ/thẻ/năm 2.5 Thẻ Vietcombank Visa, JCB, Mastercard\n2.5.1 Thẻ chính 200.000 VNĐ/thẻ/năm 2.5.2 Thẻ phụ 100.000 VNĐ/thẻ/năm 2.6 Thẻ Vietcombank American Express"
       ],
       "status": "PASS"
     },
@@ -398,7 +398,7 @@
     },
     {
       "sample": "vcb_md_15__tien_ich__bieu_lai_suat_tien_gui_va_ty_gia_20_ngoai_te.docx",
-      "chunks_count": 10,
+      "chunks_count": 9,
       "expected_min_chunks": 3,
       "has_table": false,
       "table_chunks_count": 0,
@@ -432,7 +432,7 @@
     },
     {
       "sample": "vcb_md_17__phap_ly__chinh_sach_mien_giam_phi_thuong_nien_the_tin_dung.docx",
-      "chunks_count": 15,
+      "chunks_count": 13,
       "expected_min_chunks": 3,
       "has_table": false,
       "table_chunks_count": 0,
@@ -442,7 +442,7 @@
       "table_headers_ok": true,
       "sample_breadcrumbs": [
         "ĐIỀU KIỆN ĐIỀU KHOẢN CHƯƠNG TRÌNH MIỄN PHÍ THƯỜNG NIÊN NĂM TIẾP THEO THẺ TÍN DỤNG CÁ NHÂN VIETCOMBANK > I. Nội dung Chương trình",
-        "ĐIỀU KIỆN ĐIỀU KHOẢN CHƯƠNG TRÌNH MIỄN PHÍ THƯỜNG NIÊN NĂM TIẾP THEO THẺ TÍN DỤNG CÁ NHÂN VIETCOMBANK > I. Nội dung Chương trình",
+        "ĐIỀU KIỆN ĐIỀU KHOẢN CHƯƠNG TRÌNH MIỄN PHÍ THƯỜNG NIÊN NĂM TIẾP THEO THẺ TÍN DỤNG CÁ NHÂN VIETCOMBANK > II. Điều kiện điều khoản của Chương trình",
         "ĐIỀU KIỆN ĐIỀU KHOẢN CHƯƠNG TRÌNH MIỄN PHÍ THƯỜNG NIÊN NĂM TIẾP THEO THẺ TÍN DỤNG CÁ NHÂN VIETCOMBANK > II. Điều kiện điều khoản của Chương trình"
       ],
       "status": "PASS"
@@ -466,7 +466,7 @@
     },
     {
       "sample": "vcb_md_19__the_tin_dung__vcb_saigon_centre_takashimaya_visa_vang.docx",
-      "chunks_count": 8,
+      "chunks_count": 10,
       "expected_min_chunks": 3,
       "has_table": false,
       "table_chunks_count": 0,
@@ -476,14 +476,14 @@
       "table_headers_ok": true,
       "sample_breadcrumbs": [
         "SAIGON CENTRE TAKASHIMAYA VIETCOMBANK > 1. LỢI ÍCH > Đặc quyền",
-        "SAIGON CENTRE TAKASHIMAYA VIETCOMBANK > 1. LỢI ÍCH > Đặc quyền",
-        "SAIGON CENTRE TAKASHIMAYA VIETCOMBANK > 2. ĐIỀU KIỆN MỞ THẺ > Điều kiện phát hành"
+        "SAIGON CENTRE TAKASHIMAYA VIETCOMBANK > 2. ĐIỀU KIỆN MỞ THẺ > Điều kiện phát hành",
+        "SAIGON CENTRE TAKASHIMAYA VIETCOMBANK > 4. BIỂU PHÍ & LÃI SUẤT > Phí phát hành thẻ"
       ],
       "status": "PASS"
     },
     {
       "sample": "vcb_md_20__the_tin_dung__vcb_vibe_chuan.docx",
-      "chunks_count": 11,
+      "chunks_count": 7,
       "expected_min_chunks": 3,
       "has_table": false,
       "table_chunks_count": 0,
@@ -493,14 +493,14 @@
       "table_headers_ok": true,
       "sample_breadcrumbs": [
         "VIETCOMBANK VIBE > 1. LỢI ÍCH > Đặc quyền",
-        "VIETCOMBANK VIBE > 1. LỢI ÍCH > Đặc quyền",
-        "VIETCOMBANK VIBE > 2. ĐIỀU KIỆN MỞ THẺ > Điều kiện phát hành"
+        "VIETCOMBANK VIBE > 2. ĐIỀU KIỆN MỞ THẺ > Điều kiện phát hành",
+        "VIETCOMBANK VIBE > 4. BIỂU PHÍ & LÃI SUẤT > Phí thường niên"
       ],
       "status": "PASS"
     },
     {
       "sample": "vcb_md_21__the_tin_dung__vcb_visa_platinum.docx",
-      "chunks_count": 8,
+      "chunks_count": 7,
       "expected_min_chunks": 3,
       "has_table": false,
       "table_chunks_count": 0,
@@ -509,15 +509,15 @@
       "breadcrumbs_ok": true,
       "table_headers_ok": true,
       "sample_breadcrumbs": [
-        "VIETCOMBANK VISA PLATINUM > 1. LỢI ÍCH > Đặc quyền",
-        "VIETCOMBANK VISA PLATINUM > 1. LỢI ÍCH > Đặc quyền",
-        "VIETCOMBANK VISA PLATINUM > 2. ĐIỀU KIỆN MỞ THẺ > Điều kiện phát hành"
+        "VIETCOMBANK VISA PLATINUM > Điều kiện điều khoản áp dụng từ 21/07/2026 > Đặc quyền",
+        "VIETCOMBANK VISA PLATINUM > 2. ĐIỀU KIỆN MỞ THẺ > Điều kiện phát hành",
+        "VIETCOMBANK VISA PLATINUM > 4. BIỂU PHÍ & LÃI SUẤT > Phí thường niên"
       ],
       "status": "PASS"
     },
     {
       "sample": "vcb_md_22__the_tin_dung__vcb_vietnam_airlines_amex_vang.docx",
-      "chunks_count": 8,
+      "chunks_count": 10,
       "expected_min_chunks": 3,
       "has_table": false,
       "table_chunks_count": 0,
@@ -527,8 +527,8 @@
       "table_headers_ok": true,
       "sample_breadcrumbs": [
         "VIETCOMBANK VIETNAM AIRLINES AMERICAN EXPRESS® > 1. LỢI ÍCH > Đặc quyền",
-        "VIETCOMBANK VIETNAM AIRLINES AMERICAN EXPRESS® > 1. LỢI ÍCH > Đặc quyền",
-        "VIETCOMBANK VIETNAM AIRLINES AMERICAN EXPRESS® > 3. THÔNG TIN SẢN PHẨM"
+        "VIETCOMBANK VIETNAM AIRLINES AMERICAN EXPRESS® > 3. THÔNG TIN SẢN PHẨM",
+        "VIETCOMBANK VIETNAM AIRLINES AMERICAN EXPRESS® > 4. BIỂU PHÍ & LÃI SUẤT > Phí phát hành thẻ"
       ],
       "status": "PASS"
     },
@@ -551,7 +551,7 @@
     },
     {
       "sample": "vcb_md_24__the_tin_dung__vcb_cashplus_platinum_amex.docx",
-      "chunks_count": 11,
+      "chunks_count": 8,
       "expected_min_chunks": 3,
       "has_table": false,
       "table_chunks_count": 0,
@@ -585,7 +585,7 @@
     },
     {
       "sample": "vcb_md_26__the_tin_dung__vcb_jcb_platinum.docx",
-      "chunks_count": 11,
+      "chunks_count": 7,
       "expected_min_chunks": 3,
       "has_table": false,
       "table_chunks_count": 0,
@@ -595,14 +595,14 @@
       "table_headers_ok": true,
       "sample_breadcrumbs": [
         "VIETCOMBANK JCB PLATINUM > 1. LỢI ÍCH > Đặc quyền",
-        "VIETCOMBANK JCB PLATINUM > 1. LỢI ÍCH > Đặc quyền",
-        "VIETCOMBANK JCB PLATINUM > 3. THÔNG TIN SẢN PHẨM"
+        "VIETCOMBANK JCB PLATINUM > 3. THÔNG TIN SẢN PHẨM",
+        "VIETCOMBANK JCB PLATINUM > 4. BIỂU PHÍ & LÃI SUẤT > Phí thường niên"
       ],
       "status": "PASS"
     },
     {
       "sample": "vcb_md_27__the_tin_dung__vcb_mastercard_world.docx",
-      "chunks_count": 8,
+      "chunks_count": 7,
       "expected_min_chunks": 3,
       "has_table": false,
       "table_chunks_count": 0,
@@ -612,8 +612,8 @@
       "table_headers_ok": true,
       "sample_breadcrumbs": [
         "VIETCOMBANK MASTERCARD® WORLD > 1. LỢI ÍCH > Đặc quyền",
-        "VIETCOMBANK MASTERCARD® WORLD > 1. LỢI ÍCH > Đặc quyền",
-        "VIETCOMBANK MASTERCARD® WORLD > 3. THÔNG TIN SẢN PHẨM > Hạn mức sử dụng"
+        "VIETCOMBANK MASTERCARD® WORLD > Hạn mức tín dụng: từ 70 triệu VND",
+        "VIETCOMBANK MASTERCARD® WORLD > 4. BIỂU PHÍ & LÃI SUẤT > Các loại phí khác & Lãi suất"
       ],
       "status": "PASS"
     },
@@ -629,7 +629,7 @@
       "table_headers_ok": true,
       "sample_breadcrumbs": [
         "VIETCOMBANK AMERICAN EXPRESS® > 1. LỢI ÍCH > Đặc quyền",
-        "VIETCOMBANK AMERICAN EXPRESS® > 3. THÔNG TIN SẢN PHẨM > Hạn mức sử dụng",
+        "VIETCOMBANK AMERICAN EXPRESS® > Hạn mức tín dụng: đến 300 triệu VND",
         "VIETCOMBANK AMERICAN EXPRESS® > 4. BIỂU PHÍ & LÃI SUẤT > Phí thường niên"
       ],
       "status": "PASS"
@@ -646,7 +646,7 @@
       "table_headers_ok": true,
       "sample_breadcrumbs": [
         "VIETCOMBANK JCB > 1. LỢI ÍCH > Đặc quyền",
-        "VIETCOMBANK JCB > 3. THÔNG TIN SẢN PHẨM > Hạn mức sử dụng",
+        "VIETCOMBANK JCB > Hạn mức tín dụng: đến 300 triệu VND",
         "VIETCOMBANK JCB > 4. BIỂU PHÍ & LÃI SUẤT > Các loại phí khác & Lãi suất"
       ],
       "status": "PASS"
@@ -663,7 +663,7 @@
       "table_headers_ok": true,
       "sample_breadcrumbs": [
         "VIETCOMBANK MASTERCARD® > 1. LỢI ÍCH > Tích điểm VCB Loyalty",
-        "VIETCOMBANK MASTERCARD® > 3. THÔNG TIN SẢN PHẨM > Hạn mức sử dụng",
+        "VIETCOMBANK MASTERCARD® > Hạn mức tín dụng: đến 300 triệu VND",
         "VIETCOMBANK MASTERCARD® > 4. BIỂU PHÍ & LÃI SUẤT > Các loại phí khác & Lãi suất"
       ],
       "status": "PASS"
@@ -687,7 +687,7 @@
     },
     {
       "sample": "vcb_md_32__the_ghi_no__vcb_visa_platinum_debit.docx",
-      "chunks_count": 8,
+      "chunks_count": 7,
       "expected_min_chunks": 3,
       "has_table": false,
       "table_chunks_count": 0,
@@ -696,15 +696,15 @@
       "breadcrumbs_ok": true,
       "table_headers_ok": true,
       "sample_breadcrumbs": [
-        "VIETCOMBANK VISA PLATINUM DEBIT > 1. LỢI ÍCH > Đặc quyền",
-        "VIETCOMBANK VISA PLATINUM DEBIT > 1. LỢI ÍCH > Đặc quyền",
-        "VIETCOMBANK VISA PLATINUM DEBIT > 2. ĐIỀU KIỆN MỞ THẺ > Điều kiện phát hành"
+        "VIETCOMBANK VISA PLATINUM DEBIT > Điều kiện điều khoản áp dụng từ 21/07/2026 > Đặc quyền",
+        "VIETCOMBANK VISA PLATINUM DEBIT > 2. ĐIỀU KIỆN MỞ THẺ > Điều kiện phát hành",
+        "VIETCOMBANK VISA PLATINUM DEBIT > 3. THÔNG TIN SẢN PHẨM > Số lượng thẻ phát hành"
       ],
       "status": "PASS"
     },
     {
       "sample": "vcb_md_33__the_ghi_no__vcb_everlink_cashback.docx",
-      "chunks_count": 8,
+      "chunks_count": 7,
       "expected_min_chunks": 3,
       "has_table": false,
       "table_chunks_count": 0,
@@ -714,14 +714,14 @@
       "table_headers_ok": true,
       "sample_breadcrumbs": [
         "VIETCOMBANK EVER-LINK > 1. LỢI ÍCH > Đặc quyền",
-        "VIETCOMBANK EVER-LINK > 1. LỢI ÍCH > Đặc quyền",
-        "VIETCOMBANK EVER-LINK > 2. ĐIỀU KIỆN MỞ THẺ > Điều kiện phát hành"
+        "VIETCOMBANK EVER-LINK > 2. ĐIỀU KIỆN MỞ THẺ > Điều kiện phát hành",
+        "VIETCOMBANK EVER-LINK > 3. THÔNG TIN SẢN PHẨM > Số lượng thẻ phát hành"
       ],
       "status": "PASS"
     },
     {
       "sample": "vcb_md_34__the_ghi_no__vcb_takashimaya_visa_debit.docx",
-      "chunks_count": 6,
+      "chunks_count": 5,
       "expected_min_chunks": 3,
       "has_table": false,
       "table_chunks_count": 0,
@@ -731,8 +731,8 @@
       "table_headers_ok": true,
       "sample_breadcrumbs": [
         "VIETCOMBANK TAKASHIMAYA VISA > 1. LỢI ÍCH > Đặc quyền",
-        "VIETCOMBANK TAKASHIMAYA VISA > 1. LỢI ÍCH > Đặc quyền",
-        "VIETCOMBANK TAKASHIMAYA VISA > 2. ĐIỀU KIỆN MỞ THẺ > Điều kiện điều khoản phát hành và sử dụng Thẻ Thanh toán"
+        "VIETCOMBANK TAKASHIMAYA VISA > 2. ĐIỀU KIỆN MỞ THẺ > Điều kiện điều khoản phát hành và sử dụng Thẻ Thanh toán",
+        "VIETCOMBANK TAKASHIMAYA VISA > 4. BIỂU PHÍ & LÃI SUẤT > Phí thường niên"
       ],
       "status": "PASS"
     },
@@ -815,8 +815,8 @@
       "breadcrumbs_ok": true,
       "table_headers_ok": true,
       "sample_breadcrumbs": [
-        "CHƯƠNG TRÌNH KHÁCH HÀNG THÂN THIẾT VCB LOYALTY > Quy định đổi điểm:",
-        "CHƯƠNG TRÌNH KHÁCH HÀNG THÂN THIẾT VCB LOYALTY > Quy định về dặm bay",
+        "CHƯƠNG TRÌNH KHÁCH HÀNG THÂN THIẾT VCB LOYALTY > 1. THÔNG TIN CHUNG > Điều kiện hội viên",
+        "CHƯƠNG TRÌNH KHÁCH HÀNG THÂN THIẾT VCB LOYALTY > 1. THÔNG TIN CHUNG > Điều kiện & Điều khoản Chương trình",
         "CHƯƠNG TRÌNH KHÁCH HÀNG THÂN THIẾT VCB LOYALTY > CÂU HỎI THƯỜNG GẶP (FAQ) > Q1: Tôi nên chọn hình thức nhận OTP nào để khi ra nước ngoài vẫn có thể thực hiện các giao dịch trên VCB Digibank?"
       ],
       "status": "PASS"
@@ -833,7 +833,7 @@
       "table_headers_ok": true,
       "sample_breadcrumbs": [
         "TRẢ GÓP LINH HOẠT > 2. ĐIỀU KIỆN CHUYỂN ĐỔI TRẢ GÓP",
-        "TRẢ GÓP LINH HOẠT > Biểu phí và kỳ hạn",
+        "TRẢ GÓP LINH HOẠT > 3. BIỂU PHÍ VÀ KỲ HẠN",
         "TRẢ GÓP LINH HOẠT > CÂU HỎI THƯỜNG GẶP (FAQ) > Q1: Tôi nhận được tin nhắn thông báo khi giao dịch thẻ tín dụng là hạn mức khả dụng tạm tính? Giải thích giúp tôi"
       ],
       "status": "PASS"
