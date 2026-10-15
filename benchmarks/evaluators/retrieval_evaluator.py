@@ -158,19 +158,24 @@ class RetrievalEvaluator:
         retrieved_chunk: dict[str, Any],
         expected_chunk_ids: set[str],
         expected_context_span: str,
-        expected_bc_prefix: str = ""
+        expected_bc_prefix: str = "",
+        parent_map: dict[str, str] | None = None
     ) -> bool:
         """
         Kiểm tra tính liên quan (Relevance) công bằng:
         1. Khớp cứng chunk_id (khi cùng cấu hình sinh ra chunk_id đó).
         2. HOẶC Token Containment Recall với context span >= containment_threshold (0.70).
         3. HOẶC Chuỗi con trực tiếp giữa chunk content và context span.
+        4. Hỗ trợ Profile C Roll-up: Nếu có parent_map, mở rộng content thành parent content.
         """
         doc_id = retrieved_chunk.get("chunk_id", "")
         if doc_id in expected_chunk_ids:
             return True
 
         content = retrieved_chunk.get("content", "")
+        if parent_map and doc_id in parent_map:
+            content = parent_map[doc_id]
+
         # Bỏ prefix [Breadcrumbs: ...] khi so khớp văn bản gốc
         body = content.split("]\n", 1)[-1] if "[Breadcrumbs:" in content else content
 
@@ -190,7 +195,8 @@ class RetrievalEvaluator:
         self,
         chunks: list[dict[str, Any]],
         golden_qa: list[dict[str, Any]],
-        top_k: int = 10
+        top_k: int = 10,
+        parent_map: dict[str, str] | None = None
     ) -> dict[str, Any]:
         """
         Thực thi kiểm thử truy xuất trên tập Golden QA và tính toán các metrics:
@@ -232,7 +238,7 @@ class RetrievalEvaluator:
             # Đánh giá nhị phân tính liên quan (Relevance Binary Vector)
             relevance = []
             for doc, _ in results:
-                rel = self.is_chunk_relevant(doc, target_ids, target_span, target_bc)
+                rel = self.is_chunk_relevant(doc, target_ids, target_span, target_bc, parent_map=parent_map)
                 relevance.append(1 if rel else 0)
 
             # 1. Recall@5 & Recall@10
@@ -257,8 +263,12 @@ class RetrievalEvaluator:
             for rank_idx, rel in enumerate(relevance[:10], start=1):
                 if rel == 1:
                     dcg += 1.0 / math.log2(rank_idx + 1)
-            idcg = 1.0 / math.log2(1 + 1)
-            ndcg_val = round(dcg / idcg, 4)
+            num_rel = sum(relevance[:10])
+            if num_rel > 0:
+                idcg = sum(1.0 / math.log2(i + 1) for i in range(1, num_rel + 1))
+                ndcg_val = round(min(dcg / idcg, 1.0), 4)
+            else:
+                ndcg_val = 0.0
             ndcgs.append(ndcg_val)
             category_stats[cat]["ndcg"].append(ndcg_val)
 

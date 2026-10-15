@@ -1,0 +1,122 @@
+{
+  "task0b_rows": [
+    {
+      "config": "Config 0 - Baseline (Naive)",
+      "code_ref": "pre-v3-merge (d1aaf5cf)",
+      "r5_old": 0.62,
+      "r5_new": 0.92,
+      "delta_r5": 0.3,
+      "mrr_old": 0.4045,
+      "mrr_new": 0.8583,
+      "delta_mrr": 0.4538,
+      "reproduced": "N",
+      "chunks": 165,
+      "hash": "ccd977a04976cf7c"
+    },
+    {
+      "config": "Config 1 - Pipeline v1",
+      "code_ref": "pre-v3-merge (d1aaf5cf)",
+      "r5_old": 0.76,
+      "r5_new": 0.84,
+      "delta_r5": 0.08,
+      "mrr_old": 0.5933,
+      "mrr_new": 0.6622,
+      "delta_mrr": 0.0689,
+      "reproduced": "N",
+      "chunks": 227,
+      "hash": "db2e962a2e41d90d"
+    },
+    {
+      "config": "Config 2 - Pipeline v2 (Prod cũ)",
+      "code_ref": "pre-v3-merge (d1aaf5cf)",
+      "r5_old": 0.84,
+      "r5_new": 0.84,
+      "delta_r5": 0.0,
+      "mrr_old": 0.6733,
+      "mrr_new": 0.6456,
+      "delta_mrr": -0.0277,
+      "reproduced": "N",
+      "chunks": 228,
+      "hash": "ddb5acdef36ed1ca"
+    },
+    {
+      "config": "Config 3 - Upgrade OCR",
+      "code_ref": "pre-v3-merge + exp1 (d1aaf5cf)",
+      "r5_old": 0.84,
+      "r5_new": 0.84,
+      "delta_r5": 0.0,
+      "mrr_old": 0.6733,
+      "mrr_new": 0.6622,
+      "delta_mrr": -0.0111,
+      "reproduced": "N",
+      "chunks": 228,
+      "hash": "352fc1e7115577e8"
+    },
+    {
+      "config": "Config 4 - Fast Vision",
+      "code_ref": "pre-v3-merge + exp1+exp2 (d1aaf5cf)",
+      "r5_old": 0.84,
+      "r5_new": 0.84,
+      "delta_r5": 0.0,
+      "mrr_old": 0.6733,
+      "mrr_new": 0.7233,
+      "delta_mrr": 0.05,
+      "reproduced": "N",
+      "chunks": 228,
+      "hash": "4ac8a677ab05ad7a"
+    },
+    {
+      "config": "Config 5A - Profile A",
+      "code_ref": "v3-production (d409e36)",
+      "r5_old": 0.78,
+      "r5_new": 0.98,
+      "delta_r5": 0.2,
+      "mrr_old": 0.5365,
+      "mrr_new": 0.9062,
+      "delta_mrr": 0.3697,
+      "reproduced": "N",
+      "chunks": 237,
+      "hash": "8673138d079f13db"
+    },
+    {
+      "config": "Config 5B - Profile B (Ult)",
+      "code_ref": "v3-production (d409e36)",
+      "r5_old": 0.9,
+      "r5_new": 0.98,
+      "delta_r5": 0.08,
+      "mrr_old": 0.7403,
+      "mrr_new": 0.9622,
+      "delta_mrr": 0.2219,
+      "reproduced": "N",
+      "chunks": 201,
+      "hash": "b2a213fe68fd0919"
+    },
+    {
+      "config": "Config 5C - Profile C",
+      "code_ref": "v3-production (d409e36)",
+      "r5_old": 0.78,
+      "r5_new": 0.98,
+      "delta_r5": 0.2,
+      "mrr_old": 0.5327,
+      "mrr_new": 0.9067,
+      "delta_mrr": 0.374,
+      "reproduced": "N",
+      "chunks": 240,
+      "hash": "44b285a4ef2ad94e"
+    }
+  ],
+  "hash_isolation": {
+    "Config 0 - Baseline (Naive)": "ccd977a04976cf7c",
+    "Config 1 - Pipeline v1": "db2e962a2e41d90d",
+    "Config 2 - Pipeline v2 (Prod cũ)": "ddb5acdef36ed1ca",
+    "Config 3 - Upgrade OCR": "352fc1e7115577e8",
+    "Config 4 - Fast Vision": "4ac8a677ab05ad7a",
+    "Config 5A - Profile A": "8673138d079f13db",
+    "Config 5B - Profile B (Ult)": "b2a213fe68fd0919",
+    "Config 5C - Profile C": "44b285a4ef2ad94e"
+  },
+  "determinism_5b": true,
+  "config_2_3_diff_count": 3,
+  "config_3_4_diff_count": 29,
+  "impacted_golden_qa_count": 1
+}
