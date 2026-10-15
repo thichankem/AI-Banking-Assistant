@@ -73,6 +73,11 @@ class BreadcrumbTracker:
         source: str = "ocr_geometry_prediction"
     ) -> None:
         """Khi phát hiện heading cấp N, xóa cấp N trở xuống và cập nhật cấp mới."""
+        norm_txt = strip_vietnamese_accents(label).lower()
+        # Loại trừ Letterhead (quốc hiệu, tiêu ngữ, tên ngân hàng) khỏi stack phân cấp
+        if any(ign in norm_txt for ign in ["cong hoa xa hoi", "doc lap - tu do", "doc lap tu do", "ngan hang thuong mai", "ngan hang tmcp", "vietcombank"]):
+            return
+
         norm_kind = self._normalize_kind(kind)
         if norm_kind in self.ORDER:
             idx = self.ORDER.index(norm_kind)

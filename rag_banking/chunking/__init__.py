@@ -24,13 +24,26 @@ from .pdf_chunker import (
     LayoutHierarchyLevel,
     ScanStructureReconstructor,
     BreadcrumbTracker,
-    TOCVerifier
+    TOCVerifier,
+    ScanTableDetector,
+    PaddleVietOCRAdapter,
+    UnifiedPageStreamProcessor,
+    HybridPDFChunker,
+    TableFormatter,
+    TableFormatType
 )
 from .unified_chunk import (
     LayoutAwareChunker,
     DLAChunker,
     BreadcrumbsChunker,
     DocumentStructureChunker,
+    SyllableProfile,
+    SyllableBudgetManager,
+    PROFILE_A,
+    PROFILE_B,
+    PROFILE_C,
+    STANDARD_PROFILES,
+    UnifiedBudgetOrchestrator,
     count_words,
     count_syllables_vietnamese,
     strip_vietnamese_accents,

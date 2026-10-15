@@ -1,0 +1,91 @@
+flowchart TD
+    %% Ingestion & Router Layer
+    subgraph S_INGEST["1. Ingestion & Routing Layer"]
+        START(["Tệp đầu vào: .docx / .pdf / .md"]) --> CP["ChunkingPipeline / LayoutAwareChunker"]
+        CP --> ROUTE{"Phân loại phần mở rộng tệp"}
+    end
+
+    %% DOCX Subsystem
+    subgraph S_DOCX["2. Phân hệ Word (.docx) - DOCXChunker"]
+        ROUTE -- ".docx" --> D_FONT["Global Document Font Profiling<br/>Character-weighted Font Histogram (0% Regex)"]
+        D_FONT --> D_BODY["Duyệt tuần tự OpenXML Body Elements"]
+        
+        D_BODY --> D_TBX["Trích xuất Textbox<br/>&lt;w:txbxContent&gt;"]
+        D_BODY --> D_ELEM{"Loại phần tử?"}
+
+        D_ELEM -- "Đoạn văn (&lt;w:p&gt;)" --> D_HD{"Phát hiện Heading?"}
+        D_HD -- "Có (H1..H6 / In đậm)" --> D_FLUSH1["Force Flush Buffer văn bản"]
+        D_FLUSH1 --> D_UPD_BC["Cập nhật Active Headers Stack<br/>(Breadcrumb)"]
+        D_HD -- "Không (Nội dung / List)" --> D_BUF["Thêm vào text_buffer"]
+
+        D_ELEM -- "Bảng (&lt;w:tbl&gt;)" --> D_FLUSH2["Force Flush Buffer văn bản"]
+        D_FLUSH2 --> D_TBL["Xử lý Bảng biểu Table Atomicity<br/>- Header 2 tầng (Hierarchical)<br/>- Ô gộp (Merged Cells) & Bảng lồng<br/>- Batch 4 hàng/chunk + Lặp lại Header"]
+        D_TBL --> OUT_TBL["Tạo chunk: docx_table"]
+
+        D_BUF --> D_CHECK_SIZE{"Buffer >= min_section_size (120 từ)<br/>hoặc chạm max_chunk_size (800 ký tự)?"}
+        D_CHECK_SIZE -- "Có" --> D_CHUNK["Đóng gói chunk docx_text<br/>(Gắn Breadcrumb + Tách câu an toàn)"]
+        D_CHECK_SIZE -- "Chưa đủ" --> D_BODY
+    end
+
+    %% PDF Subsystem
+    subgraph S_PDF["3. Phân hệ PDF (.pdf) - PDFChunker & DLA"]
+        ROUTE -- ".pdf" --> P_TITLE["BƯỚC 0: Trích xuất Title Thực tế<br/>extract_document_title_dla (Visual OCR DLA)"]
+        P_TITLE --> P_PAGE["BƯỚC 1: Lặp duyệt từng trang (Page-by-page)"]
+
+        P_PAGE --> P_TBL_EXT["Trích xuất Bảng biểu Trang<br/>PyMuPDF find_tables / pdfplumber"]
+        P_TBL_EXT --> P_V_CHECK{"Bảng phức tạp / ô gộp đa tầng<br/>chưa bóc tách được?"}
+        P_V_CHECK -- "Có" --> P_VISION["LocalVisionTableExtractor<br/>(Ollama gemma4:12b / RTX 4060 GPU Queue)"]
+        P_V_CHECK -- "Không" --> P_TBL_CHUNK["Tuyến tính hóa bảng: * Hàng X: Cột A...<br/>Tạo chunk: pdf_table"]
+        P_VISION --> P_TBL_CHUNK
+
+        P_PAGE --> P_SCAN_DET{"ScanDetector: Trang Scan?<br/>1. img_area_ratio >= 40% & w_count < 30<br/>2. Lỗi font TV: is_valid_vietnamese_text == False<br/>3. Char count < 20 & có XObject Image"}
+        
+        %% Scan Path
+        P_SCAN_DET -- "Trang Scan (True)" --> P_OCR_PRE["Tiền xử lý ảnh (OpenCV):<br/>- Render 300 DPI<br/>- Deskew cân chỉnh góc nghiêng<br/>- Lọc mộc đỏ ngân hàng HSV"]
+        P_OCR_PRE --> P_TESS["Tesseract OCR v5 (vie+eng)<br/>Trích xuất Lines + Bounding Box + Conf"]
+
+        %% Digital Path
+        P_SCAN_DET -- "Trang Số (False)" --> P_DIG_READ["PyMuPDF Natural Spatial Reading Order<br/>(Bỏ qua BBoxes vùng bảng & Header/Footer mép)"]
+        P_DIG_READ --> P_DEHYPH["Khử gạch nối dòng & Hàn gắn câu ngắt cứng<br/>clean_and_dehyphenate_text"]
+
+        %% PDF Branching Decision
+        P_PAGE --> P_MAJ{"Tỷ lệ trang scan >= 50% tổng số trang?"}
+
+        %% Reconstruction Sub-branch
+        P_MAJ -- "Đúng: Tài liệu Scan chủ đạo" --> P_SCAN_REC["ScanStructureReconstructor<br/>(100% Geometric DLA - 0% Regex)"]
+        P_SCAN_REC --> P_TOC["TOCVerifier: Quét Mục lục 3 trang đầu<br/>Lấy outline tiêu đề đối soát"]
+        P_TOC --> P_DLA_PRED["OCRLayoutHierarchyPredictor (5D Geometry):<br/>rel_h, gap_before, is_centered, left_indent, rel_w"]
+        P_DLA_PRED --> P_STATE["State Machine BreadcrumbTracker:<br/>Stack: Title -> H1 -> H2 -> H3"]
+        P_STATE --> OUT_SCAN["Tạo chunk: pdf_ocr_scan<br/>(Lưu vết page_start, page_end, conf)"]
+
+        %% Digital Multi-page Sub-branch
+        P_MAJ -- "Sai: Tài liệu Số chủ đạo" --> P_DIG_FLOW["Nối luồng toàn tài liệu Cross-page Continuity"]
+        P_DIG_FLOW --> P_DIG_FILT["detect_and_remove_headers_footers<br/>(Lọc header/footer lặp qua trang)"]
+        P_DIG_FILT --> P_DIG_CHUNK["Phân cấp Pháp lý & Section-Length-Aware<br/>Gộp mục còi cọc < 120 từ vào dải vàng"]
+        P_DIG_CHUNK --> OUT_DIG["Tạo chunk: pdf_text<br/>(Gắn breadcrumbs đa tầng)"]
+    end
+
+    %% Markdown / Text & Unified Strategies
+    subgraph S_UNIFIED["4. Chiến lược Phân đoạn Cấu trúc - Structure Chunker"]
+        ROUTE -- ".md / .txt" --> U_STRAT["DocumentStructureChunker / BreadcrumbsChunker"]
+        U_STRAT --> U_CHOOSE{"Lựa chọn Chiến lược"}
+        
+        U_CHOOSE -- "Strategy 1" --> S1["Structure-based Chunking<br/>(Sub-section + Ngân sách âm tiết 400 syllables)"]
+        U_CHOOSE -- "Strategy 2" --> S2["Hierarchical Chunking<br/>(Parent-Child Linking qua parent_id để Roll-up)"]
+        U_CHOOSE -- "Strategy 3" --> S3["Section-Length-Aware Chunking<br/>(Chống phân mảnh - gộp mục còi cọc < 120 âm tiết)"]
+    end
+
+    %% Canonical NLP & Contract Output
+    subgraph S_OUTPUT["5. Bộ giải quyết Chuẩn tắc & Schema Contract Chuẩn"]
+        OUT_TBL & D_CHUNK & OUT_SCAN & OUT_DIG & S1 & S2 & S3 --> NLP["Canonical Resolver Utilities (0% Regex):<br/>- split_sentences_banking / group_sentences_banking<br/>- count_words / count_syllables_vietnamese<br/>- strip_vietnamese_accents (NFKD)"]
+        NLP --> CONTRACT(["Chuẩn hóa Schema Contract:<br/>- chunk_id: str<br/>- source: str<br/>- chunk_type: docx_text | docx_table | pdf_text | pdf_table | pdf_ocr_scan<br/>- breadcrumb: str ('Tài liệu > Chương > Điều...')<br/>- section_title: str<br/>- content: str ('[Breadcrumbs: ...]\\nNội dung...')<br/>- word_count: int<br/>(Tuyệt đối không có trường rác: ref, legal_ref, raw_content)"])
+    end
+
+    %% Styling
+    style START fill:#E3F2FD,stroke:#1565C0,stroke-width:2px;
+    style CONTRACT fill:#E8F5E9,stroke:#2E7D32,stroke-width:2px;
+    style S_INGEST fill:#FAFAFA,stroke:#9E9E9E,stroke-dasharray: 5 5;
+    style S_DOCX fill:#E8EAF6,stroke:#3F51B5;
+    style S_PDF fill:#FFF3E0,stroke:#E65100;
+    style S_UNIFIED fill:#F3E5F5,stroke:#7B1FA2;
+    style S_OUTPUT fill:#E0F2F1,stroke:#00695C;

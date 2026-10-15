@@ -23,12 +23,34 @@ from .canonical_resolver import (
 )
 from .breadcrumbs_chunker import BreadcrumbsChunker
 from .structure_chunker import DocumentStructureChunker
+from .syllable_budget_manager import (
+    SyllableProfile,
+    SyllableBudgetManager,
+    PROFILE_A,
+    PROFILE_B,
+    PROFILE_C,
+    STANDARD_PROFILES
+)
+from .unified_budget_chunker import (
+    UnifiedDOCXChunker,
+    UnifiedStructureChunker,
+    UnifiedBudgetOrchestrator
+)
 
 __all__ = [
     "LayoutAwareChunker",
     "DLAChunker",
     "BreadcrumbsChunker",
     "DocumentStructureChunker",
+    "SyllableProfile",
+    "SyllableBudgetManager",
+    "PROFILE_A",
+    "PROFILE_B",
+    "PROFILE_C",
+    "STANDARD_PROFILES",
+    "UnifiedDOCXChunker",
+    "UnifiedStructureChunker",
+    "UnifiedBudgetOrchestrator",
     "count_words",
     "count_syllables_vietnamese",
     "strip_vietnamese_accents",

@@ -14,6 +14,11 @@ from .scan_detector import (
     ScanDetector
 )
 from .vision_table_extractor import LocalVisionTableExtractor
+from .scan_table_detector import ScanTableDetector, DetectedTableBox
+from .paddle_vietocr_adapter import PaddleVietOCRAdapter
+from .unified_page_stream_processor import UnifiedPageStreamProcessor, UnifiedGeometryLine
+from .hybrid_pdf_chunker import HybridPDFChunker
+from .table_formatter import TableFormatter, TableFormatType, NormalizedTable, TableCell
 
 __all__ = [
     "PDFChunker",
@@ -28,4 +33,14 @@ __all__ = [
     "is_scanned_page",
     "detect_pdf_file_scan_status",
     "ScanDetector",
+    "ScanTableDetector",
+    "DetectedTableBox",
+    "PaddleVietOCRAdapter",
+    "UnifiedPageStreamProcessor",
+    "UnifiedGeometryLine",
+    "HybridPDFChunker",
+    "TableFormatter",
+    "TableFormatType",
+    "NormalizedTable",
+    "TableCell",
 ]

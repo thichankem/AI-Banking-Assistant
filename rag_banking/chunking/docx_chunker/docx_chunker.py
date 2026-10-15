@@ -2,8 +2,8 @@
 Module DOCX Layout-Aware & Advanced Table/Hierarchy Chunker
 ============================================================
 Bộ phân đoạn tài liệu Microsoft Word (.docx) ngân hàng nhận thức bố cục và cấu trúc DLA:
-1. Heuristic Heading Detection: Tự động nhận diện in đậm (run.bold), đánh số tay (Điều 5., Chương II.),
-   không bị phụ thuộc vào Word Style.
+1. Global Document Font Size Profiling (0% Regex / Rule-based Keywords): Quét phân phối kích cỡ chữ toàn văn bản
+   (Character-weighted Font Histogram), so sánh tương quan kích cỡ chữ để tự động phân cấp Heading Level 1, 2, 3...
 2. Comprehensive Coverage: Quét trọn vẹn Textbox (<w:txbxContent>), Bảng lồng (Nested Tables), Ô gộp (Merged Cells).
 3. Multi-Level Table Header (Header 2 tầng): Tự động phát hiện và ghép tiêu đề phân cấp.
 4. Table Atomicity & Row Batching: Chia bảng theo hàng kèm lặp lại Header ở mọi chunk; tuyệt đối không cắt vụn bảng.
@@ -13,6 +13,7 @@ Bộ phân đoạn tài liệu Microsoft Word (.docx) ngân hàng nhận thức 
 
 from __future__ import annotations
 from pathlib import Path
+from collections import Counter
 
 import docx
 from docx.text.paragraph import Paragraph
@@ -60,6 +61,7 @@ class DOCXChunker:
     """
     Bộ phân đoạn tài liệu DOCX chuyên dụng cho ngân hàng theo giải thuật DLA & Advanced Table/Hierarchy.
     """
+    MAX_HEADING_LEVEL: int = 6  # Khống chế tối đa 6 cấp heading (H1..H6), không tính tên tệp (title)
 
     def __init__(
         self,
@@ -167,9 +169,12 @@ class DOCXChunker:
             for tb_text in textbox_texts:
                 text_buffer.append(f"> [Ghi chú / Textbox]: {tb_text}")
 
-        # 2. Duyệt các phần tử cấp khối trong Body theo thứ tự tài liệu
+        # 2. Lập hồ sơ tương quan kích cỡ chữ toàn văn bản (Global Document Font Profiling)
+        font_profile = self._profile_document_fonts(doc)
+
+        # 3. Duyệt các phần tử cấp khối trong Body theo thứ tự tài liệu
         for child in doc.element.body:
-            # 2.1. Đoạn văn bản (<w:p>)
+            # 3.1. Đoạn văn bản (<w:p>)
             if child.tag.endswith("p"):
                 p = Paragraph(child, doc)
                 text = p.text.strip()
@@ -177,7 +182,7 @@ class DOCXChunker:
                     continue
 
                 style_name = p.style.name if p.style else ""
-                heading_level = self._detect_heading_level(p, style_name, text)
+                heading_level = self._detect_heading_level(p, style_name, text, font_profile)
 
                 # Khi gặp Tiêu đề (Heading)
                 if heading_level is not None:
@@ -210,7 +215,7 @@ class DOCXChunker:
                 if current_chars >= self.max_chunk_size:
                     emit_text_chunks(force_flush=True)
 
-            # 2.2. Bảng biểu (<w:tbl>)
+            # 3.2. Bảng biểu (<w:tbl>)
             elif child.tag.endswith("tbl"):
                 # BẮT BUỘC: Flush buffer text trước khi xử lý bảng
                 emit_text_chunks(force_flush=True)
@@ -231,13 +236,101 @@ class DOCXChunker:
 
         return chunks
 
-    def _detect_heading_level(self, p: Paragraph, style_name: str, text: str) -> int | None:
+    def _get_doc_default_font_size(self, doc: docx.Document) -> float:
+        """Trích xuất kích cỡ chữ mặc định của tài liệu từ OpenXML docDefaults."""
+        try:
+            docDefaults = doc.styles.element.find(qn("w:docDefaults"))
+            if docDefaults is not None:
+                rPrDefault = docDefaults.find(qn("w:rPrDefault"))
+                if rPrDefault is not None:
+                    rPr = rPrDefault.find(qn("w:rPr"))
+                    if rPr is not None:
+                        sz = rPr.find(qn("w:sz"))
+                        if sz is not None and sz.get(qn("w:val")):
+                            return float(sz.get(qn("w:val"))) / 2.0
+        except Exception:
+            pass
+        return 11.0
+
+    def _get_run_font_size(self, run, p: Paragraph, default_sz: float) -> float:
+        """Trích xuất kích cỡ chữ thực tế (point) của run văn bản."""
+        if run.font.size is not None:
+            return run.font.size.pt
+        if hasattr(run, "_element") and run._element is not None and run._element.rPr is not None:
+            el_sz = run._element.rPr.find(qn("w:sz"))
+            if el_sz is not None and el_sz.get(qn("w:val")):
+                return float(el_sz.get(qn("w:val"))) / 2.0
+        if p.style and p.style.font and p.style.font.size is not None:
+            return p.style.font.size.pt
+        return default_sz
+
+    def _profile_document_fonts(self, doc: docx.Document) -> dict:
         """
-        Nhận diện cấp độ tiêu đề tổng quát hoàn toàn dựa trên cấu trúc tài liệu & Typography (0% Rule-based Keywords):
-        1. Word Styles chuẩn (Heading 1..9, Title, Subtitle).
+        Khảo sát phân phối kích cỡ chữ trên toàn bộ tệp DOCX (Character-weighted Font Histogram):
+        1. Tính tổng số lượng ký tự theo từng kích cỡ chữ trong toàn bộ văn bản và bảng biểu.
+        2. Xác định base_size: Cỡ chữ thân bài có mật độ xuất hiện lớn nhất (Mode).
+        3. Phân cấp các cỡ chữ lớn hơn base_size theo thứ tự giảm dần thành Heading Level 1, 2, 3...
+        """
+        default_sz = self._get_doc_default_font_size(doc)
+        font_char_counts = Counter()
+
+        for p in doc.paragraphs:
+            for r in p.runs:
+                t = r.text.strip()
+                if not t:
+                    continue
+                sz = self._get_run_font_size(r, p, default_sz)
+                font_char_counts[sz] += len(t)
+
+        for t in doc.tables:
+            for row in t.rows:
+                for cell in row.cells:
+                    for p in cell.paragraphs:
+                        for r in p.runs:
+                            t = r.text.strip()
+                            if not t:
+                                continue
+                            sz = self._get_run_font_size(r, p, default_sz)
+                            font_char_counts[sz] += len(t)
+
+        if not font_char_counts:
+            return {
+                "base_size": 11.0,
+                "heading_levels": {},
+                "default_sz": 11.0,
+                "larger_sizes": []
+            }
+
+        base_size = font_char_counts.most_common(1)[0][0]
+        # Các cỡ chữ lớn hơn cỡ chữ thân bài ít nhất 0.4pt (loại trừ sai số số thực)
+        # Khống chế tối đa (MAX_HEADING_LEVEL - 1) cỡ chữ lớn để dành cấp cuối cùng cho tiểu mục in đậm
+        max_font_headings = max(self.MAX_HEADING_LEVEL - 1, 1)
+        larger_sizes = sorted([sz for sz in font_char_counts.keys() if sz >= base_size + 0.4], reverse=True)[:max_font_headings]
+        heading_levels = {sz: min(idx + 1, self.MAX_HEADING_LEVEL) for idx, sz in enumerate(larger_sizes)}
+
+        return {
+            "base_size": base_size,
+            "heading_levels": heading_levels,
+            "default_sz": default_sz,
+            "larger_sizes": larger_sizes
+        }
+
+    def _detect_heading_level(
+        self,
+        p: Paragraph,
+        style_name: str,
+        text: str,
+        font_profile: dict | None = None
+    ) -> int | None:
+        """
+        Nhận diện cấp độ tiêu đề dựa trên so sánh tương quan cỡ chữ toàn tài liệu (0% Regex):
+        Khống chế tối đa 6 cấp heading (H1..H6), không tính tên file (title):
+        1. Word Styles chuẩn (Title, Subtitle, Heading 1..9).
         2. Thuộc tính OpenXML Outline Level (w:outlineLvl).
-        3. Thuộc tính hình thức văn bản: In đậm (Bold), chữ in hoa ngắn.
-        4. Ký hiệu phân cấp số học chuẩn quốc tế (Số La Mã, outline numbering đa tầng).
+        3. Tương quan kích cỡ chữ toàn văn bản (Global Font Size Profiling):
+           - Kích cỡ lớn nhất so với thân bài -> Level 1.
+           - Kích cỡ lớn thứ nhì -> Level 2...
+           - Cỡ chữ bằng thân bài nhưng in đậm toàn bộ -> Sub-heading (Level kế tiếp, tối đa 6).
         """
         style_lower = style_name.lower()
 
@@ -248,7 +341,8 @@ class DOCXChunker:
             return 2
         if "heading" in style_lower:
             digits = [c for c in style_name if c.isdigit()]
-            return int("".join(digits)) if digits else 1
+            lvl = int("".join(digits)) if digits else 1
+            return min(lvl, self.MAX_HEADING_LEVEL)
 
         # 2. Qua OpenXML Outline Level
         try:
@@ -257,56 +351,37 @@ class DOCXChunker:
                 if pPr is not None and hasattr(pPr, "outlineLvl") and pPr.outlineLvl is not None:
                     lvl_val = pPr.outlineLvl.val
                     if lvl_val is not None:
-                        return int(lvl_val) + 1
+                        return min(int(lvl_val) + 1, self.MAX_HEADING_LEVEL)
         except Exception:
             pass
 
         first_line = text.split("\n")[0].strip()
         tokens = first_line.split()
-        if not tokens or len(first_line) > 120:
+        if not tokens or len(first_line) > 140:
             return None
 
-        # 3. Phân tích định dạng in đậm toàn bộ dòng
-        is_all_bold = False
-        if p.runs:
-            non_empty_runs = [r for r in p.runs if r.text.strip()]
-            if non_empty_runs and all(r.bold for r in non_empty_runs):
-                is_all_bold = True
+        non_empty_runs = [r for r in p.runs if r.text.strip()]
+        if not non_empty_runs:
+            return None
 
-        # Ký hiệu số La Mã chuẩn quốc tế (I., II., III., IV., V., etc.)
-        first_tok_clean = tokens[0].rstrip(".:)-")
-        is_roman = first_tok_clean in ("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII")
+        if not font_profile:
+            return None
 
-        # Đánh số phân cấp đa tầng (vd: 1.1, 1.1.1, 1., etc.)
-        num_clean = tokens[0].rstrip(".")
-        dot_count = num_clean.count(".")
-        is_multi_level_num = dot_count >= 1 and all(part.isdigit() for part in num_clean.split("."))
-        is_single_num = tokens[0].endswith(".") and tokens[0][:-1].isdigit()
-        is_letter_bullet = tokens[0].endswith(")") and len(tokens[0]) == 2 and tokens[0][0].isalpha()
+        default_sz = font_profile.get("default_sz", 11.0)
+        run_sizes = [self._get_run_font_size(r, p, default_sz) for r in non_empty_runs]
+        p_sz = max(run_sizes)
 
-        if is_all_bold:
-            if is_roman and len(tokens) >= 2:
-                return 1
-            if first_line.isupper() and 3 < len(first_line) < 100:
-                return 2
-            if is_multi_level_num:
-                return min(2 + dot_count, 5)
-            if is_single_num:
-                return 3
-            if is_letter_bullet:
-                return 5
+        # 3.1. So sánh với các kích cỡ chữ lớn hơn cỡ chữ chung của file
+        for sz, lvl in font_profile.get("heading_levels", {}).items():
+            if abs(p_sz - sz) < 0.3:
+                return min(lvl, self.MAX_HEADING_LEVEL)
+
+        # 3.2. Cỡ chữ bằng cỡ chữ chung nhưng in đậm toàn bộ (Sub-heading, tối đa Level 6)
+        is_all_bold = all(r.bold for r in non_empty_runs)
+        if is_all_bold and len(first_line) < 100:
             if 1 <= len(tokens) <= 15 and not first_line.endswith((".", ";", ":")):
-                return 2
-
-        # Tiêu đề không in đậm nhưng có đặc trưng cấu trúc nổi bật
-        if is_roman and len(tokens) >= 2 and (first_line.isupper() or not first_line.endswith((".", ";", ":"))):
-            return 1
-
-        if first_line.isupper() and 5 < len(first_line) < 80 and not first_line.endswith((".", ";", ":")):
-            return 2
-
-        if is_multi_level_num and len(tokens) >= 2 and not first_line.endswith((".", ";", ":")):
-            return min(2 + dot_count, 5)
+                sub_lvl = len(font_profile.get("larger_sizes", [])) + 1
+                return min(sub_lvl, self.MAX_HEADING_LEVEL)
 
         return None
 

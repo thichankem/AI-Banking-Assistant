@@ -112,12 +112,13 @@ class OCRLayoutHierarchyPredictor:
             }
         """
         text = line.get("text", "").strip()
-        h = float(line.get("height", 16.0))
-        w = float(line.get("width", 100.0))
-        x_min = float(line.get("x_min", stats.get("base_left", 50.0)))
         has_explicit_y = "y_min" in line
         y_min = float(line.get("y_min", page_h * 0.20))
-        y_max = float(line.get("y_max", y_min + h))
+        y_max = float(line.get("y_max", y_min + 16.0))
+        h = float(line.get("height", line.get("h", max(y_max - y_min, 1.0))))
+        x_min = float(line.get("x_min", stats.get("base_left", 50.0)))
+        x_max = float(line.get("x_max", x_min + 100.0))
+        w = float(line.get("width", line.get("w", max(x_max - x_min, 1.0))))
         cx = float(line.get("center_x", (x_min + w / 2.0)))
 
         median_h = stats.get("median_h", 16.0)
@@ -125,26 +126,78 @@ class OCRLayoutHierarchyPredictor:
         median_gap = stats.get("median_gap", 8.0)
 
         # ---------------------------------------------------------------------
-        # 1. Kiểm tra Vùng Mép Trang (Header/Footer Boundary)
+        # 1. Kiểm tra Vùng Mép Trang (Header/Footer Boundary & Page Numbers) (0% Regex)
         # ---------------------------------------------------------------------
-        is_top_edge = y_min < page_h * self.edge_margin_ratio
-        is_bottom_edge = y_max > page_h * (1.0 - self.edge_margin_ratio) or y_max > page_h * 0.910
-        is_page_num = (w / page_w < 0.15) and bool(
-            len(text) <= 8 and any(c.isdigit() for c in text) and (text.startswith("Trang") or "/" in text or text.isdigit())
-        )
+        words = text.split()
+        word_count = len(words)
+        char_count = len(text)
+        text_lower = text.lower()
 
-        if has_explicit_y and (is_top_edge or is_bottom_edge or is_page_num):
-            # Nếu chữ rất to ở đầu trang (Display Title h >= 34px) thì bỏ qua kiểm tra mép trang
-            if is_top_edge and h >= 34.0:
-                pass
-            else:
-                return {
-                    "predicted_level": LayoutHierarchyLevel.HEADER_FOOTER,
-                    "confidence": 0.95,
-                    "is_heading": False,
-                    "indent_level": 0,
-                    "features": {"edge": True}
-                }
+        is_extreme_top = y_min < page_h * 0.045
+        is_extreme_bottom = y_max > page_h * 0.955
+        is_near_bottom = y_max > page_h * 0.930
+
+        # A. Nhận diện số trang (Page Number)
+        is_page_num = False
+        if (is_extreme_top or is_extreme_bottom or is_near_bottom) and word_count <= 3 and char_count <= 12:
+            clean_pn = text_lower.replace("trang", "").replace("page", "").replace("of", "/").replace("-", "").strip()
+            parts = clean_pn.split("/")
+            if parts and all(p.strip().isdigit() for p in parts if p.strip()) and any(p.strip().isdigit() for p in parts):
+                is_page_num = True
+
+        # B. Bảo vệ Footnote & Chú thích nghiệp vụ: nếu dòng có câu hoàn chỉnh hoặc từ khóa nghiệp vụ
+        is_footnote_or_content = False
+        if word_count >= 5 or char_count >= 25:
+            banking_terms = (
+                "bổ sung", "ghi chú", "lưu ý", "áp dụng", "hiệu lực", "vnđ", "đồng", 
+                "phí", "thẻ", "khách hàng", "chủ tk", "tài khoản", "nghĩa vụ", "quyền",
+                "cam kết", "điều", "khoản", "hợp đồng", "thỏa thuận", "quy định",
+                "hạn mức", "lãi suất", "thanh toán", "chi nhánh", "phòng giao dịch",
+                "không trái", "pháp luật", "giấy tờ", "căn cước", "sử dụng"
+            )
+            if any(term in text_lower for term in banking_terms):
+                is_footnote_or_content = True
+            elif text.endswith((".", ",", ";", ":", ")")):
+                is_footnote_or_content = True
+
+        # C. Tiêu đề tài liệu ở đầu trang 1
+        page_num = line.get("page_num", 1)
+        is_page1_title = (page_num == 1) and (y_min < page_h * 0.25) and (h >= 14.0 or text.isupper() or (w / page_w) >= 0.25)
+
+        if is_page_num:
+            return {
+                "predicted_level": LayoutHierarchyLevel.HEADER_FOOTER,
+                "confidence": 0.98,
+                "is_heading": False,
+                "indent_level": 0,
+                "features": {"is_page_number": True}
+            }
+
+        # D. Tiêu đề mẫu biểu / Running Header ở mép cực cận (Mẫu số 02, PUBLIC, VIETCOMBANK)
+        is_form_field = any(term in text_lower for term in (
+            "loại", "thẻ", "card", "tài khoản", "account", "dịch vụ", "service", 
+            "họ và tên", "ngày sinh", "chữ ký", "stt", "mức phí", "đơn vị", "nội dung"
+        ))
+        if (is_extreme_top or is_extreme_bottom) and not is_page1_title and not is_form_field and word_count <= 4 and char_count <= 25:
+            return {
+                "predicted_level": LayoutHierarchyLevel.HEADER_FOOTER,
+                "confidence": 0.95,
+                "is_heading": False,
+                "indent_level": 0,
+                "features": {"edge": True}
+            }
+
+        # Nếu là văn bản nội dung / footnote / điều khoản pháp lý / tiêu đề / nhãn biểu mẫu: KHÔNG BAO GIỜ là header_footer
+        if is_footnote_or_content or is_page1_title or is_form_field:
+            pass
+        elif (is_extreme_top or is_extreme_bottom) and not is_form_field and char_count <= 40 and word_count <= 6:
+            return {
+                "predicted_level": LayoutHierarchyLevel.HEADER_FOOTER,
+                "confidence": 0.90,
+                "is_heading": False,
+                "indent_level": 0,
+                "features": {"edge": True}
+            }
 
         # ---------------------------------------------------------------------
         # 2. Tính toán các đặc trưng bố cục hình học chuẩn hóa
@@ -179,7 +232,8 @@ class OCRLayoutHierarchyPredictor:
         if (h >= 34.0 and y_min < page_h * 0.65) or \
            (rel_h >= 1.30 and (is_centered or is_short_line)) or \
            (is_centered and is_uppercase and y_min < page_h * 0.25 and rel_w >= 0.30) or \
-           (rel_h >= 1.05 and is_centered and is_uppercase and y_min < page_h * 0.25):
+           (rel_h >= 1.05 and is_centered and is_uppercase and y_min < page_h * 0.25) or \
+           (page_num == 1 and y_min < page_h * 0.20 and is_uppercase and word_count >= 3):
             return {
                 "predicted_level": LayoutHierarchyLevel.TITLE,
                 "confidence": 0.95,
@@ -256,7 +310,8 @@ class OCRLayoutHierarchyPredictor:
         self,
         lines: list[dict],
         page_w: float,
-        page_h: float
+        page_h: float,
+        page_num: int = 1
     ) -> list[dict]:
         """
         Duyệt và gắn nhãn phân cấp hình học cho toàn bộ danh sách dòng của một trang.
@@ -270,6 +325,9 @@ class OCRLayoutHierarchyPredictor:
         for i, line in enumerate(lines):
             prev_l = lines[i - 1] if i > 0 else None
             next_l = lines[i + 1] if i + 1 < len(lines) else None
+
+            if "page_num" not in line:
+                line["page_num"] = page_num
 
             pred = self.predict_line_hierarchy(
                 line=line,
