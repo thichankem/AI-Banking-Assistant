@@ -96,6 +96,12 @@ benchmark_summary.json
 visual_audit_report.json
 rag_banking/storage/*.json
 
+# Allow independent benchmark suite to be tracked
+!benchmarks/
+!benchmarks/**
+!benchmarks/datasets/**
+!benchmarks/results/**
+
 # DLA Chunking Viewer Layouts, Sample Data & Generated Manifests
 **/viewer/layouts/
 **/viewer/sample_data/
