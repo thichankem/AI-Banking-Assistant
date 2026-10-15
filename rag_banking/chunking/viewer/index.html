@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vietcombank AI Assistant - Chunking & DLA Bounding Box Inspector (108 Tệp)</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- Top Header Navigation -->
+  <!-- Top Header Navigation -->
+  <header class="top-header">
+    <div class="brand-section">
+      <div class="brand-title">
+        <h1>AI Banking Assistant</h1>
+      </div>
+    </div>
+
+    <!-- Bộ điều khiển chọn trong 108 tệp -->
+    <div class="header-doc-picker">
+      <div class="doc-select-bar">
+        <button id="btn-prev-doc" class="btn btn-nav" title="Tệp trước (Phím tắt: Alt+Trái)">&lt;</button>
+        <div class="select-wrapper doc-master-wrapper">
+          <select id="doc-master-select" class="dataset-select" title="Chọn bất kỳ tệp nào trong 108 tệp ngân hàng">
+            <option value="">Đang tải danh mục 108 tệp...</option>
+          </select>
+          <span class="select-arrow">▼</span>
+        </div>
+        <button id="btn-next-doc" class="btn btn-nav" title="Tệp tiếp theo (Phím tắt: Alt+Phải)">&gt;</button>
+      </div>
+    </div>
+
+    <div class="header-controls">
+      <input type="file" id="raw-file-upload-input" accept=".pdf,.docx,.doc" style="display: none;">
+      <button id="btn-pick-raw-file" class="btn btn-secondary" title="Chọn file PDF/DOCX khác từ máy tính">
+        <span>Chọn tệp ngoài</span>
+      </button>
+
+      <button id="btn-theme-toggle" class="btn btn-secondary" title="Đổi giao diện Sáng / Tối">Tối</button>
+    </div>
+  </header>
+
+  <!-- Secondary Toolbar & Metrics -->
+  <div class="sub-toolbar">
+    <div class="view-layers-control">
+      <!-- Tách biệt rõ ràng Box Element và Khung Chunk -->
+      <div class="layer-buttons-group">
+        <button id="btn-toggle-boxes" class="btn-layer btn-layer-element active" title="Bật / Tắt Bounding Box của từng Element">
+          <span class="layer-dot layer-dot-element"></span>
+          <span>Box Element</span>
+        </button>
+
+        <button id="btn-toggle-chunks" class="btn-layer btn-layer-chunk active" title="Bật / Tắt Khung bao quanh từng Chunk">
+          <span class="layer-dot layer-dot-chunk"></span>
+          <span>Khung Chunk</span>
+        </button>
+
+        <button id="btn-toggle-raw-bg" class="btn-layer btn-layer-raw active" title="Bật / Tắt hiển thị nền File Gốc">
+          <span>File Gốc</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Summary Metrics -->
+    <div class="metrics-summary">
+      <div class="metric-pill">
+        <span>Tệp:</span>
+        <strong id="stat-doc-index">1/108</strong>
+      </div>
+      <span>•</span>
+      <div class="metric-pill">
+        <strong id="stat-elements">0</strong>
+        <span>boxes</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Dual-Pane Split Layout -->
+  <main class="main-split-container" id="main-split-container">
+    
+    <!-- NỬA TRÁI: BẢN GỐC & BOUNDING BOX -->
+    <section class="split-pane split-pane-left" id="split-pane-left">
+      <div class="pane-header">
+        <div class="pane-title">
+          <span>TÀI LIỆU GỐC & BOUNDING BOX</span>
+        </div>
+        <div class="pane-tools">
+          <select id="page-jump-select" class="btn btn-sm" title="Nhảy nhanh đến trang"></select>
+          <button id="btn-zoom-out" class="btn btn-sm" title="Thu nhỏ (-)">−</button>
+          <span id="zoom-level-text" style="font-size: 11.5px; font-weight:600; min-width:40px; text-align:center;">Vừa khung</span>
+          <button id="btn-zoom-in" class="btn btn-sm" title="Phóng to (+)">+</button>
+          <button id="btn-zoom-reset" class="btn btn-sm" title="Khôi phục 100%">100%</button>
+        </div>
+      </div>
+
+      <!-- Vùng cuộn tài liệu và hiển thị các trang -->
+      <div id="page-viewer-scroll" class="page-viewer-scroll">
+        <!-- Các trang và Bounding Box sẽ được app.js render động vào đây -->
+      </div>
+    </section>
+
+    <!-- Thanh kéo chỉnh kích thước 2 nửa (Split Resizer) -->
+    <div class="split-resizer" id="split-resizer" title="Kéo sang trái hoặc phải để chỉnh độ rộng 2 nửa">
+      <div class="resizer-handle"></div>
+    </div>
+
+    <!-- NỬA PHẢI: KẾT QUẢ PHÂN ĐOẠN (CHUNKING) -->
+    <section class="split-pane split-pane-right" id="split-pane-right">
+      <div class="pane-header">
+        <div class="pane-title">
+          <span>KẾT QUẢ CHUNKING</span>
+        </div>
+        <span id="chunk-counter" style="font-size: 12px; color: var(--text-secondary); font-weight:500;">0 chunks</span>
+      </div>
+
+      <!-- Banner thông báo đang soi Element / Chunk -->
+      <div id="active-inspect-banner" class="active-inspect-banner hidden">
+        <div id="active-inspect-info" class="active-inspect-info"></div>
+        <button id="btn-clear-inspect" class="btn btn-sm" style="background:transparent; border-color:rgba(56,189,248,0.4); color:#38bdf8;">
+          Bỏ chọn
+        </button>
+      </div>
+
+      <!-- Thanh tìm kiếm Chunk -->
+      <div class="right-filter-bar">
+        <div class="search-box">
+          <input type="text" id="chunk-search-input" class="search-input" placeholder="Tìm kiếm nội dung chunk...">
+        </div>
+      </div>
+
+      <!-- Vùng cuộn danh sách Chunks -->
+      <div id="chunks-list-container" class="chunks-list-container">
+        <!-- Các card chunk sẽ được app.js render động vào đây -->
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Tooltip động khi di chuột qua Bounding Box -->
+  <div id="box-tooltip"></div>
+
+  <!-- Overlay Kéo thả tệp -->
+  <div id="drop-zone-overlay">
+    <div style="font-size: 18px; font-weight: 700; margin-bottom: 6px;">Thả tệp PDF, DOCX hoặc JSON vào đây để soi ngay</div>
+    <div style="font-size: 13px; color: #94a3b8;">Tự động nạp tài liệu gốc và kết nối Bounding Box với Chunks</div>
+  </div>
+
+  <script src="libs/pdf.min.js"></script>
+  <script src="libs/mammoth.browser.min.js"></script>
+  <script src="manifest_108.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

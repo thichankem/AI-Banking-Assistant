@@ -15,6 +15,7 @@ Bộ phân đoạn tài liệu PDF ngân hàng nhận thức bố cục, bảng 
 from __future__ import annotations
 
 from pathlib import Path
+from collections import Counter
 
 import pymupdf as fitz
 import pdfplumber
@@ -43,6 +44,289 @@ except (ImportError, ValueError):
     )
 
 
+def clean_filename_fallback(stem: str) -> str:
+    """Tạo tên hiển thị nghiệp vụ ngân hàng chuẩn mực khi không có text số hoặc OCR."""
+    parts = stem.split("_")
+    cleaned = []
+    for i, p in enumerate(parts):
+        if p in ("vcb", "pdf", "full", "slide"):
+            continue
+        if p.isdigit() and i < 4:
+            continue
+        cleaned.append(p)
+
+    mapping = {
+        "bctc": "Báo Cáo Tài Chính",
+        "hop": "Hợp",
+        "nhat": "Nhất",
+        "kiem": "Kiểm",
+        "toan": "Toán",
+        "rieng": "Riêng",
+        "le": "Lẻ",
+        "ban": "Bán",
+        "nien": "Niên",
+        "kqkd": "Kết Quả Kinh Doanh",
+        "cbtt": "Công Bố Thông Tin",
+        "nq": "Nghị Quyết",
+        "hdqt": "HĐQT",
+        "cctg": "Chứng Chỉ Tiền Gửi",
+        "vcbs": "VCBS",
+        "tktt": "Tài Khoản Thanh Toán",
+        "dieu": "Điều",
+        "kien": "Kiện",
+        "khoan": "Khoản",
+        "bieu": "Biểu",
+        "phi": "Phí",
+        "the": "Thẻ",
+        "truc": "Trực",
+        "tuyen": "Tuyến",
+        "debit": "Debit",
+        "haha": "Haha",
+        "trai": "Trái",
+        "phieu": "Phiếu"
+    }
+
+    res_words = []
+    for w in cleaned:
+        low = w.lower()
+        if low in mapping:
+            res_words.append(mapping[low])
+        elif low.startswith("q") and len(low) == 2 and low[1].isdigit():
+            res_words.append(f"Quý {low[1]}")
+        else:
+            res_words.append(w.title())
+
+    title_str = " ".join(res_words).strip()
+    return f"{title_str} - Vietcombank" if title_str else stem
+
+
+def is_valid_title_candidate(title: str) -> bool:
+    """Kiểm tra chuỗi tiêu đề có phải là câu chữ nghiệp vụ thật hay là rác OCR."""
+    if not title or len(title) < 10:
+        return False
+    words = title.split()
+    if len(words) < 2:
+        return False
+
+    vowels = set("aáàảãạăắằẳẵặâấầẩẫậeéèẻẽẹêếềểễệiíìỉĩịoóòỏõọôốồổỗộơớờởỡợuúùủũụưứừửữựyýỳỷỹỵ"
+                 "AÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬEÉÈẺẼẸÊẾỀỂỄỆIÍÌỈĨỊOÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢUÚÙỦŨỤƯỨỪỬỮỰYÝỲỶỸỴ")
+
+    valid_acronyms = {"vcb", "vcbs", "tmcp", "hđqt", "hdqt", "cctg", "khcn", "khdn", "nhnn", "bctc", "usd", "vnd", "vnđ", "ey", "kpmg", "pwc", "deloitte"}
+    valid_words = 0
+    noise_words = 0
+    for w in words:
+        w_clean = "".join(c for c in w if c.isalpha())
+        if not w_clean:
+            continue
+        has_vowel = any(c in vowels for c in w_clean)
+        if has_vowel or w_clean.lower() in valid_acronyms:
+            valid_words += 1
+        else:
+            noise_words += 1
+
+    if noise_words > valid_words or valid_words < 2:
+        return False
+    return True
+
+
+def extract_document_title_dla(doc: fitz.Document, pdf_path: Path) -> str:
+    """
+    Trích xuất Tiêu đề Văn bản Thực tế (Document Title) từ trang đầu tiên
+    thuần túy bằng bố cục thị giác:
+    - Vị trí ở phần đỉnh trang (trước phần thân bài đầu tiên có lề trái sát biên).
+    - Căn giữa (Center Alignment) hoặc có cỡ chữ lớn nhất trang (font size >= body + 1).
+    - Hỗ trợ cả Digital PDF lẫn Scanned Image PDF thông qua Visual OCR DLA (0% Regex).
+    """
+    if len(doc) == 0:
+        return clean_filename_fallback(pdf_path.stem)
+
+    page = doc[0]
+    page_w = page.rect.width
+    page_h = page.rect.height
+    center_target = page_w / 2.0
+
+    table_bboxes = []
+    try:
+        tabs = page.find_tables()
+        if tabs and tabs.tables:
+            for tab in tabs.tables:
+                table_bboxes.append(fitz.Rect(tab.bbox))
+    except Exception:
+        pass
+    min_table_top = min((tb.y0 for tb in table_bboxes), default=page_h)
+
+    text_dict = page.get_text("dict")
+    raw_lines = []
+
+    for block in text_dict.get("blocks", []):
+        if "lines" not in block:
+            continue
+        for line in block["lines"]:
+            l_x0, l_y0, l_x1, l_y1 = line["bbox"]
+            txt = "".join(s["text"] for s in line["spans"]).strip()
+            if not txt:
+                continue
+
+            # Bỏ qua header / số trang / mã hiệu sát mép đỉnh
+            if l_y0 < 0.03 * page_h:
+                continue
+            if l_y0 > 0.40 * page_h:
+                continue
+            # Bỏ qua nếu dòng nằm tại hoặc sau đỉnh bảng biểu đầu tiên, hoặc giao cắt với bảng
+            if l_y0 >= min_table_top - 2:
+                continue
+            line_rect = fitz.Rect(l_x0, l_y0, l_x1, l_y1)
+            if any(line_rect.intersects(tb) for tb in table_bboxes):
+                continue
+
+            line_size = max(s["size"] for s in line["spans"])
+            line_center = (l_x0 + l_x1) / 2.0
+            is_centered = abs(line_center - center_target) < (page_w * 0.22)
+            is_upper = txt.isupper()
+            is_bold = any(bool(s["flags"] & 2) for s in line["spans"])
+
+            raw_lines.append({
+                "text": txt,
+                "x0": l_x0,
+                "y0": l_y0,
+                "x1": l_x1,
+                "y1": l_y1,
+                "width": l_x1 - l_x0,
+                "size": line_size,
+                "center_x": line_center,
+                "is_centered": is_centered,
+                "is_upper": is_upper,
+                "is_bold": is_bold
+            })
+
+    if raw_lines:
+        raw_lines.sort(key=lambda l: (round(l["y0"] / 3.0) * 3.0, l["x0"]))
+        title_lines = []
+        started = False
+
+        for l in raw_lines:
+            txt_clean = l["text"].strip()
+            # Bỏ qua các dòng chú thích hiệu lực / ban hành dạng (hiệu lực từ ngày...)
+            if txt_clean.startswith("(") and txt_clean.endswith(")"):
+                continue
+            if any(kw in txt_clean.lower() for kw in ("hiệu lực từ", "áp dụng từ", "ban hành theo", "ban hành kèm")):
+                continue
+
+            # Nếu gặp một dòng sát lề trái x0 < page_w * 0.12 và chiều rộng lớn width > page_w * 0.7:
+            # Đây là dòng thân bài tràn lề -> Kết thúc vùng tiêu đề
+            if started and l["x0"] < page_w * 0.12 and l["width"] > page_w * 0.70:
+                break
+
+            is_title_candidate = (
+                (l["is_centered"] and (l["is_upper"] or l["size"] >= 13.0 or l["is_bold"])) or
+                (l["size"] >= 14.0) or
+                (l["is_upper"] and len(l["text"]) > 10 and l["y0"] < 0.25 * page_h)
+            )
+
+            if is_title_candidate:
+                started = True
+                title_lines.append(l["text"])
+            elif started:
+                if l["is_centered"] and len(title_lines) < 4:
+                    title_lines.append(l["text"])
+                else:
+                    break
+
+        if title_lines:
+            return " ".join(title_lines).strip()
+
+    # Nếu không có digital text (Scanned PDF), kích hoạt OCR DLA trên trang đầu
+    try:
+        import pytesseract
+        from PIL import Image
+        import io
+        tess_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+        if Path(tess_cmd).is_file():
+            pytesseract.pytesseract.tesseract_cmd = tess_cmd
+        pix = page.get_pixmap(dpi=150)
+        img = Image.open(io.BytesIO(pix.tobytes("png")))
+        data = pytesseract.image_to_data(img, lang="vie+eng", output_type=pytesseract.Output.DICT)
+        
+        lines_dict = {}
+        for i in range(len(data["text"])):
+            w_txt = data["text"][i].strip()
+            if not w_txt:
+                continue
+            l_key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
+            lines_dict.setdefault(l_key, []).append({
+                "text": w_txt,
+                "left": data["left"][i],
+                "top": data["top"][i],
+                "width": data["width"][i],
+                "height": data["height"][i]
+            })
+
+        p_w_img, p_h_img = img.width, img.height
+        c_target_img = p_w_img / 2.0
+        ocr_lines = []
+        for words in lines_dict.values():
+            l_txt = " ".join(w["text"] for w in words).strip()
+            if not l_txt or len(l_txt) < 3:
+                continue
+            l_top = min(w["top"] for w in words)
+            l_left = min(w["left"] for w in words)
+            l_right = max(w["left"] + w["width"] for w in words)
+            l_h = max(w["height"] for w in words)
+            l_center = (l_left + l_right) / 2.0
+            
+            if l_top < 0.03 * p_h_img or l_top > 0.45 * p_h_img:
+                continue
+                
+            is_centered = abs(l_center - c_target_img) < (p_w_img * 0.22)
+            is_upper = l_txt.isupper()
+            ocr_lines.append({
+                "text": l_txt,
+                "top": l_top,
+                "height": l_h,
+                "is_centered": is_centered,
+                "is_upper": is_upper
+            })
+            
+        ocr_lines.sort(key=lambda x: x["top"])
+        title_candidates = []
+        started = False
+        for l in ocr_lines:
+            txt = l["text"]
+            if "CỘNG HÒA XÃ HỘI" in txt or "Độc lập - Tự do" in txt:
+                continue
+            if txt.lower().startswith("số:") or txt.lower().startswith("so:"):
+                continue
+            if "Kính gửi:" in txt or "Kínhgửi:" in txt:
+                break
+                
+            is_title = (
+                (l["is_centered"] and (l["is_upper"] or l["height"] >= 24)) or
+                (l["height"] >= 28) or
+                ("báo cáo tài chính" in txt.lower()) or
+                ("bản đăng ký" in txt.lower() or "ban dang ky" in txt.lower()) or
+                ("yêu cầu chuyển tiền" in txt.lower()) or
+                ("công bố thông tin" in txt.lower() or "cong bo thong tin" in txt.lower()) or
+                ("nghị quyết" in txt.lower())
+            )
+            if is_title:
+                started = True
+                title_candidates.append(txt)
+            elif started:
+                if l["is_centered"] and len(title_candidates) < 4:
+                    title_candidates.append(txt)
+                else:
+                    break
+                    
+        if title_candidates:
+            res_title = " ".join(title_candidates).strip()
+            if len(res_title) >= 12 and is_valid_title_candidate(res_title):
+                return res_title
+    except Exception:
+        pass
+
+    return clean_filename_fallback(pdf_path.stem)
+
+
 class PDFChunker:
     """
     Bộ phân đoạn tài liệu PDF chuyên dụng cho ngân hàng theo giải thuật DLA & Advanced Table/OCR/Vision LLM.
@@ -53,11 +337,12 @@ class PDFChunker:
         ocr_extractor: OCRExtractor | None = None,
         vision_table_extractor: LocalVisionTableExtractor | None = None,
         enable_vision_llm_tables: bool = False,
-        max_chunk_size: int = 800,           # Trần kích thước ký tự (~400 từ)
-        min_section_size: int = 120,         # Ngưỡng từ tối thiểu dải vàng (150-450 từ)
-        chunk_overlap: int = 100,            # Độ gối đầu khi phải chia nhỏ đoạn dài
+        max_chunk_size: int = 2000,          # Trần kích thước ký tự (~400 từ)
+        min_section_size: int = 150,         # Ngưỡng từ tối thiểu dải vàng (150-450 từ)
+        chunk_overlap: int = 150,            # Độ gối đầu khi phải chia nhỏ đoạn dài
         image_area_ratio_threshold: float = 0.40, # Tỷ lệ diện tích ảnh kích hoạt scan
-        table_rows_per_chunk: int = 4        # Số hàng bảng biểu tối đa trong một chunk
+        table_rows_per_chunk: int = 10,      # Số hàng bảng biểu tối đa trong một chunk (giữ nguyên vẹn nhóm dịch vụ)
+        use_unified_stream: bool = True       # Bật UnifiedPageStreamProcessor (5D Geometry, bỏ rẽ nhánh 50% scan)
     ):
         self.ocr_extractor = ocr_extractor or OCRExtractor()
         self.vision_table_extractor = vision_table_extractor or LocalVisionTableExtractor()
@@ -67,12 +352,14 @@ class PDFChunker:
         self.chunk_overlap = chunk_overlap
         self.image_area_ratio_threshold = image_area_ratio_threshold
         self.table_rows_per_chunk = table_rows_per_chunk
+        self.use_unified_stream = use_unified_stream
 
     def chunk_pdf(
         self,
         pdf_path: str | Path,
         max_pages: int | None = None,
-        enable_vision_tables: bool | None = None
+        enable_vision_tables: bool | None = None,
+        use_unified_stream: bool | None = None
     ) -> list[dict]:
         """
         Đọc và phân đoạn toàn diện một tệp PDF ngân hàng:
@@ -83,6 +370,23 @@ class PDFChunker:
             print(f"[PDF Chunker] Không tìm thấy tệp: {pdf_path}")
             return []
 
+        # ---------------------------------------------------------------------
+        # NHÁNH V3 NÂNG CẤP: UNIFIED PAGE STREAM PROCESSOR (BỎ RẼ NHÁNH 50%)
+        # ---------------------------------------------------------------------
+        run_unified = self.use_unified_stream if use_unified_stream is None else use_unified_stream
+        if run_unified:
+            try:
+                from .hybrid_pdf_chunker import HybridPDFChunker
+                hybrid = HybridPDFChunker(
+                    ocr_extractor=self.ocr_extractor,
+                    max_chunk_size=self.max_chunk_size,
+                    min_section_size=self.min_section_size,
+                    chunk_overlap=self.chunk_overlap,
+                    table_rows_per_chunk=self.table_rows_per_chunk
+                )
+                return hybrid.chunk_pdf(pdf_path, max_pages=max_pages)
+            except Exception as e:
+                print(f"[PDF Chunker] Unified stream gặp lỗi: {e}. Fallback sang luồng đa trang cổ điển.")
 
         try:
             doc = fitz.open(str(pdf_path))
@@ -91,6 +395,12 @@ class PDFChunker:
         except Exception as e:
             print(f"[PDF Chunker] Không thể mở tệp {pdf_path.name}: {e}")
             return []
+
+        # ---------------------------------------------------------------------
+        # BƯỚC 0: TRÍCH XUẤT TIÊU ĐỀ VĂN BẢN THỰC TẾ & KHỞI TẠO BỘ THEO DÕI
+        # ---------------------------------------------------------------------
+        doc_title = extract_document_title_dla(doc, pdf_path)
+        table_tracker = {"section": "", "subsection": ""}
 
         chunks: list[dict] = []
         raw_page_texts: list[str] = []
@@ -109,22 +419,26 @@ class PDFChunker:
             page_area = max(page_rect.width * page_rect.height, 1.0)
 
             # 1.1. Trích xuất bảng biểu bằng PyMuPDF find_tables (hoặc Local Vision LLM)
-            table_chunks = self._extract_page_tables(
+            table_chunks, table_bboxes = self._extract_page_tables(
                 page=page,
                 pdf_path=pdf_path,
                 page_num=page_num,
                 start_idx=len(chunks),
-                use_vision=use_vision
+                use_vision=use_vision,
+                doc_title=doc_title,
+                table_tracker=table_tracker
             )
             if table_chunks:
                 chunks.extend(table_chunks)
 
-            # 1.2. Nhận diện trang scan thông minh
+            # 1.2. Nhận diện trang scan thông minh (loại trừ vùng bảng đã bóc tách)
             page_text, chunk_type, ocr_conf, layout_lines = self._extract_page_text_or_scan(
                 page=page,
                 pdf_path=pdf_path,
                 page_idx=page_idx,
-                page_area=page_area
+                page_area=page_area,
+                table_bboxes=table_bboxes,
+                doc_title=doc_title
             )
 
             if layout_lines:
@@ -141,7 +455,7 @@ class PDFChunker:
         # BƯỚC 2: PHỤC HỒI CẤU TRÚC SCAN NẾU LÀ TÀI LIỆU SCAN CHỦ ĐẠO
         # ---------------------------------------------------------------------
         if scan_pages_lines and (len(scan_pages_lines) >= pages_to_process * 0.5):
-            reconstructor = ScanStructureReconstructor(doc_title=pdf_path.stem)
+            reconstructor = ScanStructureReconstructor(doc_title=doc_title)
             ordered_scan_lines = [scan_pages_lines[p] for p in sorted(scan_pages_lines.keys())]
             scan_chunks = reconstructor.reconstruct_document_chunks(
                 pages_lines=ordered_scan_lines,
@@ -165,7 +479,8 @@ class PDFChunker:
         digital_chunks = self._chunk_document_blocks(
             document_blocks=document_blocks,
             pdf_path=pdf_path,
-            start_chunk_idx=len(chunks)
+            start_chunk_idx=len(chunks),
+            doc_title=doc_title
         )
         chunks.extend(digital_chunks)
 
@@ -177,10 +492,13 @@ class PDFChunker:
         pdf_path: Path,
         page_num: int,
         start_idx: int,
-        use_vision: bool = False
-    ) -> list[dict]:
+        use_vision: bool = False,
+        doc_title: str = "",
+        table_tracker: dict | None = None
+    ) -> tuple[list[dict], list[tuple[float, float, float, float]]]:
         """Dò và trích xuất các bảng biểu trên trang thành pdf_table (PyMuPDF hoặc Local Vision LLM)."""
         table_chunks: list[dict] = []
+        table_bboxes: list[tuple[float, float, float, float]] = []
 
         # 1. Trích xuất bảng số học bằng PyMuPDF find_tables
         try:
@@ -189,12 +507,27 @@ class PDFChunker:
                 for tab in tabs.tables:
                     extracted = tab.extract()
                     if extracted and len(extracted) >= 2:
+                        bbox = tuple(float(x) for x in tab.bbox)
+                        table_bboxes.append(bbox)
                         t_chunks = self._process_pdf_table(
                             table_data=extracted,
                             pdf_path=pdf_path,
                             page_num=page_num,
-                            start_idx=start_idx + len(table_chunks)
+                            start_idx=start_idx + len(table_chunks),
+                            doc_title=doc_title,
+                            table_tracker=table_tracker
                         )
+                        # Gắn chú thích / footnote ngay dưới bảng nếu có
+                        table_bottom = bbox[3]
+                        for b in page.get_text("blocks"):
+                            if len(b) >= 5:
+                                bx0, by0, bx1, by1, btext = b[0], b[1], b[2], b[3], b[4]
+                                b_clean = btext.strip()
+                                if table_bottom - 5 <= by0 <= table_bottom + 45 and len(b_clean) >= 12:
+                                    if b_clean[0].isdigit() or b_clean.startswith(("*", "(*)", "Ghi chú", "Lưu ý")):
+                                        if t_chunks:
+                                            t_chunks[-1]["content"] += f"\n[Ghi chú / Footnote]: {b_clean}"
+                                            t_chunks[-1]["word_count"] = count_words(t_chunks[-1]["content"])
                         table_chunks.extend(t_chunks)
         except Exception:
             pass
@@ -209,12 +542,12 @@ class PDFChunker:
                 ):
                     v_res = self.vision_table_extractor.extract_table_from_page(
                         page=page,
-                        doc_title=pdf_path.stem,
+                        doc_title=doc_title or pdf_path.stem,
                         page_num=page_num
                     )
                     if v_res and v_res.get("markdown_table"):
                         md_table = v_res["markdown_table"]
-                        breadcrumb = f"{pdf_path.stem} > Trang {page_num} > Bảng phức tạp Vision LLM"
+                        breadcrumb = f"{doc_title or pdf_path.stem} > Trang {page_num} > Bảng phức tạp Vision LLM"
                         full_content = f"[Breadcrumbs: {breadcrumb}]\n{md_table}"
                         table_chunks.append({
                             "chunk_id": f"{pdf_path.stem}_vision_tbl_{start_idx + len(table_chunks)}",
@@ -233,24 +566,138 @@ class PDFChunker:
             except Exception as e:
                 print(f"[PDF Chunker] Lỗi bóc tách Vision LLM trang {page_num}: {e}")
 
-        return table_chunks
+        return table_chunks, table_bboxes
 
     def _extract_page_text_or_scan(
         self,
         page: object,
         pdf_path: Path,
         page_idx: int,
-        page_area: float
+        page_area: float,
+        table_bboxes: list[tuple[float, float, float, float]] | None = None,
+        doc_title: str = ""
     ) -> tuple[str, str, float, list[dict] | None]:
-        """Nhận diện trang scan hay văn bản số và trích xuất nội dung phù hợp."""
+        """Nhận diện trang scan hay văn bản số và trích xuất nội dung phù hợp theo Natural Spatial Reading Order."""
         # 1. Nhận diện trang scan bằng ScanDetector chuyên biệt
         needs_ocr, metrics = detect_is_scanned_page(
             page=page,
             image_area_ratio_threshold=self.image_area_ratio_threshold
         )
-        digital_text = page.get_text("text").strip()
 
-        if needs_ocr and self.ocr_extractor.is_available():
+        # Tính kích cỡ font chiếm ưu thế của thân bài bằng DLA
+        dom_size = 12.0
+        p_dict = {}
+        try:
+            p_dict = page.get_text("dict")
+            sizes = []
+            for b in p_dict.get("blocks", []):
+                if "lines" in b:
+                    for l in b["lines"]:
+                        for s in l["spans"]:
+                            if len(s["text"].strip()) > 8:
+                                sizes.append(round(s["size"]))
+            if sizes:
+                dom_size = Counter(sizes).most_common(1)[0][0]
+        except Exception:
+            pass
+
+        # 2. Trích xuất text số theo thứ tự không gian đọc tự nhiên (loại trừ vùng bảng)
+        blocks = page.get_text("blocks")
+        valid_blocks = []
+        page_footnotes = []
+        for b in blocks:
+            if len(b) < 5:
+                continue
+            bx0, by0, bx1, by1, btext = b[0], b[1], b[2], b[3], b[4]
+            b_str = btext.strip()
+            if not b_str:
+                continue
+            # Bỏ qua số trang đơn lẻ sát mép
+            if len(b_str) <= 3 and b_str.isdigit() and (by1 > page.rect.height * 0.93 or by0 < page.rect.height * 0.05):
+                continue
+            # Bỏ qua mã hiệu mẫu ở đỉnh
+            if by0 < page.rect.height * 0.05 and b_str.lower().startswith(("mẫu số", "mau so")):
+                continue
+
+            # Phát hiện Footnote bằng DLA (font size nhỏ hơn body size ít nhất 1.5pt tại cuối trang)
+            if by0 > page.rect.height * 0.85:
+                b_sizes = []
+                for b_raw in p_dict.get("blocks", []):
+                    if "lines" in b_raw and abs(b_raw["bbox"][1] - by0) < 5:
+                        for l in b_raw["lines"]:
+                            for s in l["spans"]:
+                                if s["text"].strip():
+                                    b_sizes.append(s["size"])
+                avg_sz = sum(b_sizes) / len(b_sizes) if b_sizes else dom_size
+                if avg_sz <= dom_size - 1.5:
+                    page_footnotes.append(b_str)
+                    continue
+
+            bw = max(bx1 - bx0, 1.0)
+            bh = max(by1 - by0, 1.0)
+            is_in_table = False
+            if table_bboxes:
+                for tx0, ty0, tx1, ty1 in table_bboxes:
+                    iy0 = max(by0, ty0)
+                    iy1 = min(by1, ty1)
+                    ix0 = max(bx0, tx0)
+                    ix1 = min(bx1, tx1)
+                    if iy1 > iy0 and ix1 > ix0:
+                        inter_area = (iy1 - iy0) * (ix1 - ix0)
+                        if inter_area / (bw * bh) > 0.35:
+                            is_in_table = True
+                            break
+                    if ty1 - 5 <= by0 <= ty1 + 45 and (b_str[0].isdigit() or b_str.startswith(("*", "(*)", "Ghi chú", "Lưu ý"))):
+                        is_in_table = True
+                        break
+            if not is_in_table:
+                # Nếu trang đầu tiên và có bảng biểu, loại bỏ các khối tiêu đề / metadata trên đỉnh bảng
+                # vì đã được trích xuất thành doc_title / breadcrumb cấp 0
+                if page_idx == 0 and table_bboxes:
+                    min_table_top = min(tb[1] for tb in table_bboxes)
+                    if by1 <= min_table_top + 5 and by0 < page.rect.height * 0.35:
+                        continue
+                # Nếu trang đầu tiên, loại bỏ các khối tiêu đề tài liệu / header metadata ở phần đỉnh trang
+                # (doc_title đã được trích xuất ở cấp văn bản làm breadcrumb root)
+                if page_idx == 0 and by1 <= page.rect.height * 0.25:
+                    norm_b = "".join(ch for ch in b_str.lower() if ch.isalnum())
+                    norm_title = "".join(ch for ch in doc_title.lower() if ch.isalnum()) if doc_title else ""
+                    if norm_title and (norm_b in norm_title or norm_title in norm_b):
+                        continue
+                    if b_str.lower().startswith(("mẫu số", "mau so", "quyết định", "ban hành kèm theo", "số:")):
+                        continue
+                valid_blocks.append((by0, bx0, b_str))
+
+        # Sắp xếp Spatial Reading Order (y0 tăng dần với tolerance 5px, sau đó x0 tăng dần)
+        valid_blocks.sort(key=lambda item: (round(item[0] / 5.0) * 5.0, item[1]))
+
+        # Ghép các khối ngắt dòng giữa câu thành đoạn văn hoàn chỉnh (chống xé vụn câu)
+        merged_paras: list[str] = []
+        for item in valid_blocks:
+            b_txt = item[2].strip()
+            if not b_txt:
+                continue
+            if merged_paras:
+                prev = merged_paras[-1]
+                # Nếu câu trước chưa kết thúc bằng dấu chấm/hai chấm và dòng này là phần nối tiếp
+                is_continuation = (
+                    not prev.endswith((".", ":", ";", "!", "?", "---"))
+                    and not b_txt.startswith(("-", "*", "•", "###"))
+                    and (b_txt[0].islower() or (not b_txt[0].isdigit() and len(b_txt.split()) > 1 and not b_txt.isupper()))
+                )
+                if is_continuation:
+                    merged_paras[-1] = f"{prev} {b_txt}"
+                    continue
+            merged_paras.append(b_txt)
+
+        # Gắn footnote của trang trực tiếp vào đoạn cuối cùng trên trang
+        if page_footnotes and merged_paras:
+            for fn in page_footnotes:
+                merged_paras[-1] = f"{merged_paras[-1]}\n[Ghi chú / Footnote]: {fn}"
+
+        digital_text = "\n\n".join(merged_paras).strip()
+
+        if needs_ocr and len(digital_text) < 50 and self.ocr_extractor.is_available():
             img_np = self.ocr_extractor.render_pdf_page_300dpi(pdf_path, page_idx=page_idx)
             if img_np is not None:
                 lines = self.ocr_extractor.extract_layout_lines(img_np, apply_deskew=True, apply_red_stamp_filter=True)
@@ -294,23 +741,26 @@ class PDFChunker:
         self,
         document_blocks: list[dict],
         pdf_path: Path,
-        start_chunk_idx: int
+        start_chunk_idx: int,
+        doc_title: str = ""
     ) -> list[dict]:
-        """Phân đoạn các khối văn bản số liên tục qua các trang."""
+        """Phân đoạn các khối văn bản số liên tục qua các trang theo Cấu trúc Pháp lý (Chương > Điều > Khoản)
+        bảo toàn tuyệt đối Tính Nguyên tử của Khoản (Clause Atomicity) - 0% Regex & Không cắt vụn Rule-based."""
         chunks: list[dict] = []
         chunk_counter = start_chunk_idx
-        active_headers: dict[int, str] = {}
+        active_headers: dict[int, str] = {0: doc_title} if doc_title else {}
         buffer_blocks: list[dict] = []
 
         def get_breadcrumb() -> str:
             sorted_levels = sorted(active_headers.keys())
             titles = [active_headers[lvl] for lvl in sorted_levels if active_headers[lvl]]
-            return " > ".join(titles) if titles else pdf_path.stem
+            return " > ".join(titles) if titles else (doc_title or pdf_path.stem)
 
         def get_section_title() -> str:
-            if not active_headers:
-                return "Tổng quan"
-            return active_headers[max(active_headers.keys())]
+            for lvl in (2, 1, 3):
+                if lvl in active_headers and active_headers[lvl]:
+                    return active_headers[lvl]
+            return doc_title or "Tổng quan"
 
         def emit_buffer(force_flush: bool = False) -> None:
             nonlocal chunk_counter
@@ -334,53 +784,75 @@ class PDFChunker:
 
             breadcrumb = get_breadcrumb()
             section_title = get_section_title()
-            # Cắt nhỏ nếu dài hơn max_chunk_size
-            if len(combined_text) <= self.max_chunk_size:
-                sub_parts = [combined_text]
-            else:
-                sentences = split_sentences_banking(combined_text)
-                sub_parts = group_sentences_banking(sentences, self.max_chunk_size, self.chunk_overlap)
+            # Bảo đảm tiêu đề phân mục (section_title) luôn hiện diện ở đầu nội dung khối nếu chưa có
+            if section_title and section_title != doc_title and not combined_text.startswith(f"### {section_title}"):
+                if not combined_text.startswith("###"):
+                    combined_text = f"### {section_title}\n\n{combined_text}"
 
-            for part in sub_parts:
-                item = self._create_digital_chunk(
-                    chunk_idx=chunk_counter,
-                    pdf_path=pdf_path,
-                    chunk_type=chunk_type,
-                    breadcrumb=breadcrumb,
-                    section_title=section_title,
-                    pages_involved=pages_involved,
-                    content_text=part,
-                    ocr_confidence=avg_ocr_conf
-                )
-                chunks.append(item)
-                chunk_counter += 1
+            # TUYỆT ĐỐI BẢO TOÀN NGUYÊN TỬ CỦA KHOẢN (CLAUSE ATOMICITY - CẤM RULEBASED CẮT NỬA CHỪNG)
+            item = self._create_digital_chunk(
+                chunk_idx=chunk_counter,
+                pdf_path=pdf_path,
+                chunk_type=chunk_type,
+                breadcrumb=breadcrumb,
+                section_title=section_title,
+                pages_involved=pages_involved,
+                content_text=combined_text,
+                ocr_confidence=avg_ocr_conf
+            )
+            chunks.append(item)
+            chunk_counter += 1
 
         for block in document_blocks:
-            heading_level, heading_title = self._detect_block_heading(block["text"])
-            if heading_level is not None:
-                if heading_level == 1:
-                    emit_buffer(force_flush=True)
-                else:
-                    curr_words = count_words("\n".join(b["text"] for b in buffer_blocks))
-                    if curr_words >= self.min_section_size:
-                        emit_buffer(force_flush=True)
-                    else:
-                        if buffer_blocks:
-                            buffer_blocks.append({
-                                "text": f"### {heading_title}",
-                                "page_num": block["page_num"],
-                                "chunk_type": block["chunk_type"],
-                                "ocr_confidence": block["ocr_confidence"]
-                            })
+            # Nếu có khoảng cách trang lớn giữa các khối (do các trang ở giữa là bảng biểu thuần túy)
+            if buffer_blocks and (block["page_num"] - buffer_blocks[-1]["page_num"] >= 2):
+                emit_buffer(force_flush=True)
 
-                active_headers[heading_level] = heading_title
-                for lvl in [l for l in list(active_headers.keys()) if l > heading_level]:
-                    del active_headers[lvl]
+            # Bỏ qua nếu nội dung khối là chính doc_title (đã được lưu ở active_headers[0])
+            norm_b = "".join(ch for ch in block["text"].lower() if ch.isalnum())
+            norm_title = "".join(ch for ch in doc_title.lower() if ch.isalnum()) if doc_title else ""
+            if norm_title and norm_b and (norm_b == norm_title or (len(norm_b) >= 20 and norm_b in norm_title)):
                 continue
 
+            heading_level, heading_title = self._detect_block_heading(block["text"])
+            if heading_level is not None:
+                if heading_level in (1, 2):
+                    # Tiêu đề Chương hoặc Điều/Mục: Bắt buộc ngắt phân đoạn (Flush buffer)
+                    emit_buffer(force_flush=True)
+                    active_headers[heading_level] = heading_title
+                    for lvl in [l for l in list(active_headers.keys()) if l > heading_level]:
+                        del active_headers[lvl]
+                    buffer_blocks.append({
+                        "text": f"### {heading_title}",
+                        "page_num": block["page_num"],
+                        "chunk_type": block["chunk_type"],
+                        "ocr_confidence": block["ocr_confidence"]
+                    })
+                    continue
+                elif heading_level == 3:
+                    # Khoản (Clause): Kiểm tra xem buffer hiện tại đã đủ một đoạn có ý nghĩa chưa
+                    curr_words = count_words("\n".join(b["text"] for b in buffer_blocks))
+                    block_words = count_words(block["text"])
+
+                    # Nếu buffer đã có >= 180 từ (đã đủ một phân đoạn điều khoản hoàn chỉnh)
+                    # hoặc nếu thêm Khoản này vào sẽ vượt quá ngưỡng vàng (~320 từ)
+                    # hoặc nếu chuyển sang trang mới và buffer đã có >= 100 từ:
+                    should_flush = (
+                        (curr_words >= 180) or
+                        (curr_words >= self.min_section_size and curr_words + block_words > 320) or
+                        (buffer_blocks and block["page_num"] != buffer_blocks[-1]["page_num"] and curr_words >= 100)
+                    )
+                    if should_flush:
+                        emit_buffer(force_flush=True)
+
+                    active_headers[3] = heading_title
+                    for lvl in [l for l in list(active_headers.keys()) if l > 3]:
+                        del active_headers[lvl]
+                    buffer_blocks.append(block)
+                    continue
+
+            # Đoạn thân bài (Body text / Điểm a, b, c / Diễn giải)
             buffer_blocks.append(block)
-            if sum(len(b["text"]) for b in buffer_blocks) >= self.max_chunk_size:
-                emit_buffer(force_flush=True)
 
         emit_buffer(force_flush=True)
         if not chunks and document_blocks:
@@ -447,32 +919,79 @@ class PDFChunker:
         return item
 
     def _detect_block_heading(self, text: str) -> tuple[int | None, str]:
-        """Nhận diện tiêu đề phân cấp tài liệu tổng quát hoàn toàn dựa trên cấu trúc hình thức & outline (0% Rule-based Keywords)."""
-        first_line = text.split("\n")[0].strip()
-        tokens = first_line.split()
-        if not tokens or len(first_line) > 120:
+        """
+        Nhận diện tiêu đề phân cấp tài liệu tổng quát (0% Regex)
+        dựa trên cấu trúc hình thức thị giác:
+        - Phân cấp Điều, Chương, Phần, Mục.
+        - Số La Mã chuẩn quốc tế (I., II., III...).
+        - Tiêu đề in hoa ngắn (standalone heading).
+        - Đánh số phân cấp đa tầng (1.1, 1.2, 1.1.1...).
+        """
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+        if not lines:
             return None, ""
 
-        # 1. Ký hiệu số La Mã chuẩn quốc tế (I., II., III., IV., V., etc.)
+        first_line = lines[0]
+        tokens = first_line.split()
+        if not tokens:
+            return None, ""
+
+        first_word_norm = tokens[0].lower().rstrip(".:)-")
+
+        # 1. Khoản (Clause) (1., 2., 3., 4., 5... hoặc Khoản 1, Khoản 2...)
+        # Khoản đi liền với câu dài ở dòng đầu tiên nên không bị giới hạn bởi độ dài tiêu đề
+        if first_word_norm in ("khoan", "khoản") and len(tokens) >= 2:
+            tok2 = tokens[1].rstrip(".:)-")
+            if tok2.isdigit():
+                return 3, f"Khoản {tok2}"
+
+        tok0 = tokens[0]
+        if tok0.endswith(".") and tok0[:-1].isdigit():
+            num = int(tok0[:-1])
+            if len(tokens) >= 2 and (tokens[1][0].isupper() or tokens[1][0].isalpha()):
+                return 3, f"Khoản {num}"
+
+        # Đối với Tiêu đề Chương, Điều, Mục, Tiêu đề in hoa -> Giới hạn độ dài dòng tiêu đề <= 140 ký tự
+        if len(first_line) > 140:
+            return None, ""
+
+        # 2. Nhận diện Chương / Phần: Cần có số thứ tự ở token 2 hoặc viết IN HOA
+        if first_word_norm in ("chuong", "chương", "phan", "phần"):
+            if len(tokens) >= 2:
+                tok2 = tokens[1].rstrip(".:)-")
+                is_num_or_roman = tok2.isdigit() or tok2 in ("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X") or len(tok2) == 1
+                if is_num_or_roman or first_line.isupper():
+                    full_title = first_line
+                    if len(tokens) <= 3 and len(lines) > 1 and len(lines[1]) < 80:
+                        full_title = f"{first_line} - {lines[1]}"
+                    return 1, full_title
+
+        # 3. Nhận diện Điều / Mục: Token 2 PHẢI là số thứ tự (ví dụ: Điều 1., Điều 2., Mục 1., Mục I.)
+        if first_word_norm in ("dieu", "điều", "muc", "mục"):
+            if len(tokens) >= 2:
+                tok2 = tokens[1].rstrip(".:)-")
+                is_num_or_roman = tok2.isdigit() or tok2 in ("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X")
+                if is_num_or_roman:
+                    full_title = first_line
+                    if len(tokens) <= 3 and len(lines) > 1 and len(lines[1]) < 80:
+                        full_title = f"{first_line} {lines[1]}"
+                    return 2, full_title
+
+        # 4. Ký hiệu số La Mã chuẩn quốc tế (I., II., III., IV., V., etc.)
         first_tok_clean = tokens[0].rstrip(".:)-")
         is_roman = first_tok_clean in ("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII")
         if is_roman and len(tokens) >= 2:
             return 1, first_line
 
-        # 2. Tiêu đề in hoa ngắn (standalone heading)
+        # 5. Tiêu đề in hoa ngắn (standalone heading)
         if first_line.isupper() and 3 < len(first_line) < 100 and not first_line.endswith((".", ";", ":")):
             return 2, first_line
 
-        # 3. Đánh số phân cấp đa tầng (1.1, 1.1.1, etc.)
+        # 6. Đánh số phân cấp đa tầng (1.1, 1.2, 1.1.1, etc.)
         num_clean = tokens[0].rstrip(".")
         dot_count = num_clean.count(".")
         if dot_count >= 1 and all(part.isdigit() for part in num_clean.split(".")) and len(tokens) >= 2:
             return min(2 + dot_count, 5), first_line
-
-        # 4. Đánh số mục đơn (1., 2.) kèm tiêu đề ngắn
-        if tokens[0].endswith(".") and tokens[0][:-1].isdigit() and len(tokens) >= 2 and len(tokens) <= 15:
-            if not first_line.endswith((".", ";", ":")):
-                return 3, first_line
 
         return None, ""
 
@@ -481,40 +1000,130 @@ class PDFChunker:
         table_data: list[list[str | None]],
         pdf_path: Path,
         page_num: int,
-        start_idx: int
+        start_idx: int,
+        doc_title: str = "",
+        table_tracker: dict | None = None
     ) -> list[dict]:
-        """Xử lý bảng PDF thành Linearized Chunks (pdf_table) kèm header cột."""
+        """Xử lý bảng PDF thành Linearized Chunks (pdf_table) kèm header cột và Breadcrumb phân cấp nghiệp vụ chuẩn xác."""
         if not table_data or len(table_data) < 2:
             return []
+
+        if table_tracker is None:
+            table_tracker = {"section": "", "subsection": ""}
+
+        def is_fee_data_cell(text: str) -> bool:
+            t = text.lower()
+            return any(kw in t for kw in [
+                "vnđ", "vnd", "đồng", "%", "miễn phí", "/thẻ", "/giao dịch", "/tháng",
+                "/năm", "/lần", "/món", "usd", "eur", "jpy"
+            ])
 
         raw_header = [str(c).strip().replace("\n", " ") if c is not None else "" for c in table_data[0]]
         header_names = [name if name else f"Cột_{i+1}" for i, name in enumerate(raw_header)]
 
-        data_rows: list[str] = []
+        last_seen_cells: dict[int, str] = {}
+        batches_with_meta: list[tuple[list[str], str, str, list[int]]] = []
+        current_batch_rows: list[str] = []
+        current_batch_row_indices: list[int] = []
+        pending_category_row_indices: list[int] = []
+
+        def flush_batch():
+            if not current_batch_rows:
+                return
+            b_parts = [doc_title or pdf_path.stem]
+            if table_tracker.get("section"):
+                b_parts.append(table_tracker["section"])
+            if table_tracker.get("subsection"):
+                b_parts.append(table_tracker["subsection"])
+            curr_bc = " > ".join(b_parts)
+            curr_title = table_tracker.get("subsection") or table_tracker.get("section") or f"Bảng biểu Trang {page_num}"
+            batches_with_meta.append((list(current_batch_rows), curr_bc, curr_title, list(current_batch_row_indices)))
+            current_batch_rows.clear()
+            current_batch_row_indices.clear()
 
         for r_idx, row in enumerate(table_data[1:], start=1):
             cleaned_cells = [str(c).strip().replace("\n", " ") if c is not None else "" for c in row]
             if not any(cleaned_cells):
                 continue
 
-            row_items = []
+            non_empty = [c for c in cleaned_cells if c]
+            col0 = cleaned_cells[0] if len(cleaned_cells) > 0 else ""
+            col1 = cleaned_cells[1] if len(cleaned_cells) > 1 else ""
+            col2 = cleaned_cells[2] if len(cleaned_cells) > 2 else ""
+
+            has_price = any(is_fee_data_cell(c) for c in cleaned_cells)
+            is_col0_index = col0.replace(".", "").isdigit() or (header_names and any(h.lower() in ("stt", "no.", "số tt", "số thứ tự") for h in [header_names[0]]))
+
+            # 1. Nhận diện Hàng Phân Cấp Thuần Túy / Pure Category Row (không mang giá trị tiền/phí)
+            is_category_row = (not has_price) and ((not col2) or (len(non_empty) <= 2))
+
+            if is_category_row:
+                flush_batch()
+                last_seen_cells.clear()
+                pending_category_row_indices.append(r_idx)
+
+                label = f"{col0} {col1}".strip()
+                col0_clean = col0.rstrip(".:)-")
+                if col0_clean in ("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"):
+                    table_tracker["section"] = label
+                    table_tracker["subsection"] = ""
+                elif col0_clean.isdigit():
+                    table_tracker["subsection"] = label
+                elif not table_tracker.get("section"):
+                    table_tracker["section"] = label
+                else:
+                    table_tracker["subsection"] = label
+                continue
+
+            # 2. Nhận diện Cột Nhóm Dịch Vụ Hợp Nhất (Merged Group Column 0)
+            if col0 and not is_col0_index and len(col0.split()) >= 2:
+                if table_tracker.get("section") and table_tracker["section"] != col0:
+                    flush_batch()
+                table_tracker["section"] = col0
+                table_tracker["subsection"] = ""
+                last_seen_cells.clear()
+                last_seen_cells[0] = col0
+
+            # 3. Kỹ thuật Điền Trước (Forward-Fill) cho các ô trống bị merge trong bảng
+            row_filled = list(cleaned_cells)
             for c_idx, val in enumerate(cleaned_cells):
+                if val:
+                    if not is_fee_data_cell(val):
+                        last_seen_cells[c_idx] = val
+                else:
+                    if c_idx in last_seen_cells and c_idx < len(cleaned_cells) - 1:
+                        row_filled[c_idx] = f"({last_seen_cells[c_idx]})"
+
+            # 4. Tuyến tính hóa từng hàng với nhãn cột ngữ nghĩa rõ ràng
+            row_items = []
+            for c_idx, val in enumerate(row_filled):
+                if not val:
+                    continue
                 col_name = header_names[c_idx] if c_idx < len(header_names) else f"Cột_{c_idx+1}"
+                if col_name.startswith("Cột_"):
+                    if is_fee_data_cell(val):
+                        col_name = "Mức phí"
+                    elif c_idx == 0:
+                        col_name = "Dịch vụ"
+                    else:
+                        col_name = "Nội dung"
                 row_items.append(f"{col_name}: {val}")
 
             row_str = " | ".join(row_items)
-            data_rows.append(f"* Hàng {r_idx}: {row_str}")
+            if pending_category_row_indices:
+                current_batch_row_indices.extend(pending_category_row_indices)
+                pending_category_row_indices.clear()
+            current_batch_rows.append(f"* Hàng {r_idx}: {row_str}")
+            current_batch_row_indices.append(r_idx)
 
-            if not data_rows:
-                return []
+            if len(current_batch_rows) >= self.table_rows_per_chunk:
+                flush_batch()
 
-        table_breadcrumb = f"{pdf_path.stem} > Trang {page_num} > Bảng biểu"
+        # Flush batch cuối cùng
+        flush_batch()
+
         chunks: list[dict] = []
-        batch_size = self.table_rows_per_chunk
-
-        for i in range(0, len(data_rows), batch_size):
-            batch_data = data_rows[i:i + batch_size]
-
+        for batch_data, table_breadcrumb, table_section_title, batch_row_indices in batches_with_meta:
             content = (
                 f"[Breadcrumbs: {table_breadcrumb}]\n"
                 f"Cột dữ liệu: {', '.join(header_names)}\n"
@@ -526,13 +1135,14 @@ class PDFChunker:
                 "source": pdf_path.name,
                 "chunk_type": "pdf_table",
                 "breadcrumb": table_breadcrumb,
-                "section_title": f"Bảng biểu Trang {page_num}",
+                "section_title": table_section_title,
                 "page_numbers": [page_num],
                 "page_start": page_num,
                 "page_end": page_num,
-                "breadcrumb_source": "layout_visual",
-                "breadcrumb_confidence": 1.0,
+                "breadcrumb_source": "table_dla_hierarchy",
+                "breadcrumb_confidence": 0.98,
                 "heading_ocr_confidence": 1.0,
+                "table_row_indices": batch_row_indices,
                 "content": content,
                 "word_count": count_words(content)
             })

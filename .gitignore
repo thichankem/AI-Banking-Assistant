@@ -80,9 +80,48 @@ retival_dataset/
 retival dataset/
 chunking_dataset/
 output_dataset/
+all_chunks.json
+*.jsonl
+
+# Test Results, Benchmark & Tuning JSON Outputs
+test_results.json
+*_test_results.json
+*tests_summary.json
+*_summary.json
+*_results.json
+*stats.json
+ablation_raw_results.json
+master_ablation_results.json
+benchmark_summary.json
+visual_audit_report.json
+rag_banking/storage/*.json
+
+# DLA Chunking Viewer Layouts, Sample Data & Generated Manifests
+**/viewer/layouts/
+**/viewer/sample_data/
+**/viewer/temp_audit/
+**/viewer/visual_audit/
+**/viewer/manifest_108.json
+**/viewer/manifest_108.js
+**/viewer/raw_samples_b64.js
+**/viewer/datasets.js
+**/viewer/embedded_sample.js
+
+# Experiments & Benchmark Directories
+experiments/
+**/experiments/
+experiment/
+**/experiment/
+*experiment*/
+scratch/
+**/scratch/
 
 # Documentation Exclusions (Only ignore study_flow, documentation & research)
 docs/study_flow/
 docs/api documentation/
 docs/documentation/
 docs/research/
+
+# Google Colab Workflows, Scripts & Skills
+gg_colab/
+

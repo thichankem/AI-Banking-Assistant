@@ -34,44 +34,58 @@ class LayoutAwareChunker:
         self,
         max_chunk_size: int = 800,
         min_section_size: int = 120,
-        chunk_overlap: int = 100
+        chunk_overlap: int = 100,
+        profile: Any | None = None
     ):
         self.max_chunk_size = max_chunk_size
         self.min_section_size = min_section_size
         self.chunk_overlap = chunk_overlap
 
-        # Khởi tạo các sub-chunkers chuyên biệt cho DOCX và PDF
+        # Khởi tạo Profile âm tiết chuẩn hóa (Mặc định: Profile B 150-400 âm tiết)
         try:
-            from ..docx_chunker import DOCXChunker
-            from ..pdf_chunker import PDFChunker, OCRExtractor
+            from .syllable_budget_manager import PROFILE_B, SyllableProfile
+            from .unified_budget_chunker import UnifiedBudgetOrchestrator
+            from ..pdf_chunker.paddle_vietocr_adapter import PaddleVietOCRAdapter
+            from ..pdf_chunker.scan_table_detector import ScanTableDetector
+            from ..pdf_chunker.pdf_chunker import PDFChunker, OCRExtractor
         except (ImportError, ValueError):
-            from rag_banking.chunking.docx_chunker import DOCXChunker
-            from rag_banking.chunking.pdf_chunker import PDFChunker, OCRExtractor
+            from rag_banking.chunking.unified_chunk.syllable_budget_manager import PROFILE_B, SyllableProfile
+            from rag_banking.chunking.unified_chunk.unified_budget_chunker import UnifiedBudgetOrchestrator
+            from rag_banking.chunking.pdf_chunker.paddle_vietocr_adapter import PaddleVietOCRAdapter
+            from rag_banking.chunking.pdf_chunker.scan_table_detector import ScanTableDetector
+            from rag_banking.chunking.pdf_chunker.pdf_chunker import PDFChunker, OCRExtractor
 
-        self.docx_chunker = DOCXChunker(
-            max_chunk_size=max_chunk_size,
-            min_section_size=min_section_size,
-            chunk_overlap=chunk_overlap
-        )
-        self.ocr_extractor = OCRExtractor()
+        self.profile = profile or PROFILE_B
+        self.budget_orch = UnifiedBudgetOrchestrator(profile=self.profile)
+
+        # Cấu hình OCR Extractor: Ưu tiên PaddleVietOCRAdapter + ScanTableDetector
+        try:
+            self.paddle_ocr = PaddleVietOCRAdapter()
+            self.table_detector = ScanTableDetector()
+            self.ocr_extractor = self.paddle_ocr
+        except Exception:
+            self.ocr_extractor = OCRExtractor()
+
+        self.docx_chunker = self.budget_orch.docx_chunker
         self.pdf_chunker = PDFChunker(
             ocr_extractor=self.ocr_extractor,
-            max_chunk_size=max_chunk_size,
-            min_section_size=min_section_size,
-            chunk_overlap=chunk_overlap
+            max_chunk_size=self.profile.max_syllables * 4 if hasattr(self.profile, "max_syllables") else max_chunk_size,
+            min_section_size=self.profile.min_syllables if hasattr(self.profile, "min_syllables") else min_section_size,
+            chunk_overlap=self.profile.overlap_syllables * 4 if hasattr(self.profile, "overlap_syllables") else chunk_overlap,
+            use_unified_stream=True
         )
 
     # -------------------------------------------------------------------------
-    # 1. Các phương thức trích xuất từng định dạng chuyên biệt (DOCX & PDF)
+    # 1. Các phương thức trích xuất từng định dạng chuyên biệt (DOCX, PDF, MD)
     # -------------------------------------------------------------------------
 
     def chunk_docx(self, file_path: str | Path) -> list[dict]:
-        """Phân đoạn tệp Word DOCX theo DLA & Section-Length-Aware."""
-        return self.docx_chunker.chunk_docx(file_path)
+        """Phân đoạn tệp Word DOCX theo ngân sách âm tiết Profile B."""
+        return self.budget_orch.chunk_file(file_path)
 
     def chunk_pdf(self, file_path: str | Path, max_pages: int | None = None) -> list[dict]:
-        """Phân đoạn tệp PDF (hỗ trợ digital và OCR scan + Anti-Fragmentation)."""
-        return self.pdf_chunker.chunk_pdf(file_path, max_pages=max_pages)
+        """Phân đoạn tệp PDF theo luồng hình học 5D thống nhất không dùng ngưỡng 50%."""
+        return self.pdf_chunker.chunk_pdf(file_path, max_pages=max_pages, use_unified_stream=True)
 
     # -------------------------------------------------------------------------
     # 2. Điều phối định dạng cốt lõi: chunk_file, chunk_dataset, chunk_directory
@@ -79,20 +93,39 @@ class LayoutAwareChunker:
 
     def chunk_file(self, file_path: str | Path, max_pdf_pages: int | None = None) -> list[dict]:
         """
-        Tự động phân đoạn một tệp dựa trên phần mở rộng (Chỉ xử lý .docx và .pdf):
-        - .docx -> DOCXChunker (Heading AST + Anti-fragmentation)
-        - .pdf  -> PDFChunker (Digital + Tesseract OCR v5 + Page Anti-fragmentation)
+        Tự động phân đoạn một tệp dựa trên phần mở rộng (.docx, .pdf, .md):
+        Tuân thủ nghiêm ngặt 100% Schema Contract 7 trường chuẩn.
         """
         file_path = Path(file_path)
         suffix = file_path.suffix.lower()
 
+        raw_chunks: list[dict] = []
         if suffix == ".docx":
-            return self.chunk_docx(file_path)
+            raw_chunks = self.chunk_docx(file_path)
         elif suffix == ".pdf":
-            return self.chunk_pdf(file_path, max_pages=max_pdf_pages)
+            raw_chunks = self.chunk_pdf(file_path, max_pages=max_pdf_pages)
+        elif suffix in (".md", ".txt"):
+            raw_chunks = self.budget_orch.chunk_file(file_path)
         else:
-            print(f"[LayoutAwareChunker] Định dạng không được hỗ trợ (chỉ hỗ trợ .docx và .pdf): {suffix}")
+            print(f"[LayoutAwareChunker] Định dạng không được hỗ trợ: {suffix}")
             return []
+
+        # Chuẩn hóa chính xác 100% theo Schema Contract (Đúng 7 trường chuẩn)
+        cleaned_chunks: list[dict] = []
+        for c in raw_chunks:
+            c_id = c.get("chunk_id", "")
+            content = c.get("content", "")
+            cleaned_chunks.append({
+                "chunk_id": c_id,
+                "source": c.get("source", file_path.name),
+                "chunk_type": c.get("chunk_type", "text"),
+                "breadcrumb": c.get("breadcrumb", file_path.stem),
+                "section_title": c.get("section_title", "N/A"),
+                "content": content,
+                "word_count": count_words(content)
+            })
+
+        return cleaned_chunks
 
     def chunk_dataset(
         self,
