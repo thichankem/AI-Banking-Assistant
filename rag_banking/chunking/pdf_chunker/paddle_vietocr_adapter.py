@@ -103,10 +103,35 @@ class PaddleVietOCRAdapter:
         """Kiểm tra adapter có ít nhất một engine sẵn sàng phục vụ."""
         return self._is_vietocr_ready or self._is_paddle_ready or True
 
-    def get_active_engine_name(self) -> str:
-        det_name = "PaddleOCR-DBNet" if self._is_paddle_ready else "OpenCV-MorphDet"
-        rec_name = f"VietOCR-{self.vietocr_config_name}" if self._is_vietocr_ready else "Tesseract-Fallback"
-        return f"Hybrid Pipeline ({det_name} + {rec_name})"
+    def render_pdf_page_300dpi(self, pdf_path: str | Path, page_idx: int = 0) -> np.ndarray | None:
+        """Render trang PDF ở độ phân giải 300 DPI thành ảnh OpenCV BGR."""
+        try:
+            import fitz
+            doc = fitz.open(str(pdf_path))
+            if page_idx < len(doc):
+                pix = doc[page_idx].get_pixmap(dpi=300)
+                img = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, pix.n))
+                if pix.n == 4:
+                    return cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
+                elif pix.n == 3:
+                    return cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+                elif pix.n == 1:
+                    return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        except Exception as e:
+            logger.warning(f"[PaddleVietOCR] Lỗi render trang PDF {page_idx}: {e}")
+        return None
+
+    def extract_text_from_pdf_page(self, pdf_path: str | Path, page_idx: int = 0) -> tuple[str, float]:
+        """Trích xuất toàn bộ văn bản và điểm tin cậy trung bình của trang PDF."""
+        img_np = self.render_pdf_page_300dpi(pdf_path, page_idx=page_idx)
+        if img_np is None:
+            return "", 0.0
+        lines = self.extract_layout_lines(img_np)
+        if not lines:
+            return "", 0.0
+        text = "\n".join(l["text"] for l in lines)
+        conf = round(sum(l.get("score", 0.9) for l in lines) / len(lines), 3)
+        return text, conf
 
     def filter_red_stamp(self, image_np: np.ndarray) -> np.ndarray:
         """Lọc bớt màu đỏ của con dấu mộc ngân hàng bằng không gian màu HSV."""
