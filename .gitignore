@@ -119,6 +119,8 @@ experiments/
 experiment/
 **/experiment/
 *experiment*/
+benchmarks/
+**/benchmarks/
 scratch/
 **/scratch/
 
