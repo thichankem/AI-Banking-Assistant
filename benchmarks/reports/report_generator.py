@@ -163,6 +163,10 @@ def generate_benchmark_report(
     return report_content
 
 
+# Alias tương thích
+generate_master_ablation_report = generate_benchmark_report
+
+
 if __name__ == "__main__":
     raw_path = sys.argv[1] if len(sys.argv) > 1 else "benchmarks/reports/ablation_raw_results.json"
     generate_benchmark_report(raw_path)

@@ -57,31 +57,24 @@ from benchmarks.reports.report_generator import (
     generate_master_ablation_report
 )
 
-# Nạp các module từ experiments/core_upgrades
-from rag_banking.chunking.experiments.core_upgrades.exp1_ocr_table_scan import (
+from rag_banking.chunking.pdf_chunker import (
     ScanTableDetector,
     DetectedTableBox,
-    PaddleVietOCRAdapter
-)
-from rag_banking.chunking.experiments.core_upgrades.exp2_vision_table_opt import (
-    VisionTableRunner,
+    PaddleVietOCRAdapter,
     TableFormatter,
     TableFormatType,
-    NormalizedTable
-)
-from rag_banking.chunking.experiments.core_upgrades.exp3_unified_hybrid_pdf import (
+    NormalizedTable,
     UnifiedPageStreamProcessor,
     HybridPDFChunker
 )
-from rag_banking.chunking.experiments.core_upgrades.exp4_chunk_budget_tuning import (
+from rag_banking.chunking.unified_chunk import (
     SyllableProfile,
     SyllableBudgetManager,
     PROFILE_A,
     PROFILE_B,
     PROFILE_C,
     STANDARD_PROFILES,
-    UnifiedBudgetOrchestrator,
-    GridSearchRunner
+    UnifiedBudgetOrchestrator
 )
 
 logger = logging.getLogger("master_ablation_runner")
@@ -705,6 +698,8 @@ def run_master_ablation_benchmark(
     print(f"{'='*78}\n")
 
     return master_results
+# Alias tương thích
+run_ablation_benchmark = run_master_ablation_benchmark
 
 
 # =============================================================================
