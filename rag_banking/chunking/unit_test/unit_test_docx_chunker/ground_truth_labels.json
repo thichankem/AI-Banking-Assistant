@@ -1,0 +1,422 @@
+{
+  "docx_merged_table_46.docx": {
+    "expected_min_chunks": 1,
+    "has_table": true,
+    "expected_breadcrumb_keywords": [
+      "ĐỊNH"
+    ]
+  },
+  "docx_merged_table_47.docx": {
+    "expected_min_chunks": 1,
+    "has_table": true,
+    "expected_breadcrumb_keywords": [
+      "ĐỊNH"
+    ]
+  },
+  "docx_merged_table_48.docx": {
+    "expected_min_chunks": 1,
+    "has_table": true,
+    "expected_breadcrumb_keywords": [
+      "ĐỊNH"
+    ]
+  },
+  "docx_merged_table_49.docx": {
+    "expected_min_chunks": 1,
+    "has_table": true,
+    "expected_breadcrumb_keywords": [
+      "ĐỊNH"
+    ]
+  },
+  "docx_merged_table_50.docx": {
+    "expected_min_chunks": 1,
+    "has_table": true,
+    "expected_breadcrumb_keywords": [
+      "ĐỊNH"
+    ]
+  },
+  "docx_table_multilevel_16.docx": {
+    "expected_min_chunks": 1,
+    "has_table": true,
+    "expected_breadcrumb_keywords": [
+      "BIỂU"
+    ]
+  },
+  "docx_table_multilevel_17.docx": {
+    "expected_min_chunks": 1,
+    "has_table": true,
+    "expected_breadcrumb_keywords": [
+      "BIỂU"
+    ]
+  },
+  "docx_table_multilevel_18.docx": {
+    "expected_min_chunks": 1,
+    "has_table": true,
+    "expected_breadcrumb_keywords": [
+      "BIỂU"
+    ]
+  },
+  "docx_table_multilevel_19.docx": {
+    "expected_min_chunks": 1,
+    "has_table": true,
+    "expected_breadcrumb_keywords": [
+      "BIỂU"
+    ]
+  },
+  "docx_table_multilevel_20.docx": {
+    "expected_min_chunks": 1,
+    "has_table": true,
+    "expected_breadcrumb_keywords": [
+      "BIỂU"
+    ]
+  },
+  "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "THƯỜNG"
+    ]
+  },
+  "vcb_md_02__phap_ly__the_le_chi_tiet_chuong_trinh_vcb_loyalty.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "CHƯƠNG"
+    ]
+  },
+  "vcb_md_03__phap_ly__dieu_kien_dieu_khoan_mo_tai_khoan_truc_tuyen_ekyc.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "ĐIỀU"
+    ]
+  },
+  "vcb_md_04__faq__ngan_hang_so_vcb_digibank_va_smart_otp.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "THƯỜNG"
+    ]
+  },
+  "vcb_md_05__phap_ly__dieu_kien_dieu_khoan_mo_va_su_dung_tai_khoan_khcn.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "ĐIỀU"
+    ]
+  },
+  "vcb_md_06__faq__chuyen_tien_va_nhan_tien_kieu_hoi.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "THƯỜNG"
+    ]
+  },
+  "vcb_md_07__faq__vcb_loyalty_tich_diem_va_doi_qua.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "THƯỜNG"
+    ]
+  },
+  "vcb_md_08__faq__cho_vay_khach_hang_ca_nhan.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "THƯỜNG"
+    ]
+  },
+  "vcb_md_09__phap_ly__the_le_chuong_trinh_uu_dai_urbox_evergreen_visa.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "CHƯƠNG"
+    ]
+  },
+  "vcb_md_10__the_tin_dung__vcb_vibe_platinum_dac_quyen_va_bieu_phi.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "LIỆU"
+    ]
+  },
+  "vcb_md_11__ngan_hang_so__quy_trinh_van_hanh_dich_vu_so_vcb_digibank.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "TỔNG"
+    ]
+  },
+  "vcb_md_12__quy_trinh__mo_tai_khoan_thanh_toan_ekyc_va_xac_thuc_nfc.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "TRÌNH"
+    ]
+  },
+  "vcb_md_13__phap_ly__bieu_phi_va_lai_suat_the_tin_dung_quoc_te.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "BIỂU"
+    ]
+  },
+  "vcb_md_14__bao_mat__nguyen_tac_an_toan_va_canh_bao_5_hinh_thuc_lua_dao.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "NGUYÊN"
+    ]
+  },
+  "vcb_md_15__tien_ich__bieu_lai_suat_tien_gui_va_ty_gia_20_ngoai_te.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "BIỂU"
+    ]
+  },
+  "vcb_md_16__quy_trinh__mo_tai_khoan_so_dep_vcb_va_bieu_phi.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "TRÌNH"
+    ]
+  },
+  "vcb_md_17__phap_ly__chinh_sach_mien_giam_phi_thuong_nien_the_tin_dung.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "ĐIỀU"
+    ]
+  },
+  "vcb_md_18__the_tin_dung__vcb_vietnam_airlines_amex_platinum.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "VIETCOMBANK"
+    ]
+  },
+  "vcb_md_19__the_tin_dung__vcb_saigon_centre_takashimaya_visa_vang.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "SAIGON"
+    ]
+  },
+  "vcb_md_20__the_tin_dung__vcb_vibe_chuan.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "VIETCOMBANK"
+    ]
+  },
+  "vcb_md_21__the_tin_dung__vcb_visa_platinum.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "VIETCOMBANK"
+    ]
+  },
+  "vcb_md_22__the_tin_dung__vcb_vietnam_airlines_amex_vang.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "VIETCOMBANK"
+    ]
+  },
+  "vcb_md_23__the_tong_hop__danh_muc_va_so_sanh_cac_dong_the.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "TỔNG"
+    ]
+  },
+  "vcb_md_24__the_tin_dung__vcb_cashplus_platinum_amex.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "VIETCOMBANK"
+    ]
+  },
+  "vcb_md_25__chuyen_tien__cam_nang_chuyen_nhan_tien_trong_nuoc_va_quoc_te.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "NANG"
+    ]
+  },
+  "vcb_md_26__the_tin_dung__vcb_jcb_platinum.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "VIETCOMBANK"
+    ]
+  },
+  "vcb_md_27__the_tin_dung__vcb_mastercard_world.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "VIETCOMBANK"
+    ]
+  },
+  "vcb_md_28__the_tin_dung__vcb_american_express_vang.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "VIETCOMBANK"
+    ]
+  },
+  "vcb_md_29__the_tin_dung__vcb_jcb_chuan.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "VIETCOMBANK"
+    ]
+  },
+  "vcb_md_30__the_tin_dung__vcb_mastercard_chuan.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "VIETCOMBANK"
+    ]
+  },
+  "vcb_md_31__the_ghi_no__vcb_digicard_phi_vat_ly.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "DIGICARD"
+    ]
+  },
+  "vcb_md_32__the_ghi_no__vcb_visa_platinum_debit.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "VIETCOMBANK"
+    ]
+  },
+  "vcb_md_33__the_ghi_no__vcb_everlink_cashback.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "VIETCOMBANK"
+    ]
+  },
+  "vcb_md_34__the_ghi_no__vcb_takashimaya_visa_debit.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "VIETCOMBANK"
+    ]
+  },
+  "vcb_md_35__tai_khoan__bieu_phi_dich_vu_tai_khoan_vietcombank.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "BIỂU"
+    ]
+  },
+  "vcb_md_36__the_ghi_no__vcb_mastercard_debit.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "VIETCOMBANK"
+    ]
+  },
+  "vcb_md_37__tai_khoan__danh_muc_cac_loai_tai_khoan_thanh_toan.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "DANH"
+    ]
+  },
+  "vcb_md_38__bao_hiem_dau_tu__fwd_vietcombank_va_quy_mo_vcbf.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "DANH"
+    ]
+  },
+  "vcb_md_39__ngan_hang_so__chuong_trinh_khach_hang_than_thiet_vcb_loyalty.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "CHƯƠNG"
+    ]
+  },
+  "vcb_md_40__the_dich_vu__tra_gop_linh_hoat_lai_suat_0.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "LINH"
+    ]
+  },
+  "vcb_md_41__cho_vay__an_tam_kinh_doanh_ho_kinh_doanh.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "KINH"
+    ]
+  },
+  "vcb_md_42__cho_vay__kinh_doanh_tai_loc_san_xuat_kinh_doanh.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "KINH"
+    ]
+  },
+  "vcb_md_43__ngan_hang_so__quy_chuan_dich_vu_digibank_va_smart_otp.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "CHUẨN"
+    ]
+  },
+  "vcb_md_44__the_ghi_no__vcb_connect24_napas.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "VIETCOMBANK"
+    ]
+  },
+  "vcb_md_45__cho_vay__vay_mua_nha_o_dat_o.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "VAY MUA NHÀ Ở, "
+    ]
+  },
+  "vcb_md_46__cho_vay__vay_mua_nha_du_an.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "VAY MUA NHÀ DỰ "
+    ]
+  },
+  "vcb_md_47__cho_vay__vay_tieu_dung_co_tai_san_bao_dam.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "TIÊU"
+    ]
+  },
+  "vcb_md_48__cho_vay__danh_muc_tong_hop_cac_goi_vay_khcn.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "TỔNG"
+    ]
+  },
+  "vcb_md_49__cho_vay__vay_xay_sua_nha_o.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "VAY XÂY SỬA NHÀ"
+    ]
+  },
+  "vcb_md_50__cho_vay__vay_tin_chap_theo_luong_nguoi_lao_dong.docx": {
+    "expected_min_chunks": 3,
+    "has_table": false,
+    "expected_breadcrumb_keywords": [
+      "CHẤP"
+    ]
+  }
+}

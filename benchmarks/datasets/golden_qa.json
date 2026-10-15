@@ -1,0 +1,502 @@
+[
+  {
+    "question": "Quy định chi tiết về quyền và nghĩa vụ liên quan đến: 'ĐIỀU KHOẢN VÀ ĐIỀU KIỆN VỀ MỞ VÀ SỬ DỤNG...' được áp dụng thế nào?",
+    "ground_truth_answer": "ĐIỀU KHOẢN VÀ ĐIỀU KIỆN VỀ MỞ VÀ SỬ DỤNG",
+    "ground_truth_context_span": "ĐIỀU KHOẢN VÀ ĐIỀU KIỆN VỀ MỞ VÀ SỬ DỤNG",
+    "expected_chunk_ids": [
+      "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen_stream_c0"
+    ],
+    "expected_breadcrumb_prefix": "ĐIỀU KHOẢN VÀ ĐIỀU KIỆN VỀ MỞ VÀ SỬ DỤNG TÀI KHOẢN THANH TOÁN VIETCOMBANK ĐỐI VỚI KHÁCH HÀNG CÁ NHÂN TRÊN KÊNH TRỰC TUYẾN",
+    "category": "multi_level_legal"
+  },
+  {
+    "question": "Quy định chi tiết về quyền và nghĩa vụ liên quan đến: 'TÀI KHOẢN THANH TOÁN VIETCOMBANK ĐỐI VỚI KHÁCH HÀN...' được áp dụng thế nào?",
+    "ground_truth_answer": "TÀI KHOẢN THANH TOÁN VIETCOMBANK ĐỐI VỚI KHÁCH HÀNG",
+    "ground_truth_context_span": "TÀI KHOẢN THANH TOÁN VIETCOMBANK ĐỐI VỚI KHÁCH HÀNG",
+    "expected_chunk_ids": [
+      "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen_stream_c1"
+    ],
+    "expected_breadcrumb_prefix": "ĐIỀU KHOẢN VÀ ĐIỀU KIỆN VỀ MỞ VÀ SỬ DỤNG TÀI KHOẢN THANH TOÁN VIETCOMBANK ĐỐI VỚI KHÁCH HÀNG CÁ NHÂN TRÊN KÊNH TRỰC TUYẾN",
+    "category": "multi_level_legal"
+  },
+  {
+    "question": "Quy định chi tiết về quyền và nghĩa vụ liên quan đến: '1. Khách hàng (KH): là cá nhân mở tài khoản thanh ...' được áp dụng thế nào?",
+    "ground_truth_answer": "1. Khách hàng (KH): là cá nhân mở tài khoản thanh toán Vietcombank (VCB) trên kênh trực tuyến.",
+    "ground_truth_context_span": "1. Khách hàng (KH): là cá nhân mở tài khoản thanh toán Vietcombank (VCB) trên kênh trực tuyến.",
+    "expected_chunk_ids": [
+      "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen_stream_c2"
+    ],
+    "expected_breadcrumb_prefix": "ĐIỀU KHOẢN VÀ ĐIỀU KIỆN VỀ MỞ VÀ SỬ DỤNG TÀI KHOẢN THANH TOÁN VIETCOMBANK ĐỐI VỚI KHÁCH HÀNG CÁ NHÂN TRÊN KÊNH TRỰC TUYẾN",
+    "category": "multi_level_legal"
+  },
+  {
+    "question": "Quy định chi tiết về quyền và nghĩa vụ liên quan đến: '2. Tài khoản thanh toán (TK) trực tuyến (TK trực t...' được áp dụng thế nào?",
+    "ground_truth_answer": "2. Tài khoản thanh toán (TK) trực tuyến (TK trực tuyến): là TK tiền gửi không kỳ hạn đồng Việt Nam (VND) của",
+    "ground_truth_context_span": "2. Tài khoản thanh toán (TK) trực tuyến (TK trực tuyến): là TK tiền gửi không kỳ hạn đồng Việt Nam (VND) của",
+    "expected_chunk_ids": [
+      "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen_stream_c2"
+    ],
+    "expected_breadcrumb_prefix": "ĐIỀU KHOẢN VÀ ĐIỀU KIỆN VỀ MỞ VÀ SỬ DỤNG TÀI KHOẢN THANH TOÁN VIETCOMBANK ĐỐI VỚI KHÁCH HÀNG CÁ NHÂN TRÊN KÊNH TRỰC TUYẾN",
+    "category": "multi_level_legal"
+  },
+  {
+    "question": "Quy định chi tiết về quyền và nghĩa vụ liên quan đến: 'KH mở trên kênh ngân hàng điện tử (NHĐT) của VCB h...' được áp dụng thế nào?",
+    "ground_truth_answer": "KH mở trên kênh ngân hàng điện tử (NHĐT) của VCB hoặc kênh NHĐT khác theo quy định từng thời kỳ của",
+    "ground_truth_context_span": "KH mở trên kênh ngân hàng điện tử (NHĐT) của VCB hoặc kênh NHĐT khác theo quy định từng thời kỳ của",
+    "expected_chunk_ids": [
+      "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen_stream_c2"
+    ],
+    "expected_breadcrumb_prefix": "ĐIỀU KHOẢN VÀ ĐIỀU KIỆN VỀ MỞ VÀ SỬ DỤNG TÀI KHOẢN THANH TOÁN VIETCOMBANK ĐỐI VỚI KHÁCH HÀNG CÁ NHÂN TRÊN KÊNH TRỰC TUYẾN",
+    "category": "multi_level_legal"
+  },
+  {
+    "question": "Quy định chi tiết về quyền và nghĩa vụ liên quan đến: 'VCB để sử dụng các dịch vụ thanh toán do VCB cung ...' được áp dụng thế nào?",
+    "ground_truth_answer": "VCB để sử dụng các dịch vụ thanh toán do VCB cung ứng.",
+    "ground_truth_context_span": "VCB để sử dụng các dịch vụ thanh toán do VCB cung ứng.",
+    "expected_chunk_ids": [
+      "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen_stream_c2"
+    ],
+    "expected_breadcrumb_prefix": "ĐIỀU KHOẢN VÀ ĐIỀU KIỆN VỀ MỞ VÀ SỬ DỤNG TÀI KHOẢN THANH TOÁN VIETCOMBANK ĐỐI VỚI KHÁCH HÀNG CÁ NHÂN TRÊN KÊNH TRỰC TUYẾN",
+    "category": "multi_level_legal"
+  },
+  {
+    "question": "Quy định chi tiết về quyền và nghĩa vụ liên quan đến: '3. Dịch vụ mở TK trên kênh trực tuyến dành cho KH ...' được áp dụng thế nào?",
+    "ground_truth_answer": "3. Dịch vụ mở TK trên kênh trực tuyến dành cho KH (gọi tắt là Dịch vụ mở TK trực tuyến) là dịch vụ cho phép",
+    "ground_truth_context_span": "3. Dịch vụ mở TK trên kênh trực tuyến dành cho KH (gọi tắt là Dịch vụ mở TK trực tuyến) là dịch vụ cho phép",
+    "expected_chunk_ids": [
+      "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen_stream_c2"
+    ],
+    "expected_breadcrumb_prefix": "ĐIỀU KHOẢN VÀ ĐIỀU KIỆN VỀ MỞ VÀ SỬ DỤNG TÀI KHOẢN THANH TOÁN VIETCOMBANK ĐỐI VỚI KHÁCH HÀNG CÁ NHÂN TRÊN KÊNH TRỰC TUYẾN",
+    "category": "multi_level_legal"
+  },
+  {
+    "question": "Quy định chi tiết về quyền và nghĩa vụ liên quan đến: 'KH mở TK trực tuyến (không áp dụng đối với TK chun...' được áp dụng thế nào?",
+    "ground_truth_answer": "KH mở TK trực tuyến (không áp dụng đối với TK chung, TK mở thông qua người đại diện theo pháp luật hoặc",
+    "ground_truth_context_span": "KH mở TK trực tuyến (không áp dụng đối với TK chung, TK mở thông qua người đại diện theo pháp luật hoặc",
+    "expected_chunk_ids": [
+      "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen_stream_c2"
+    ],
+    "expected_breadcrumb_prefix": "ĐIỀU KHOẢN VÀ ĐIỀU KIỆN VỀ MỞ VÀ SỬ DỤNG TÀI KHOẢN THANH TOÁN VIETCOMBANK ĐỐI VỚI KHÁCH HÀNG CÁ NHÂN TRÊN KÊNH TRỰC TUYẾN",
+    "category": "multi_level_legal"
+  },
+  {
+    "question": "Quy định chi tiết về quyền và nghĩa vụ liên quan đến: 'người giám hộ) và đăng ký sử dụng sản phẩm dịch vụ...' được áp dụng thế nào?",
+    "ground_truth_answer": "người giám hộ) và đăng ký sử dụng sản phẩm dịch vụ kèm theo mở TK hoàn toàn trên ứng dụng VCB Digibank",
+    "ground_truth_context_span": "người giám hộ) và đăng ký sử dụng sản phẩm dịch vụ kèm theo mở TK hoàn toàn trên ứng dụng VCB Digibank",
+    "expected_chunk_ids": [
+      "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen_stream_c2"
+    ],
+    "expected_breadcrumb_prefix": "ĐIỀU KHOẢN VÀ ĐIỀU KIỆN VỀ MỞ VÀ SỬ DỤNG TÀI KHOẢN THANH TOÁN VIETCOMBANK ĐỐI VỚI KHÁCH HÀNG CÁ NHÂN TRÊN KÊNH TRỰC TUYẾN",
+    "category": "multi_level_legal"
+  },
+  {
+    "question": "Quy định chi tiết về quyền và nghĩa vụ liên quan đến: 'hoặc kênh NHĐT khác theo quy định từng thời kỳ của...' được áp dụng thế nào?",
+    "ground_truth_answer": "hoặc kênh NHĐT khác theo quy định từng thời kỳ của VCB, không cần phải gặp mặt trực tiếp tại điểm giao",
+    "ground_truth_context_span": "hoặc kênh NHĐT khác theo quy định từng thời kỳ của VCB, không cần phải gặp mặt trực tiếp tại điểm giao",
+    "expected_chunk_ids": [
+      "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen_stream_c2"
+    ],
+    "expected_breadcrumb_prefix": "ĐIỀU KHOẢN VÀ ĐIỀU KIỆN VỀ MỞ VÀ SỬ DỤNG TÀI KHOẢN THANH TOÁN VIETCOMBANK ĐỐI VỚI KHÁCH HÀNG CÁ NHÂN TRÊN KÊNH TRỰC TUYẾN",
+    "category": "multi_level_legal"
+  },
+  {
+    "question": "Quy định chi tiết về quyền và nghĩa vụ liên quan đến: '4. Địa điểm giao dịch (ĐGD): là địa điểm giao dịch...' được áp dụng thế nào?",
+    "ground_truth_answer": "4. Địa điểm giao dịch (ĐGD): là địa điểm giao dịch hợp pháp thuộc mạng lưới hoạt động của VCB bao gồm Trụ",
+    "ground_truth_context_span": "4. Địa điểm giao dịch (ĐGD): là địa điểm giao dịch hợp pháp thuộc mạng lưới hoạt động của VCB bao gồm Trụ",
+    "expected_chunk_ids": [
+      "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen_stream_c2"
+    ],
+    "expected_breadcrumb_prefix": "ĐIỀU KHOẢN VÀ ĐIỀU KIỆN VỀ MỞ VÀ SỬ DỤNG TÀI KHOẢN THANH TOÁN VIETCOMBANK ĐỐI VỚI KHÁCH HÀNG CÁ NHÂN TRÊN KÊNH TRỰC TUYẾN",
+    "category": "multi_level_legal"
+  },
+  {
+    "question": "Quy định chi tiết về quyền và nghĩa vụ liên quan đến: '5. Chủ TK: là cá nhân đứng tên mở TK....' được áp dụng thế nào?",
+    "ground_truth_answer": "5. Chủ TK: là cá nhân đứng tên mở TK.",
+    "ground_truth_context_span": "5. Chủ TK: là cá nhân đứng tên mở TK.",
+    "expected_chunk_ids": [
+      "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen_stream_c2"
+    ],
+    "expected_breadcrumb_prefix": "ĐIỀU KHOẢN VÀ ĐIỀU KIỆN VỀ MỞ VÀ SỬ DỤNG TÀI KHOẢN THANH TOÁN VIETCOMBANK ĐỐI VỚI KHÁCH HÀNG CÁ NHÂN TRÊN KÊNH TRỰC TUYẾN",
+    "category": "multi_level_legal"
+  },
+  {
+    "question": "Quy định chi tiết về quyền và nghĩa vụ liên quan đến: '6. Xác thực trực tiếp là việc cán bộ VCB kiểm tra,...' được áp dụng thế nào?",
+    "ground_truth_answer": "6. Xác thực trực tiếp là việc cán bộ VCB kiểm tra, đối chiếu thông tin KH đã cung cấp khi mở TK trực tuyến, thu",
+    "ground_truth_context_span": "6. Xác thực trực tiếp là việc cán bộ VCB kiểm tra, đối chiếu thông tin KH đã cung cấp khi mở TK trực tuyến, thu",
+    "expected_chunk_ids": [
+      "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen_stream_c2"
+    ],
+    "expected_breadcrumb_prefix": "ĐIỀU KHOẢN VÀ ĐIỀU KIỆN VỀ MỞ VÀ SỬ DỤNG TÀI KHOẢN THANH TOÁN VIETCOMBANK ĐỐI VỚI KHÁCH HÀNG CÁ NHÂN TRÊN KÊNH TRỰC TUYẾN",
+    "category": "multi_level_legal"
+  },
+  {
+    "question": "Mức biểu phí thẻ tín dụng quốc tế quy định cho hạng mục: '* Hàng 1: STT: 1 | Dịch vụ: Phí phát hành (*) | Mứ...' là bao nhiêu?",
+    "ground_truth_answer": "* Hàng 1: STT: 1 | Dịch vụ: Phí phát hành (*) | Mức phí: Miễn phí",
+    "ground_truth_context_span": "* Hàng 1: STT: 1 | Dịch vụ: Phí phát hành (*) | Mức phí: Miễn phí",
+    "expected_chunk_ids": [
+      "vcb_pdf_22_bieu_phi_the_tdqt_2026_pdf_tbl_0"
+    ],
+    "expected_breadcrumb_prefix": "BIỂU PHÍ DỊCH VỤ VÀ LÃI SUẤT THẺ TÍN DỤNG QUỐC TẾ ÁP DỤNG CHO KHÁCH HÀNG CÁ NHÂN TẠI VIETCOMBANK",
+    "category": "complex_table"
+  },
+  {
+    "question": "Mức biểu phí thẻ tín dụng quốc tế quy định cho hạng mục: '* Hàng 3: STT: 2.1 | Dịch vụ: Thẻ Vietcombank Visa...' là bao nhiêu?",
+    "ground_truth_answer": "* Hàng 3: STT: 2.1 | Dịch vụ: Thẻ Vietcombank Visa Infinite | Mức phí: 30.000.000 VNĐ/thẻ/năm",
+    "ground_truth_context_span": "* Hàng 3: STT: 2.1 | Dịch vụ: Thẻ Vietcombank Visa Infinite | Mức phí: 30.000.000 VNĐ/thẻ/năm",
+    "expected_chunk_ids": [
+      "vcb_pdf_22_bieu_phi_the_tdqt_2026_pdf_tbl_1"
+    ],
+    "expected_breadcrumb_prefix": "BIỂU PHÍ DỊCH VỤ VÀ LÃI SUẤT THẺ TÍN DỤNG QUỐC TẾ ÁP DỤNG CHO KHÁCH HÀNG CÁ NHÂN TẠI VIETCOMBANK",
+    "category": "complex_table"
+  },
+  {
+    "question": "Mức biểu phí thẻ tín dụng quốc tế quy định cho hạng mục: '* Hàng 4: STT: (2.1) | Dịch vụ: (Thẻ Vietcombank V...' là bao nhiêu?",
+    "ground_truth_answer": "* Hàng 4: STT: (2.1) | Dịch vụ: (Thẻ Vietcombank Visa Infinite) | Mức phí: (Miễn phí cho khách hàng",
+    "ground_truth_context_span": "* Hàng 4: STT: (2.1) | Dịch vụ: (Thẻ Vietcombank Visa Infinite) | Mức phí: (Miễn phí cho khách hàng",
+    "expected_chunk_ids": [
+      "vcb_pdf_22_bieu_phi_the_tdqt_2026_pdf_tbl_1"
+    ],
+    "expected_breadcrumb_prefix": "BIỂU PHÍ DỊCH VỤ VÀ LÃI SUẤT THẺ TÍN DỤNG QUỐC TẾ ÁP DỤNG CHO KHÁCH HÀNG CÁ NHÂN TẠI VIETCOMBANK",
+    "category": "complex_table"
+  },
+  {
+    "question": "Mức biểu phí thẻ tín dụng quốc tế quy định cho hạng mục: '* Hàng 8: STT: 2.2 | Dịch vụ: Thẻ Vietcombank Visa...' là bao nhiêu?",
+    "ground_truth_answer": "* Hàng 8: STT: 2.2 | Dịch vụ: Thẻ Vietcombank Visa Signature | Mức phí: 3.000.000 VNĐ/thẻ/năm",
+    "ground_truth_context_span": "* Hàng 8: STT: 2.2 | Dịch vụ: Thẻ Vietcombank Visa Signature | Mức phí: 3.000.000 VNĐ/thẻ/năm",
+    "expected_chunk_ids": [
+      "vcb_pdf_22_bieu_phi_the_tdqt_2026_pdf_tbl_2"
+    ],
+    "expected_breadcrumb_prefix": "BIỂU PHÍ DỊCH VỤ VÀ LÃI SUẤT THẺ TÍN DỤNG QUỐC TẾ ÁP DỤNG CHO KHÁCH HÀNG CÁ NHÂN TẠI VIETCOMBANK",
+    "category": "complex_table"
+  },
+  {
+    "question": "Mức biểu phí thẻ tín dụng quốc tế quy định cho hạng mục: '* Hàng 9: STT: (2.2) | Dịch vụ: (Thẻ Vietcombank V...' là bao nhiêu?",
+    "ground_truth_answer": "* Hàng 9: STT: (2.2) | Dịch vụ: (Thẻ Vietcombank Visa Signature) | Mức phí: (Miễn phí cho khách hàng",
+    "ground_truth_context_span": "* Hàng 9: STT: (2.2) | Dịch vụ: (Thẻ Vietcombank Visa Signature) | Mức phí: (Miễn phí cho khách hàng",
+    "expected_chunk_ids": [
+      "vcb_pdf_22_bieu_phi_the_tdqt_2026_pdf_tbl_2"
+    ],
+    "expected_breadcrumb_prefix": "BIỂU PHÍ DỊCH VỤ VÀ LÃI SUẤT THẺ TÍN DỤNG QUỐC TẾ ÁP DỤNG CHO KHÁCH HÀNG CÁ NHÂN TẠI VIETCOMBANK",
+    "category": "complex_table"
+  },
+  {
+    "question": "Mức biểu phí thẻ tín dụng quốc tế quy định cho hạng mục: '* Hàng 12: STT: 2.3.1 | Dịch vụ: Thẻ chính | Mức p...' là bao nhiêu?",
+    "ground_truth_answer": "* Hàng 12: STT: 2.3.1 | Dịch vụ: Thẻ chính | Mức phí: 800.000 VNĐ/thẻ/năm",
+    "ground_truth_context_span": "* Hàng 12: STT: 2.3.1 | Dịch vụ: Thẻ chính | Mức phí: 800.000 VNĐ/thẻ/năm",
+    "expected_chunk_ids": [
+      "vcb_pdf_22_bieu_phi_the_tdqt_2026_pdf_tbl_3"
+    ],
+    "expected_breadcrumb_prefix": "BIỂU PHÍ DỊCH VỤ VÀ LÃI SUẤT THẺ TÍN DỤNG QUỐC TẾ ÁP DỤNG CHO KHÁCH HÀNG CÁ NHÂN TẠI VIETCOMBANK",
+    "category": "complex_table"
+  },
+  {
+    "question": "Mức biểu phí thẻ tín dụng quốc tế quy định cho hạng mục: '* Hàng 13: STT: 2.3.2 | Dịch vụ: Thẻ phụ | Mức phí...' là bao nhiêu?",
+    "ground_truth_answer": "* Hàng 13: STT: 2.3.2 | Dịch vụ: Thẻ phụ | Mức phí: 500.000 VNĐ/thẻ/năm",
+    "ground_truth_context_span": "* Hàng 13: STT: 2.3.2 | Dịch vụ: Thẻ phụ | Mức phí: 500.000 VNĐ/thẻ/năm",
+    "expected_chunk_ids": [
+      "vcb_pdf_22_bieu_phi_the_tdqt_2026_pdf_tbl_3"
+    ],
+    "expected_breadcrumb_prefix": "BIỂU PHÍ DỊCH VỤ VÀ LÃI SUẤT THẺ TÍN DỤNG QUỐC TẾ ÁP DỤNG CHO KHÁCH HÀNG CÁ NHÂN TẠI VIETCOMBANK",
+    "category": "complex_table"
+  },
+  {
+    "question": "Mức biểu phí thẻ tín dụng quốc tế quy định cho hạng mục: '* Hàng 15: STT: 2.4.1 | Dịch vụ: Thẻ chính | Mức p...' là bao nhiêu?",
+    "ground_truth_answer": "* Hàng 15: STT: 2.4.1 | Dịch vụ: Thẻ chính | Mức phí: 400.000 VNĐ/thẻ/năm",
+    "ground_truth_context_span": "* Hàng 15: STT: 2.4.1 | Dịch vụ: Thẻ chính | Mức phí: 400.000 VNĐ/thẻ/năm",
+    "expected_chunk_ids": [
+      "vcb_pdf_22_bieu_phi_the_tdqt_2026_pdf_tbl_4"
+    ],
+    "expected_breadcrumb_prefix": "BIỂU PHÍ DỊCH VỤ VÀ LÃI SUẤT THẺ TÍN DỤNG QUỐC TẾ ÁP DỤNG CHO KHÁCH HÀNG CÁ NHÂN TẠI VIETCOMBANK",
+    "category": "complex_table"
+  },
+  {
+    "question": "Mức biểu phí thẻ tín dụng quốc tế quy định cho hạng mục: '* Hàng 16: STT: 2.4.2 | Dịch vụ: Thẻ phụ | Mức phí...' là bao nhiêu?",
+    "ground_truth_answer": "* Hàng 16: STT: 2.4.2 | Dịch vụ: Thẻ phụ | Mức phí: 200.000 VNĐ/thẻ/năm",
+    "ground_truth_context_span": "* Hàng 16: STT: 2.4.2 | Dịch vụ: Thẻ phụ | Mức phí: 200.000 VNĐ/thẻ/năm",
+    "expected_chunk_ids": [
+      "vcb_pdf_22_bieu_phi_the_tdqt_2026_pdf_tbl_4"
+    ],
+    "expected_breadcrumb_prefix": "BIỂU PHÍ DỊCH VỤ VÀ LÃI SUẤT THẺ TÍN DỤNG QUỐC TẾ ÁP DỤNG CHO KHÁCH HÀNG CÁ NHÂN TẠI VIETCOMBANK",
+    "category": "complex_table"
+  },
+  {
+    "question": "Mức biểu phí thẻ tín dụng quốc tế quy định cho hạng mục: '* Hàng 18: STT: 2.5.1 | Dịch vụ: Thẻ chính | Mức p...' là bao nhiêu?",
+    "ground_truth_answer": "* Hàng 18: STT: 2.5.1 | Dịch vụ: Thẻ chính | Mức phí: 200.000 VNĐ/thẻ/năm",
+    "ground_truth_context_span": "* Hàng 18: STT: 2.5.1 | Dịch vụ: Thẻ chính | Mức phí: 200.000 VNĐ/thẻ/năm",
+    "expected_chunk_ids": [
+      "vcb_pdf_22_bieu_phi_the_tdqt_2026_pdf_tbl_5"
+    ],
+    "expected_breadcrumb_prefix": "BIỂU PHÍ DỊCH VỤ VÀ LÃI SUẤT THẺ TÍN DỤNG QUỐC TẾ ÁP DỤNG CHO KHÁCH HÀNG CÁ NHÂN TẠI VIETCOMBANK",
+    "category": "complex_table"
+  },
+  {
+    "question": "Mức biểu phí thẻ tín dụng quốc tế quy định cho hạng mục: '* Hàng 19: STT: 2.5.2 | Dịch vụ: Thẻ phụ | Mức phí...' là bao nhiêu?",
+    "ground_truth_answer": "* Hàng 19: STT: 2.5.2 | Dịch vụ: Thẻ phụ | Mức phí: 100.000 VNĐ/thẻ/năm",
+    "ground_truth_context_span": "* Hàng 19: STT: 2.5.2 | Dịch vụ: Thẻ phụ | Mức phí: 100.000 VNĐ/thẻ/năm",
+    "expected_chunk_ids": [
+      "vcb_pdf_22_bieu_phi_the_tdqt_2026_pdf_tbl_5"
+    ],
+    "expected_breadcrumb_prefix": "BIỂU PHÍ DỊCH VỤ VÀ LÃI SUẤT THẺ TÍN DỤNG QUỐC TẾ ÁP DỤNG CHO KHÁCH HÀNG CÁ NHÂN TẠI VIETCOMBANK",
+    "category": "complex_table"
+  },
+  {
+    "question": "Mức biểu phí thẻ tín dụng quốc tế quy định cho hạng mục: '* Hàng 2: STT: a | Dịch vụ: Thẻ chính | Mức phí: 4...' là bao nhiêu?",
+    "ground_truth_answer": "* Hàng 2: STT: a | Dịch vụ: Thẻ chính | Mức phí: 400.000 VNĐ/thẻ/năm",
+    "ground_truth_context_span": "* Hàng 2: STT: a | Dịch vụ: Thẻ chính | Mức phí: 400.000 VNĐ/thẻ/năm",
+    "expected_chunk_ids": [
+      "vcb_pdf_22_bieu_phi_the_tdqt_2026_pdf_tbl_6"
+    ],
+    "expected_breadcrumb_prefix": "BIỂU PHÍ DỊCH VỤ VÀ LÃI SUẤT THẺ TÍN DỤNG QUỐC TẾ ÁP DỤNG CHO KHÁCH HÀNG CÁ NHÂN TẠI VIETCOMBANK",
+    "category": "complex_table"
+  },
+  {
+    "question": "Mức biểu phí thẻ tín dụng quốc tế quy định cho hạng mục: '* Hàng 3: STT: b | Dịch vụ: Thẻ phụ | Mức phí: 200...' là bao nhiêu?",
+    "ground_truth_answer": "* Hàng 3: STT: b | Dịch vụ: Thẻ phụ | Mức phí: 200.000 VNĐ/thẻ/năm",
+    "ground_truth_context_span": "* Hàng 3: STT: b | Dịch vụ: Thẻ phụ | Mức phí: 200.000 VNĐ/thẻ/năm",
+    "expected_chunk_ids": [
+      "vcb_pdf_22_bieu_phi_the_tdqt_2026_pdf_tbl_6"
+    ],
+    "expected_breadcrumb_prefix": "BIỂU PHÍ DỊCH VỤ VÀ LÃI SUẤT THẺ TÍN DỤNG QUỐC TẾ ÁP DỤNG CHO KHÁCH HÀNG CÁ NHÂN TẠI VIETCOMBANK",
+    "category": "complex_table"
+  },
+  {
+    "question": "Nghị quyết HĐQT phê duyệt nội dung chi tiết: 'NGOẠI THƯƠNG VIỆT NAM TẬP - TỰ DO - HẠNH phúc...' như thế nào?",
+    "ground_truth_answer": "NGOẠI THƯƠNG VIỆT NAM TẬP - TỰ DO - HẠNH phúc",
+    "ground_truth_context_span": "NGOẠI THƯƠNG VIỆT NAM TẬP - TỰ DO - HẠNH phúc",
+    "expected_chunk_ids": [
+      "vcb_pdf_21_nq_hdqt_cctg_vcbs_stream_c0"
+    ],
+    "expected_breadcrumb_prefix": "CONG BO THONG TIN BAT THƯỜNG",
+    "category": "noisy_scan_ocr"
+  },
+  {
+    "question": "Nghị quyết HĐQT phê duyệt nội dung chi tiết: 'Thuận V/v HĐQT phê duyệt nội dung thỏa thuận hợp...' như thế nào?",
+    "ground_truth_answer": "Thuận V/v HĐQT phê duyệt nội dung thỏa thuận hợp",
+    "ground_truth_context_span": "Thuận V/v HĐQT phê duyệt nội dung thỏa thuận hợp",
+    "expected_chunk_ids": [
+      "vcb_pdf_21_nq_hdqt_cctg_vcbs_stream_c0"
+    ],
+    "expected_breadcrumb_prefix": "CONG BO THONG TIN BAT THƯỜNG",
+    "category": "noisy_scan_ocr"
+  },
+  {
+    "question": "Nghị quyết HĐQT phê duyệt nội dung chi tiết: 'Thu tác v/v thực hiện giao dịch CCTG do VCB phát t...' như thế nào?",
+    "ground_truth_answer": "Thu tác v/v thực hiện giao dịch CCTG do VCB phát tháng",
+    "ground_truth_context_span": "Thu tác v/v thực hiện giao dịch CCTG do VCB phát tháng",
+    "expected_chunk_ids": [
+      "vcb_pdf_21_nq_hdqt_cctg_vcbs_stream_c0"
+    ],
+    "expected_breadcrumb_prefix": "CONG BO THONG TIN BAT THƯỜNG",
+    "category": "noisy_scan_ocr"
+  },
+  {
+    "question": "Nghị quyết HĐQT phê duyệt nội dung chi tiết: 'Thành băng phương tiện điện tử giữa KHCN của Người...' như thế nào?",
+    "ground_truth_answer": "Thành băng phương tiện điện tử giữa KHCN của Người",
+    "ground_truth_context_span": "Thành băng phương tiện điện tử giữa KHCN của Người",
+    "expected_chunk_ids": [
+      "vcb_pdf_21_nq_hdqt_cctg_vcbs_stream_c0"
+    ],
+    "expected_breadcrumb_prefix": "CONG BO THONG TIN BAT THƯỜNG",
+    "category": "noisy_scan_ocr"
+  },
+  {
+    "question": "Nghị quyết HĐQT phê duyệt nội dung chi tiết: 'VCB và VCBS trên hệ thống của VCB...' như thế nào?",
+    "ground_truth_answer": "VCB và VCBS trên hệ thống của VCB",
+    "ground_truth_context_span": "VCB và VCBS trên hệ thống của VCB",
+    "expected_chunk_ids": [
+      "vcb_pdf_21_nq_hdqt_cctg_vcbs_stream_c0"
+    ],
+    "expected_breadcrumb_prefix": "CONG BO THONG TIN BAT THƯỜNG",
+    "category": "noisy_scan_ocr"
+  },
+  {
+    "question": "Nghị quyết HĐQT phê duyệt nội dung chi tiết: '- Kính gửi: - Ủy ban Chứng khoán Nhà nước;...' như thế nào?",
+    "ground_truth_answer": "- Kính gửi: - Ủy ban Chứng khoán Nhà nước;",
+    "ground_truth_context_span": "- Kính gửi: - Ủy ban Chứng khoán Nhà nước;",
+    "expected_chunk_ids": [
+      "vcb_pdf_21_nq_hdqt_cctg_vcbs_stream_c1"
+    ],
+    "expected_breadcrumb_prefix": "CONG BO THONG TIN BAT THƯỜNG",
+    "category": "noisy_scan_ocr"
+  },
+  {
+    "question": "Nghị quyết HĐQT phê duyệt nội dung chi tiết: '- Sở Giao dịch Chứng khoán Việt Nam;...' như thế nào?",
+    "ground_truth_answer": "- Sở Giao dịch Chứng khoán Việt Nam;",
+    "ground_truth_context_span": "- Sở Giao dịch Chứng khoán Việt Nam;",
+    "expected_chunk_ids": [
+      "vcb_pdf_21_nq_hdqt_cctg_vcbs_stream_c1"
+    ],
+    "expected_breadcrumb_prefix": "CONG BO THONG TIN BAT THƯỜNG",
+    "category": "noisy_scan_ocr"
+  },
+  {
+    "question": "Nghị quyết HĐQT phê duyệt nội dung chi tiết: '- Sở Giao dịch Chứng khoán Hà Nội;...' như thế nào?",
+    "ground_truth_answer": "- Sở Giao dịch Chứng khoán Hà Nội;",
+    "ground_truth_context_span": "- Sở Giao dịch Chứng khoán Hà Nội;",
+    "expected_chunk_ids": [
+      "vcb_pdf_21_nq_hdqt_cctg_vcbs_stream_c1"
+    ],
+    "expected_breadcrumb_prefix": "CONG BO THONG TIN BAT THƯỜNG",
+    "category": "noisy_scan_ocr"
+  },
+  {
+    "question": "Nghị quyết HĐQT phê duyệt nội dung chi tiết: '- Sở Giao dịch Chứng khoán TP HCM....' như thế nào?",
+    "ground_truth_answer": "- Sở Giao dịch Chứng khoán TP HCM.",
+    "ground_truth_context_span": "- Sở Giao dịch Chứng khoán TP HCM.",
+    "expected_chunk_ids": [
+      "vcb_pdf_21_nq_hdqt_cctg_vcbs_stream_c1"
+    ],
+    "expected_breadcrumb_prefix": "CONG BO THONG TIN BAT THƯỜNG",
+    "category": "noisy_scan_ocr"
+  },
+  {
+    "question": "Nghị quyết HĐQT phê duyệt nội dung chi tiết: '1981. Tên tổ chức: Ngân hàng TMCP Ngoại thương Việ...' như thế nào?",
+    "ground_truth_answer": "1981. Tên tổ chức: Ngân hàng TMCP Ngoại thương Việt Nam 1992",
+    "ground_truth_context_span": "1981. Tên tổ chức: Ngân hàng TMCP Ngoại thương Việt Nam 1992",
+    "expected_chunk_ids": [
+      "vcb_pdf_21_nq_hdqt_cctg_vcbs_stream_c1"
+    ],
+    "expected_breadcrumb_prefix": "CONG BO THONG TIN BAT THƯỜNG",
+    "category": "noisy_scan_ocr"
+  },
+  {
+    "question": "Nghị quyết HĐQT phê duyệt nội dung chi tiết: 'Địa chỉ trụ sở chính: 198 Trần Quang Khải, Hoàn Ki...' như thế nào?",
+    "ground_truth_answer": "Địa chỉ trụ sở chính: 198 Trần Quang Khải, Hoàn Kiếm, Hà Nội Nội",
+    "ground_truth_context_span": "Địa chỉ trụ sở chính: 198 Trần Quang Khải, Hoàn Kiếm, Hà Nội Nội",
+    "expected_chunk_ids": [
+      "vcb_pdf_21_nq_hdqt_cctg_vcbs_stream_c2"
+    ],
+    "expected_breadcrumb_prefix": "CONG BO THONG TIN BAT THƯỜNG",
+    "category": "noisy_scan_ocr"
+  },
+  {
+    "question": "Nghị quyết HĐQT phê duyệt nội dung chi tiết: 'Email: cltkhdqt.ho Avietcombank.com.vn....' như thế nào?",
+    "ground_truth_answer": "Email: cltkhdqt.ho Avietcombank.com.vn.",
+    "ground_truth_context_span": "Email: cltkhdqt.ho Avietcombank.com.vn.",
+    "expected_chunk_ids": [
+      "vcb_pdf_21_nq_hdqt_cctg_vcbs_stream_c2"
+    ],
+    "expected_breadcrumb_prefix": "CONG BO THONG TIN BAT THƯỜNG",
+    "category": "noisy_scan_ocr"
+  },
+  {
+    "question": "Theo hướng dẫn quy chuẩn dịch vụ ngân hàng, nội dung: 'Thẻ chưa kích hoạt nên chưa chi tiêu được --> Trườ...' được quy định ra sao?",
+    "ground_truth_answer": "Thẻ chưa kích hoạt nên chưa chi tiêu được --> Trường hợp này khách hàng có thể tự kích hoạt thẻ bằng các phương thức nhắn tin qua kênh SMS/kênh VCB Digibank trên trình duyệt web/trên ứng dụng mobile hoặc liên hệ Chi nhánh phát hành thẻ/Trung tâm dịch vụ khách hàng (số điện thoại 1900 54 54 13) để kiểm tra và được hỗ trợ.",
+    "ground_truth_context_span": "Thẻ chưa kích hoạt nên chưa chi tiêu được --> Trường hợp này khách hàng có thể tự kích hoạt thẻ bằng các phương thức nhắn tin qua kênh SMS/kênh VCB Digibank trên trình duyệt web/trên ứng dụng mobile hoặc liên hệ Chi nhánh phát hành thẻ/Trung tâm dịch vụ khách hàng (số điện thoại 1900 54 54 13) để kiểm tra và được hỗ trợ.",
+    "expected_chunk_ids": [
+      "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang_docx_c0"
+    ],
+    "expected_breadcrumb_prefix": "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang",
+    "category": "cross_page_defragmented"
+  },
+  {
+    "question": "Theo hướng dẫn quy chuẩn dịch vụ ngân hàng, nội dung: 'Thẻ chưa mở code Chi tiêu internet để có thể chi t...' được quy định ra sao?",
+    "ground_truth_answer": "Thẻ chưa mở code Chi tiêu internet để có thể chi tiêu online.--> Trường hợp này khách hàng chủ động mở code trên VCB Digibank trên trình duyệt web/trên ứng dụng mobile hoặc liên hệ Chi nhánh phát hành thẻ/Trung tâm dịch vụ khách hàng (số điện thoại 1900 54 54 13) để kiểm tra và được hỗ trợ.",
+    "ground_truth_context_span": "Thẻ chưa mở code Chi tiêu internet để có thể chi tiêu online.--> Trường hợp này khách hàng chủ động mở code trên VCB Digibank trên trình duyệt web/trên ứng dụng mobile hoặc liên hệ Chi nhánh phát hành thẻ/Trung tâm dịch vụ khách hàng (số điện thoại 1900 54 54 13) để kiểm tra và được hỗ trợ.",
+    "expected_chunk_ids": [
+      "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang_docx_c0"
+    ],
+    "expected_breadcrumb_prefix": "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang",
+    "category": "cross_page_defragmented"
+  },
+  {
+    "question": "Theo hướng dẫn quy chuẩn dịch vụ ngân hàng, nội dung: 'KH liên hệ CN quản lý ATM/VCBC trong trường hợp có...' được quy định ra sao?",
+    "ground_truth_answer": "KH liên hệ CN quản lý ATM/VCBC trong trường hợp có thể hỗ trợ trả ngay thẻ bị thu giữ tại ATM theo yêu cầu để được định danh theo quy định hiện và trả lại thẻ.",
+    "ground_truth_context_span": "KH liên hệ CN quản lý ATM/VCBC trong trường hợp có thể hỗ trợ trả ngay thẻ bị thu giữ tại ATM theo yêu cầu để được định danh theo quy định hiện và trả lại thẻ.",
+    "expected_chunk_ids": [
+      "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang_docx_c1"
+    ],
+    "expected_breadcrumb_prefix": "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang",
+    "category": "cross_page_defragmented"
+  },
+  {
+    "question": "Theo hướng dẫn quy chuẩn dịch vụ ngân hàng, nội dung: 'Trường hợp thẻ VCB bị thu giữ tại ATM của VCB: Tro...' được quy định ra sao?",
+    "ground_truth_answer": "Trường hợp thẻ VCB bị thu giữ tại ATM của VCB: Trong thời hạn ba mươi (30) ngày kể từ ngày thẻ bị giữ:",
+    "ground_truth_context_span": "Trường hợp thẻ VCB bị thu giữ tại ATM của VCB: Trong thời hạn ba mươi (30) ngày kể từ ngày thẻ bị giữ:",
+    "expected_chunk_ids": [
+      "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang_docx_c1"
+    ],
+    "expected_breadcrumb_prefix": "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang",
+    "category": "cross_page_defragmented"
+  },
+  {
+    "question": "Theo hướng dẫn quy chuẩn dịch vụ ngân hàng, nội dung: 'Trường hợp thẻ VCB bị thu giữ tại ATM của ngân hàn...' được quy định ra sao?",
+    "ground_truth_answer": "Trường hợp thẻ VCB bị thu giữ tại ATM của ngân hàng khác: Trong thời hạn mười (10) ngày làm việc kể từ ngày thẻ bị thu giữ và KH yêu cầu nhận lại thẻ tại CN của VCB/TCTTT:",
+    "ground_truth_context_span": "Trường hợp thẻ VCB bị thu giữ tại ATM của ngân hàng khác: Trong thời hạn mười (10) ngày làm việc kể từ ngày thẻ bị thu giữ và KH yêu cầu nhận lại thẻ tại CN của VCB/TCTTT:",
+    "expected_chunk_ids": [
+      "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang_docx_c1"
+    ],
+    "expected_breadcrumb_prefix": "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang",
+    "category": "cross_page_defragmented"
+  },
+  {
+    "question": "Theo hướng dẫn quy chuẩn dịch vụ ngân hàng, nội dung: 'Lưu ý: Trường hợp không nhớ cú pháp cụ thể, KH soạ...' được quy định ra sao?",
+    "ground_truth_answer": "Lưu ý: Trường hợp không nhớ cú pháp cụ thể, KH soạn tin nhắn theo cú pháp VCB HELP gửi đến tổng đài 6167 để được hướng dẫn.",
+    "ground_truth_context_span": "Lưu ý: Trường hợp không nhớ cú pháp cụ thể, KH soạn tin nhắn theo cú pháp VCB HELP gửi đến tổng đài 6167 để được hướng dẫn.",
+    "expected_chunk_ids": [
+      "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang_docx_c3"
+    ],
+    "expected_breadcrumb_prefix": "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang",
+    "category": "cross_page_defragmented"
+  },
+  {
+    "question": "Theo hướng dẫn quy chuẩn dịch vụ ngân hàng, nội dung: 'Cách 4: Khách hàng gọi điện đến tổng đài 1900 54 5...' được quy định ra sao?",
+    "ground_truth_answer": "Cách 4: Khách hàng gọi điện đến tổng đài 1900 54 54 13, nhấn phím 1>>1>>1>>1 và làm theo hướng dẫn.",
+    "ground_truth_context_span": "Cách 4: Khách hàng gọi điện đến tổng đài 1900 54 54 13, nhấn phím 1>>1>>1>>1 và làm theo hướng dẫn.",
+    "expected_chunk_ids": [
+      "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang_docx_c3"
+    ],
+    "expected_breadcrumb_prefix": "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang",
+    "category": "cross_page_defragmented"
+  },
+  {
+    "question": "Theo hướng dẫn quy chuẩn dịch vụ ngân hàng, nội dung: 'Để đảm bảo an toàn cho giao dịch thẻ của khách hàn...' được quy định ra sao?",
+    "ground_truth_answer": "Để đảm bảo an toàn cho giao dịch thẻ của khách hàng tại ATM, theo quy định của Ngân hàng Nhà nước về giám sát chặt chẽ các giao dịch rút tiền vào ban đêm, trong khoảng thời gian 19h-7h hàng ngày, khách hàng chỉ có thể thực hiện được 02 giao dịch rút tiền khi giao dịch tại ATM của ngân hàng khác.",
+    "ground_truth_context_span": "Để đảm bảo an toàn cho giao dịch thẻ của khách hàng tại ATM, theo quy định của Ngân hàng Nhà nước về giám sát chặt chẽ các giao dịch rút tiền vào ban đêm, trong khoảng thời gian 19h-7h hàng ngày, khách hàng chỉ có thể thực hiện được 02 giao dịch rút tiền khi giao dịch tại ATM của ngân hàng khác.",
+    "expected_chunk_ids": [
+      "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang_docx_c4"
+    ],
+    "expected_breadcrumb_prefix": "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang",
+    "category": "cross_page_defragmented"
+  },
+  {
+    "question": "Theo hướng dẫn quy chuẩn dịch vụ ngân hàng, nội dung: 'Trong trường hợp này, bạn cần kiểm tra các điểm sa...' được quy định ra sao?",
+    "ground_truth_answer": "Trong trường hợp này, bạn cần kiểm tra các điểm sau:",
+    "ground_truth_context_span": "Trong trường hợp này, bạn cần kiểm tra các điểm sau:",
+    "expected_chunk_ids": [
+      "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang_docx_c11"
+    ],
+    "expected_breadcrumb_prefix": "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang",
+    "category": "cross_page_defragmented"
+  },
+  {
+    "question": "Theo hướng dẫn quy chuẩn dịch vụ ngân hàng, nội dung: 'Trong trường hợp này, bạn hãy đề nghị người bán hà...' được quy định ra sao?",
+    "ground_truth_answer": "Trong trường hợp này, bạn hãy đề nghị người bán hàng kiểm tra lại và gọi tới hotline MOCA số 1900 6923 để được hỗ trợ.",
+    "ground_truth_context_span": "Trong trường hợp này, bạn hãy đề nghị người bán hàng kiểm tra lại và gọi tới hotline MOCA số 1900 6923 để được hỗ trợ.",
+    "expected_chunk_ids": [
+      "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang_docx_c12"
+    ],
+    "expected_breadcrumb_prefix": "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang",
+    "category": "cross_page_defragmented"
+  },
+  {
+    "question": "Theo hướng dẫn quy chuẩn dịch vụ ngân hàng, nội dung: 'Nếu muốn nâng hạn mức thanh toán trên Ứng dụng Moc...' được quy định ra sao?",
+    "ground_truth_answer": "Nếu muốn nâng hạn mức thanh toán trên Ứng dụng Moca, Chủ thẻ cần phải thực hiện nâng hạn mức thanh toán trên MOCA tại ATM của VCB theo quy định. Sau khi nâng hạn mức thành công, hạn mức thanh toán tối đa của thẻ thanh toán nội địa VCB trên Ứng dụng MOCA là: tối đa 10.000.000 VND/giao dịch/thẻ và 10.000.000 VND/ngày/thẻ.",
+    "ground_truth_context_span": "Nếu muốn nâng hạn mức thanh toán trên Ứng dụng Moca, Chủ thẻ cần phải thực hiện nâng hạn mức thanh toán trên MOCA tại ATM của VCB theo quy định. Sau khi nâng hạn mức thành công, hạn mức thanh toán tối đa của thẻ thanh toán nội địa VCB trên Ứng dụng MOCA là: tối đa 10.000.000 VND/giao dịch/thẻ và 10.000.000 VND/ngày/thẻ.",
+    "expected_chunk_ids": [
+      "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang_docx_c15"
+    ],
+    "expected_breadcrumb_prefix": "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang",
+    "category": "cross_page_defragmented"
+  },
+  {
+    "question": "Theo hướng dẫn quy chuẩn dịch vụ ngân hàng, nội dung: 'Đối với thẻ thanh toán nội địa, trong trường hợp b...' được quy định ra sao?",
+    "ground_truth_answer": "Đối với thẻ thanh toán nội địa, trong trường hợp bạn muốn thanh toán trên Ứng dụng MOCA với hạn mức cao hơn hạn mức mặc định (5.000.000 VND/giao dịch/thẻ và 5.000.000 VND/ngày/thẻ), bạn phải thực hiện đăng ký nâng hạn mức thanh toán trên MOCA tại ATM VCB.",
+    "ground_truth_context_span": "Đối với thẻ thanh toán nội địa, trong trường hợp bạn muốn thanh toán trên Ứng dụng MOCA với hạn mức cao hơn hạn mức mặc định (5.000.000 VND/giao dịch/thẻ và 5.000.000 VND/ngày/thẻ), bạn phải thực hiện đăng ký nâng hạn mức thanh toán trên MOCA tại ATM VCB.",
+    "expected_chunk_ids": [
+      "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang_docx_c17"
+    ],
+    "expected_breadcrumb_prefix": "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang",
+    "category": "cross_page_defragmented"
+  }
+]

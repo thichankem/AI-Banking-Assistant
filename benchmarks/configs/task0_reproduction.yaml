@@ -1,0 +1,60 @@
+# Cấu hình Tái lập Kết quả Master Ablation (Task 0 Reproducibility)
+meta:
+  benchmark_version: "2.0.0-reproduction"
+  task: "Task 0 - Reproduce Phase 1 Master Ablation"
+  seed: 42
+  git_commit_hash: "007d9d0e75d8844b14ec3afbfbdd930ed21f1c61"
+  timestamp_created: "2026-10-15T16:38:00+07:00"
+
+dataset:
+  golden_qa_path: "benchmarks/datasets/golden_qa.json"
+  total_queries: 50
+  corpus_files:
+    - "dataset/chunking_dataset/pdf/vcb_pdf_22_bieu_phi_the_tdqt_2026.pdf"
+    - "dataset/chunking_dataset/pdf/vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen.pdf"
+    - "dataset/chunking_dataset/pdf/vcb_pdf_21_nq_hdqt_cctg_vcbs.pdf"
+    - "dataset/chunking_dataset/docx/vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.docx"
+
+tolerance: 0.005
+
+target_baselines:
+  "Config 0 - Baseline (Naive Chunking)":
+    recall_at_5: 0.6200
+    recall_at_10: 0.6400
+    mrr_at_10: 0.4045
+    ndcg_at_10: 0.4681
+  "Config 1 - Pipeline v1 (Structure + Breadcrumb)":
+    recall_at_5: 0.7600
+    recall_at_10: 0.8000
+    mrr_at_10: 0.5933
+    ndcg_at_10: 0.6455
+  "Config 2 - Pipeline v2 (Current Production)":
+    recall_at_5: 0.8400
+    recall_at_10: 0.8800
+    mrr_at_10: 0.6733
+    ndcg_at_10: 0.7263
+  "Config 3 - Upgrade OCR & Scan Table (v2 + exp1)":
+    recall_at_5: 0.8400
+    recall_at_10: 0.8800
+    mrr_at_10: 0.6733
+    ndcg_at_10: 0.7264
+  "Config 4 - Upgrade Fast Vision & Table Formats (Config 3 + exp2)":
+    recall_at_5: 0.8400
+    recall_at_10: 0.8800
+    mrr_at_10: 0.6733
+    ndcg_at_10: 0.7264
+  "Config 5A - Pipeline v3 (Profile A: 100-200)":
+    recall_at_5: 0.7800
+    recall_at_10: 0.8400
+    mrr_at_10: 0.5365
+    ndcg_at_10: 0.6129
+  "Config 5B - Pipeline v3 Ultimate (Profile B: 150-400)":
+    recall_at_5: 0.9000
+    recall_at_10: 0.9000
+    mrr_at_10: 0.7403
+    ndcg_at_10: 0.7174
+  "Config 5C - Pipeline v3 (Profile C: Parent-Child 200/700)":
+    recall_at_5: 0.7800
+    recall_at_10: 0.9000
+    mrr_at_10: 0.5327
+    ndcg_at_10: 0.6301

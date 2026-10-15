@@ -1,0 +1,223 @@
+{
+  "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.docx": {
+    "suffix": ".docx",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "docx_text"
+    ]
+  },
+  "vcb_md_02__phap_ly__the_le_chi_tiet_chuong_trinh_vcb_loyalty.docx": {
+    "suffix": ".docx",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "docx_text"
+    ]
+  },
+  "vcb_md_03__phap_ly__dieu_kien_dieu_khoan_mo_tai_khoan_truc_tuyen_ekyc.docx": {
+    "suffix": ".docx",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "docx_text"
+    ]
+  },
+  "vcb_md_04__faq__ngan_hang_so_vcb_digibank_va_smart_otp.docx": {
+    "suffix": ".docx",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "docx_text"
+    ]
+  },
+  "vcb_md_05__phap_ly__dieu_kien_dieu_khoan_mo_va_su_dung_tai_khoan_khcn.docx": {
+    "suffix": ".docx",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "docx_text"
+    ]
+  },
+  "vcb_md_06__faq__chuyen_tien_va_nhan_tien_kieu_hoi.docx": {
+    "suffix": ".docx",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "docx_text"
+    ]
+  },
+  "vcb_md_07__faq__vcb_loyalty_tich_diem_va_doi_qua.docx": {
+    "suffix": ".docx",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "docx_text"
+    ]
+  },
+  "vcb_md_08__faq__cho_vay_khach_hang_ca_nhan.docx": {
+    "suffix": ".docx",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "docx_text"
+    ]
+  },
+  "vcb_md_09__phap_ly__the_le_chuong_trinh_uu_dai_urbox_evergreen_visa.docx": {
+    "suffix": ".docx",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "docx_text"
+    ]
+  },
+  "vcb_md_10__the_tin_dung__vcb_vibe_platinum_dac_quyen_va_bieu_phi.docx": {
+    "suffix": ".docx",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "docx_text"
+    ]
+  },
+  "vcb_md_11__ngan_hang_so__quy_trinh_van_hanh_dich_vu_so_vcb_digibank.docx": {
+    "suffix": ".docx",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "docx_text"
+    ]
+  },
+  "vcb_md_12__quy_trinh__mo_tai_khoan_thanh_toan_ekyc_va_xac_thuc_nfc.docx": {
+    "suffix": ".docx",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "docx_text"
+    ]
+  },
+  "vcb_md_13__phap_ly__bieu_phi_va_lai_suat_the_tin_dung_quoc_te.docx": {
+    "suffix": ".docx",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "docx_text"
+    ]
+  },
+  "vcb_md_14__bao_mat__nguyen_tac_an_toan_va_canh_bao_5_hinh_thuc_lua_dao.docx": {
+    "suffix": ".docx",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "docx_text"
+    ]
+  },
+  "vcb_md_15__tien_ich__bieu_lai_suat_tien_gui_va_ty_gia_20_ngoai_te.docx": {
+    "suffix": ".docx",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "docx_text"
+    ]
+  },
+  "vcb_pdf_20_cbtt_trai_phieu_rieng_le_2025.pdf": {
+    "suffix": ".pdf",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "pdf_ocr_scan"
+    ]
+  },
+  "vcb_pdf_21_nq_hdqt_cctg_vcbs.pdf": {
+    "suffix": ".pdf",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "pdf_ocr_scan"
+    ]
+  },
+  "vcb_pdf_22_bieu_phi_the_tdqt_2026.pdf": {
+    "suffix": ".pdf",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "pdf_table",
+      "pdf_text"
+    ]
+  },
+  "vcb_pdf_23_bieu_phi_cho_vay_khcn_2025.pdf": {
+    "suffix": ".pdf",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "pdf_table",
+      "pdf_text"
+    ]
+  },
+  "vcb_pdf_24_bieu_phi_chuyen_tien_ngoai_te_digibank.pdf": {
+    "suffix": ".pdf",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "pdf_table",
+      "pdf_text"
+    ]
+  },
+  "vcb_pdf_25_bieu_phi_tai_khoan_so_dep.pdf": {
+    "suffix": ".pdf",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "pdf_table",
+      "pdf_text"
+    ]
+  },
+  "vcb_pdf_26_bieu_phi_the_thanh_toan_debit_haha.pdf": {
+    "suffix": ".pdf",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "pdf_table",
+      "pdf_text"
+    ]
+  },
+  "vcb_pdf_27_dieu_kien_dieu_khoan_tktt_truc_tuyen.pdf": {
+    "suffix": ".pdf",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "pdf_text"
+    ]
+  },
+  "vcb_pdf_28_dieu_kien_dieu_khoan_the_ghi_no.pdf": {
+    "suffix": ".pdf",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "pdf_table",
+      "pdf_text"
+    ]
+  },
+  "vcb_pdf_29_dieu_kien_dieu_khoan_the_tin_dung.pdf": {
+    "suffix": ".pdf",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "pdf_table",
+      "pdf_text"
+    ]
+  },
+  "vcb_pdf_30_hop_dong_phat_hanh_the_tin_dung.pdf": {
+    "suffix": ".pdf",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "pdf_table",
+      "pdf_text"
+    ]
+  },
+  "vcb_pdf_31_hop_dong_phat_hanh_the_ghi_no.pdf": {
+    "suffix": ".pdf",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "pdf_table",
+      "pdf_text"
+    ]
+  },
+  "vcb_pdf_32_cam_ket_mo_tktt_truc_tuyen.pdf": {
+    "suffix": ".pdf",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "pdf_text"
+    ]
+  },
+  "vcb_pdf_33_quy_tac_fwd_vung_uoc_mo.pdf": {
+    "suffix": ".pdf",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "pdf_table",
+      "pdf_text"
+    ]
+  },
+  "vcb_pdf_34_quy_tac_fwd_vung_uoc_mo_1_lan.pdf": {
+    "suffix": ".pdf",
+    "expected_min_chunks": 2,
+    "expected_chunk_types": [
+      "pdf_table",
+      "pdf_text"
+    ]
+  }
+}
