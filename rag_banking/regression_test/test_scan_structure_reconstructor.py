@@ -18,7 +18,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 import unittest
-from rag_banking.chunking.scan_structure_reconstructor import (
+from rag_banking.chunking.pdf_chunker.scan_structure_reconstructor import (
     BreadcrumbTracker,
     TOCVerifier,
     ScanStructureReconstructor,
@@ -191,7 +191,7 @@ class TestScanStructureReconstructor(unittest.TestCase):
 
     def test_07_ocr_layout_hierarchy_predictor(self):
         """Kiểm tra OCRLayoutHierarchyPredictor dự đoán chuẩn 100% bằng hình học (0% Regex)."""
-        from rag_banking.chunking import OCRLayoutHierarchyPredictor, LayoutHierarchyLevel
+        from rag_banking.chunking.pdf_chunker.ocr_layout_predictor import OCRLayoutHierarchyPredictor, LayoutHierarchyLevel
 
         predictor = OCRLayoutHierarchyPredictor()
         page_w = 800.0

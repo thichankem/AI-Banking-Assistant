@@ -1,487 +1,447 @@
 """
-Module Canonical Entity & Legal Structure Resolver
-===================================================
-Module xử lý ngôn ngữ tự nhiên (NLP) và bóc tách cấu trúc tài liệu đa lĩnh vực
-hoàn toàn KHÔNG sử dụng biểu thức chính quy (0% Regex Engine - Pure Python String Traversal).
+Module Canonical Resolver (Universal NLP & Text Normalization Engine)
+======================================================================
+Bộ tiện ích chuẩn hóa văn bản, phân đoạn câu và xử lý hình thái tự nhiên
+cho hệ thống RAG Banking (chuyên trách tiền xử lý Tiếng Việt và Tiếng Anh;
+mọi ký tự và ngôn ngữ khác được bảo toàn nguyên vẹn như chuỗi ký tự đặc biệt).
 
-Các nhóm chức năng chính:
-1. Chuẩn hóa chuỗi ký tự & Âm tiết:
-   - `strip_vietnamese_accents()`: Khử dấu tiếng Việt (NFKD) chống lỗi OCR.
-   - `count_words()`, `count_syllables_vietnamese()`: Đếm từ và số âm tiết tiếng Việt.
-   - `clean_and_dehyphenate_text()`: Khử gạch nối ngắt dòng, nối câu gãy dòng cứng.
-
-2. Định danh văn bản & Cấu trúc thứ bậc (Pure String Heuristics):
-   - `extract_document_identifier()`: Bóc tách số hiệu thể thức văn bản và root title.
-   - `extract_hierarchical_units()`: Bóc tách đơn vị thứ bậc (Chương, Mục, Điều, Khoản, Điểm, FAQ).
-
-3. Tách câu an toàn nhận thức cấu trúc:
-   - `split_sentences_banking()`: Tách câu ký tự thuần túy, bảo vệ số thực, tiền tệ, từ viết tắt.
-   - `group_sentences_banking()`: Gom cụm câu theo kích thước trần max_chunk_size có overlap.
-
-4. Kiểm định chất lượng văn bản & Khử Header/Footer:
-   - `is_valid_vietnamese_text()`: Lọc văn bản rác bằng mật độ âm vị học và nguyên âm thuần túy.
-   - `detect_and_remove_headers_footers()`: Tự động phát hiện và loại bỏ header/footer lặp qua trang.
+NGUYÊN TẮC THIẾT KẾ:
+1. 0% REGEX LAW: Tuyệt đối không sử dụng `import re` hay regex methods.
+2. BẢO TOÀN NGUYÊN VẸN NỘI DUNG: Không tự tiện xóa bỏ ký tự ngoại ngữ;
+   coi các ngôn ngữ khác như các chuỗi ký tự đặc biệt cần được giữ nguyên bản.
+3. UNICODE STANDARD INVARIANTS: Dựa trên chuẩn Unicode (UAX #29, Unicode Categories L*, N*, P*, Z*, C*)
+   và nguyên lý chữ hoa/chữ thường (Bicameral Capitalization) để nhận diện ranh giới câu.
 """
 
 from __future__ import annotations
 
 import unicodedata
-from pathlib import Path
 
 
-# =============================================================================
-# 1. HẰNG SỐ BẢNG NGUYÊN ÂM (UNICODE CHARACTER SETS)
-# =============================================================================
-
-# Bảng nguyên âm tiếng Việt và tiếng Latin chuẩn Unicode phục vụ kiểm tra ngôn ngữ tự nhiên
-VIETNAMESE_VOWELS: set[str] = set("aàáảãạăằắẳẵặâầấẩẫậeèéẻẽẹêềếểễệiìíỉĩịoòóỏõọôồốổỗộơờớởỡợuùúủũụưừứửữựyỳýỷỹỵ")
-LATIN_VOWELS: set[str] = set("aeiouy")
-
-
-# =============================================================================
-# 2. CHUẨN HÓA KÝ TỰ & ĐẾM TỪ (PURE STRING UTILITIES)
-# =============================================================================
-
-def strip_vietnamese_accents(text: str) -> str:
-    """
-    Chuyển đổi văn bản tiếng Việt có dấu thành không dấu (chuẩn Unicode NFKD).
-    Hỗ trợ fuzzy matching tiêu đề mục lục và đối chiếu chống sai lệch OCR.
-    """
-    if not text:
-        return ""
-    text_clean = text.replace("đ", "d").replace("Đ", "D")
-    nfkd = unicodedata.normalize("NFKD", text_clean)
-    return "".join(c for c in nfkd if not unicodedata.combining(c))
-
-
-def count_words(text: str) -> int:
-    """Đếm số từ phân tách bởi khoảng trắng (Whitespace Token Count)."""
-    if not text:
-        return 0
-    return len(text.split())
-
-
-def count_syllables_vietnamese(text: str) -> int:
-    """Đếm số âm tiết tiếng Việt (tương đương số từ có ký tự chữ/số)."""
-    if not text:
-        return 0
-    return len([w for w in text.split() if any(c.isalnum() for c in w)])
-
-
+# -----------------------------------------------------------------------------
+# 1. LÀM SẠCH VĂN BẢN & HÀN GẮN NGẮT DÒNG GẠCH NỐI (DEHYPHENATION)
+# -----------------------------------------------------------------------------
 def clean_and_dehyphenate_text(text: str) -> str:
     """
-    Hàn gắn văn bản:
-    1. Khử gạch nối ngắt dòng tiếng Việt (ngân-\nhàng -> ngân hàng, thanh-\ntoán -> thanh toán).
-    2. Nối dòng gãy cứng giữa câu (hard line breaks trong cùng câu văn).
-    3. Chuẩn hóa khoảng trắng dư thừa và ngắt dòng tối đa 2 lần.
+    Làm sạch văn bản tự nhiên (bảo toàn nguyên vẹn mọi ký tự, không xóa ngôn ngữ khác):
+    1. Hàn gắn các từ bị ngắt dòng có dấu gạch nối (vd: ngân-\\nhàng -> ngân hàng).
+    2. Chuẩn hóa khoảng trắng và loại bỏ dòng trống dư thừa.
+    Thuần túy xử lý chuỗi cơ sở (0% Regex).
     """
     if not text:
         return ""
 
-    text_norm = unicodedata.normalize("NFC", text)
-    lines = text_norm.split("\n")
-    merged_lines: list[str] = []
+    lines_raw = text.split("\n")
+    stitched_lines: list[str] = []
+    idx = 0
+    total_raw = len(lines_raw)
 
+    while idx < total_raw:
+        line = lines_raw[idx]
+        stripped = line.rstrip()
+        # Nếu dòng kết thúc bằng dấu '-' nối với từ dòng kế tiếp
+        if stripped.endswith("-") and len(stripped) > 1 and stripped[-2].isalnum() and idx + 1 < total_raw:
+            next_line = lines_raw[idx + 1].lstrip()
+            if next_line and next_line[0].isalnum():
+                stitched_lines.append(stripped[:-1] + next_line)
+                idx += 2
+                continue
+        stitched_lines.append(line)
+        idx += 1
+
+    # Chuẩn hóa khoảng trắng dư thừa trong từng dòng
+    lines = [" ".join(line.split()) for line in stitched_lines]
+
+    # Bỏ các dòng trống liên tiếp (chỉ giữ tối đa 1 dòng trống phân cách đoạn)
+    cleaned_lines: list[str] = []
+    prev_empty = False
     for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            merged_lines.append("")
-            continue
+        if not line:
+            if not prev_empty:
+                cleaned_lines.append("")
+                prev_empty = True
+        else:
+            cleaned_lines.append(line)
+            prev_empty = False
 
-        if merged_lines and merged_lines[-1] != "":
-            prev = merged_lines[-1]
-            # Xử lý gạch nối cuối dòng
-            if prev and prev[-1] in ("-", "–", "—"):
-                prev_base = prev[:-1].rstrip()
-                merged_lines[-1] = f"{prev_base} {stripped}"
-                continue
-
-            # Nối dòng gãy cứng giữa câu
-            if not prev.endswith((".", ":", ";", "!", "?", "---", "***")) and not prev.startswith(("#", "-", "*", "|", "•")):
-                first_toks = stripped.split()
-                is_outline_heading = (
-                    stripped.isupper()
-                    or (len(first_toks) >= 2 and any(c.isdigit() for c in first_toks[1]) and first_toks[0][0].isupper())
-                    or (first_toks and first_toks[0].rstrip(".").isdigit())
-                )
-                if stripped[0].islower() or (len(stripped) > 1 and stripped[0].isalnum() and not is_outline_heading):
-                    merged_lines[-1] = f"{prev} {stripped}"
-                    continue
-
-        merged_lines.append(stripped)
-
-    # Làm sạch khoảng trắng thừa
-    clean_blocks: list[str] = []
-    for line in merged_lines:
-        clean_line = " ".join(line.split())
-        clean_blocks.append(clean_line)
-
-    result = "\n".join(clean_blocks)
-    while "\n\n\n" in result:
-        result = result.replace("\n\n\n", "\n\n")
-    return result.strip()
+    return "\n".join(cleaned_lines).strip()
 
 
-# =============================================================================
-# 3. ĐỊNH DANH PHÁP LÝ & CẤU TRÚC THỨ BẬC (ZERO REGEX STRING PARSER)
-# =============================================================================
-
-def extract_document_identifier(
-    breadcrumb_text: str = "",
-    full_context: str = "",
-    source_name: str = ""
-) -> str:
+# -----------------------------------------------------------------------------
+# 2. PHÂN ĐOẠN CÂU PHỔ QUÁT (UNIVERSAL SENTENCE BOUNDARY SEGMENTATION)
+# -----------------------------------------------------------------------------
+def split_sentences(text: str) -> list[str]:
     """
-    Trích xuất tên hoặc số hiệu văn bản định danh một cách tổng quát đa lĩnh vực (0% Regex):
-    Ưu tiên:
-    1. Số hiệu thể thức văn bản chứa dấu '/' kèm chữ số (vd: Thông tư 17/2024/TT-NHNN, Nghị định 52/2024/NĐ-CP).
-    2. Phần tử gốc đầu tiên của Breadcrumb (Root Node) sau khi làm sạch slug/prefix.
-    3. Tên tệp nguồn được làm sạch tổng quát.
-    """
-    # 1. Bắt số hiệu văn bản chính thức xuất hiện ở đầu văn bản
-    target_str = breadcrumb_text or full_context[:300]
-    tokens = target_str.replace(":", " ").replace(",", " ").replace(";", " ").split()
-    for i, tok in enumerate(tokens):
-        if "/" in tok and any(c.isdigit() for c in tok) and len(tok) >= 5:
-            prefix = ""
-            if i > 0:
-                prev = tokens[i - 1]
-                if prev.lower() in ("số", "no.", "no"):
-                    if i > 1:
-                        prefix = f"{tokens[i - 2]} "
-                else:
-                    prefix = f"{prev} "
-            return f"{prefix}{tok}".strip()
-
-    # 2. Lấy phần tử gốc đầu tiên của Breadcrumb
-    if breadcrumb_text:
-        root_part = breadcrumb_text.split(" > ")[0].strip()
-        if root_part.startswith("[") and "]" in root_part:
-            root_part = root_part.split("]", 1)[1].strip()
-        if "__" in root_part:
-            root_part = root_part.split("__", 1)[1].strip()
-        clean_root = root_part.replace("_", " ").strip()
-        if clean_root:
-            return clean_root
-
-    # 3. Fallback từ tên tệp nguồn
-    if source_name:
-        stem = Path(source_name).stem
-        if "__" in stem:
-            stem = stem.split("__", 1)[1].strip()
-        clean_stem = stem.replace("_", " ").strip().title()
-        if clean_stem:
-            return clean_stem
-
-    return ""
-
-
-def extract_hierarchical_units(full_context: str, text_chunk: str = "") -> str:
-    """
-    Bóc tách các đơn vị phân cấp chuẩn đa lĩnh vực (0% Regex):
-    Chương / Chapter -> Mục / Section -> Điều / Article -> Khoản / Clause -> Điểm / Sub-clause -> FAQ.
-    """
-    context = full_context or text_chunk
-    tokens = context.replace(":", " : ").replace(".", " . ").replace(",", " , ").replace(")", " ) ").split()
-
-    dieu = ""
-    khoan = ""
-    diem = ""
-    chuong = ""
-    muc = ""
-    faq = ""
-
-    i = 0
-    while i < len(tokens):
-        t_lower = tokens[i].lower()
-        if t_lower in ("điều", "article", "section") and i + 1 < len(tokens):
-            nxt = tokens[i + 1].rstrip(".,;:")
-            if any(c.isdigit() for c in nxt):
-                dieu = f"Điều {nxt}"
-                i += 2
-                continue
-        elif t_lower in ("khoản", "clause", "paragraph") and i + 1 < len(tokens):
-            nxt = tokens[i + 1].rstrip(".,;:")
-            if nxt.isdigit():
-                khoan = f"Khoản {nxt}"
-                i += 2
-                continue
-        elif t_lower in ("điểm", "point", "sub-clause") and i + 1 < len(tokens):
-            nxt = tokens[i + 1].rstrip(".,;:)").lower()
-            if len(nxt) == 1 and nxt.isalpha():
-                diem = f"Điểm {nxt}"
-                i += 2
-                continue
-        elif t_lower in ("chương", "phần", "chapter", "part") and i + 1 < len(tokens):
-            nxt = tokens[i + 1].rstrip(".,;:")
-            chuong = f"Chương {nxt}"
-            i += 2
-            continue
-        elif t_lower in ("mục", "tiểu mục") and i + 1 < len(tokens):
-            nxt = tokens[i + 1].rstrip(".,;:")
-            muc = f"Mục {nxt}"
-            i += 2
-            continue
-        elif t_lower in ("câu", "question", "q") and i + 1 < len(tokens):
-            if tokens[i + 1].lower() == "hỏi" and i + 2 < len(tokens):
-                nxt = tokens[i + 2].rstrip(".,;:")
-                if any(c.isdigit() for c in nxt):
-                    faq = f"Câu {nxt}"
-                    i += 3
-                    continue
-            else:
-                nxt = tokens[i + 1].rstrip(".,;:")
-                if any(c.isdigit() for c in nxt):
-                    faq = f"Câu {nxt}"
-                    i += 2
-                    continue
-        i += 1
-
-    # Ghép chuỗi phân cấp theo thứ tự ưu tiên
-    if dieu:
-        res = dieu
-        if khoan:
-            res += f", {khoan}"
-            if diem:
-                res += f", {diem}"
-        return res
-    if faq:
-        return faq
-    if muc:
-        res = muc
-        if khoan:
-            res += f", {khoan}"
-        return res
-    if chuong:
-        return chuong
-    if khoan:
-        return khoan
-
-    return ""
-
-
-# =============================================================================
-# 4. TÁCH CÂU AN TOÀN ĐA LĨNH VỰC (ZERO REGEX CHARACTER TRAVERSAL)
-# =============================================================================
-
-def split_sentences_banking(text: str) -> list[str]:
-    """
-    Tách câu tổng quát hóa hoàn toàn KHÔNG sử dụng biểu thức chính quy (0% Regex):
-    - Bảo vệ số thực, số tiền, tỷ lệ: 500.000.000 VND, 6,5%/năm, 50 USD, 3.14
-    - Bảo vệ ký hiệu phân cấp, đề mục: 1., 2., 12., Điều 12., Khoản 2., Mục 1.
-    - Bảo vệ từ viết tắt: TP.HCM, v.v., e.g., i.e., TNHH., INC.
-    - Tách câu an toàn tại [.?!] theo sau bởi khoảng trắng và ký tự viết hoa.
+    Phân đoạn câu song ngữ Tiếng Việt - Tiếng Anh tối ưu hóa cho RAG Banking (0% Regex).
+    Dựa trên các bất biến ngôn ngữ tự nhiên và chuẩn Unicode:
+    1. Ranh giới câu xuất hiện tại dấu ngắt câu cuối câu (. ? ! …) hoặc ngắt đoạn kép (\\n\\n).
+    2. Gom các dấu đóng ngoặc/trích dẫn liền kề bám theo câu (." .) .').
+    3. Nguyên lý chữ thường (Lowercase Invariant): Trong tiếng Việt và tiếng Anh, câu mới
+       không bao giờ bắt đầu bằng chữ thường (bảo vệ 'Smith et al. showed', 'e.g. for instance', 'tp. Hồ Chí Minh').
+    4. Không ngắt khi dấu chấm nằm trong số tiền, số thập phân, mã số, URL hoặc tiền tố chỉ mục / chức danh ngắn.
+    5. Xử lý ngắt dòng mềm (soft wrap) trong PDF/OCR tiếng Việt & tiếng Anh một cách tự nhiên.
     """
     if not text:
         return []
 
-    text_norm = unicodedata.normalize("NFC", text).strip()
-    if not text_norm:
-        return []
-
+    text_len = len(text)
     sentences: list[str] = []
     current_chars: list[str] = []
-    n = len(text_norm)
+    closing_delimiters = {'"', "'", '”', '’', '»', ')', ']', '}'}
+
     i = 0
+    while i < text_len:
+        c = text[i]
 
-    while i < n:
-        ch = text_norm[i]
-        current_chars.append(ch)
+        # A. Ngắt đoạn văn bản cứng (\\n\\n) -> Ranh giới câu/đoạn chắc chắn
+        if c == "\n":
+            is_double_break = False
+            next_idx = i + 1
+            while next_idx < text_len and text[next_idx] in (" ", "\t", "\r", "\n"):
+                if text[next_idx] == "\n":
+                    is_double_break = True
+                next_idx += 1
 
-        # Kiểm tra dấu kết thúc câu tiềm năng
-        if ch in (".", "?", "!"):
-            if i + 1 < n and text_norm[i + 1] in (" ", "\t", "\n"):
-                is_boundary = True
+            if is_double_break:
+                candidate = "".join(current_chars).strip()
+                if candidate:
+                    sentences.append(candidate)
+                current_chars = []
+                i = next_idx
+                continue
 
-                pre_words = "".join(current_chars).strip().split()
-                if pre_words:
-                    last_tok = pre_words[-1]
+            # Ngắt dòng đơn \n trong PDF/OCR:
+            prev_content = "".join(current_chars).strip()
+            if prev_content and next_idx < text_len:
+                next_char = text[next_idx]
+                if next_char.islower():
+                    # Soft wrap: thay \n bằng khoảng trắng để câu liền mạch
+                    current_chars.append(" ")
+                    i = next_idx
+                    continue
+                elif prev_content[-1] in (".", "?", "!", ";"):
+                    sentences.append(prev_content)
+                    current_chars = []
+                    i = next_idx
+                    continue
 
-                    # A. Kiểm tra số thập phân / số tiền có dấu chấm (vd: 500.000, 1.000.000.000)
-                    if ch == "." and i > 0 and text_norm[i - 1].isdigit():
-                        if last_tok.count(".") >= 1 and not last_tok.rstrip(".").isdigit():
-                            is_boundary = False
-                        elif len(pre_words) <= 2 and last_tok.rstrip(".").isdigit():
-                            is_boundary = False
+            current_chars.append(" ")
+            i += 1
+            continue
 
-                    # B. Kiểm tra đề mục phân cấp đi kèm chữ số (Từ viết hoa kèm số: CapitalizedWord Number.)
-                    if (
-                        last_tok.rstrip(".").isdigit()
-                        or (len(last_tok) > 1 and last_tok[-1] == "." and any(c.isdigit() for c in last_tok[:-1]))
-                    ):
-                        if len(pre_words) >= 2 and pre_words[-2] and pre_words[-2][0].isupper():
-                            is_boundary = False
-                        elif len(pre_words) <= 3:
-                            is_boundary = False
+        # B. Dấu kết thúc câu (. ? !)
+        if c in {".", "?", "!"}:
+            current_chars.append(c)
 
-                    # C. Kiểm tra từ viết tắt (TP.HCM, v.v., e.g., TNHH., LLC.)
-                    if last_tok.count(".") >= 2:
-                        is_boundary = False
-                    elif last_tok.rstrip(".").isupper() and len(last_tok.rstrip(".")) <= 5:
-                        is_boundary = False
+            # Gom dấu chấm lửng liên tiếp (...)
+            if c == ".":
+                while i + 1 < text_len and text[i + 1] == ".":
+                    current_chars.append(".")
+                    i += 1
 
-                # D. Ký tự tiếp theo sau khoảng trắng phải là ký tự in hoa hoặc xuống dòng
-                j = i + 1
-                while j < n and text_norm[j] in (" ", "\t"):
-                    j += 1
-                if j < n:
-                    next_non_space = text_norm[j]
-                    if not (next_non_space.isupper() or next_non_space == "\n" or text_norm[i + 1] == "\n"):
-                        is_boundary = False
-                else:
-                    is_boundary = True
+            # Gom các dấu đóng ngoặc / đóng trích dẫn đi liền kề ngay sau
+            next_pos = i + 1
+            while next_pos < text_len and text[next_pos] in closing_delimiters:
+                current_chars.append(text[next_pos])
+                next_pos += 1
 
-                if is_boundary:
-                    sent = "".join(current_chars).strip()
-                    if sent:
-                        sentences.append(sent)
-                    current_chars.clear()
-                    while i + 1 < n and text_norm[i + 1] in (" ", "\t"):
-                        i += 1
+            # Bỏ qua khoảng trắng theo sau để kiểm tra ký tự bắt đầu tiếp theo
+            follow_pos = next_pos
+            has_space_after = False
+            while follow_pos < text_len and text[follow_pos] in (" ", "\t", "\r", "\n"):
+                has_space_after = True
+                follow_pos += 1
+
+            # Nếu đến cuối chuỗi -> kết thúc câu cuối cùng
+            if follow_pos >= text_len:
+                candidate = "".join(current_chars).strip()
+                if candidate:
+                    sentences.append(candidate)
+                current_chars = []
+                i = follow_pos
+                continue
+
+            # Nếu không có khoảng trắng theo sau -> Số thập phân (3.14), URL (domain.com), Email
+            if not has_space_after:
+                i = next_pos
+                continue
+
+            next_char = text[follow_pos]
+
+            # 1. Bất biến chữ thường (Lowercase Lookahead Invariant):
+            # Trong văn bản chuẩn, câu mới KHÔNG BAO GIỜ bắt đầu bằng chữ thường
+            if next_char.islower():
+                current_chars.append(" ")
+                i = follow_pos
+                continue
+
+            # 2. Tiền tố phân cấp / chỉ mục danh sách hoặc danh xưng ngắn (vd: "Section 1.", "Dr. Smith", "Fig. 2", "1.")
+            curr_str = "".join(current_chars).strip()
+            words = curr_str.split()
+            if words:
+                last_token = words[-1].rstrip(".:?!;\"'”’»)]}")
+                # A. Chỉ mục số/chữ danh sách/đề mục ngắn (vd: "1.", "Section 1.", "A.")
+                if len(words) <= 3 and (last_token.isdigit() or (len(last_token) == 1 and last_token.isalpha())):
+                    current_chars.append(" ")
+                    i = follow_pos
+                    continue
+
+                # B. Từ ngắn viết hoa trước tên riêng hoặc số (vd: "Dr. Smith", "Fig. 2", "Prof. Nguyen")
+                if 1 <= len(last_token) <= 4 and last_token[0].isupper() and (next_char.isupper() or next_char.isdigit()):
+                    current_chars.append(" ")
+                    i = follow_pos
+                    continue
+
+            # Thỏa mãn ranh giới câu hợp lệ -> Cắt câu!
+            candidate = "".join(current_chars).strip()
+            if candidate:
+                sentences.append(candidate)
+            current_chars = []
+            i = follow_pos
+            continue
+
+        # Các ký tự văn bản thông thường
+        current_chars.append(c)
         i += 1
 
-    rem = "".join(current_chars).strip()
-    if rem:
-        sentences.append(rem)
+    # Đóng gói phần còn lại nếu có
+    if current_chars:
+        candidate = "".join(current_chars).strip()
+        if candidate:
+            sentences.append(candidate)
 
-    return sentences if sentences else [text]
-
-
-# Alias tổng quát hóa không gắn mác riêng ngành ngân hàng
-split_sentences_generalized = split_sentences_banking
+    return sentences
 
 
-def group_sentences_banking(sentences: list[str], max_size: int, overlap: int = 100) -> list[str]:
+split_sentences_banking = split_sentences
+split_sentences_generalized = split_sentences
+
+
+# -----------------------------------------------------------------------------
+# 3. GOM NHÓM CÂU THEO NGÂN SÁCH (SENTENCE GROUPING - 0% CONTENT OVERLAP)
+# -----------------------------------------------------------------------------
+def group_sentences(
+    sentences: list[str],
+    max_words: int = 350,
+    overlap_words: int = 0,
+    max_chunk_size: int | None = None,
+    chunk_overlap: int | None = None
+) -> list[str]:
     """
-    Gom nhóm các câu thành các chunk vừa vặn với kích thước trần max_size (ký tự).
-    Không bao giờ cắt giữa chừng một câu văn.
+    Gom các câu thành từng nhóm (chunk) với kích thước từ tối đa.
+    Tuyệt đối không overlap nội dung (0% content overlap) giữa các chunk liền kề.
+    Đảm bảo không bao giờ cắt vụn giữa chừng một câu văn.
     """
     if not sentences:
-        return [""]
+        return []
 
-    parts: list[str] = []
-    current_chunk = ""
+    limit = max_words if max_words is not None else (max_chunk_size // 2 if max_chunk_size else 350)
+    overlap = overlap_words if overlap_words is not None else (chunk_overlap // 2 if chunk_overlap else 0)
 
-    for sentence in sentences:
-        s = sentence.strip()
-        if not s:
-            continue
+    chunks: list[str] = []
+    current_sentences: list[str] = []
+    current_word_count = 0
 
-        if len(current_chunk) + len(s) + 1 <= max_size:
-            current_chunk = f"{current_chunk} {s}".strip() if current_chunk else s
-        else:
-            if current_chunk:
-                parts.append(current_chunk)
-            current_chunk = s
-
-    if current_chunk:
-        parts.append(current_chunk)
-
-    return parts or (sentences if sentences else [""])
-
-
-# =============================================================================
-# 5. ĐÁNH GIÁ CHẤT LƯỢNG VĂN BẢN TỰ NHIÊN & LỌC HEADER/FOOTER (0% REGEX)
-# =============================================================================
-
-def is_valid_vietnamese_text(text: str, min_valid_ratio: float = 0.25) -> bool:
-    """
-    Kiểm tra chất lượng văn bản tự nhiên đa ngôn ngữ (0% Regex):
-    1. Lọc ký tự lỗi byte điều khiển lạ (> 5% ký tự không hợp lệ).
-    2. Phân bố thống kê âm vị học (Phonotactic Consonant Entropy): phát hiện cụm >= 5 phụ âm liên tiếp.
-    3. Tỷ lệ từ chứa nguyên âm hợp lệ >= min_valid_ratio.
-    """
-    if not text or len(text.strip()) < 10:
-        return False
-
-    text_lower = text.lower()
-
-    # 1. Ký tự byte điều khiển lạ
-    weird_count = sum(1 for c in text if (ord(c) < 32 and c not in "\t\n\r") or c == "\ufffd")
-    if weird_count / max(len(text), 1) > 0.05:
-        return False
-
-    # 2. Tách từ thuần túy không dùng regex
-    words = [w.strip(".,;:?!\"'()[]{}<>-–—/") for w in text_lower.split()]
-    words = [w for w in words if w]
-    if not words:
-        return False
-
-    # 3. Phân bố phụ âm: cụm >= 5 phụ âm liên tiếp
-    def has_extreme_consonants(word: str) -> bool:
-        consecutive = 0
-        for ch in word:
-            if ch in "bcdfghjklmnpqrstvwxyz":
-                consecutive += 1
-                if consecutive >= 5:
-                    return True
+    for s in sentences:
+        s_words = len(s.split())
+        if current_word_count + s_words > limit and current_sentences:
+            chunks.append(" ".join(current_sentences))
+            if overlap <= 0:
+                current_sentences = []
+                current_word_count = 0
             else:
-                consecutive = 0
+                overlap_sentences: list[str] = []
+                overlap_count = 0
+                for prev_s in reversed(current_sentences):
+                    prev_w = len(prev_s.split())
+                    if overlap_count + prev_w <= overlap:
+                        overlap_sentences.insert(0, prev_s)
+                        overlap_count += prev_w
+                    else:
+                        break
+                current_sentences = overlap_sentences
+                current_word_count = overlap_count
+
+        current_sentences.append(s)
+        current_word_count += s_words
+
+    if current_sentences:
+        chunks.append(" ".join(current_sentences))
+
+    return chunks
+
+
+group_sentences_banking = group_sentences
+
+
+# -----------------------------------------------------------------------------
+# 4. ĐÁNH GIÁ TÍNH HỢP LỆ VĂN BẢN (0% REGEX)
+# -----------------------------------------------------------------------------
+def is_valid_readable_text(text: str) -> bool:
+    """
+    Kiểm tra văn bản hợp lệ theo đặc tính chuẩn Unicode (0% Regex).
+    1. Phát hiện và loại bỏ rác mã hóa PDF, Mojibake và ký tự điều khiển hỏng bảng mã.
+    2. Đảm bảo văn bản chứa các ký tự có nghĩa (chữ cái Category L* hoặc ký số N*).
+    3. Không xóa bỏ ngôn ngữ ngoại lai (coi như các chuỗi ký tự đặc biệt).
+    """
+    if not text:
+        return False
+    s = text.strip()
+    if len(s) < 5:
         return False
 
-    extreme_clusters = sum(1 for w in words if has_extreme_consonants(w))
-    if extreme_clusters / len(words) > 0.20:
+    total_chars = len(s)
+    # 1. Ký tự điều khiển bất thường hoặc ký tự thay thế hỏng bảng mã (\ufffd, \x00-\x1f)
+    bad_chars = sum(
+        1 for c in s
+        if c in ("\ufffd", "\x00", "\ufeff") or
+        (unicodedata.category(c).startswith("C") and c not in ("\n", "\r", "\t"))
+    )
+    if bad_chars / total_chars > 0.03:
         return False
 
-    # 4. Tỷ lệ từ chứa nguyên âm
-    all_valid_vowels = VIETNAMESE_VOWELS | LATIN_VOWELS
-    words_with_vowels = sum(1 for w in words if any(c in all_valid_vowels for c in w))
-    ratio = words_with_vowels / len(words)
+    # 2. Phải có ít nhất ký tự chữ cái (Unicode category L*) hoặc ký hiệu số (N*)
+    has_meaningful_content = any(
+        unicodedata.category(c)[0] in ("L", "N") for c in s
+    )
+    if not has_meaningful_content:
+        return False
 
-    return ratio >= min_valid_ratio
-
-
-# Alias tổng quát hóa đánh giá chất lượng văn bản
-is_valid_natural_text = is_valid_vietnamese_text
+    return True
 
 
-def detect_and_remove_headers_footers(pages_text: list[str]) -> list[str]:
+is_valid_natural_text = is_valid_readable_text
+
+
+def is_valid_vietnamese_text(text: str) -> bool:
     """
-    Tự động phát hiện và loại bỏ Header/Footer và số trang lặp lại qua nhiều trang (0% Regex).
+    Kiểm tra tính hợp lệ văn bản đọc được (tương thích ngược, hoàn toàn không hardcode bảng chữ).
     """
-    def is_page_number(line_str: str) -> bool:
-        s = line_str.strip().lower()
+    return is_valid_readable_text(text)
+
+
+# -----------------------------------------------------------------------------
+# 5. LỌC HEADER / FOOTER & MẪU BIỂU TỰ NHIÊN (STRUCTURAL PATTERNS)
+# -----------------------------------------------------------------------------
+def detect_and_remove_headers_footers(
+    text: str,
+    custom_ignore_phrases: list[str] | None = None,
+    config: object | None = None
+) -> str:
+    """
+    Loại bỏ các dòng header/footer, số trang và mã biểu mẫu theo cấu trúc cú pháp phổ quát.
+    Tuân thủ 0% Regex Law và nguyên tắc Zero Domain Hardcoding qua config.
+    """
+    if not text:
+        return ""
+
+    ignore_phrases: list[str] = []
+    if custom_ignore_phrases is not None:
+        ignore_phrases.extend(custom_ignore_phrases)
+    elif config is not None and getattr(config, "custom_ignore_phrases", None):
+        ignore_phrases.extend(config.custom_ignore_phrases)
+
+    lines = text.splitlines()
+    filtered: list[str] = []
+
+    for line in lines:
+        s = line.strip()
         if not s:
-            return False
-        clean = s.replace("trang", "").replace("page", "").replace("of", "/").strip()
-        parts = clean.split("/")
-        return all(p.strip().isdigit() for p in parts if p.strip()) and any(p.strip().isdigit() for p in parts)
-
-    if len(pages_text) < 3:
-        cleaned: list[str] = []
-        for p in pages_text:
-            lines = [l for l in p.split("\n") if not is_page_number(l)]
-            cleaned.append("\n".join(lines))
-        return cleaned
-
-    top_freq: dict[str, int] = {}
-    bottom_freq: dict[str, int] = {}
-
-    for p in pages_text:
-        lines = [l.strip() for l in p.split("\n") if l.strip()]
-        if not lines:
             continue
-        for l in lines[:2]:
-            if len(l) < 100 and not l.startswith("#"):
-                top_freq[l] = top_freq.get(l, 0) + 1
-        for l in lines[-2:]:
-            if len(l) < 100:
-                bottom_freq[l] = bottom_freq.get(l, 0) + 1
+        s_lower = s.lower()
+        words = s.split()
 
-    threshold = max(3, int(len(pages_text) * 0.4))
-    repeated_headers = {l for l, c in top_freq.items() if c >= threshold}
-    repeated_footers = {l for l, c in bottom_freq.items() if c >= threshold}
-
-    cleaned_pages: list[str] = []
-    for p in pages_text:
-        lines = p.split("\n")
-        filtered: list[str] = []
-        for l in lines:
-            if is_page_number(l):
+        # 1. Số trang độc lập hoặc có nhãn ngắn (vd: "1", "1/5", "Page 2", "Trang 3")
+        if len(words) == 1:
+            w0 = words[0]
+            if w0.isdigit() or (all(c.isdigit() or c in "/-" for c in w0) and any(c.isdigit() for c in w0)):
                 continue
-            if l.strip() in repeated_headers or l.strip() in repeated_footers:
+        elif len(words) in (2, 3) and words[0].isalpha() and len(words[0]) <= 6:
+            remainder = "".join(words[1:])
+            if all(c.isdigit() or c in "/-" for c in remainder) and any(c.isdigit() for c in remainder):
                 continue
-            filtered.append(l)
-        cleaned_pages.append("\n".join(filtered))
 
-    return cleaned_pages
+        # 2. Tiêu đề mẫu biểu có mã định danh và dấu hai chấm (vd: "01/TNDN:", "202-B:", "#12:", "A-04:")
+        if ":" in s and len(words) <= 10:
+            prefix = s.split(":", 1)[0].strip()
+            prefix_words = prefix.split()
+            if prefix_words:
+                code_token = prefix_words[-1]
+                has_digit = any(c.isdigit() for c in code_token)
+                has_code_delim = any(c in "/-#_" for c in code_token) or (len(code_token) <= 5 and any(c.isdigit() for c in code_token) and any(c.isalpha() for c in code_token))
+                if has_digit and has_code_delim:
+                    continue
+
+        # 3. Cụm từ người dùng cấu hình loại trừ (Slogan, banner, metadata)
+        if ignore_phrases and any(p.lower() in s_lower for p in ignore_phrases if p.strip()):
+            continue
+
+        filtered.append(line)
+
+    return "\n".join(filtered)
+
+
+# -----------------------------------------------------------------------------
+# 6. TIỆN ÍCH TRÍCH XUẤT ĐỊNH DANH & PHÂN CẤP TỔNG QUÁT
+# -----------------------------------------------------------------------------
+def extract_document_identifier(filename: str = "", text: str = "") -> str:
+    """Lấy định danh tài liệu sạch từ tên tệp hoặc văn bản đầu vào (0% Regex)."""
+    if filename:
+        stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+        return stem.strip()
+    if text:
+        first_line = text.strip().splitlines()[0] if text.strip() else ""
+        return first_line.strip()
+    return ""
+
+
+def extract_hierarchical_units(text: str = "", text_chunk: str = "") -> list[str]:
+    """
+    Trích xuất các điều khoản, phân đoạn phân cấp song ngữ Việt - Anh (0% Regex):
+    Cú pháp tổng quát: [Từ định danh viết hoa] [Chỉ số: Số / Số La Mã].
+    Ví dụ tiếng Việt: Điều 1, Khoản 2, Mục III, Chương 4, Phần I...
+    Ví dụ tiếng Anh: Section 1, Article 2, Chapter III, Part 4, Clause 5...
+    """
+    content = text or text_chunk
+    if not content:
+        return []
+    words = content.split()
+    results: list[str] = []
+    i = 0
+    roman_chars = set("ivxlcdmIVXLCDM")
+    while i < len(words) - 1:
+        curr_w = words[i].strip(",.;:()")
+        next_w = words[i + 1].strip(",.;:()")
+
+        # Đảm bảo từ viết hoa thuộc bảng chữ cái Latin (Tiếng Việt / Tiếng Anh)
+        is_title_word = bool(
+            curr_w
+            and curr_w[0].isupper()
+            and curr_w.isalpha()
+            and 2 <= len(curr_w) <= 20
+            and all(unicodedata.name(c, "").startswith("LATIN") for c in curr_w)
+        )
+        is_num = next_w.isdigit()
+        is_roman = bool(next_w and all(c in roman_chars for c in next_w) and not is_num)
+
+        if is_title_word and (is_num or is_roman):
+            results.append(f"{curr_w.capitalize()} {next_w.upper() if is_roman else next_w}")
+            i += 1
+        i += 1
+    return list(dict.fromkeys(results))
+
+
+__all__ = [
+    "clean_and_dehyphenate_text",
+    "split_sentences",
+    "split_sentences_banking",
+    "split_sentences_generalized",
+    "group_sentences",
+    "group_sentences_banking",
+    "is_valid_vietnamese_text",
+    "is_valid_readable_text",
+    "is_valid_natural_text",
+    "detect_and_remove_headers_footers",
+    "extract_document_identifier",
+    "extract_hierarchical_units",
+]

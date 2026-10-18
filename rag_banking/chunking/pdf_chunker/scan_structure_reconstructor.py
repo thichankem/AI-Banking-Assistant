@@ -19,10 +19,6 @@ from .ocr_layout_predictor import (
     LayoutHierarchyLevel
 )
 
-try:
-    from ..unified_chunk.canonical_resolver import strip_vietnamese_accents
-except (ImportError, ValueError):
-    from rag_banking.chunking.unified_chunk.canonical_resolver import strip_vietnamese_accents
 
 def fix_num(raw_str: str) -> int:
     """Khắc phục các lỗi OCR thường gặp trong ký số (O, o, l, I -> 0, 1)."""
@@ -43,21 +39,64 @@ class BreadcrumbTracker:
     """
     ORDER = ["title", "h1", "h2", "h3"]
     KIND_ALIASES = {
+        "title": "title",
+        "h1": "h1",
+        "h2": "h2",
+        "h3": "h3",
         "phan": "title",
+        "part": "title",
         "chuong": "h1",
+        "chapter": "h1",
+        "section": "h1",
         "muc": "h2",
         "dieu": "h2",
-        "visual": "h2"
+        "article": "h2",
+        "clause": "h2",
+        "visual": "h2",
+        "sub_section": "h3",
+        "sub-section": "h3"
     }
 
-    def __init__(self, doc_title: str):
+    # Zero Domain Hardcoding: Mặc định rỗng, không hardcode bất kỳ quốc hiệu/slogan của quốc gia nào
+    COMMON_ADMIN_HEADERS: list[str] = []
+
+    def __init__(
+        self,
+        doc_title: str,
+        common_admin_headers: list[str] | None = None,
+        custom_org_headers: list[str] | None = None,
+        config: object | None = None
+    ):
         self.doc_title = doc_title
         self.stack: dict[str, str] = {}
         self.scores: dict[str, float] = {}
         self.last_kind: str | None = None
         self.source: str = "page_fallback"
         self.current_caption: str | None = None
-        self.last_dieu: int = 0
+        self.last_section_num: int = 0
+
+        # Cấu hình danh sách loại trừ tiêu ngữ / letterhead (chỉ lọc chuỗi khi có cấu hình inject)
+        if common_admin_headers is not None:
+            self.common_admin_headers = list(common_admin_headers)
+        elif config is not None and getattr(config, "common_admin_headers", None):
+            self.common_admin_headers = list(config.common_admin_headers)
+        else:
+            self.common_admin_headers = list(self.COMMON_ADMIN_HEADERS)
+
+        if custom_org_headers is not None:
+            self.custom_org_headers = list(custom_org_headers)
+        elif config is not None and getattr(config, "custom_org_headers", None):
+            self.custom_org_headers = list(config.custom_org_headers)
+        else:
+            self.custom_org_headers = []
+
+    @property
+    def last_dieu(self) -> int:
+        return self.last_section_num
+
+    @last_dieu.setter
+    def last_dieu(self, val: int) -> None:
+        self.last_section_num = val
 
     def _normalize_kind(self, kind: str) -> str:
         """Chuẩn hóa loại nhãn phân cấp về hệ trục hình học (title, h1, h2, h3)."""
@@ -70,15 +109,34 @@ class BreadcrumbTracker:
         label: str,
         number: int | None = None,
         score: float = 1.0,
-        source: str = "ocr_geometry_prediction"
+        source: str = "ocr_geometry_prediction",
+        page_num: int = 1,
+        y_min: float | None = None,
+        page_h: float | None = None
     ) -> None:
-        """Khi phát hiện heading cấp N, xóa cấp N trở xuống và cập nhật cấp mới."""
-        norm_txt = strip_vietnamese_accents(label).lower()
-        # Loại trừ Letterhead (quốc hiệu, tiêu ngữ, tên ngân hàng) khỏi stack phân cấp
-        if any(ign in norm_txt for ign in ["cong hoa xa hoi", "doc lap - tu do", "doc lap tu do", "ngan hang thuong mai", "ngan hang tmcp", "vietcombank"]):
-            return
-
+        """
+        Khi phát hiện heading cấp N:
+        1. Lọc Letterhead / Banner hành chính theo Bố cục hình học (Structural / Positional).
+        2. Lọc Letterhead theo danh sách cấu hình động (Configuration Injection).
+        3. Cập nhật State Machine phân cấp (title -> h1 -> h2 -> h3).
+        """
         norm_kind = self._normalize_kind(kind)
+
+        # 1. Nhận diện bố cục Letterhead / Banner hành chính ở mép trên cùng Trang 1
+        # Thường nằm trước tiêu đề chính của văn bản và không có số hiệu phân cấp
+        if page_num == 1 and y_min is not None and page_h is not None:
+            if y_min < 0.12 * page_h and number is None:
+                # Nếu chưa có Title chính trong stack hoặc dòng này không phải Title lớn
+                if "title" not in self.stack and norm_kind != "title":
+                    return
+
+        # 2. Loại trừ theo danh sách chuỗi cấu hình (nếu người dùng tiêm cấu hình)
+        ignored_headers = self.common_admin_headers + self.custom_org_headers
+        if ignored_headers:
+            norm_txt = label.lower()
+            if any(ign in norm_txt for ign in ignored_headers):
+                return
+
         if norm_kind in self.ORDER:
             idx = self.ORDER.index(norm_kind)
             for k in self.ORDER[idx:]:
@@ -92,7 +150,7 @@ class BreadcrumbTracker:
         self.current_caption = None
 
         if number is not None:
-            self.last_dieu = number
+            self.last_section_num = number
 
 
     def reset_for_new_doc(self, new_doc_title: str) -> None:
@@ -138,52 +196,100 @@ class BreadcrumbTracker:
 class TOCVerifier:
     """
     Trình phân tích và kiểm chứng Mục lục (Table of Contents) ở 1-3 trang đầu.
-    Sử dụng fuzzy matching dựa trên chuỗi không dấu để sửa lỗi chính tả OCR.
+    Sử dụng đối chiếu chuỗi không dấu để sửa lỗi chính tả OCR (đa ngôn ngữ).
     """
 
     def __init__(self):
         self.toc_found: bool = False
-        self.expected_dieus: dict[int, str] = {}
+        self.expected_sections: dict[int, str] = {}
         self.toc_pages: set[int] = set()
 
+    @property
+    def expected_dieus(self) -> dict[int, str]:
+        return self.expected_sections
+
+    @expected_dieus.setter
+    def expected_dieus(self, val: dict[int, str]) -> None:
+        self.expected_sections = val
+
     def parse_toc_page(self, lines: list[dict], page_idx: int = 1) -> bool:
-        """Nhận diện trang mục lục và thu thập outline tiêu đề (page_idx 1-indexed)."""
+        """
+        Nhận diện trang mục lục và thu thập outline tiêu đề (page_idx 1-indexed)
+        dựa trên cấu trúc hình học dòng dẫn hướng (Leader patterns) và số trang (0% Regex, không dùng từ khóa).
+        """
         if not lines:
             return False
 
-        full_text = " ".join(l.get("text", "") for l in lines)
-        norm_full = strip_vietnamese_accents(full_text).lower()
-
-        if "muc luc" in norm_full or "table of contents" in norm_full or "content" in norm_full:
-            self.toc_found = True
-            self.toc_pages.add(page_idx)
+        detected_entries: list[str] = []
+        leader_symbols = ("..", ". .", "---", "___")
 
         for line in lines:
             txt = line.get("text", "").strip()
-            # Bắt cặp tiêu đề và số trang trong dòng mục lục (dạng: ... 12 hoặc . . . 12)
-            if "..." in txt or ". ." in txt:
-                clean_title = txt.split("..")[0].strip()
-                if "." in clean_title:
-                    clean_title = clean_title.split(".", 1)[-1].strip()
-                if len(clean_title) >= 3:
-                    num_cand = len(self.expected_dieus) + 1
-                    self.expected_dieus[num_cand] = clean_title
+            if not txt or len(txt) < 4:
+                continue
+
+            # 1. Phát hiện dòng có ký hiệu dẫn hướng (Leader patterns: .., . ., ---, ___)
+            has_leader = any(sym in txt for sym in leader_symbols)
+            if has_leader:
+                earliest_pos = len(txt)
+                for sym in leader_symbols:
+                    pos = txt.find(sym)
+                    if pos != -1 and pos < earliest_pos:
+                        earliest_pos = pos
+
+                title_part = txt[:earliest_pos].strip()
+                tail_part = txt[earliest_pos:].lstrip(".-_ ").strip()
+
+                if tail_part:
+                    tail_tok = tail_part.split()[-1].rstrip(".:)-")
+                    roman_chars = set("ivxlcdmIVXLCDM")
+                    is_page_num = (
+                        tail_tok.isdigit() or
+                        all(c in roman_chars for c in tail_tok) or
+                        (all(c.isdigit() or c in "-/" for c in tail_tok) and any(c.isdigit() for c in tail_tok))
+                    )
+                    if is_page_num and len(title_part) >= 3:
+                        clean_title = title_part
+                        if "." in clean_title:
+                            clean_title = clean_title.split(".", 1)[-1].strip()
+                        if len(clean_title) >= 3:
+                            detected_entries.append(clean_title)
+            else:
+                # 2. Cấu trúc không có chấm bi nhưng kết thúc bằng số trang và không kết câu
+                words = txt.split()
+                if 2 <= len(words) <= 12 and not txt.endswith((".", ";", ":")):
+                    last_tok = words[-1].rstrip(".:)-")
+                    roman_chars = set("ivxlcdmIVXLCDM")
+                    if last_tok.isdigit() or all(c in roman_chars for c in last_tok):
+                        title_cand = " ".join(words[:-1]).strip()
+                        if len(title_cand) >= 3 and not title_cand.endswith((".", ";")):
+                            detected_entries.append(title_cand)
+
+        # Tiêu chuẩn cấu trúc: Nếu trang có từ 2 dòng cấu trúc mục lục trở lên -> Xác nhận trang TOC
+        if len(detected_entries) >= 2:
+            self.toc_found = True
+            self.toc_pages.add(page_idx)
+            for title in detected_entries:
+                num_cand = len(self.expected_sections) + 1
+                self.expected_sections[num_cand] = title
 
         return self.toc_found
 
-    def verify_dieu(self, dieu_num: int, ocr_title: str) -> tuple[bool, str, float]:
+    def verify_section(self, section_num: int, ocr_title: str) -> tuple[bool, str, float]:
         """Đối chiếu tên tiêu đề với mục lục."""
-        if not self.toc_found or dieu_num not in self.expected_dieus:
+        if not self.toc_found or section_num not in self.expected_sections:
             return False, ocr_title, 0.0
 
-        expected = self.expected_dieus[dieu_num]
-        norm_exp = strip_vietnamese_accents(expected).lower()
-        norm_ocr = strip_vietnamese_accents(ocr_title).lower()
+        expected = self.expected_sections[section_num]
+        norm_exp = expected.lower()
+        norm_ocr = ocr_title.lower()
 
         if norm_exp in norm_ocr or norm_ocr in norm_exp:
             return True, expected, 0.05
 
         return False, ocr_title, 0.0
+
+    verify_dieu = verify_section
 
 
 # =============================================================================
@@ -196,11 +302,22 @@ class ScanStructureReconstructor:
     dựa 100% trên đặc trưng hình học OCR (OCR Geometric Predictor).
     """
 
-    def __init__(self, doc_title: str):
+    def __init__(
+        self,
+        doc_title: str,
+        common_admin_headers: list[str] | None = None,
+        custom_org_headers: list[str] | None = None,
+        config: object | None = None
+    ):
         self.doc_title = doc_title
-        self.tracker = BreadcrumbTracker(doc_title)
+        self.tracker = BreadcrumbTracker(
+            doc_title=doc_title,
+            common_admin_headers=common_admin_headers,
+            custom_org_headers=custom_org_headers,
+            config=config
+        )
         self.toc_verifier = TOCVerifier()
-        self.layout_predictor = OCRLayoutHierarchyPredictor()
+        self.layout_predictor = OCRLayoutHierarchyPredictor(config=config)
 
     def filter_header_footer_lines(
         self,
@@ -296,10 +413,14 @@ class ScanStructureReconstructor:
             if next_t.isupper() and next_h >= median_h * 0.95 and len(next_t) < 80:
                 label = f"{label}. {next_t}"
 
-        # Ánh xạ kết quả dự đoán OCR
-        kind = "dieu" if level in [LayoutHierarchyLevel.H2, LayoutHierarchyLevel.H3] else "chuong"
-        if level == LayoutHierarchyLevel.TITLE:
-            kind = "title"
+        # Ánh xạ kết quả dự đoán OCR theo đúng cấp bậc hình học 8D (không ép cứng dieu/chuong)
+        level_to_kind = {
+            LayoutHierarchyLevel.TITLE: "title",
+            LayoutHierarchyLevel.H1: "h1",
+            LayoutHierarchyLevel.H2: "h2",
+            LayoutHierarchyLevel.H3: "h3",
+        }
+        kind = level_to_kind.get(level, "h2")
 
         return {
             "kind": kind,
@@ -331,8 +452,16 @@ class ScanStructureReconstructor:
         ocr_scores = [l.get("score", 0.85) for l in buffer_lines]
         avg_ocr_conf = round(sum(ocr_scores) / max(len(ocr_scores), 1), 3)
 
-        # Tiêu đề mục đang hoạt động
-        section_label = self.tracker.stack.get("h2") or self.tracker.stack.get("dieu") or ""
+        # Tiêu đề mục đang hoạt động (hỗ trợ cả các cấp hình học h2, h3, h1, title lẫn legacy dieu/chuong)
+        section_label = (
+            self.tracker.stack.get("h2") or
+            self.tracker.stack.get("h3") or
+            self.tracker.stack.get("h1") or
+            self.tracker.stack.get("title") or
+            self.tracker.stack.get("dieu") or
+            self.tracker.stack.get("chuong") or
+            ""
+        )
 
         # Xác định độ thụt lề lớn nhất trong chunk từ OCR (0: Body, 1: Khoản, 2: Điểm)
         indent_levels = [l.get("indent_level", 0) for l in buffer_lines]
@@ -430,12 +559,15 @@ class ScanStructureReconstructor:
                             chunk_counter += 1
                         buffer_lines = []
 
-                    # Cập nhật State Machine
+                    # Cập nhật State Machine (hỗ trợ phát hiện letterhead theo bố cục hình học)
                     self.tracker.on_heading(
                         kind=pred_level,
                         label=line.get("text", ""),
                         score=line.get("score", 0.90),
-                        source="ocr_geometry_prediction"
+                        source="ocr_geometry_prediction",
+                        page_num=page_idx,
+                        y_min=line.get("y_min"),
+                        page_h=page_h
                     )
 
                     buffer_page_start = page_idx

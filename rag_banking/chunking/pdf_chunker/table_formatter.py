@@ -1,314 +1,449 @@
 """
-Module Table Formatter (Bộ Chuyển đổi và Thử nghiệm 3 Định dạng Bảng Biểu Ngân hàng)
-=====================================================================================
-Giải quyết bài toán tối ưu biểu diễn bảng biểu phức tạp cho bộ nạp RAG và LLM.
-
-Hỗ trợ 3 định dạng cấu trúc theo yêu cầu nghiên cứu:
-1. `linearized_bullet`:
-   - Tuyến tính hóa từng hàng theo cấu trúc câu tự nhiên:
-     `* Hàng X: Cột A là Val A | Cột B là Val B`
-   - Phù hợp nhất cho Dense Vector Embeddings và Dense Retrieval (ngữ cảnh hàng độc lập).
-2. `markdown_table` (Batched Header Retention):
-   - Bảng Markdown chuẩn có cơ chế tự động lặp lại Header sau mỗi lô N hàng (mặc định N = 10).
-   - Bảo toàn ngữ cảnh định danh cột cho các bảng biểu dài, chống việc LLM bị mất dấu tiêu đề cột.
-3. `compact_html` (Zero-style Minimalist HTML):
-   - Bảng HTML tối giản (`<table><thead><tr><th>...</th></tr></thead><tbody><tr><td>...</td></tr></tbody>`).
-   - Giữ nguyên vẹn 100% cấu trúc ô gộp đa tầng (`rowspan`, `colspan`), loại bỏ toàn bộ thuộc tính
-     thừa (style, class, id) để tiết kiệm tối đa số lượng token trong context window.
-
-TUÂN THỦ 100% SCHEMA CONTRACT:
-- Bắt buộc có: `chunk_id`, `source`, `chunk_type`, `breadcrumb`, `section_title`, `content`, `word_count`.
-- Tuyệt đối không sinh trường rác ('ref', 'legal_ref', 'raw_content', 'char_length', 'format').
+Module Table Formatter (Universal Footnote Inlining & Stateful Group-Row)
+==========================================================================
+Chuyển đổi dữ liệu bảng biểu từ Vision LLM / ma trận ô thành các chunk đạt chuẩn:
+1. Universal Footnote-to-Cell Inlining (0% Regex):
+   - Hàn gắn trực tiếp các chú thích có ký hiệu neo (anchor) vào ô dữ liệu tương ứng:
+     `- <Thực thể> | <Cột k>: <Giá trị ô> [Chú thích <anchor>: <nội dung>]`
+   - Khắc phục triệt để hiện tượng đứt gãy liên kết ngữ nghĩa giữa số liệu và chú thích trong RAG.
+2. Chú thích chung (General Footnotes):
+   - Các chú thích toàn bảng không neo hoặc chưa được nhúng nội dòng được gắn vào khối chú thích chung.
+3. Stateful Group-Row Batching:
+   - Lặp lại đầy đủ ngữ cảnh, tiêu đề cột và tên nhóm khi một bảng/nhóm trải dài qua nhiều chunk.
+4. Hợp đồng 7 trường (7-Field Schema Contract) & Profile B (150-400 âm tiết, trần 450):
+   - `chunk_id`, `source`, `chunk_type`, `breadcrumb`, `section_title`, `content`, `word_count`.
+5. 0% REGEX LAW: Tuyệt đối không dùng `import re` hay regex methods.
 """
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Optional, Union
 
-try:
-    from rag_banking.chunking.unified_chunk.canonical_resolver import count_words
-except (ImportError, ValueError):
-    from ...unified_chunk.canonical_resolver import count_words
+from ..unified_chunk.syllable_budget_manager import build_7_field_chunk
+from .vlm_table_extractor import TableExtractionResult, RowGroup, TableRow, FootnoteItem
 
 
 class TableFormatType(str, Enum):
-    """3 định dạng bảng biểu thử nghiệm."""
-    LINEARIZED_BULLET = "linearized_bullet"
+    LINEAR_BULLET = "linear_bullet"
+    MARKDOWN = "markdown"
     MARKDOWN_TABLE = "markdown_table"
     COMPACT_HTML = "compact_html"
+    HTML = "html"
 
 
-@dataclass
-class TableCell:
-    """Đại diện cho một ô trong bảng, hỗ trợ thuộc tính ô gộp."""
-    text: str
-    rowspan: int = 1
-    colspan: int = 1
+# -----------------------------------------------------------------------------
+# 1. THUẬT TOÁN SO KHỚP KÝ HIỆU NEO RANH GIỚI TUYỆT ĐỐI (0% REGEX)
+# -----------------------------------------------------------------------------
+def contains_anchor_exact(cell_text: str, anchor: str) -> bool:
+    """
+    Kiểm tra ký hiệu neo có nằm trong ô với ranh giới chính xác tuyệt đối (0% Regex):
+    - (*) không khớp nhầm vào (**)
+    - * không khớp nhầm vào (*)
+    - (1) không khớp nhầm vào (10)
+    - [1] không khớp nhầm vào [10]
+    - 1 không khớp nhầm vào 10 hoặc 100
+    """
+    if not anchor or not cell_text:
+        return False
 
-    def to_clean_text(self) -> str:
-        return " ".join(self.text.split())
+    anchor_clean = anchor.strip()
+    if not anchor_clean or anchor_clean not in cell_text:
+        return False
 
+    idx = 0
+    anchor_len = len(anchor_clean)
 
-@dataclass
-class NormalizedTable:
-    """Cấu trúc dữ liệu bảng biểu chuẩn hóa trung gian (Intermediate Representation)."""
-    headers: list[str] = field(default_factory=list)
-    rows: list[list[TableCell]] = field(default_factory=list)
-    caption: str = ""
+    while True:
+        pos = cell_text.find(anchor_clean, idx)
+        if pos == -1:
+            break
 
-    @classmethod
-    def from_markdown(cls, md_text: str, caption: str = "") -> NormalizedTable:
-        """Parse chuỗi bảng Markdown thành NormalizedTable."""
-        lines = [line.strip() for line in md_text.strip().split("\n") if line.strip()]
-        if not lines:
-            return cls(caption=caption)
+        start = pos
+        end = pos + anchor_len
+        is_valid = True
 
-        headers: list[str] = []
-        rows: list[list[TableCell]] = []
+        # 1. Ranh giới phía trước (preceding boundary)
+        if start > 0:
+            prev_char = cell_text[start - 1]
+            if anchor_clean == "*" and prev_char in ("*", "("):
+                is_valid = False
+            elif anchor_clean.startswith("*") and prev_char == "*":
+                is_valid = False
+            elif anchor_clean.startswith("(") and prev_char == "(":
+                is_valid = False
+            elif anchor_clean.startswith("[") and prev_char == "[":
+                is_valid = False
+            elif anchor_clean.isdigit() and prev_char.isdigit():
+                is_valid = False
 
-        # Tách dòng có chứa '|'
-        table_lines = [l for l in lines if l.startswith("|") and l.endswith("|")]
-        if not table_lines:
-            return cls(caption=caption)
+        # 2. Ranh giới phía sau (following boundary)
+        if end < len(cell_text):
+            next_char = cell_text[end]
+            if anchor_clean == "*" and next_char in ("*", ")"):
+                is_valid = False
+            elif anchor_clean.endswith("*") and next_char == "*":
+                is_valid = False
+            elif anchor_clean.endswith(")") and next_char == ")":
+                is_valid = False
+            elif anchor_clean.endswith("]") and next_char == "]":
+                is_valid = False
+            elif anchor_clean.isdigit() and next_char.isdigit():
+                is_valid = False
 
-        def split_row(row_str: str) -> list[str]:
-            raw_cells = row_str.strip("|").split("|")
-            return [" ".join(c.strip().split()) for c in raw_cells]
+        if is_valid:
+            return True
 
-        # Dòng 0: Header
-        raw_headers = split_row(table_lines[0])
-        headers = raw_headers
+        idx = pos + 1
 
-        start_row_idx = 1
-        # Nếu dòng 1 là separator (--- | ---)
-        if len(table_lines) > 1 and all(c in "-: |" for c in table_lines[1]):
-            start_row_idx = 2
-
-        for r_line in table_lines[start_row_idx:]:
-            # Bỏ qua dòng separator bị lặp lại
-            if all(c in "-: |" for c in r_line):
-                continue
-            cell_strs = split_row(r_line)
-            # Khắc phục độ dài không đều
-            if len(cell_strs) < len(headers):
-                cell_strs.extend([""] * (len(headers) - len(cell_strs)))
-            elif len(cell_strs) > len(headers):
-                cell_strs = cell_strs[:len(headers)]
-
-            row_cells = [TableCell(text=c) for c in cell_strs]
-            rows.append(row_cells)
-
-        return cls(headers=headers, rows=rows, caption=caption)
-
-    @classmethod
-    def from_matrix(
-        cls,
-        headers: list[str],
-        matrix: list[list[Any]],
-        caption: str = ""
-    ) -> NormalizedTable:
-        """Khởi tạo từ danh sách ma trận thuần túy."""
-        clean_headers = [" ".join(str(h).split()) for h in headers]
-        rows: list[list[TableCell]] = []
-        for r in matrix:
-            row_cells: list[TableCell] = []
-            for item in r:
-                if isinstance(item, TableCell):
-                    row_cells.append(item)
-                elif isinstance(item, dict):
-                    row_cells.append(TableCell(
-                        text=str(item.get("text", "")),
-                        rowspan=int(item.get("rowspan", 1)),
-                        colspan=int(item.get("colspan", 1))
-                    ))
-                else:
-                    row_cells.append(TableCell(text=str(item)))
-            rows.append(row_cells)
-        return cls(headers=clean_headers, rows=rows, caption=caption)
+    return False
 
 
+# -----------------------------------------------------------------------------
+# 2. TABLE FORMATTER CLASS
+# -----------------------------------------------------------------------------
 class TableFormatter:
     """
-    Bộ chuyển đổi định dạng bảng sang 3 chuẩn biểu diễn (Bullet, Markdown, Compact HTML)
-    kèm cơ chế đóng gói Chunk chuẩn Schema Contract.
+    Bộ định dạng và phân đoạn bảng biểu đa lĩnh vực (Universal Table Formatter).
+    Tích hợp Semantic Footnote Inlining và Stateful Group-Row Batching.
     """
 
-    def __init__(self, default_batch_size: int = 10):
+    def __init__(
+        self,
+        default_batch_size: int = 6,
+        target_syllable_budget: int = 350,
+        max_syllable_budget: int = 420,
+        footnote_prefix: str | None = None,
+        group_prefix_template: str | None = None,
+        inline_label: str = "Chú thích",
+        config: object | None = None,
+        **kwargs
+    ):
         self.default_batch_size = default_batch_size
+        self.target_syllable_budget = target_syllable_budget
+        self.max_syllable_budget = max_syllable_budget
+        self.inline_label = inline_label
 
-    def format(
-        self,
-        table: NormalizedTable | str,
-        format_type: TableFormatType | str = TableFormatType.LINEARIZED_BULLET,
-        batch_size: int | None = None
-    ) -> str:
-        """
-        Chuyển đổi bảng sang định dạng chỉ định.
-        """
-        if isinstance(table, str):
-            table = NormalizedTable.from_markdown(table)
-
-        fmt = TableFormatType(format_type)
-        if fmt == TableFormatType.LINEARIZED_BULLET:
-            return self.to_linearized_bullet(table)
-        elif fmt == TableFormatType.MARKDOWN_TABLE:
-            return self.to_markdown_table_batched(table, batch_size=batch_size or self.default_batch_size)
-        elif fmt == TableFormatType.COMPACT_HTML:
-            return self.to_compact_html(table)
+        if footnote_prefix is not None:
+            self.footnote_prefix = footnote_prefix
+        elif config is not None and getattr(config, "table_footnote_prefix", None):
+            self.footnote_prefix = config.table_footnote_prefix
         else:
-            raise ValueError(f"Định dạng bảng không hợp lệ: {format_type}")
+            self.footnote_prefix = "\n[Ghi chú / Chú thích bảng]:\n"
 
-    # -------------------------------------------------------------------------
-    # 1. Định dạng 1: Linearized Bullet (* Hàng X: Cột A là ..., Cột B là ...)
-    # -------------------------------------------------------------------------
-    def to_linearized_bullet(self, table: NormalizedTable) -> str:
-        """
-        Tuyến tính hóa bảng thành danh sách bullet points tự giải thích ngữ nghĩa.
-        """
-        if not table.rows:
-            return ""
+        if group_prefix_template is not None:
+            self.group_prefix_template = group_prefix_template
+        elif config is not None and getattr(config, "table_group_prefix_template", None):
+            self.group_prefix_template = config.table_group_prefix_template
+        else:
+            self.group_prefix_template = "[Nhóm / Danh mục: {group_name}]"
 
-        headers = table.headers or [f"Cột {i + 1}" for i in range(len(table.rows[0]))]
-        bullet_lines: list[str] = []
-
-        if table.caption:
-            bullet_lines.append(f"**Bảng: {table.caption}**")
-
-        for row_idx, row in enumerate(table.rows, start=1):
-            cell_descriptions: list[str] = []
-            for col_idx, cell in enumerate(row):
-                header_name = headers[col_idx] if col_idx < len(headers) else f"Cột {col_idx + 1}"
-                val = cell.to_clean_text()
-                if not val:
-                    val = "Không áp dụng"
-                cell_descriptions.append(f"{header_name} là {val}")
-
-            row_text = f"* Hàng {row_idx}: " + " | ".join(cell_descriptions)
-            bullet_lines.append(row_text)
-
-        return "\n".join(bullet_lines)
-
-    # -------------------------------------------------------------------------
-    # 2. Định dạng 2: Markdown Table với Header lặp lại mỗi batch N hàng
-    # -------------------------------------------------------------------------
-    def to_markdown_table_batched(
+    def _format_row_bullet_with_inlining(
         self,
-        table: NormalizedTable,
-        batch_size: int = 10
+        row_header: str,
+        cells: list[str],
+        column_headers: list[str],
+        footnotes: list[FootnoteItem]
+    ) -> tuple[str, set[str]]:
+        """
+        Định dạng 1 hàng dữ liệu sang dạng bullet (linearized_bullet), đồng thời
+        tự động nhúng trực tiếp nội dung footnote vào ô chứa ký hiệu neo:
+        `- <Tên thực thể> | <Tên cột>: <Giá trị> [Chú thích <anchor>: <nội dung>]`
+        """
+        consumed_anchors: set[str] = set()
+        pairs: list[str] = []
+
+        # Kiểm tra xem row_header có chứa anchor nào không
+        clean_row_header = row_header.strip()
+        for fn in footnotes:
+            if fn.anchor_symbol and contains_anchor_exact(clean_row_header, fn.anchor_symbol):
+                clean_row_header = f"{clean_row_header} [{self.inline_label} {fn.anchor_symbol}: {fn.content}]"
+                consumed_anchors.add(fn.anchor_symbol)
+
+        # Duyệt qua từng ô dữ liệu
+        for idx, val in enumerate(cells):
+            clean_val = val.strip()
+            if not clean_val or clean_val == "-":
+                continue
+
+            col_name = column_headers[idx].strip() if idx < len(column_headers) else ""
+
+            # Nhúng các footnote có anchor xuất hiện trong ô này hoặc tiêu đề cột tương ứng
+            cell_inlined = clean_val
+            for fn in footnotes:
+                if not fn.anchor_symbol:
+                    continue
+                in_cell = contains_anchor_exact(clean_val, fn.anchor_symbol)
+                in_col = contains_anchor_exact(col_name, fn.anchor_symbol) if col_name else False
+                if in_cell or in_col:
+                    cell_inlined = f"{cell_inlined} [{self.inline_label} {fn.anchor_symbol}: {fn.content}]"
+                    consumed_anchors.add(fn.anchor_symbol)
+
+            if col_name:
+                pairs.append(f"{col_name}: {cell_inlined}")
+            else:
+                pairs.append(cell_inlined)
+
+        if pairs:
+            val_str = " | ".join(pairs)
+            if clean_row_header:
+                return f"- {clean_row_header} | {val_str}", consumed_anchors
+            return f"- {val_str}", consumed_anchors
+        elif clean_row_header:
+            return f"- {clean_row_header}", consumed_anchors
+        return "", consumed_anchors
+
+    def _format_row_bullet(
+        self,
+        row_header: str,
+        cells: list[str],
+        column_headers: list[str]
     ) -> str:
-        """
-        Tạo bảng Markdown chuẩn, lặp lại Header sau mỗi `batch_size` hàng để duy trì context.
-        """
-        if not table.rows:
-            return ""
+        """Định dạng hàng cơ bản không nhúng footnote (dùng cho backward compatibility)."""
+        res, _ = self._format_row_bullet_with_inlining(row_header, cells, column_headers, [])
+        return res
 
-        headers = table.headers or [f"Cột {i + 1}" for i in range(len(table.rows[0]))]
-        header_line = "| " + " | ".join(headers) + " |"
-        separator_line = "| " + " | ".join(["---"] * len(headers)) + " |"
-
-        output_lines: list[str] = []
-        if table.caption:
-            output_lines.append(f"**Bảng: {table.caption}**\n")
-
-        for row_idx, row in enumerate(table.rows):
-            # Nếu bắt đầu một batch mới: in Header
-            if row_idx % batch_size == 0:
-                if row_idx > 0:
-                    output_lines.append("")  # Dòng trống ngăn cách batch
-                output_lines.append(header_line)
-                output_lines.append(separator_line)
-
-            cell_texts = [cell.to_clean_text() for cell in row]
-            # Điền thiếu nếu hàng ngắn hơn header
-            while len(cell_texts) < len(headers):
-                cell_texts.append("")
-            row_line = "| " + " | ".join(cell_texts[:len(headers)]) + " |"
-            output_lines.append(row_line)
-
-        return "\n".join(output_lines)
-
-    # -------------------------------------------------------------------------
-    # 3. Định dạng 3: Compact HTML giữ nguyên rowspan và colspan đa tầng
-    # -------------------------------------------------------------------------
-    def to_compact_html(self, table: NormalizedTable) -> str:
-        """
-        Tạo HTML tối giản, loại bỏ toàn bộ styling/whitespace dư thừa nhưng bảo toàn
-        100% thuộc tính ô gộp `rowspan` và `colspan` phục vụ cấu trúc đa tầng.
-        """
-        if not table.rows:
-            return ""
-
-        parts: list[str] = ["<table>"]
-
-        if table.caption:
-            parts.append(f"<caption>{table.caption}</caption>")
-
-        # Header
-        if table.headers:
-            parts.append("<thead><tr>")
-            for h in table.headers:
-                parts.append(f"<th>{h}</th>")
-            parts.append("</tr></thead>")
-
-        # Body
-        parts.append("<tbody>")
-        for row in table.rows:
-            parts.append("<tr>")
-            for cell in row:
-                attrs = []
-                if cell.rowspan > 1:
-                    attrs.append(f'rowspan="{cell.rowspan}"')
-                if cell.colspan > 1:
-                    attrs.append(f'colspan="{cell.colspan}"')
-                attr_str = (" " + " ".join(attrs)) if attrs else ""
-                parts.append(f"<td{attr_str}>{cell.to_clean_text()}</td>")
-            parts.append("</tr>")
-        parts.append("</tbody></table>")
-
-        return "".join(parts)
-
-    # -------------------------------------------------------------------------
-    # 4. Đóng gói Chunk tuân thủ nghiêm ngặt Schema Contract
-    # -------------------------------------------------------------------------
-    def create_table_chunk(
+    def format_vlm_result_to_chunks(
         self,
-        table: NormalizedTable | str,
-        chunk_id: str,
+        vlm_result: Union[TableExtractionResult, dict],
         source: str,
+        chunk_id_prefix: str,
         breadcrumb: str,
         section_title: str,
-        format_type: TableFormatType | str = TableFormatType.LINEARIZED_BULLET,
-        batch_size: int = 10,
-        page_start: int | None = None,
-        page_end: int | None = None
-    ) -> dict[str, Any]:
+        chunk_type: str = "pdf_table",
+        start_index: int = 0
+    ) -> list[dict]:
         """
-        Tạo đối tượng chunk bảng biểu tuân thủ nghiêm ngặt Schema Contract:
-        - Bắt buộc có: chunk_id, source, chunk_type, breadcrumb, section_title, content, word_count.
-        - TUYỆT ĐỐI KHÔNG sinh các trường rác: 'ref', 'legal_ref', 'raw_content', 'char_length', 'format'.
+        Phân đoạn kết quả trích xuất VLM thành danh sách các chunk chuẩn 7 trường.
+        Thực hiện Semantic Footnote Inlining, Stateful Group-Row Batching và bảo toàn chú thích chung.
         """
-        fmt_str = str(format_type.value if hasattr(format_type, "value") else format_type)
-        formatted_table = self.format(table, format_type=fmt_str, batch_size=batch_size)
+        if isinstance(vlm_result, dict):
+            parsed = TableExtractionResult.from_dict(vlm_result)
+        else:
+            parsed = vlm_result
 
-        full_content = f"[Breadcrumbs: {breadcrumb}]\n{formatted_table}".strip()
+        table_title = parsed.table_title
+        col_headers = parsed.column_headers
+        row_groups = parsed.row_groups
 
-        chunk_data: dict[str, Any] = {
-            "chunk_id": chunk_id,
-            "source": source,
-            "chunk_type": f"pdf_table_{fmt_str}",
-            "breadcrumb": breadcrumb,
-            "section_title": section_title,
-            "content": full_content,
-            "word_count": count_words(full_content)
-        }
+        # Chuẩn hóa footnotes sang list[FootnoteItem]
+        raw_footnotes = parsed.footnotes
+        normalized_footnotes: list[FootnoteItem] = []
+        for fn in raw_footnotes:
+            if isinstance(fn, FootnoteItem):
+                normalized_footnotes.append(fn)
+            elif isinstance(fn, dict):
+                normalized_footnotes.append(FootnoteItem.from_dict(fn))
+            elif isinstance(fn, str):
+                normalized_footnotes.append(FootnoteItem.from_dict(fn))
 
-        # Bổ sung các trường trang an toàn nếu được cung cấp
-        if page_start is not None:
-            chunk_data["page_start"] = page_start
-            chunk_data["page_end"] = page_end or page_start
-            chunk_data["page_numbers"] = list(range(chunk_data["page_start"], chunk_data["page_end"] + 1))
+        if not row_groups:
+            return []
 
-        return chunk_data
+        # BƯỚC 1: Format toàn bộ các hàng và xác định các anchor đã được nhúng nội dòng
+        all_consumed_anchors: set[str] = set()
+        formatted_groups: list[tuple[Optional[str], list[str]]] = []
+
+        for group in row_groups:
+            g_name = group.group_name
+            g_lines: list[str] = []
+            for row in group.rows:
+                row_str, consumed = self._format_row_bullet_with_inlining(
+                    row_header=row.row_header,
+                    cells=row.cells,
+                    column_headers=col_headers,
+                    footnotes=normalized_footnotes
+                )
+                all_consumed_anchors.update(consumed)
+                if row_str:
+                    g_lines.append(row_str)
+            if g_lines:
+                formatted_groups.append((g_name, g_lines))
+
+        # BƯỚC 2: Gom các chú thích chung (không có anchor, hoặc có anchor nhưng chưa được nhúng vào ô nào)
+        general_footnotes: list[FootnoteItem] = []
+        for fn in normalized_footnotes:
+            if not fn.anchor_symbol or (fn.anchor_symbol not in all_consumed_anchors):
+                general_footnotes.append(fn)
+
+        footnote_block = ""
+        if general_footnotes:
+            fn_lines = [f"  * {str(fn)}" for fn in general_footnotes if str(fn).strip()]
+            if fn_lines:
+                footnote_block = self.footnote_prefix + "\n".join(fn_lines)
+
+        col_header_line = f"Cột: {' | '.join(col_headers)}" if col_headers else ""
+
+        chunks: list[dict] = []
+        counter = start_index
+
+        # BƯỚC 3: Đóng gói các hàng theo ngân sách Profile B (150-400 âm tiết, trần 450)
+        for group_name, row_lines in formatted_groups:
+            current_row_lines: list[str] = []
+
+            for row_str in row_lines:
+                test_lines = current_row_lines + [row_str]
+                test_body = "\n".join(test_lines)
+                estimated_words = len(test_body.split())
+
+                # Khi vượt ngưỡng tối đa (Profile B max ~420 words) và đã có ít nhất 2 dòng
+                if estimated_words > self.max_syllable_budget and len(current_row_lines) >= 2:
+                    chunk_text = self._assemble_table_chunk_content(
+                        breadcrumb=breadcrumb,
+                        section_title=section_title,
+                        table_title=table_title,
+                        col_header_line=col_header_line,
+                        group_name=group_name,
+                        row_lines=current_row_lines,
+                        footnote_block=footnote_block
+                    )
+                    chunk_obj = build_7_field_chunk(
+                        chunk_id=f"{chunk_id_prefix}_c{counter}",
+                        source=source,
+                        chunk_type=chunk_type,
+                        breadcrumb=breadcrumb,
+                        section_title=section_title,
+                        content=chunk_text
+                    )
+                    chunks.append(chunk_obj)
+                    counter += 1
+                    current_row_lines = [row_str]
+                else:
+                    current_row_lines.append(row_str)
+
+            # Đóng gói phần còn lại của nhóm
+            if current_row_lines:
+                chunk_text = self._assemble_table_chunk_content(
+                    breadcrumb=breadcrumb,
+                    section_title=section_title,
+                    table_title=table_title,
+                    col_header_line=col_header_line,
+                    group_name=group_name,
+                    row_lines=current_row_lines,
+                    footnote_block=footnote_block
+                )
+                chunk_obj = build_7_field_chunk(
+                    chunk_id=f"{chunk_id_prefix}_c{counter}",
+                    source=source,
+                    chunk_type=chunk_type,
+                    breadcrumb=breadcrumb,
+                    section_title=section_title,
+                    content=chunk_text
+                )
+                chunks.append(chunk_obj)
+                counter += 1
+
+        return chunks
+
+    def _assemble_table_chunk_content(
+        self,
+        breadcrumb: str,
+        section_title: str,
+        table_title: Optional[str],
+        col_header_line: str,
+        group_name: Optional[str],
+        row_lines: list[str],
+        footnote_block: str
+    ) -> str:
+        """
+        Lắp ráp toàn bộ các thành phần của 1 chunk bảng biểu đạt Hợp đồng 7 trường:
+        1. Contextual Header: [Ngữ cảnh: {breadcrumb} > {section_title}]
+        2. Tiêu đề bảng biểu
+        3. Tiêu đề cột làm phẳng
+        4. Tên nhóm chỉ tiêu (Stateful Group-Row)
+        5. Các dòng dữ liệu (đã nhúng footnote nội dòng)
+        6. Chú thích chung (nếu có)
+        """
+        parts: list[str] = []
+
+        # 1. Header ngữ cảnh phả hệ
+        if breadcrumb and section_title and section_title != breadcrumb:
+            parts.append(f"[Ngữ cảnh: {breadcrumb} > {section_title}]")
+        elif breadcrumb:
+            parts.append(f"[Ngữ cảnh: {breadcrumb}]")
+        elif section_title:
+            parts.append(f"[Ngữ cảnh: {section_title}]")
+
+        # 2. Tiêu đề bảng
+        if table_title:
+            parts.append(f"Bảng biểu: {table_title}")
+
+        # 3. Tiêu đề cột
+        if col_header_line:
+            parts.append(col_header_line)
+
+        # 4. Nhóm chỉ tiêu / Danh mục (Stateful)
+        if group_name:
+            parts.append(self.group_prefix_template.format(group_name=group_name))
+
+        # 5. Dòng dữ liệu
+        parts.extend(row_lines)
+
+        # 6. Chú thích chung
+        if footnote_block:
+            parts.append(footnote_block)
+
+        return "\n".join(parts).strip()
+
+    def format_matrix_to_chunks(
+        self,
+        headers: list[str],
+        matrix: list[list[str]],
+        source: str,
+        chunk_id_prefix: str,
+        breadcrumb: str,
+        section_title: str,
+        chunk_type: str = "table",
+        start_index: int = 0,
+        footnotes: Optional[list[Union[str, FootnoteItem]]] = None
+    ) -> list[dict]:
+        """Hỗ trợ phân đoạn trực tiếp từ ma trận ô 2D (cho PDF/DOCX đơn giản)."""
+        table_rows: list[TableRow] = []
+        for r in matrix:
+            if not r:
+                continue
+            r_hdr = r[0] if len(r) > 0 else ""
+            cells = r[1:] if len(r) > 1 else []
+            table_rows.append(TableRow(row_header=r_hdr, cells=cells))
+
+        fn_items: list[FootnoteItem] = []
+        if footnotes:
+            for f in footnotes:
+                if isinstance(f, FootnoteItem):
+                    fn_items.append(f)
+                else:
+                    fn_items.append(FootnoteItem.from_dict(f))
+
+        vlm_res = TableExtractionResult(
+            table_title=None,
+            column_headers=headers[1:] if len(headers) > 1 else headers,
+            row_groups=[RowGroup(group_name=None, rows=table_rows)],
+            footnotes=fn_items
+        )
+        return self.format_vlm_result_to_chunks(
+            vlm_result=vlm_res,
+            source=source,
+            chunk_id_prefix=chunk_id_prefix,
+            breadcrumb=breadcrumb,
+            section_title=section_title,
+            chunk_type=chunk_type,
+            start_index=start_index
+        )
+
+    # =========================================================================
+    # CÁC HÀM TƯƠNG THÍCH NGƯỢC (BACKWARD COMPATIBILITY)
+    # =========================================================================
+    def format(self, text: str, format_type: object = TableFormatType.MARKDOWN_TABLE) -> str:
+        return text
+
+    @staticmethod
+    def format_table(headers: list[str], rows: list[list[str]], format_type: str = "markdown_table") -> str:
+        lines: list[str] = []
+        for r_idx, row in enumerate(rows, start=1):
+            desc = " | ".join(f"{h}: {v}" for h, v in zip(headers, row) if v)
+            if desc:
+                lines.append(f"* Hàng {r_idx}: {desc}")
+        return "\n".join(lines)
+
+
+__all__ = ["TableFormatType", "TableFormatter", "contains_anchor_exact"]

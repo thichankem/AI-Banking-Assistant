@@ -23,9 +23,9 @@ from pathlib import Path
 import pymupdf as fitz
 
 try:
-    from ..unified_chunk.canonical_resolver import is_valid_vietnamese_text, count_words
+    from ..unified_chunk.canonical_resolver import is_valid_vietnamese_text, is_valid_readable_text
 except (ImportError, ValueError):
-    from rag_banking.chunking.unified_chunk.canonical_resolver import is_valid_vietnamese_text, count_words
+    from rag_banking.chunking.unified_chunk.canonical_resolver import is_valid_vietnamese_text, is_valid_readable_text
 
 
 def detect_is_scanned_page(
@@ -63,14 +63,15 @@ def detect_is_scanned_page(
     # 2. Đo lường văn bản số (digital text)
     digital_text = page.get_text("text").strip()
     char_count = len(digital_text)
-    w_count = count_words(digital_text)
+    w_count = len(digital_text.split())
+    is_valid_readable = is_valid_readable_text(digital_text)
     is_valid_vn = is_valid_vietnamese_text(digital_text)
 
     # 3. Đánh giá 3 điều kiện quyết định theo Flowchart
     # - Điều kiện A: Ảnh chiếm diện tích lớn (>= 40%) và chữ số nghèo nàn (< 30 từ)
     cond_a = (img_area_ratio >= image_area_ratio_threshold and w_count < min_word_threshold)
-    # - Điều kiện B: Có chữ số nhưng lỗi font tiếng Việt / text OCR rác
-    cond_b = (w_count > 10 and not is_valid_vn)
+    # - Điều kiện B: Có chữ số nhưng lỗi font / Mojibake / text OCR rác (chấp nhận cả tiếng Việt, tiếng Anh, code)
+    cond_b = (w_count > 10 and not is_valid_readable)
     # - Điều kiện C: Rất ít ký tự (< 20) nhưng trang có chứa ảnh XObject
     cond_c = (char_count < 20 and len(img_list) > 0)
 
@@ -81,7 +82,7 @@ def detect_is_scanned_page(
     if cond_a:
         reason = f"image_area_ratio ({img_area_ratio:.2%}) >= {image_area_ratio_threshold:.0%} và word_count ({w_count}) < {min_word_threshold}"
     elif cond_b:
-        reason = "corrupted_vietnamese_font (tỷ lệ nguyên âm thấp hoặc phụ âm lỗi)"
+        reason = "corrupted_font_or_mojibake (tỷ lệ ký tự lỗi hoặc bảng mã hỏng)"
     elif cond_c:
         reason = f"low_char_count ({char_count} < 20) có chứa {len(img_list)} ảnh XObject"
 
@@ -93,6 +94,7 @@ def detect_is_scanned_page(
         "img_area_ratio": round(img_area_ratio, 4),
         "char_count": char_count,
         "word_count": w_count,
+        "is_valid_readable": is_valid_readable,
         "is_valid_vietnamese": is_valid_vn
     }
 

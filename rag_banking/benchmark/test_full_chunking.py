@@ -41,7 +41,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from rag_banking.config import Config
-from rag_banking.chunking.layout_aware_chunker import LayoutAwareChunker
+from rag_banking.chunking.unified_chunk.layout_aware_chunker import LayoutAwareChunker
 
 
 def _build_preview_markdown(title, description, sample_chunks):
