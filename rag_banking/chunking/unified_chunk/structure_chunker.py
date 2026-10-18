@@ -19,10 +19,13 @@ import unicodedata
 from pathlib import Path
 
 from .canonical_resolver import (
-    count_words,
-    count_syllables_vietnamese,
     split_sentences_banking,
     group_sentences_banking
+)
+from .syllable_budget_manager import (
+    MIN_SYLLABLES,
+    MAX_SYLLABLES,
+    OVERLAP_SYLLABLES
 )
 
 
@@ -40,7 +43,7 @@ class DocumentElement:
         self.content = content.strip()
         self.level = level
         self.metadata = metadata or {}
-        self.syllable_count = count_syllables_vietnamese(self.content)
+        self.syllable_count = len(self.content.split())
 
     def __repr__(self) -> str:
         return f"<Element {self.element_type} (lvl={self.level}, len={self.syllable_count}): {self.content[:30]}...>"
@@ -81,8 +84,8 @@ def _build_structure_chunk(
         "breadcrumb": breadcrumb,
         "section_title": section_title,
         "content": content,
-        "syllable_count": count_syllables_vietnamese(content),
-        "word_count": count_words(content)
+        "syllable_count": len(content.split()),
+        "word_count": len(content.split())
     }
     if hierarchy_level:
         chunk["hierarchy_level"] = hierarchy_level
@@ -98,9 +101,10 @@ class DocumentStructureChunker:
 
     def __init__(
         self,
-        chunk_size: int = 400,        # Ngân sách âm tiết mục tiêu cho mỗi chunk (~500 tokens)
-        min_section_size: int = 120,   # Ngưỡng tối thiểu để kích hoạt Section_length_aware gộp mục
-        chunk_overlap: int = 50       # Số âm tiết gối đầu khi phải cắt nhỏ đoạn văn bản dài
+        chunk_size: int = MAX_SYLLABLES,        # Ngân sách âm tiết mục tiêu cho mỗi chunk (400)
+        min_section_size: int = MIN_SYLLABLES,  # Ngưỡng tối thiểu để kích hoạt Section_length_aware gộp mục (100)
+        chunk_overlap: int = OVERLAP_SYLLABLES, # Tuyệt đối không overlap content (0% content overlap = 0)
+        **kwargs
     ):
         self.chunk_size = chunk_size
         self.min_section_size = min_section_size
@@ -110,8 +114,8 @@ class DocumentStructureChunker:
     # BƯỚC 1: PARSING VĂN BẢN THÀNH DOCUMENT STRUCTURE & SUB-SECTIONS
     # -------------------------------------------------------------------------
 
-    def parse_markdown_to_structure(self, text: str, source_name: str = "doc") -> list[SubSection]:
-        """Chuyển đổi văn bản Markdown thành danh sách SubSection có quan hệ thứ bậc."""
+    def parse_structure(self, text: str, source_name: str = "doc") -> list[SubSection]:
+        """Chuyển đổi văn bản cấu trúc phân cấp thành danh sách SubSection có quan hệ thứ bậc."""
         text = unicodedata.normalize("NFC", text)
         lines = text.split("\n")
 
@@ -155,7 +159,7 @@ class DocumentStructureChunker:
                     i += 1
                     continue
 
-            # 2. Phát hiện Bảng biểu Markdown
+            # 2. Phát hiện Bảng biểu phân tách cột
             if stripped.startswith("|") and stripped.endswith("|") and i + 1 < total_lines:
                 next_stripped = lines[i + 1].strip()
                 if next_stripped.startswith("|") and next_stripped.endswith("|") and "-" in next_stripped:
@@ -179,6 +183,8 @@ class DocumentStructureChunker:
 
         # Lọc bỏ các sub_section rỗng không có element
         return [s for s in sub_sections if s.elements]
+
+    parse_markdown_to_structure = parse_structure
 
     # -------------------------------------------------------------------------
     # STRATEGY 1: DOCUMENT_STRUCTURE-BASED CHUNKING
@@ -235,7 +241,7 @@ class DocumentStructureChunker:
                         current_syllables = 0
 
                     sentences = split_sentences_banking(el.content)
-                    sub_parts = group_sentences_banking(sentences, max_char_size=self.chunk_size * 3, overlap_chars=self.chunk_overlap * 2)
+                    sub_parts = group_sentences_banking(sentences, max_words=self.chunk_size, overlap_words=0)
                     for part in sub_parts:
                         sub_el = DocumentElement(element_type="text", content=part)
                         emit_chunk([sub_el])

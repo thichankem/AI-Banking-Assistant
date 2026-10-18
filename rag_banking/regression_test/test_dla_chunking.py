@@ -1,11 +1,10 @@
 """
 Unit & Integration Test cho Phân hệ DLA Chunking (rag_banking/chunking)
-Kiểm tra toàn diện 3 luồng:
+Kiểm tra toàn diện 2 luồng cốt lõi:
 1. Test DOCXChunker trên tệp .docx (Heading hierarchy, FAQ, Paragraphs, Lists)
 2. Test PDFChunker trên tệp .pdf (Digital text & OCR scan)
-3. Test ExcelChunker trên tệp .xlsx (Đa sheet, Headers, Linearized rows)
-4. Test LayoutAwareChunker (DLAChunker) điều phối tự động theo đuôi tệp.
-5. Kiểm định Schema toàn vẹn (Data Contract Integrity).
+3. Test LayoutAwareChunker (DLAChunker) điều phối tự động theo đuôi tệp.
+4. Kiểm định Schema toàn vẹn (Data Contract Integrity).
 """
 
 import sys
@@ -24,9 +23,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from rag_banking.config import Config
-from rag_banking.chunking import (
-    DOCXChunker,
-    PDFChunker,
+from rag_banking.chunking.docx_chunker.docx_chunker import DOCXChunker
+from rag_banking.chunking.pdf_chunker.pdf_chunker import PDFChunker
+from rag_banking.chunking.unified_chunk.layout_aware_chunker import (
     LayoutAwareChunker,
     DLAChunker
 )
@@ -67,7 +66,7 @@ class TestDLAChunking(unittest.TestCase):
     def test_02_format_guardrail(self):
         """Kiểm tra cơ chế bảo vệ định dạng: Chỉ hỗ trợ DOCX và PDF."""
         dla = DLAChunker()
-        unsupported_res = dla.chunk_file("test_matrix.xlsx")
+        unsupported_res = dla.chunk_file("test_matrix.csv")
         self.assertEqual(unsupported_res, [], "LayoutAwareChunker phải từ chối các định dạng không phải docx/pdf!")
         print("\n[PASS] Format Guardrail xác thực thành công: Chỉ hỗ trợ DOCX và PDF.")
 
@@ -77,7 +76,7 @@ class TestDLAChunking(unittest.TestCase):
         self.assertTrue(len(pdf_files) > 0, "Không tìm thấy tệp .pdf trong dataset!")
 
         sample_pdf = pdf_files[0]
-        chunker = PDFChunker(max_chunk_size=800, chunk_overlap=100)
+        chunker = PDFChunker(max_chunk_size=800, chunk_overlap=0)
         chunks = chunker.chunk_pdf(sample_pdf, max_pages=2)
 
         self.assertGreater(len(chunks), 0, "PDFChunker không sinh ra chunk nào!")
@@ -112,7 +111,7 @@ class TestDLAChunking(unittest.TestCase):
 
     def test_05_document_structure_chunker_strategies(self):
         """Kiểm tra DocumentStructureChunker với 3 chiến lược: Structure, Hierarchical, Section-Length-Aware."""
-        from rag_banking.chunking import DocumentStructureChunker
+        from rag_banking.chunking.unified_chunk.structure_chunker import DocumentStructureChunker
 
         sample_markdown = (
             "# QUY CHẾ DỊCH VỤ NGÂN HÀNG SỐ\n\n"
@@ -132,24 +131,24 @@ class TestDLAChunking(unittest.TestCase):
         )
 
         chunker = DocumentStructureChunker(chunk_size=300, min_section_size=30, chunk_overlap=20)
-        sub_sections = chunker.parse_markdown_to_structure(sample_markdown, source_name="quy_che_sample.md")
-        self.assertGreater(len(sub_sections), 0, "Không phân tích được Markdown thành sub-sections!")
+        sub_sections = chunker.parse_structure(sample_markdown, source_name="quy_che_sample.docx")
+        self.assertGreater(len(sub_sections), 0, "Không phân tích được văn bản cấu trúc thành sub-sections!")
 
         # 1. Test Strategy 1: Structure-based chunking
-        s1_chunks = chunker.chunk_strategy_1_structure_based(sub_sections, source_name="quy_che_sample.md")
+        s1_chunks = chunker.chunk_strategy_1_structure_based(sub_sections, source_name="quy_che_sample.docx")
         self.assertGreater(len(s1_chunks), 0)
         self.assertEqual(s1_chunks[0]["strategy"], "strategy_1_structure_based")
         has_table = any(c.get("chunk_type") == "table" for c in s1_chunks)
         self.assertTrue(has_table, "Strategy 1 phải tách riêng chunk bảng!")
 
         # 2. Test Strategy 2: Hierarchical chunking (Parent - Child)
-        s2_chunks = chunker.chunk_strategy_2_hierarchical(sub_sections, source_name="quy_che_sample.md")
+        s2_chunks = chunker.chunk_strategy_2_hierarchical(sub_sections, source_name="quy_che_sample.docx")
         self.assertGreater(len(s2_chunks), 0)
         has_child = any(c.get("hierarchy_level") == "child" for c in s2_chunks)
         self.assertTrue(has_child, "Strategy 2 phải sinh ra child chunks!")
 
         # 3. Test Strategy 3: Section-Length-Aware (Anti-Fragmentation)
-        s3_chunks = chunker.chunk_strategy_3_section_length_aware(sub_sections, source_name="quy_che_sample.md")
+        s3_chunks = chunker.chunk_strategy_3_section_length_aware(sub_sections, source_name="quy_che_sample.docx")
         self.assertGreater(len(s3_chunks), 0)
         # Kiểm tra xem Điều 1 và Điều 2 (đều ngắn < 30 từ) có được gộp vào nhau không
         merged_breadcrumb_found = any("&" in c["breadcrumb"] for c in s3_chunks)

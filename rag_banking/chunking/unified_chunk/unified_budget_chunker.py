@@ -1,13 +1,13 @@
 """
 Module Unified Budget Chunker (Bộ Phân đoạn Đa Định dạng Đồng nhất Ngân sách Âm tiết)
 ====================================================================================
-Giải quyết triệt để vấn đề: Chuẩn hóa toàn bộ điều kiện ngắt chunk trên cả .docx,
-.pdf, .md về một hàm đo duy nhất là `count_syllables_vietnamese` (0% Regex).
+Giải quyết triệt để vấn đề: Chuẩn hóa toàn bộ điều kiện ngắt chunk trên cả .docx
+và .pdf về một chuẩn đo độ dài duy nhất là `len(text.split())` (0% Regex).
 
 Cung cấp:
 1. `UnifiedDOCXChunker`: Khắc phục sự lệch đơn vị (800 ký tự vs 120 từ), chuyển sang (min_syllables, max_syllables).
-2. `UnifiedStructureChunker`: Hỗ trợ cả 3 chiến lược cấu trúc kèm Profile C (Parent-Child Roll-up).
-3. `UnifiedBudgetOrchestrator`: Bộ điều phối trung tâm nhận Profile A, B, C và phân đoạn mọi tài liệu.
+2. `UnifiedStructureChunker`: Hỗ trợ cả 3 chiến lược cấu trúc kèm Parent-Child Roll-up.
+3. `UnifiedBudgetOrchestrator`: Bộ điều phối trung tâm phân đoạn tài liệu theo ngân sách chuẩn.
 
 TUÂN THỦ 100% SCHEMA CONTRACT:
 - `chunk_id`, `source`, `chunk_type`, `breadcrumb`, `section_title`, `content`, `word_count`.
@@ -18,40 +18,31 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
 
 import docx
 
 try:
-    from rag_banking.chunking.docx_chunker.docx_chunker import DOCXChunker
     from rag_banking.chunking.unified_chunk.structure_chunker import (
         DocumentElement,
         SubSection,
         DocumentStructureChunker
     )
-    from rag_banking.chunking.unified_chunk.canonical_resolver import (
-        count_words,
-        count_syllables_vietnamese,
-        split_sentences_banking
-    )
+    from rag_banking.chunking.unified_chunk.canonical_resolver import split_sentences_banking
 except (ImportError, ValueError):
-    from ..docx_chunker.docx_chunker import DOCXChunker
     from .structure_chunker import (
         DocumentElement,
         SubSection,
         DocumentStructureChunker
     )
-    from .canonical_resolver import (
-        count_words,
-        count_syllables_vietnamese,
-        split_sentences_banking
-    )
+    from .canonical_resolver import split_sentences_banking
 
 from .syllable_budget_manager import (
-    SyllableProfile,
+    MIN_SYLLABLES,
+    MAX_SYLLABLES,
+    OVERLAP_SYLLABLES,
+    CEILING_SYLLABLES,
     SyllableBudgetManager,
-    PROFILE_B,
-    STANDARD_PROFILES
+    prepend_context_header
 )
 
 logger = logging.getLogger("unified_budget_chunker")
@@ -62,11 +53,26 @@ class UnifiedDOCXChunker:
     Bộ phân đoạn DOCX đồng nhất hoàn toàn theo đơn vị âm tiết (Syllable Budget).
     """
 
-    def __init__(self, profile: SyllableProfile = PROFILE_B):
-        self.profile = profile
-        self.budget_manager = SyllableBudgetManager(profile=profile)
+    def __init__(
+        self,
+        min_syllables: int = MIN_SYLLABLES,
+        max_syllables: int = MAX_SYLLABLES,
+        overlap_syllables: int = OVERLAP_SYLLABLES,
+        ceiling_syllables: int = CEILING_SYLLABLES,
+        **kwargs
+    ):
+        self.min_syllables = min_syllables
+        self.max_syllables = max_syllables
+        self.overlap_syllables = overlap_syllables
+        self.ceiling_syllables = ceiling_syllables
+        self.budget_manager = SyllableBudgetManager(
+            min_syllables=min_syllables,
+            max_syllables=max_syllables,
+            overlap_syllables=overlap_syllables,
+            ceiling_syllables=ceiling_syllables
+        )
 
-    def chunk_docx(self, docx_path: str | Path) -> list[dict[str, Any]]:
+    def chunk_docx(self, docx_path: str | Path) -> list[dict]:
         """
         Đọc và phân đoạn tài liệu DOCX theo ngân sách âm tiết của profile.
         """
@@ -75,7 +81,7 @@ class UnifiedDOCXChunker:
             return []
 
         doc = docx.Document(str(docx_path))
-        chunks: list[dict[str, Any]] = []
+        chunks: list[dict] = []
         chunk_idx = 0
 
         active_headers: dict[int, str] = {}
@@ -95,20 +101,20 @@ class UnifiedDOCXChunker:
             if not full_text:
                 return None
 
-            syl_count = count_syllables_vietnamese(full_text)
+            syl_count = len(full_text.split())
             breadcrumb = get_current_breadcrumb()
             section_title = active_headers.get(max(active_headers.keys(), default=1), doc_title)
 
-            # Nếu văn bản dài quá trần max_syllables: chia nhỏ có overlap âm tiết
-            if syl_count > self.profile.max_syllables:
+            # Nếu văn bản dài quá trần max_syllables: chia nhỏ theo ngân sách âm tiết (0% content overlap)
+            if syl_count > self.max_syllables:
                 sentences = split_sentences_banking(full_text)
                 sub_parts = self.budget_manager.split_sentences_by_syllable_budget(
                     sentences=sentences,
-                    max_syllables=self.profile.max_syllables,
-                    overlap_syllables=self.profile.overlap_syllables
+                    max_syllables=self.max_syllables,
+                    overlap_syllables=self.overlap_syllables
                 )
                 for part in sub_parts:
-                    content_str = f"[Breadcrumbs: {breadcrumb}]\n{part}"
+                    content_str = prepend_context_header(part, breadcrumb, section_title)
                     chunks.append({
                         "chunk_id": f"{docx_path.stem}_docx_c{chunk_idx}",
                         "source": docx_path.name,
@@ -116,13 +122,13 @@ class UnifiedDOCXChunker:
                         "breadcrumb": breadcrumb,
                         "section_title": section_title,
                         "content": content_str,
-                        "word_count": count_words(content_str),
-                        "syllable_count": count_syllables_vietnamese(content_str)
+                        "word_count": len(content_str.split()),
+                        "syllable_count": len(content_str.split())
                     })
                     chunk_idx += 1
                 return None
 
-            content_str = f"[Breadcrumbs: {breadcrumb}]\n{full_text}"
+            content_str = prepend_context_header(full_text, breadcrumb, section_title)
             chunk_obj = {
                 "chunk_id": f"{docx_path.stem}_docx_c{chunk_idx}",
                 "source": docx_path.name,
@@ -130,7 +136,7 @@ class UnifiedDOCXChunker:
                 "breadcrumb": breadcrumb,
                 "section_title": section_title,
                 "content": content_str,
-                "word_count": count_words(content_str),
+                "word_count": len(content_str.split()),
                 "syllable_count": syl_count
             }
             chunk_idx += 1
@@ -143,8 +149,9 @@ class UnifiedDOCXChunker:
             if not text:
                 continue
 
-            style_name = para.style.name.lower() if para.style else ""
-            is_heading = style_name.startswith("heading")
+            style_name = (para.style.name or "").lower() if para.style else ""
+            style_id = (getattr(para.style, "style_id", "") or "").lower() if para.style else ""
+            is_heading = "heading" in style_name or "heading" in style_id or "title" in style_name or "title" in style_id
 
             if is_heading:
                 # Flush buffer trước đó
@@ -168,8 +175,8 @@ class UnifiedDOCXChunker:
 
             text_buffer.append(text)
             # Kiểm tra ngân sách buffer
-            cur_syl = sum(count_syllables_vietnamese(t) for t in text_buffer)
-            if cur_syl >= self.profile.max_syllables:
+            cur_syl = sum(len(t.split()) for t in text_buffer)
+            if cur_syl >= self.max_syllables:
                 emit_text_chunk(text_buffer)
                 text_buffer = []
 
@@ -181,32 +188,41 @@ class UnifiedDOCXChunker:
 
 class UnifiedStructureChunker:
     """
-    Bộ phân đoạn cấu trúc tài liệu áp dụng ngân sách âm tiết và hỗ trợ Profile C (Parent-Child Roll-up).
+    Bộ phân đoạn cấu trúc tài liệu áp dụng ngân sách âm tiết chuẩn cố định (Section-Length-Aware).
     """
 
-    def __init__(self, profile: SyllableProfile = PROFILE_B):
-        self.profile = profile
-        self.budget_manager = SyllableBudgetManager(profile=profile)
+    def __init__(
+        self,
+        min_syllables: int = MIN_SYLLABLES,
+        max_syllables: int = MAX_SYLLABLES,
+        overlap_syllables: int = OVERLAP_SYLLABLES,
+        ceiling_syllables: int = CEILING_SYLLABLES,
+        **kwargs
+    ):
+        self.min_syllables = min_syllables
+        self.max_syllables = max_syllables
+        self.overlap_syllables = overlap_syllables
+        self.ceiling_syllables = ceiling_syllables
+        self.budget_manager = SyllableBudgetManager(
+            min_syllables=min_syllables,
+            max_syllables=max_syllables,
+            overlap_syllables=overlap_syllables,
+            ceiling_syllables=ceiling_syllables
+        )
         self.base_chunker = DocumentStructureChunker(
-            chunk_size=profile.max_syllables,
-            min_section_size=profile.min_syllables,
-            chunk_overlap=profile.overlap_syllables
+            chunk_size=max_syllables,
+            min_section_size=min_syllables,
+            chunk_overlap=overlap_syllables
         )
 
-    def chunk_markdown(self, markdown_text: str, source_name: str) -> list[dict[str, Any]]:
+    def chunk_structure(self, text: str, source_name: str) -> list[dict]:
         """
-        Phân đoạn văn bản Markdown theo Profile được chỉ định.
+        Phân đoạn văn bản cấu trúc phân cấp theo ngân sách âm tiết chuẩn hóa (Section-Length-Aware).
         """
-        sub_sections = self.base_chunker.parse_markdown_to_structure(markdown_text, source_name=source_name)
-
-        # Nếu Profile C: Kích hoạt Hierarchical Parent-Child Roll-up
-        if self.profile.is_hierarchical:
-            return self._chunk_hierarchical_profile_c(sub_sections, source_name)
-
-        # Nếu Profile A hoặc B: Kích hoạt Section-Length-Aware (gộp mục ngắn)
+        sub_sections = self.base_chunker.parse_structure(text, source_name=source_name)
         return self._chunk_section_length_aware(sub_sections, source_name)
 
-    def _chunk_section_length_aware(self, sub_sections: list[SubSection], source_name: str) -> list[dict[str, Any]]:
+    def _chunk_section_length_aware(self, sub_sections: list[SubSection], source_name: str) -> list[dict]:
         """Gộp các mục con quá ngắn < min_syllables để chống phân mảnh."""
         merged_sections: list[SubSection] = []
         buf_sec: SubSection | None = None
@@ -217,8 +233,8 @@ class UnifiedStructureChunker:
                 continue
 
             can_merge = (
-                (buf_sec.total_syllables() < self.profile.min_syllables or sec.total_syllables() < self.profile.min_syllables)
-                and (buf_sec.total_syllables() + sec.total_syllables() <= self.profile.max_syllables)
+                (buf_sec.total_syllables() < self.min_syllables or sec.total_syllables() < self.min_syllables)
+                and (buf_sec.total_syllables() + sec.total_syllables() <= self.max_syllables)
             )
 
             if can_merge:
@@ -233,7 +249,7 @@ class UnifiedStructureChunker:
             merged_sections.append(buf_sec)
 
         # Sinh chunk chuẩn hóa
-        chunks: list[dict[str, Any]] = []
+        chunks: list[dict] = []
         chunk_idx = 0
 
         for sec in merged_sections:
@@ -245,117 +261,53 @@ class UnifiedStructureChunker:
             sentences = split_sentences_banking(full_text)
             grouped_texts = self.budget_manager.split_sentences_by_syllable_budget(
                 sentences=sentences,
-                max_syllables=self.profile.max_syllables,
-                overlap_syllables=self.profile.overlap_syllables
+                max_syllables=self.max_syllables,
+                overlap_syllables=self.overlap_syllables
             )
 
             for g_txt in grouped_texts:
-                content_str = f"[Breadcrumbs: {sec.breadcrumb}]\n{g_txt}"
+                content_str = prepend_context_header(g_txt, sec.breadcrumb, sec.title)
                 chunks.append({
                     "chunk_id": f"{Path(source_name).stem}_s_{chunk_idx}",
                     "source": source_name,
-                    "chunk_type": "markdown_section",
+                    "chunk_type": "structure_section",
                     "breadcrumb": sec.breadcrumb,
                     "section_title": sec.title,
                     "content": content_str,
-                    "word_count": count_words(content_str),
-                    "syllable_count": count_syllables_vietnamese(content_str)
+                    "word_count": len(content_str.split()),
+                    "syllable_count": len(content_str.split())
                 })
                 chunk_idx += 1
 
         return chunks
 
-    def _chunk_hierarchical_profile_c(self, sub_sections: list[SubSection], source_name: str) -> list[dict[str, Any]]:
-        """
-        Chiến lược Profile C:
-        - Chunk con 200 âm tiết phục vụ High-Precision Retrieval.
-        - Chunk cha 700 âm tiết phục vụ Roll-up ngữ cảnh.
-        - Liên kết chặt chẽ qua parent_id.
-        """
-        all_chunks: list[dict[str, Any]] = []
-        parent_idx = 0
-        child_idx = 0
-
-        for sec in sub_sections:
-            parent_id = f"{Path(source_name).stem}_parent_{parent_idx}"
-            full_parent_text = "\n".join(e.content for e in sec.elements if e.content).strip()
-            if not full_parent_text:
-                continue
-
-            # Cắt các child chunks (tối đa 200 âm tiết)
-            sentences = split_sentences_banking(full_parent_text)
-            child_text_parts = self.budget_manager.split_sentences_by_syllable_budget(
-                sentences=sentences,
-                max_syllables=self.profile.max_syllables,
-                overlap_syllables=self.profile.overlap_syllables
-            )
-
-            child_ids: list[str] = []
-            for c_txt in child_text_parts:
-                c_id = f"{Path(source_name).stem}_child_{child_idx}"
-                child_ids.append(c_id)
-                content_str = f"[Breadcrumbs: {sec.breadcrumb}]\n{c_txt}"
-                all_chunks.append({
-                    "chunk_id": c_id,
-                    "source": source_name,
-                    "chunk_type": "child_chunk",
-                    "breadcrumb": sec.breadcrumb,
-                    "section_title": sec.title,
-                    "content": content_str,
-                    "word_count": count_words(content_str),
-                    "syllable_count": count_syllables_vietnamese(content_str),
-                    "parent_id": parent_id
-                })
-                child_idx += 1
-
-            # Tạo parent chunk nếu có nhiều hơn 1 child chunk hoặc đoạn đủ lớn
-            parent_syl = count_syllables_vietnamese(full_parent_text)
-            if len(child_ids) > 1 or parent_syl >= self.profile.parent_min_syllables:
-                parent_content = f"[{sec.breadcrumb} - TỔNG QUAN PHÂN MỤC]\n{full_parent_text}"
-                all_chunks.append({
-                    "chunk_id": parent_id,
-                    "source": source_name,
-                    "chunk_type": "parent_chunk",
-                    "breadcrumb": sec.breadcrumb,
-                    "section_title": sec.title,
-                    "content": parent_content,
-                    "word_count": count_words(parent_content),
-                    "syllable_count": parent_syl,
-                    "child_chunk_ids": child_ids
-                })
-                parent_idx += 1
-
-        return all_chunks
-
 
 class UnifiedBudgetOrchestrator:
     """
-    Bộ phân đoạn hợp nhất hỗ trợ cả DOCX, PDF và Markdown theo Profile âm tiết chỉ định.
+    Bộ phân đoạn hợp nhất hỗ trợ DOCX và PDF theo ngân sách âm tiết chuẩn.
     """
 
-    def __init__(self, profile: SyllableProfile = PROFILE_B):
-        self.profile = profile
-        self.docx_chunker = UnifiedDOCXChunker(profile=profile)
-        self.structure_chunker = UnifiedStructureChunker(profile=profile)
+    def __init__(self, **kwargs):
+        self.docx_chunker = UnifiedDOCXChunker(**kwargs)
+        try:
+            from rag_banking.chunking.pdf_chunker.pdf_chunker import PDFChunker
+            self.pdf_chunker = PDFChunker(**kwargs)
+        except Exception as e:
+            logger.warning(f"[UnifiedBudgetOrchestrator] Không thể khởi tạo PDFChunker: {e}")
+            self.pdf_chunker = None
 
-    def set_profile(self, profile: SyllableProfile | str) -> None:
-        """Đổi profile âm tiết hoạt động."""
-        if isinstance(profile, str):
-            profile = STANDARD_PROFILES.get(profile.lower(), PROFILE_B)
-        self.profile = profile
-        self.docx_chunker = UnifiedDOCXChunker(profile=profile)
-        self.structure_chunker = UnifiedStructureChunker(profile=profile)
-
-    def chunk_file(self, file_path: str | Path) -> list[dict[str, Any]]:
-        """Phân đoạn tệp (.docx, .md, .txt) theo profile âm tiết chuẩn hóa."""
+    def chunk_file(self, file_path: str | Path, **kwargs) -> list[dict]:
+        """Phân đoạn tệp (.docx hoặc .pdf) theo ngân sách âm tiết chuẩn hóa."""
         p = Path(file_path)
         suffix = p.suffix.lower()
 
         if suffix == ".docx":
             return self.docx_chunker.chunk_docx(p)
-        elif suffix in (".md", ".txt"):
-            with open(p, "r", encoding="utf-8") as f:
-                return self.structure_chunker.chunk_markdown(f.read(), source_name=p.name)
-        else:
-            logger.warning(f"[UnifiedBudgetOrchestrator] Định dạng {suffix} chưa hỗ trợ trong nhánh exp4.")
-            return []
+        elif suffix == ".pdf":
+            if self.pdf_chunker is not None:
+                return self.pdf_chunker.chunk_pdf(p, **kwargs)
+            else:
+                logger.warning(f"[UnifiedBudgetOrchestrator] PDFChunker chưa sẵn sàng cho tệp {p.name}")
+                return []
+        logger.warning(f"[UnifiedBudgetOrchestrator] Bỏ qua định dạng chưa hỗ trợ: {suffix} ({p.name})")
+        return []

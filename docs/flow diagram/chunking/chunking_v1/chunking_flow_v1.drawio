@@ -22,7 +22,7 @@
           <mxGeometry x="85" y="150" width="80" height="42" as="geometry"/>
         </mxCell>
 
-        <mxCell id="node_input_docs" value="&lt;b&gt;Kho Tài Liệu Ngân Hàng Mục Tiêu&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;'&gt;&amp;bull; Word &lt;b&gt;.docx&lt;/b&gt; (Quy chế, Hướng dẫn)&lt;br/&gt;&amp;bull; PDF &lt;b&gt;.pdf&lt;/b&gt; (BCTC số, Bản scan mộc đỏ)&lt;br/&gt;&amp;bull; Excel &lt;b&gt;.xlsx&lt;/b&gt; (Biểu phí, lãi suất) | Markdown &lt;b&gt;.md&lt;/b&gt;&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#FEF3C7;strokeColor=#D97706;fontColor=#92400E;fontSize=11;shadow=1;align=center;">
+        <mxCell id="node_input_docs" value="&lt;b&gt;Kho Tài Liệu Ngân Hàng Mục Tiêu&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;'&gt;&amp;bull; Word &lt;b&gt;.docx&lt;/b&gt; (Quy chế, Hướng dẫn)&lt;br/&gt;&amp;bull; PDF &lt;b&gt;.pdf&lt;/b&gt; (BCTC số, Bản scan mộc đỏ)&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#FEF3C7;strokeColor=#D97706;fontColor=#92400E;fontSize=11;shadow=1;align=center;">
           <mxGeometry x="190" y="140" width="280" height="62" as="geometry"/>
         </mxCell>
 
@@ -30,11 +30,11 @@
           <mxGeometry x="495" y="136" width="265" height="70" as="geometry"/>
         </mxCell>
 
-        <mxCell id="node_router" value="&lt;b&gt;LayoutAwareChunker (DLA Engine Router)&lt;/b&gt;&lt;br/&gt;&lt;span style='font-family:Consolas,monospace;font-size:10px;color:#047857;background:#D1FAE5;padding:1px 4px;border-radius:3px;'&gt;📄 unified_chunk/layout_aware_chunker.py&lt;/span&gt;&lt;br/&gt;&lt;span style='font-size:9.5px;color:#475569;'&gt;Định tuyến theo đuôi tệp: .docx &amp;rarr; DOCX | .pdf &amp;rarr; PDF | .xlsx &amp;rarr; Excel&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#ECFDF5;strokeColor=#10B981;fontColor=#065F46;fontSize=11;fontStyle=1;shadow=1;align=center;">
+        <mxCell id="node_router" value="&lt;b&gt;LayoutAwareChunker (DLA Engine Router)&lt;/b&gt;&lt;br/&gt;&lt;span style='font-family:Consolas,monospace;font-size:10px;color:#047857;background:#D1FAE5;padding:1px 4px;border-radius:3px;'&gt;📄 unified_chunk/layout_aware_chunker.py&lt;/span&gt;&lt;br/&gt;&lt;span style='font-size:9.5px;color:#475569;'&gt;Định tuyến theo đuôi tệp: .docx &amp;rarr; DOCX | .pdf &amp;rarr; PDF&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#ECFDF5;strokeColor=#10B981;fontColor=#065F46;fontSize=11;fontStyle=1;shadow=1;align=center;">
           <mxGeometry x="785" y="136" width="280" height="70" as="geometry"/>
         </mxCell>
 
-        <mxCell id="node_config_badge" value="&lt;b&gt;Cấu hình Chunking Chuẩn:&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;'&gt;&amp;bull; &lt;b&gt;max_chunk_size&lt;/b&gt; = 800 ký tự&lt;br/&gt;&amp;bull; &lt;b&gt;chunk_overlap&lt;/b&gt; = 100 ký tự&lt;br/&gt;&amp;bull; &lt;b&gt;min_section_size&lt;/b&gt; = 120 từ&lt;br/&gt;&amp;bull; &lt;b&gt;excel_rows_per_chunk&lt;/b&gt; = 3 hàng&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=6;fillColor=#F1F5F9;strokeColor=#94A3B8;fontColor=#334155;fontSize=10;shadow=0;align=left;spacingLeft=10;">
+        <mxCell id="node_config_badge" value="&lt;b&gt;Cấu hình Chunking Chuẩn:&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:10px;'&gt;&amp;bull; &lt;b&gt;max_chunk_size&lt;/b&gt; = 800 ký tự&lt;br/&gt;&amp;bull; &lt;b&gt;chunk_overlap&lt;/b&gt; = 100 ký tự&lt;br/&gt;&amp;bull; &lt;b&gt;min_section_size&lt;/b&gt; = 120 từ&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=6;fillColor=#F1F5F9;strokeColor=#94A3B8;fontColor=#334155;fontSize=10;shadow=0;align=left;spacingLeft=10;">
           <mxGeometry x="1090" y="136" width="245" height="70" as="geometry"/>
         </mxCell>
 
@@ -276,7 +276,7 @@
           <mxGeometry x="60" y="1015" width="1300" height="350" as="geometry"/>
         </mxCell>
 
-        <mxCell id="unify_excel_box" value="&lt;b&gt;Excel Chunker (Biểu Phí, Lãi Suất .xlsx)&lt;/b&gt;&lt;br/&gt;&lt;span style='font-family:Consolas,monospace;font-size:9.5px;color:#047857;background:#D1FAE5;padding:1px 3px;border-radius:3px;'&gt;📄 unified_chunk/excel_chunker.py&lt;/span&gt;&lt;br/&gt;&lt;span style='font-size:9.5px;'&gt;Tuyến tính hóa hàng theo batch, gắn ref = file.xlsx&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#ECFDF5;strokeColor=#10B981;fontColor=#065F46;fontSize=10;shadow=1;align=center;">
+        <mxCell id="unify_excel_box" value="&lt;b&gt;Excel &amp;amp; Markdown Chunker (Pha Cuối)&lt;/b&gt;&lt;br/&gt;&lt;span style='font-size:9.5px;color:#94A3B8;'&gt;Tạm thời lược bỏ theo chỉ đạo kiến trúc, sẽ hoàn thiện ở pha cuối&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=8;fillColor=#F8FAFC;strokeColor=#E2E8F0;fontColor=#94A3B8;fontSize=10;shadow=0;align=center;">
           <mxGeometry x="90" y="1055" width="370" height="52" as="geometry"/>
         </mxCell>
 
@@ -292,7 +292,7 @@
           <mxGeometry x="90" y="1125" width="400" height="90" as="geometry"/>
         </mxCell>
 
-        <mxCell id="standard_schema" value="&lt;b&gt;CẤU TRÚC SCHEMA CHUẨN MỚI CỦA MỖI CHUNK (KHÔNG CÓ FORMAT, REF LÀ TÊN TÀI LIỆU):&lt;/b&gt;&lt;br/&gt;&lt;span style='font-family:Consolas,monospace;font-size:10px;color:#0F172A;line-height:1.6;'&gt;{&lt;br/&gt;  &quot;chunk_id&quot;: &quot;Quy_che_eKYC_docx_c0&quot;,&lt;br/&gt;  &quot;source&quot;: &quot;Quy_che_eKYC.docx&quot;,&lt;br/&gt;  &quot;ref&quot;: &quot;Quy_che_eKYC.docx&quot;,  &lt;i style='color:#059669;'&gt;// Tên tài liệu chứa chunk&lt;/i&gt;&lt;br/&gt;  &quot;breadcrumb&quot;: &quot;Quy chế eKYC &amp;gt; Chương II &amp;gt; Điều 12 &amp;gt; Hạn mức&quot;,&lt;br/&gt;  &quot;chunk_type&quot;: &quot;docx_text&quot; | &quot;pdf_text&quot; | &quot;pdf_ocr_scan&quot; | &quot;excel_table&quot;,&lt;br/&gt;  &quot;content&quot;: &quot;[Breadcrumbs: ...] \n [Ref: Quy_che_eKYC.docx] \n Nội dung văn bản...&quot;,&lt;br/&gt;  &quot;word_count&quot;: 245,  &quot;char_length&quot;: 1280,  &quot;syllable_count&quot;: 310&lt;br/&gt;}&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=6;fillColor=#F8FAFC;strokeColor=#64748B;fontColor=#0F172A;fontSize=10;shadow=1;align=left;spacingLeft=12;">
+        <mxCell id="standard_schema" value="&lt;b&gt;CẤU TRÚC SCHEMA CHUẨN MỚI CỦA MỖI CHUNK (KHÔNG CÓ FORMAT, REF LÀ TÊN TÀI LIỆU):&lt;/b&gt;&lt;br/&gt;&lt;span style='font-family:Consolas,monospace;font-size:10px;color:#0F172A;line-height:1.6;'&gt;{&lt;br/&gt;  &quot;chunk_id&quot;: &quot;Quy_che_eKYC_docx_c0&quot;,&lt;br/&gt;  &quot;source&quot;: &quot;Quy_che_eKYC.docx&quot;,&lt;br/&gt;  &quot;ref&quot;: &quot;Quy_che_eKYC.docx&quot;,  &lt;i style='color:#059669;'&gt;// Tên tài liệu chứa chunk&lt;/i&gt;&lt;br/&gt;  &quot;breadcrumb&quot;: &quot;Quy chế eKYC &amp;gt; Chương II &amp;gt; Điều 12 &amp;gt; Hạn mức&quot;,&lt;br/&gt;  &quot;chunk_type&quot;: &quot;docx_text&quot; | &quot;docx_table&quot; | &quot;pdf_text&quot; | &quot;pdf_table&quot; | &quot;pdf_ocr_scan&quot;,&lt;br/&gt;  &quot;content&quot;: &quot;[Breadcrumbs: ...] \n [Ref: Quy_che_eKYC.docx] \n Nội dung văn bản...&quot;,&lt;br/&gt;  &quot;word_count&quot;: 245,  &quot;char_length&quot;: 1280,  &quot;syllable_count&quot;: 310&lt;br/&gt;}&lt;/span&gt;" vertex="1" parent="1" style="html=1;whiteSpace=wrap;rounded=1;arcSize=6;fillColor=#F8FAFC;strokeColor=#64748B;fontColor=#0F172A;fontSize=10;shadow=1;align=left;spacingLeft=12;">
           <mxGeometry x="510" y="1125" width="825" height="150" as="geometry"/>
         </mxCell>
 

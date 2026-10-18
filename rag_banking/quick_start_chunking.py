@@ -2,7 +2,7 @@
 HƯỚNG DẪN SỬ DỤNG NHANH BỘ CHUNKING (QUICK START)
 AI Banking Assistant - Phân hệ Phân đoạn Tài liệu Nhận thức Bố cục (DLA)
 
-Ví dụ mẫu siêu đơn giản, siêu dễ hiểu cho cả 3 luồng: DOCX, PDF, và EXCEL.
+Ví dụ mẫu siêu đơn giản, siêu dễ hiểu cho 2 luồng cốt lõi: DOCX và PDF.
 """
 
 import sys
@@ -20,17 +20,16 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from rag_banking.chunking import LayoutAwareChunker
+from rag_banking.chunking.unified_chunk.layout_aware_chunker import LayoutAwareChunker
 
 def demo_quick_start():
     # 1. Khởi tạo bộ phân đoạn hợp nhất
     chunker = LayoutAwareChunker(
         max_chunk_size=500,     # Ngân sách độ dài tối ưu (~350-500 từ)
-        chunk_overlap=50,       # Độ gối đầu giữa các đoạn liên tiếp
-        excel_rows_per_chunk=3  # Số hàng Excel gộp trong 1 chunk
+        chunk_overlap=0         # Không gối đầu nội dung (0% Content Overlap Law)
     )
 
-    print("=== DEMO PHÂN ĐOẠN ĐA ĐỊNH DẠNG (DOCX, PDF, EXCEL, MD) ===\n")
+    print("=== DEMO PHÂN ĐOẠN ĐA ĐỊNH DẠNG (DOCX, PDF) ===\n")
 
     # 2. Phân đoạn tệp Word DOCX
     docx_file = Path("dataset/chunking_dataset/docx/vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.docx")
@@ -48,16 +47,8 @@ def demo_quick_start():
         print(f"    -> Sinh ra: {len(pdf_chunks)} chunks")
         print(f"    -> Mẫu chunk đầu tiên: {pdf_chunks[0]['content'][:120]}...\n")
 
-    # 4. Phân đoạn tệp Bảng biểu Excel .xlsx
-    excel_file = Path("dataset/chunking_dataset/excel/vcb_bctc_hop_nhat_bang_can_doi_va_kqkd_2021_2024.xlsx")
-    if excel_file.exists():
-        excel_chunks = chunker.chunk_excel(excel_file)
-        print(f"[3] Excel: {excel_file.name}")
-        print(f"    -> Sinh ra: {len(excel_chunks)} chunks")
-        print(f"    -> Mẫu chunk đầu tiên: {excel_chunks[0]['content'][:120]}...\n")
-
-    # 5. Phân đoạn tổng quát bằng 1 dòng lệnh duy nhất cho bất kỳ tệp nào:
-    # chunker.chunk_file("path/to/any_document.docx/.pdf/.xlsx/.md")
+    # 4. Phân đoạn tổng quát bằng 1 dòng lệnh duy nhất cho bất kỳ tệp nào:
+    # chunks = chunker.chunk_file("path/to/any_document.docx")
 
 if __name__ == "__main__":
     demo_quick_start()

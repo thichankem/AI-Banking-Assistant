@@ -1,10 +1,8 @@
 """
 Kịch bản Thực thi Chunking Toàn diện Dataset (AI Banking Assistant)
-Áp dụng thuật toán DLA (Document Layout Analysis) cho cả 3 luồng:
+Áp dụng thuật toán DLA (Document Layout Analysis) cho 2 luồng cốt lõi:
 1. DOCX: 50 tệp (.docx) -> Thứ bậc Heading H1-H4, Tables, Bullets, Lists, Paragraphs
 2. PDF:  50 tệp (.pdf)  -> Văn bản số Digital + Tự động Tesseract OCR v5 tiếng Việt cho bản scan
-3. Excel: 10 tệp (.xlsx) -> Đa sheet, Header detection, Linearized Table Rows
-(Kèm 50 tệp Markdown .md)
 
 Cách chạy:
     python rag_banking/run_chunking_dataset.py
@@ -29,7 +27,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from rag_banking.config import Config
-from rag_banking.chunking import DLAChunker
+from rag_banking.chunking.unified_chunk.layout_aware_chunker import DLAChunker
 
 
 def _build_preview_markdown(title: str, description: str, sample_chunks: list) -> str:
@@ -64,7 +62,7 @@ def run_full_dataset_chunking(max_pages_per_pdf: int = 3):
     """
     print("\n" + "=" * 80)
     print("      CHUNKING TOÀN BỘ DATASET NGÂN HÀNG THEO THUẬT TOÁN DLA")
-    print("      (HỖ TRỢ ĐẦY ĐỦ 3 LUỒNG: DOCX, PDF VÀ EXCEL + MARKDOWN)")
+    print("      (HỖ TRỢ ĐẦY ĐỦ 2 LUỒNG CỐT LÕI: DOCX VÀ PDF)")
     print("=" * 80)
 
     config = Config()
@@ -108,20 +106,14 @@ def run_full_dataset_chunking(max_pages_per_pdf: int = 3):
     # 1. Thu thập danh sách các tệp nguồn
     docx_dir = dataset_dir / "docx"
     pdf_dir = dataset_dir / "pdf"
-    excel_dir = dataset_dir / "excel"
-    md_dir = dataset_dir / "md"
 
     docx_files = sorted(list(docx_dir.glob("*.docx"))) if docx_dir.exists() else []
     pdf_files = sorted(list(pdf_dir.glob("*.pdf"))) if pdf_dir.exists() else []
-    excel_files = sorted(list(excel_dir.glob("*.xlsx"))) if excel_dir.exists() else []
-    md_files = sorted(list(md_dir.glob("*.md"))) if md_dir.exists() else []
 
-    print("[1/5] Thống kê tệp đầu vào:")
+    print("[1/3] Thống kê tệp đầu vào:")
     print(f"  - DOCX files (.docx) : {len(docx_files):>3} tệp")
     print(f"  - PDF files (.pdf)   : {len(pdf_files):>3} tệp")
-    print(f"  - Excel files (.xlsx): {len(excel_files):>3} tệp")
-    print(f"  - MD files (.md)     : {len(md_files):>3} tệp")
-    print(f"  - Tổng cộng          : {len(docx_files) + len(pdf_files) + len(excel_files) + len(md_files):>3} tệp\n")
+    print(f"  - Tổng cộng          : {len(docx_files) + len(pdf_files):>3} tệp\n")
 
     all_chunks = []
     chunks_by_format = {
@@ -156,7 +148,10 @@ def run_full_dataset_chunking(max_pages_per_pdf: int = 3):
         start_pdf = time.time()
         for idx, f in enumerate(pdf_files, start=1):
             try:
-                chunks = chunker.chunk_pdf(f, max_pages=max_pages_per_pdf)
+                # Báo cáo tài chính BCTC đồ sộ: tối đa max_pages_per_pdf (3 trang). Các văn bản điều khoản, hợp đồng, biểu phí, slide: tối đa 15 trang!
+                is_bctc = "_bctc_" in f.name.lower()
+                limit = max_pages_per_pdf if is_bctc else 15
+                chunks = chunker.chunk_pdf(f, max_pages=limit)
                 chunks_by_format["pdf"].extend(chunks)
                 if idx % 10 == 0 or idx == len(pdf_files):
                     print(f"    ... Đã xử lý {idx}/{len(pdf_files)} PDFs ({len(chunks_by_format['pdf'])} chunks tích lũy)")
@@ -171,8 +166,6 @@ def run_full_dataset_chunking(max_pages_per_pdf: int = 3):
             "speed_chunks_per_sec": round(len(chunks_by_format["pdf"]) / max(time_pdf, 0.001), 1)
         }
         print(f"    [Xong PDF] {len(chunks_by_format['pdf'])} chunks trong {time_pdf:.2f}s\n")
-
-    # Lưu ý: Luồng Excel và Markdown tạm thời tắt theo chỉ đạo tối ưu hóa 2 luồng cốt lõi PDF & DOCX.
 
     total_time = time.time() - start_total_time
 
@@ -299,14 +292,12 @@ def run_full_dataset_chunking(max_pages_per_pdf: int = 3):
             fmt_p = output_dir / "chunks_by_format" / f"{fmt_name}_chunks.json"
             with open(fmt_p, "w", encoding="utf-8") as f:
                 json.dump(c_list, f, ensure_ascii=False, indent=2)
-    print(f"  [3/8] Đã phân loại vào chunks_by_format/ (docx, excel, pdf, md)")
+    print(f"  [3/8] Đã phân loại vào chunks_by_format/ (docx, pdf)")
 
     # 4. samples_preview
     sample_docx = chunks_by_format.get("docx", [])[:10]
-    sample_excel = chunks_by_format.get("excel", [])[:10]
     sample_pdf_digital = [c for c in chunks_by_format.get("pdf", []) if c.get("chunk_type") == "pdf_text"][:10]
     sample_pdf_ocr = [c for c in chunks_by_format.get("pdf", []) if c.get("chunk_type") == "pdf_ocr_scan"][:10]
-    sample_md = chunks_by_format.get("md", [])[:10]
 
     if sample_docx:
         with open(output_dir / "samples_preview" / "preview_docx_chunks.md", "w", encoding="utf-8") as f:
@@ -314,14 +305,6 @@ def run_full_dataset_chunking(max_pages_per_pdf: int = 3):
                 "MẪU CHUNKING TỪ ĐỊNH DẠNG MICROSOFT WORD (.docx)",
                 "Minh họa DOCXChunker phân cấp Heading H1-H4, nhóm mục hỏi đáp FAQ và trích xuất bảng biểu.",
                 sample_docx
-            ))
-
-    if sample_excel:
-        with open(output_dir / "samples_preview" / "preview_excel_chunks.md", "w", encoding="utf-8") as f:
-            f.write(_build_preview_markdown(
-                "MẪU CHUNKING TỪ ĐỊNH DẠNG EXCEL (.xlsx)",
-                "Minh họa ExcelChunker đọc đa sheet, tự phát hiện Header cột và làm phẳng hàng dữ liệu.",
-                sample_excel
             ))
 
     if sample_pdf_digital:
@@ -339,14 +322,6 @@ def run_full_dataset_chunking(max_pages_per_pdf: int = 3):
                 "Minh họa tự động nhận diện trang scan/ảnh và kích hoạt Tesseract OCR v5 tiếng Việt offline.",
                 sample_pdf_ocr
             ))
-
-    if sample_md:
-        with open(output_dir / "samples_preview" / "preview_markdown_chunks.md", "w", encoding="utf-8") as f:
-            f.write(_build_preview_markdown(
-                "MẪU CHUNKING TỪ ĐỊNH DẠNG MARKDOWN (.md)",
-                "Minh họa trích xuất phân cấp Header (H1 > H2 > H3), bảng biểu Markdown và danh sách mục.",
-                sample_md
-            ))
     print(f"  [4/8] Đã tạo các tệp Markdown trực quan kiểm tra mẫu trong samples_preview/")
 
     # 5. chunking_summary_stats.json
@@ -359,7 +334,7 @@ def run_full_dataset_chunking(max_pages_per_pdf: int = 3):
     readme_path = output_dir / "README.md"
     with open(readme_path, "w", encoding="utf-8") as f:
         f.write(f"""# KẾT QUẢ PHÂN ĐOẠN DATASET THEO GIẢI THUẬT DLA (OUTPUT DATASET)
-## Hệ thống AI Banking Assistant - Phân hệ Layout-Aware Chunking (DOCX + PDF + EXCEL)
+## Hệ thống AI Banking Assistant - Phân hệ Layout-Aware Chunking (DOCX + PDF)
 
 > [!NOTE]
 > Kết quả kiểm thử tự động thực hiện trên toàn bộ dataset ngân hàng Vietcombank.
@@ -372,8 +347,6 @@ def run_full_dataset_chunking(max_pages_per_pdf: int = 3):
 - **Tổng số tệp nguồn đã xử lý**: **{summary_report['total_files_processed']} tệp**
   - 📘 **Word DOCX (.docx)**: {format_stats.get('docx', {}).get('files_count', 0)} tệp -> **{format_stats.get('docx', {}).get('chunks_count', 0):,} chunks** ({format_stats.get('docx', {}).get('duration_seconds', 0)}s)
   - 📑 **PDF (.pdf)**: {format_stats.get('pdf', {}).get('files_count', 0)} tệp -> **{format_stats.get('pdf', {}).get('chunks_count', 0):,} chunks** ({format_stats.get('pdf', {}).get('duration_seconds', 0)}s)
-  - 📊 **Excel (.xlsx)**: {format_stats.get('excel', {}).get('files_count', 0)} tệp -> **{format_stats.get('excel', {}).get('chunks_count', 0):,} chunks** ({format_stats.get('excel', {}).get('duration_seconds', 0)}s)
-  - 📝 **Markdown (.md)**: {format_stats.get('markdown', {}).get('files_count', 0)} tệp -> **{format_stats.get('markdown', {}).get('chunks_count', 0):,} chunks** ({format_stats.get('markdown', {}).get('duration_seconds', 0)}s)
 - **Tổng số chunks trích xuất**: **{total_chunks:,} chunks**
 - **Tổng thời gian xử lý**: **{total_time:.2f} giây**
 - **Tốc độ trung bình**: **{summary_report['overall_speed_chunks_per_sec']} chunks/giây**
@@ -392,12 +365,9 @@ output_dataset/
 ├── README.md                            # Hướng dẫn đối soát
 ├── chunks_by_format/                    # Chia tách theo từng luồng
 │   ├── docx_chunks.json                 # Chunks từ tệp Word .docx
-│   ├── pdf_chunks.json                  # Chunks từ tệp PDF (Digital & Scan OCR)
-│   ├── excel_chunks.json                # Chunks từ tệp Excel .xlsx
-│   └── md_chunks.json                   # Chunks từ tệp Markdown
+│   └── pdf_chunks.json                  # Chunks từ tệp PDF (Digital & Scan OCR)
 └── samples_preview/                     # Các file xem trước trực quan
     ├── preview_docx_chunks.md
-    ├── preview_excel_chunks.md
     ├── preview_pdf_digital_chunks.md
     └── preview_pdf_ocr_scan_chunks.md
 ```

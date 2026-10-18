@@ -1,7 +1,7 @@
 """
 Chương trình Điều phối Toàn trình: Kiểm thử Chunking, Embedding và Auto-Tuning
 Thực hiện trọn vẹn 4 giai đoạn theo yêu cầu:
-1. GIAI ĐOẠN 1: Kiểm thử Chunking toàn bộ dataset (100% 50 file MD, 100% 10 file Excel, 100% 50 file PDF)
+1. GIAI ĐOẠN 1: Kiểm thử Chunking toàn bộ dataset (100% tệp DOCX và PDF)
 2. GIAI ĐOẠN 2: Kiểm thử và đo lường thông lượng Embedding cho toàn bộ chunks (Batch size tuning 16-128)
 3. GIAI ĐOẠN 3: Tinh chỉnh tự động siêu tham số (Auto-Tuner BM25 + RRF + Hybrid Weights) trên 20 câu hỏi ground-truth
 4. GIAI ĐOẠN 4: Chạy kiểm thử toàn trình End-to-End RAG với bộ tham số tối ưu và ghi vết bằng Bird Tracer 🦜

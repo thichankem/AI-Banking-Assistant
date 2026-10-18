@@ -34,9 +34,19 @@ def _find_default_tesseract_cmd() -> str:
 class OCRExtractor:
     """Trình trích xuất OCR cục bộ cho tài liệu tiếng Việt với Tesseract OCR v5 và OpenCV."""
 
-    def __init__(self, tesseract_cmd: str | None = None, lang: str = "vie+eng"):
+    def __init__(
+        self,
+        tesseract_cmd: str | None = None,
+        lang: str = "vie+eng",
+        remove_red_stamps: bool = False,
+        config: object | None = None
+    ):
         self.tesseract_cmd = tesseract_cmd or _find_default_tesseract_cmd()
         self.lang = lang
+        self.remove_red_stamps = (
+            remove_red_stamps if remove_red_stamps is not None
+            else (config.remove_red_stamps if config else False)
+        )
         pytesseract.pytesseract.tesseract_cmd = self.tesseract_cmd
 
     def is_available(self) -> bool:
@@ -51,8 +61,13 @@ class OCRExtractor:
         """Tên engine OCR đang hoạt động."""
         return "Tesseract OCR v5"
 
-    def filter_red_stamp(self, image_np: np.ndarray) -> np.ndarray:
-        """Lọc bớt màu đỏ của con dấu mộc để làm rõ nét chữ đen bên dưới."""
+    def filter_red_stamp(self, image_np: np.ndarray, force: bool = False) -> np.ndarray:
+        """
+        Lọc bớt màu đỏ của con dấu mộc để làm rõ nét chữ đen bên dưới.
+        Chỉ thực hiện khi cờ remove_red_stamps được bật hoặc force=True.
+        """
+        if not self.remove_red_stamps and not force:
+            return image_np
         if image_np is None or len(image_np.shape) == 2:
             return image_np
 
@@ -132,7 +147,8 @@ class OCRExtractor:
         if img_np is None:
             return "", 0.0
 
-        img_np = self.filter_red_stamp(img_np)
+        if self.remove_red_stamps:
+            img_np = self.filter_red_stamp(img_np, force=True)
         try:
             data = pytesseract.image_to_data(img_np, lang=self.lang, output_type=pytesseract.Output.DICT)
             words = []
@@ -155,7 +171,7 @@ class OCRExtractor:
         self,
         image_input: str | Path | np.ndarray,
         apply_deskew: bool = True,
-        apply_red_stamp_filter: bool = True
+        apply_red_stamp_filter: bool | None = None
     ) -> list[dict]:
         """Trích xuất từng dòng kèm tọa độ bounding box và sắp xếp theo thứ tự đọc."""
         if isinstance(image_input, (str, Path)):
@@ -171,8 +187,9 @@ class OCRExtractor:
 
         if apply_deskew:
             img_np = self.deskew_image(img_np)
-        if apply_red_stamp_filter:
-            img_np = self.filter_red_stamp(img_np)
+        do_filter_stamp = apply_red_stamp_filter if apply_red_stamp_filter is not None else self.remove_red_stamps
+        if do_filter_stamp:
+            img_np = self.filter_red_stamp(img_np, force=True)
 
         page_h, page_w = img_np.shape[:2]
 
@@ -276,3 +293,17 @@ class OCRExtractor:
         if img_np is not None:
             return self.extract_text_and_confidence(img_np)
         return "", 0.0
+
+    def extract_text_from_page(self, page: object, dpi: int = 150) -> str:
+        """Render và trích xuất văn bản từ một đối tượng PyMuPDF Page."""
+        try:
+            pix = page.get_pixmap(dpi=dpi)
+            img = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, pix.n))
+            if pix.n >= 3:
+                img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR if pix.n == 3 else cv2.COLOR_RGBA2BGR)
+            else:
+                img_bgr = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+            text, _ = self.extract_text_and_confidence(img_bgr)
+            return text.strip()
+        except Exception as e:
+            return ""

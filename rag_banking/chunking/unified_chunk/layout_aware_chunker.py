@@ -1,186 +1,85 @@
 """
-Module Layout-Aware Unified Chunker (DLA Chunker)
-==================================================
-Bộ phân đoạn hợp nhất nhận thức bố cục tài liệu ngân hàng chuyên biệt DOCX & PDF:
-1. DOCX (.docx)  -> DOCXChunker (Heading AST, Table Atomicity, Section-Length-Aware Anti-Fragmentation)
-2. PDF (.pdf)    -> PDFChunker (Digital Text + Tesseract OCR v5 + Legal Resolution + Page Anti-Fragmentation)
-
-Hoàn toàn KHÔNG sử dụng biểu thức chính quy (0% Regex Engine).
-Tuân thủ nghiêm ngặt Schema Contract:
-- Bắt buộc có: chunk_id, source, chunk_type, breadcrumb, section_title, content, word_count.
-- TUYỆT ĐỐI KHÔNG CÓ các trường: 'ref', 'legal_ref', 'raw_content', 'char_length', 'format'.
+Bộ điều phối phân đoạn tài liệu đa định dạng (LayoutAwareChunker / DLAChunker).
+Thiết kế tối giản, trực quan, dễ hiểu:
+Tự động nhận diện phần mở rộng tệp (.docx, .pdf) và định tuyến tới bộ phân đoạn chuyên trách.
 """
 
 from __future__ import annotations
-
 import json
+import logging
 import time
 from pathlib import Path
-from typing import Any
 
-from .canonical_resolver import (
-    count_words,
-    split_sentences_banking,
-    group_sentences_banking
-)
+from .syllable_budget_manager import build_7_field_chunk
+
+logger = logging.getLogger("layout_aware_chunker")
 
 
 class LayoutAwareChunker:
     """
-    Bộ phân đoạn hợp nhất nhận thức bố cục (DLA) cho hệ thống RAG Ngân hàng.
-    Điều phối phân đoạn chuyên sâu xuyên suốt 2 định dạng cốt lõi: DOCX và PDF.
+    Bộ điều phối phân đoạn nhận thức bố cục (DLA) cho toàn bộ hệ thống RAG Banking.
+    Chuyên trách phân đoạn 2 định dạng cốt lõi: .docx và .pdf.
     """
 
     def __init__(
         self,
         max_chunk_size: int = 800,
         min_section_size: int = 120,
-        chunk_overlap: int = 100,
-        profile: Any | None = None
+        chunk_overlap: int = 0,
+        table_rows_per_chunk: int = 4,
+        target_chunk_tokens: int = 400,
+        max_chunk_words: int = 300,
+        min_chunk_words: int = 30,
+        config: object | None = None,
+        **kwargs
     ):
+        from ..docx_chunker.docx_chunker import DOCXChunker
+        from ..pdf_chunker.pdf_chunker import PDFChunker
+
         self.max_chunk_size = max_chunk_size
         self.min_section_size = min_section_size
         self.chunk_overlap = chunk_overlap
+        self.config = config
 
-        # Khởi tạo Profile âm tiết chuẩn hóa (Mặc định: Profile B 150-400 âm tiết)
-        try:
-            from .syllable_budget_manager import PROFILE_B, SyllableProfile
-            from .unified_budget_chunker import UnifiedBudgetOrchestrator
-            from ..pdf_chunker.paddle_vietocr_adapter import PaddleVietOCRAdapter
-            from ..pdf_chunker.scan_table_detector import ScanTableDetector
-            from ..pdf_chunker.pdf_chunker import PDFChunker, OCRExtractor
-        except (ImportError, ValueError):
-            from rag_banking.chunking.unified_chunk.syllable_budget_manager import PROFILE_B, SyllableProfile
-            from rag_banking.chunking.unified_chunk.unified_budget_chunker import UnifiedBudgetOrchestrator
-            from rag_banking.chunking.pdf_chunker.paddle_vietocr_adapter import PaddleVietOCRAdapter
-            from rag_banking.chunking.pdf_chunker.scan_table_detector import ScanTableDetector
-            from rag_banking.chunking.pdf_chunker.pdf_chunker import PDFChunker, OCRExtractor
-
-        self.profile = profile or PROFILE_B
-        self.budget_orch = UnifiedBudgetOrchestrator(profile=self.profile)
-
-        # Cấu hình OCR Extractor: Ưu tiên PaddleVietOCRAdapter + ScanTableDetector
-        try:
-            self.paddle_ocr = PaddleVietOCRAdapter()
-            self.table_detector = ScanTableDetector()
-            self.ocr_extractor = self.paddle_ocr
-        except Exception:
-            self.ocr_extractor = OCRExtractor()
-
-        self.docx_chunker = self.budget_orch.docx_chunker
-        self.pdf_chunker = PDFChunker(
-            ocr_extractor=self.ocr_extractor,
-            max_chunk_size=self.profile.max_syllables * 4 if hasattr(self.profile, "max_syllables") else max_chunk_size,
-            min_section_size=self.profile.min_syllables if hasattr(self.profile, "min_syllables") else min_section_size,
-            chunk_overlap=self.profile.overlap_syllables * 4 if hasattr(self.profile, "overlap_syllables") else chunk_overlap,
-            use_unified_stream=True
+        # Khởi tạo sub-chunker chuyên trách cho DOCX & PDF
+        self.docx_chunker = DOCXChunker(
+            max_chunk_size=max_chunk_size,
+            min_section_size=min_section_size,
+            chunk_overlap=chunk_overlap,
+            table_rows_per_chunk=table_rows_per_chunk
         )
-
-    # -------------------------------------------------------------------------
-    # 1. Các phương thức trích xuất từng định dạng chuyên biệt (DOCX, PDF, MD)
-    # -------------------------------------------------------------------------
+        self.pdf_chunker = PDFChunker(
+            max_chunk_size=max_chunk_size,
+            min_section_size=min_section_size,
+            chunk_overlap=chunk_overlap,
+            table_rows_per_chunk=table_rows_per_chunk,
+            config=config
+        )
+        # Giữ ocr_extractor reference cho backward-compatibility
+        self.ocr_extractor = self.pdf_chunker.ocr_extractor
 
     def chunk_docx(self, file_path: str | Path) -> list[dict]:
-        """Phân đoạn tệp Word DOCX theo ngân sách âm tiết Profile B."""
-        return self.budget_orch.chunk_file(file_path)
+        """Phân đoạn tệp Word DOCX."""
+        return self.docx_chunker.chunk_docx(file_path)
 
-    def chunk_pdf(self, file_path: str | Path, max_pages: int | None = None) -> list[dict]:
-        """Phân đoạn tệp PDF theo luồng hình học 5D thống nhất không dùng ngưỡng 50%."""
-        return self.pdf_chunker.chunk_pdf(file_path, max_pages=max_pages, use_unified_stream=True)
+    def chunk_pdf(self, file_path: str | Path, max_pages: int | None = None, **kwargs) -> list[dict]:
+        """Phân đoạn tệp PDF (hỗ trợ cả tài liệu số và scan OCR)."""
+        return self.pdf_chunker.chunk_pdf(file_path, max_pages=max_pages, **kwargs)
 
-    # -------------------------------------------------------------------------
-    # 2. Điều phối định dạng cốt lõi: chunk_file, chunk_dataset, chunk_directory
-    # -------------------------------------------------------------------------
-
-    def chunk_file(self, file_path: str | Path, max_pdf_pages: int | None = None) -> list[dict]:
+    def chunk_file(self, file_path: str | Path, max_pdf_pages: int | None = None, **kwargs) -> list[dict]:
         """
-        Tự động phân đoạn một tệp dựa trên phần mở rộng (.docx, .pdf, .md):
-        Tuân thủ nghiêm ngặt 100% Schema Contract 7 trường chuẩn.
+        Tự động phân đoạn tệp tài liệu dựa trên phần mở rộng (chỉ hỗ trợ .docx và .pdf).
         """
-        file_path = Path(file_path)
-        suffix = file_path.suffix.lower()
+        path = Path(file_path)
+        ext = path.suffix.lower()
 
-        raw_chunks: list[dict] = []
-        if suffix == ".docx":
-            raw_chunks = self.chunk_docx(file_path)
-        elif suffix == ".pdf":
-            raw_chunks = self.chunk_pdf(file_path, max_pages=max_pdf_pages)
-        elif suffix in (".md", ".txt"):
-            raw_chunks = self.budget_orch.chunk_file(file_path)
+        if ext == ".docx":
+            return self.chunk_docx(path)
+        elif ext == ".pdf":
+            return self.chunk_pdf(path, max_pages=max_pdf_pages, **kwargs)
         else:
-            print(f"[LayoutAwareChunker] Định dạng không được hỗ trợ: {suffix}")
+            logger.warning(f"[LayoutAwareChunker] Bỏ qua định dạng chưa hỗ trợ: {ext} (Hệ thống hiện tại chỉ xử lý .docx và .pdf)")
             return []
-
-        # Chuẩn hóa chính xác 100% theo Schema Contract (Đúng 7 trường chuẩn)
-        cleaned_chunks: list[dict] = []
-        for c in raw_chunks:
-            c_id = c.get("chunk_id", "")
-            content = c.get("content", "")
-            cleaned_chunks.append({
-                "chunk_id": c_id,
-                "source": c.get("source", file_path.name),
-                "chunk_type": c.get("chunk_type", "text"),
-                "breadcrumb": c.get("breadcrumb", file_path.stem),
-                "section_title": c.get("section_title", "N/A"),
-                "content": content,
-                "word_count": count_words(content)
-            })
-
-        return cleaned_chunks
-
-    def chunk_dataset(
-        self,
-        dataset_dir: str | Path,
-        output_dir: str | Path | None = None,
-        max_pdf_pages: int | None = 3
-    ) -> tuple[list[dict], dict]:
-        """
-        Xử lý toàn bộ dataset_chunking tập trung hoàn hảo vào 2 luồng cốt lõi: DOCX và PDF.
-        """
-        dataset_dir = Path(dataset_dir)
-        start_time = time.time()
-
-        docx_dir = dataset_dir / "docx"
-        pdf_dir = dataset_dir / "pdf"
-
-        docx_files = sorted(list(docx_dir.glob("*.docx"))) if docx_dir.exists() else []
-        pdf_files = sorted(list(pdf_dir.glob("*.pdf"))) if pdf_dir.exists() else []
-
-        all_chunks: list[dict] = []
-
-        # Xử lý DOCX
-        for docx_file in docx_files:
-            try:
-                chunks = self.chunk_docx(docx_file)
-                all_chunks.extend(chunks)
-            except Exception as e:
-                print(f"[DLA Chunking] Lỗi file DOCX {docx_file.name}: {e}")
-
-        # Xử lý PDF
-        for pdf_file in pdf_files:
-            try:
-                chunks = self.chunk_pdf(pdf_file, max_pages=max_pdf_pages)
-                all_chunks.extend(chunks)
-            except Exception as e:
-                print(f"[DLA Chunking] Lỗi file PDF {pdf_file.name}: {e}")
-
-        elapsed_time = round(time.time() - start_time, 2)
-        stats = {
-            "total_chunks": len(all_chunks),
-            "docx_files": len(docx_files),
-            "pdf_files": len(pdf_files),
-            "elapsed_time_seconds": elapsed_time
-        }
-
-        if output_dir:
-            out_p = Path(output_dir)
-            out_p.mkdir(parents=True, exist_ok=True)
-            with open(out_p / "chunks.json", "w", encoding="utf-8") as f:
-                json.dump(all_chunks, f, ensure_ascii=False, indent=2)
-            with open(out_p / "chunking_stats.json", "w", encoding="utf-8") as f:
-                json.dump(stats, f, ensure_ascii=False, indent=2)
-
-        return all_chunks, stats
 
     def chunk_directory(
         self,
@@ -190,35 +89,60 @@ class LayoutAwareChunker:
         max_pdf_pages: int | None = None
     ) -> list[dict]:
         """
-        Duyệt và phân đoạn toàn bộ tệp trong một thư mục bất kỳ (.docx và .pdf).
-        Hỗ trợ trực tiếp cho Ingestion Pipeline.
+        Duyệt và phân đoạn toàn bộ tệp trong thư mục (mặc định chỉ .docx và .pdf).
         """
         target_dir = Path(dir_path)
         if not target_dir.exists():
-            print(f"[LayoutAwareChunker] Không tìm thấy thư mục: {target_dir}")
             return []
 
-        default_exts = [".docx", ".pdf"]
-        raw_exts = extensions or default_exts
-        allowed_exts = set(ext.lower() if ext.startswith(".") else f".{ext.lower()}" for ext in raw_exts)
-        # Chỉ cho phép .docx và .pdf
-        allowed_exts = allowed_exts.intersection({".docx", ".pdf"})
-
+        allowed_exts = set(extensions or [".docx", ".pdf"])
         files = [p for p in target_dir.rglob("*") if p.is_file() and p.suffix.lower() in allowed_exts]
         files.sort()
+
         if max_files:
             files = files[:max_files]
 
         all_chunks: list[dict] = []
-        for file_p in files:
+        for f in files:
             try:
-                chunks = self.chunk_file(file_p, max_pdf_pages=max_pdf_pages)
+                chunks = self.chunk_file(f, max_pdf_pages=max_pdf_pages)
                 all_chunks.extend(chunks)
             except Exception as e:
-                print(f"[LayoutAwareChunker] Lỗi xử lý tệp {file_p.name}: {e}")
+                logger.error(f"[LayoutAwareChunker] Lỗi xử lý tệp {f.name}: {e}")
 
         return all_chunks
 
+    def chunk_dataset(
+        self,
+        dataset_dir: str | Path,
+        output_dir: str | Path | None = None,
+        max_pdf_pages: int | None = 3
+    ) -> tuple[list[dict], dict]:
+        """
+        Phân đoạn trọn gói dataset ngân hàng, lưu kết quả và trả về thống kê.
+        """
+        start_t = time.time()
+        dataset_path = Path(dataset_dir)
+        all_chunks = self.chunk_directory(dataset_path, max_pdf_pages=max_pdf_pages)
+        elapsed = round(time.time() - start_t, 2)
 
-# Alias tương thích ngược
+        stats = {
+            "total_chunks": len(all_chunks),
+            "elapsed_seconds": elapsed,
+            "speed_chunks_per_sec": round(len(all_chunks) / max(elapsed, 0.001), 1)
+        }
+
+        if output_dir:
+            out_p = Path(output_dir)
+            out_p.mkdir(parents=True, exist_ok=True)
+            with open(out_p / "chunks.json", "w", encoding="utf-8") as f:
+                json.dump(all_chunks, f, ensure_ascii=False, indent=2)
+
+        return all_chunks, stats
+
+
+# Bí danh tương thích ngược
 DLAChunker = LayoutAwareChunker
+
+__all__ = ["LayoutAwareChunker", "DLAChunker"]
+
