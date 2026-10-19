@@ -392,7 +392,16 @@ def process_pdf_document(
     stem_prefix = pdf_path.stem
     for c in chunks:
         cid = c.get("chunk_id")
-        c["element_ids"] = chunk_to_elements.get(cid, [])
+        eids = chunk_to_elements.get(cid, [])
+        if not eids:
+            c_pages = set(c.get("page_numbers") or [c.get("page_start", 1)])
+            cand_els = [el for el in all_elements if el["page_num"] in c_pages and el["type"] != "header_footer"]
+            if not cand_els:
+                cand_els = [el for el in all_elements if el["type"] != "header_footer"]
+            if cand_els:
+                eids = [cand_els[0]["element_id"]]
+                cand_els[0]["chunk_id"] = cid
+        c["element_ids"] = eids
 
         bc = c.get("breadcrumb", "")
         tokens = [t.strip() for t in bc.split(" > ") if t.strip()]
@@ -402,11 +411,15 @@ def process_pdf_document(
             tokens[0] = doc_title
             filtered_tokens = [tokens[0]]
             for t in tokens[1:]:
-                if t == doc_title:
+                if t == doc_title or t.lower().startswith("bảng biểu trang"):
                     continue
                 if len(t) >= 12 and not is_valid_title_candidate(t):
                     continue
                 filtered_tokens.append(t)
+            if len(filtered_tokens) == 1 and c.get("section_title") and c.get("section_title") != doc_title:
+                st = str(c.get("section_title")).strip()
+                if not st.lower().startswith("bảng biểu trang"):
+                    filtered_tokens.append(st)
             c["breadcrumb"] = " > ".join(filtered_tokens)
 
         if not c.get("section_title") or str(c["section_title"]).strip() in ("None", ""):
@@ -535,8 +548,12 @@ def process_docx_document(
 
     for c in chunks:
         cid = c.get("chunk_id")
-        if cid in chunk_to_elements:
-            c["element_ids"] = chunk_to_elements[cid]
+        eids = chunk_to_elements.get(cid, [])
+        if not eids and elements:
+            eids = [elements[0]["element_id"]]
+            if not elements[0].get("chunk_id"):
+                elements[0]["chunk_id"] = cid
+        c["element_ids"] = eids
 
     # Phân nhóm elements theo trang logic
     pages_dict = {}

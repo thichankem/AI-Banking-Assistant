@@ -86,7 +86,7 @@ class TestDLAChunking(unittest.TestCase):
         self.assertIn(first_chunk["chunk_type"], ["pdf_text", "pdf_ocr_scan", "pdf_table"])
         for forbidden in ["ref", "legal_ref", "raw_content", "char_length", "format"]:
             self.assertNotIn(forbidden, first_chunk, f"PDF chunk không được chứa trường thừa: {forbidden}")
-        self.assertTrue("page_numbers" in first_chunk or "Trang" in first_chunk.get("breadcrumb", ""))
+        self.assertTrue("page_numbers" in first_chunk or "location" in first_chunk or "Trang" in first_chunk.get("breadcrumb", ""))
         print(f"\n[PASS] PDF Chunker trích xuất thành công {len(chunks)} chunks từ {sample_pdf.name}")
 
     def test_04_unified_dla_chunker(self):
@@ -154,6 +154,34 @@ class TestDLAChunking(unittest.TestCase):
         merged_breadcrumb_found = any("&" in c["breadcrumb"] for c in s3_chunks)
         self.assertTrue(merged_breadcrumb_found, "Strategy 3 phải tự động gộp các mục con ngắn để chống phân mảnh!")
         print(f"\n[PASS] DocumentStructureChunker hoàn thành xuất sắc cả 3 chiến lược: S1={len(s1_chunks)}, S2={len(s2_chunks)}, S3={len(s3_chunks)} chunks!")
+
+    def test_06_enterprise_chunk_fields(self):
+        """Kiểm tra các trường mở rộng Enterprise: location, parent_id, original_text, token_count, is_active, updated_time."""
+        from rag_banking.chunking.unified_chunk.syllable_budget_manager import build_banking_chunk
+        chunk = build_banking_chunk(
+            chunk_id="test_01",
+            source="test.pdf",
+            chunk_type="pdf_text",
+            breadcrumb="Bieu phi > The",
+            section_title="The Infinite",
+            content="Noi dung the tin dung",
+            original_text="Noi dung the tin dung",
+            parent_id="test_parent",
+            location=[{"page": 1, "bbox": [10.0, 20.0, 100.0, 200.0]}]
+        )
+        self.assertIn("parent_id", chunk)
+        self.assertEqual(chunk["parent_id"], "test_parent")
+        self.assertIn("location", chunk)
+        self.assertEqual(len(chunk["location"]), 1)
+        self.assertEqual(chunk["location"][0]["page"], 1)
+        self.assertIn("original_text", chunk)
+        self.assertIn("token_count", chunk)
+        self.assertGreater(chunk["token_count"], 0)
+        self.assertIn("is_active", chunk)
+        self.assertTrue(chunk["is_active"])
+        self.assertIn("updated_time", chunk)
+        self.assertGreater(chunk["updated_time"], 0)
+        print("\n[PASS] Enterprise chunk fields (location, parent_id, original_text, token_count, is_active, updated_time) xác thực thành công!")
 
 
 if __name__ == "__main__":

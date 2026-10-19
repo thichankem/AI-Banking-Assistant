@@ -20,6 +20,7 @@ import logging
 import socket
 import threading
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -31,6 +32,8 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger("vlm_table_extractor")
+
+from rag_banking.compute_router import router, ComputeTarget
 
 
 # -----------------------------------------------------------------------------
@@ -193,68 +196,19 @@ class TableExtractionResult:
 
 
 # -----------------------------------------------------------------------------
-# 3. THUẬT TOÁN BÓC TÁCH KÝ HIỆU NEO VÀ FALLBACK 0% REGEX
+# 3. PHÂN ĐOẠN CHÚ THÍCH DỰ PHÒNG THUẦN TÚY (0% REGEX, 0% MẢNG KÝ TỰ NEO)
 # -----------------------------------------------------------------------------
 def extract_anchor_no_regex(text: str) -> tuple[Optional[str], str]:
     """
-    Bóc tách ký hiệu neo (anchor symbol) ở đầu dòng mà TUYỆT ĐỐI KHÔNG DÙNG REGEX.
-    Hỗ trợ đa ngành: (*), (**), (1), (a), (i), [1], [a], [*], †, ‡, §, •, 1., 1),
-    hoặc các từ khóa chú thích ("Ghi chú:", "Lưu ý:", "Nguồn:", "Note:", "Source:").
-    
-    Returns:
-        (anchor_symbol, content)
+    Trích xuất tiêu đề/nội dung chú thích thuần túy (0% Regex, 0% mảng ký tự neo).
     """
     s = text.strip()
     if not s:
         return None, ""
-
-    # 1. Dạng ngoặc tròn: (*), (**), (1), (a), (i), (12)
-    if s.startswith("(") and ")" in s:
-        idx = s.find(")")
-        if 1 <= idx <= 6:
-            inner = s[1:idx].strip()
-            if inner and (inner.isalnum() or all(c in "*†‡§#%•" for c in inner)):
-                return s[:idx + 1], s[idx + 1:].strip()
-
-    # 2. Dạng ngoặc vuông: [1], [a], [*], [i]
-    if s.startswith("[") and "]" in s:
-        idx = s.find("]")
-        if 1 <= idx <= 6:
-            inner = s[1:idx].strip()
-            if inner and (inner.isalnum() or all(c in "*†‡§#%•" for c in inner)):
-                return s[:idx + 1], s[idx + 1:].strip()
-
-    # 3. Ký tự đặc biệt độc lập: *, **, ***, †, ‡, §, •
-    syms = set("*†‡§#•")
-    sym_idx = 0
-    while sym_idx < len(s) and s[sym_idx] in syms:
-        sym_idx += 1
-    if 1 <= sym_idx <= 4:
-        return s[:sym_idx], s[sym_idx:].strip()
-
-    # 4. Chỉ mục ngắn: "1.", "2.", "1)", "2)", "a)", "a."
-    tokens = s.split(maxsplit=1)
-    if tokens:
-        w0 = tokens[0]
-        if len(w0) <= 3 and (w0.endswith(".") or w0.endswith(")")):
-            core = w0[:-1]
-            if core.isdigit() or (len(core) == 1 and core.isalpha()):
-                rem = tokens[1] if len(tokens) > 1 else ""
-                return w0, rem.strip()
-
-    # 5. Tiền tố từ khóa chú thích / nguồn dữ liệu (không phân biệt hoa thường)
-    s_lower = s.lower()
-    for kw in (
-        "ghi chú:", "ghi chú -", "ghi chú", "lưu ý:", "lưu ý -", "lưu ý",
-        "chú thích:", "chú thích -", "chú thích", "nguồn:", "nguồn -", "nguồn",
-        "điều kiện:", "điều kiện -", "đk:", "note:", "source:", "remark:",
-        "legend:", "reference:"
-    ):
-        if s_lower.startswith(kw):
-            kw_len = len(kw)
-            label = s[:kw_len].rstrip(":- ").strip()
-            return label, s[kw_len:].strip()
-
+    if ":" in s:
+        parts = s.split(":", 1)
+        if 1 <= len(parts[0].split()) <= 2:
+            return parts[0].strip(), parts[1].strip()
     return None, s
 
 
@@ -263,56 +217,22 @@ def parse_fallback_footnotes_no_regex(
     avg_line_height: float = 14.0
 ) -> list[FootnoteItem]:
     """
-    Thuật toán phân tích chú thích dự phòng khi VLM Offline (0% Regex):
-    - Nhận danh sách các dòng văn bản (str hoặc dict chứa y0, y1).
-    - Phân tích Line Gap và ký tự Unicode đầu dòng để nhận diện và nối dòng tràn (wrapped lines).
+    Phân tích chú thích dự phòng thuần túy theo dòng văn bản (0% Regex, 0% mảng ký tự neo).
     """
     if isinstance(raw_lines, str):
-        lines = [{"text": l.strip()} for l in raw_lines.splitlines() if l.strip()]
+        lines = [l.strip() for l in raw_lines.splitlines() if l.strip()]
     else:
         lines = []
         for item in raw_lines:
-            if isinstance(item, str):
-                if item.strip():
-                    lines.append({"text": item.strip()})
-            elif isinstance(item, dict):
-                lines.append(item)
-
-    if not lines:
-        return []
+            if isinstance(item, str) and item.strip():
+                lines.append(item.strip())
+            elif isinstance(item, dict) and item.get("text"):
+                lines.append(item["text"].strip())
 
     items: list[FootnoteItem] = []
-    prev_y1: Optional[float] = None
-
     for line in lines:
-        txt = line.get("text", "").strip()
-        if not txt:
-            continue
-
-        y0 = line.get("y0")
-        y1 = line.get("y1")
-
-        anchor, content = extract_anchor_no_regex(txt)
-
-        # Tính khoảng cách dọc nếu có thông tin tọa độ
-        is_large_gap = False
-        if prev_y1 is not None and y0 is not None:
-            gap = y0 - prev_y1
-            if gap > 0.45 * avg_line_height:
-                is_large_gap = True
-
-        if anchor is not None:
-            # Có ký hiệu neo mới -> Bắt đầu một FootnoteItem mới
-            items.append(FootnoteItem(anchor_symbol=anchor, content=content))
-        elif is_large_gap or not items:
-            # Khoảng cách lớn hoặc chưa có item nào -> Tạo FootnoteItem mới không anchor
-            items.append(FootnoteItem(anchor_symbol=None, content=content))
-        else:
-            # Khoảng cách hẹp và không có anchor mới -> Dòng tràn (wrapped line) của item trước
-            items[-1].content = f"{items[-1].content} {content}".strip()
-
-        if y1 is not None:
-            prev_y1 = y1
+        anchor, content = extract_anchor_no_regex(line)
+        items.append(FootnoteItem(anchor_symbol=anchor, content=content))
 
     return items
 
@@ -365,13 +285,16 @@ def crop_pdf_table_image(
 
     max_safe_bottom = h * (1.0 - footer_margin_ratio)
 
+    pad_px = 12  # Thêm lề an toàn 12px để bảo toàn nguyên vẹn đường viền bảng và các ký tự biên
     if dyn_b_px is not None:
-        py2_exp = min(dyn_b_px, max_safe_bottom)
+        py2_exp = min(max(dyn_b_px, py2) + pad_px, max_safe_bottom)
     else:
         py2_exp = min(py2 + (bottom_expansion_ratio * h), max_safe_bottom)
 
-    c_x1, c_y1 = max(0, int(round(px1))), max(0, int(round(py1)))
-    c_x2, c_y2 = min(w, int(round(px2))), min(h, int(round(py2_exp)))
+    c_x1 = max(0, int(round(px1 - pad_px)))
+    c_y1 = max(0, int(round(py1 - pad_px)))
+    c_x2 = min(w, int(round(px2 + pad_px)))
+    c_y2 = min(h, int(round(py2_exp)))
 
     return img.crop((c_x1, c_y1, c_x2, c_y2)) if (c_x2 > c_x1 and c_y2 > c_y1) else img
 
@@ -490,7 +413,7 @@ class VLMTableExtractor:
 
     def __init__(
         self,
-        model_name: str = "gemma4:12b",
+        model_name: str = "qwen2-vl",
         ollama_endpoint: str = "http://127.0.0.1:11434/api/generate",
         timeout_seconds: int = 45,
         custom_prompt_context: Optional[str] = None,
@@ -503,27 +426,47 @@ class VLMTableExtractor:
         self.gpu_lock = GPUQueueLock()
         self._last_probe_time: float = 0.0
         self._is_server_alive: bool = False
+        self._active_engine: str = "offline"  # "colab" | "ollama" | "offline"
 
     def get_prompt_text(self, custom_context: Optional[str] = None) -> str:
         ctx = custom_context or self.custom_prompt_context
         return f"{TABLE_JSON_PROMPT}\n\n[Ngữ cảnh]: {ctx}" if ctx else TABLE_JSON_PROMPT
 
     def is_available(self) -> bool:
-        """Kiểm tra nhanh kết nối endpoint Ollama (cache 15s)."""
+        """Kiểm tra kết nối: Ưu tiên 1 Google Colab GPU Cloud, Dự phòng 2 Ollama Local."""
         now = time.time()
-        if now - self._last_probe_time < 15.0:
+        if now - self._last_probe_time < 10.0:
             return self._is_server_alive
         self._last_probe_time = now
+
+        # 1. Thử kết nối Colab GPU Cloud (Tesla T4)
+        try:
+            colab_info = router.check_colab_status(timeout_sec=1.5)
+            if colab_info and colab_info.get("status") == "ok":
+                self._is_server_alive = True
+                self._active_engine = "colab"
+                gpu_name = colab_info.get("gpu", "Cloud GPU")
+                logger.info(f"🚀 [VLMTableExtractor] Ưu tiên 1: Đã kết nối Google Colab GPU ({gpu_name})!")
+                return True
+        except Exception:
+            pass
+
+        # 2. Thử kết nối Ollama Local (Dự phòng)
         try:
             parsed = urlparse(self.ollama_endpoint)
             host = parsed.hostname or "127.0.0.1"
             port = parsed.port or (443 if parsed.scheme == "https" else 80)
             with socket.create_connection((host, port), timeout=0.2):
                 self._is_server_alive = True
+                self._active_engine = "ollama"
+                logger.info("⚡ [VLMTableExtractor] Colab offline -> Sử dụng Ollama Local.")
                 return True
         except Exception:
-            self._is_server_alive = False
-            return False
+            pass
+
+        self._is_server_alive = False
+        self._active_engine = "offline"
+        return False
 
     def _image_to_base64(self, image: Image.Image) -> str:
         buf = io.BytesIO()
@@ -549,22 +492,45 @@ class VLMTableExtractor:
             text = text[fb:lb + 1]
         return json.loads(text)
 
+    def _call_vlm_raw(self, prompt: str, image_b64: str) -> str:
+        """Định tuyến gọi mô hình VLM: Ưu tiên 1 Colab GPU, Dự phòng 2 Ollama."""
+        if self._active_engine == "colab":
+            url = f"{router.endpoint}/vlm/extract_table"
+            payload = {
+                "image_base64": image_b64,
+                "prompt": prompt,
+                "custom_context": self.custom_prompt_context
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "ngrok-skip-browser-warning": "true"
+                }
+            )
+            with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+                return str(body.get("response", ""))
+        else:
+            payload = {
+                "model": self.model_name,
+                "prompt": prompt,
+                "images": [image_b64],
+                "stream": False,
+                "options": {"temperature": 0.0, "num_predict": 2048}
+            }
+            req = urllib.request.Request(
+                self.ollama_endpoint,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+                return str(body.get("response", ""))
+
     def _call_ollama_raw(self, prompt: str, image_b64: str) -> str:
-        payload = {
-            "model": self.model_name,
-            "prompt": prompt,
-            "images": [image_b64],
-            "stream": False,
-            "options": {"temperature": 0.0, "num_predict": 2048}
-        }
-        req = urllib.request.Request(
-            self.ollama_endpoint,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-            return str(body.get("response", ""))
+        return self._call_vlm_raw(prompt, image_b64)
 
     def _deterministic_fallback(
         self,

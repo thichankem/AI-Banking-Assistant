@@ -17,6 +17,7 @@ Bộ phân đoạn tài liệu PDF ngân hàng và đa ngành thế hệ mới (
 from __future__ import annotations
 
 import logging
+import unicodedata
 from pathlib import Path
 from typing import Optional, Union
 
@@ -49,32 +50,26 @@ from ..unified_chunk.syllable_budget_manager import (
 # -----------------------------------------------------------------------------
 def _is_universal_structural_anchor(text: str) -> bool:
     """
-    Nhận diện ký hiệu neo cấu trúc (Structural Anchor / Bullets / Indexing)
-    tổng quát cho mọi lĩnh vực, độc lập ngôn ngữ và TUYỆT ĐỐI 0% REGEX.
-
-    Phát hiện:
-    1. Ký hiệu neo đặc thù hoặc bullet: '*', '†', '‡', '§', '#', '•', '-'
-    2. Cặp ngoặc đơn / ngoặc vuông đầu dòng: '(*)', '(**)', '(1)', '(a)', '[1]', '[a]'
-    3. Chỉ mục số/chữ ngắn: '1.', '1)', 'a.', 'a)', 'i.', 'i)'
+    Nhận diện ký hiệu phân tách/chỉ mục đầu dòng theo chuẩn Unicode (0% Regex, 0% mảng ký tự neo hardcode).
     """
     s = text.strip()
     if not s:
         return False
 
-    # 1. Ký hiệu neo đặc thù hoặc bullet
-    if s[0] in ('*', '†', '‡', '§', '#', '•', '-', '¹', '²', '³', '⁴', '⁵'):
+    first_char = s[0]
+    # Ký hiệu biểu tượng hoặc dấu phân tách chuẩn Unicode (Categories: P* Punctuation, S* Symbol)
+    cat = unicodedata.category(first_char)
+    if cat.startswith("S") or first_char in "-•":
         return True
 
-    # 2. Cặp ngoặc đơn hoặc ngoặc vuông ở đầu dòng
-    if s.startswith("(") or s.startswith("["):
-        close_char = ")" if s.startswith("(") else "]"
+    # Cặp ngoặc đầu dòng
+    if first_char in "([":
+        close_char = ")" if first_char == "(" else "]"
         idx = s.find(close_char)
         if 1 < idx <= 6:
-            inner = s[1:idx].strip()
-            if inner and (inner.isalnum() or all(c in "*†‡§#•" for c in inner)):
-                return True
+            return True
 
-    # 3. Chỉ mục số hoặc chữ ngắn ở đầu dòng (vd: '1.', '1)', 'a.', 'a)')
+    # Chỉ mục ngắn ở đầu dòng (vd: '1.', '1)', 'a.', 'a)')
     tokens = s.split(maxsplit=1)
     if tokens:
         w0 = tokens[0]
@@ -305,8 +300,218 @@ def _is_heading_line(
     return False
 
 
+def is_complex_pdf_table(tbl: object, df: list[list[str]] | None = None) -> tuple[bool, str]:
+    """
+    Phát hiện bảng PDF có cấu trúc phức tạp hay đơn giản (0% Regex):
+    ĐIỀU KIỆN PHỨC TẠP (BẮT BUỘC CHẠY VLM):
+    1. Gộp ô (Merged / Spanned cells):
+       - Hàng tiêu đề (header) chứa ô None hoặc chuỗi rỗng xen kẽ ô có chữ (ví dụ: 'DỊCH VỤ' gộp qua nhiều cột con).
+       - Các hàng thân bảng có ô None hoặc rỗng phân bổ không đều (ô gộp dòng/cột).
+    2. Kích thước lớn / Quá nhiều ô:
+       - Số hàng >= 8 hoặc số cột >= 5 hoặc tổng số ô >= 25.
+    3. Đa tầng tiêu đề (Multi-level header hierarchy):
+       - Hàng 0 là danh mục bao quát, hàng 1 là tiêu đề chi tiết.
+    4. Hàng gộp danh mục (Group-row banner):
+       - 1 ô trải dài hết chiều ngang bảng để phân nhóm.
+
+    ĐIỀU KIỆN ĐƠN GIẢN (DÙNG PYMUPDF):
+    - Bảng lưới nhỏ gọn: Số cột <= 4, số hàng < 8, tổng số ô < 25.
+    - 100% các ô đều phân chia rành mạch 1:1, không có ô gộp None, hàng tiêu đề đầy đủ nhãn.
+    """
+    if df is None:
+        try:
+            df = tbl.extract()
+        except Exception:
+            return True, "không thể bóc tách ma trận lưới chuẩn"
+
+    if not df or len(df) < 2:
+        return False, "bảng quá nhỏ (< 2 hàng)"
+
+    num_rows = len(df)
+    num_cols = len(df[0])
+
+    # 1. Quá nhiều ô hoặc kích thước lớn
+    if num_rows >= 8 or num_cols >= 5 or (num_rows * num_cols >= 25):
+        return True, f"kích thước lớn ({num_rows} hàng x {num_cols} cột, {num_rows * num_cols} ô)"
+
+    # 2. Gộp ô trong Header (chứa None hoặc chuỗi rỗng bên cạnh ô có chữ)
+    header_row = df[0]
+    header_non_empty = [c for c in header_row if c is not None and str(c).strip()]
+    if len(header_non_empty) < num_cols:
+        return True, f"header gộp ô ({len(header_non_empty)}/{num_cols} cột có nhãn)"
+
+    # 3. Hàng gộp danh mục (Group-row banner) hoặc biến động gộp ô ở thân bảng
+    for r_idx, r in enumerate(df[1:], start=1):
+        non_empty = [c for c in r if c is not None and str(c).strip()]
+        if len(non_empty) <= 1 and num_cols > 2:
+            return True, f"hàng {r_idx} gộp danh mục toàn bảng"
+
+    # 4. Kiểm tra đa tầng tiêu đề (hàng 0 và hàng 1 đều là văn bản tiêu đề ngắn/in đậm)
+    if num_rows >= 3:
+        r1_non_empty = [c for c in df[1] if c is not None and str(c).strip()]
+        if len(r1_non_empty) > len(header_non_empty):
+            return True, "đa tầng tiêu đề phân cấp"
+
+    # Không thỏa mãn bất kỳ điều kiện phức tạp nào -> Bảng bé, đơn giản
+    return False, f"bảng phẳng đơn giản ({num_rows} hàng x {num_cols} cột)"
+
+
+def clean_pdf_table_matrix(df: list[list[str]]) -> tuple[list[str], list[list[str]]]:
+    """
+    Làm sạch ma trận bảng biểu PyMuPDF (0% Regex, loại bỏ triệt để 'Cột_3', 'Cột_4', 'Cột_5'):
+    1. Lọc bỏ các cột hoàn toàn rỗng trên toàn bộ các hàng (100% empty columns).
+    2. Hợp nhất các cột bị lệch do ô tiêu đề gộp căn giữa (Centered header split).
+    3. Kế thừa tiêu đề ô gộp ngang (Forward-fill semantic header) thay vì gán nhãn 'Cột_x'.
+    4. Khử trùng lặp tên cột bằng định danh ngữ nghĩa rõ ràng.
+    """
+    if not df or len(df) < 2:
+        return [], []
+
+    num_cols = len(df[0])
+
+    # 1. Lọc bỏ các cột hoàn toàn rỗng
+    valid_col_indices = [
+        c for c in range(num_cols)
+        if any(row[c] is not None and str(row[c]).strip() for row in df)
+    ]
+    if not valid_col_indices:
+        return [], []
+
+    compact_df = [
+        [(str(row[c]).strip().replace("\n", " ") if row[c] is not None else "") for c in valid_col_indices]
+        for row in df
+    ]
+
+    raw_headers = compact_df[0]
+    merged_headers = list(raw_headers)
+    merged_rows = [list(r) for r in compact_df[1:]]
+
+    # 2. Hợp nhất các cột bị lệch do tiêu đề gộp căn giữa
+    col = 0
+    while col < len(merged_headers) - 1:
+        curr_body_has_data = any(r[col] for r in merged_rows)
+        curr_has_header = bool(merged_headers[col])
+        next_body_has_data = any(r[col + 1] for r in merged_rows)
+        next_has_header = bool(merged_headers[col + 1])
+
+        if curr_body_has_data and not curr_has_header and next_has_header and not next_body_has_data:
+            merged_headers[col] = merged_headers[col + 1]
+            merged_headers.pop(col + 1)
+            for r in merged_rows:
+                r.pop(col + 1)
+            continue
+        elif not curr_body_has_data and curr_has_header and not next_has_header and next_body_has_data:
+            merged_headers[col + 1] = merged_headers[col]
+            merged_headers.pop(col)
+            for r in merged_rows:
+                r.pop(col)
+            continue
+        col += 1
+
+    # 3. Kế thừa tiêu đề (Forward-fill) và gán nhãn ngữ nghĩa thay vì 'Cột_x'
+    last_hdr = ""
+    final_headers = []
+    for h in merged_headers:
+        if h:
+            last_hdr = h
+            final_headers.append(h)
+        elif last_hdr:
+            final_headers.append(f"{last_hdr} (Chi tiết)")
+        else:
+            final_headers.append("Nội dung / Dịch vụ")
+
+    # 4. Khử trùng lặp tên cột
+    seen: dict[str, int] = {}
+    unique_headers: list[str] = []
+    for h in final_headers:
+        if h not in seen:
+            seen[h] = 1
+            unique_headers.append(h)
+        else:
+            seen[h] += 1
+            unique_headers.append(f"{h} ({seen[h]})")
+
+    return unique_headers, merged_rows
+
+
 # -----------------------------------------------------------------------------
-# 3. CORE PDF CHUNKER CLASS
+# 3. HEADING TRACKER & TIÊU ĐỀ THỰC TẾ (0% REGEX)
+# -----------------------------------------------------------------------------
+class PDFHeadingTracker:
+    """Theo dõi phân cấp tiêu đề đa tầng (Doc Title -> H1 -> H2) tuân thủ 0% Regex."""
+    def __init__(self, doc_title: str):
+        self.doc_title = doc_title.strip()
+        self.h1: Optional[str] = None
+        self.h2: Optional[str] = None
+
+    def update(self, heading: str):
+        h = heading.strip()
+        if not h or h == self.doc_title or h.lower().startswith("bảng biểu trang"):
+            return
+        # Nhận diện cấp H1: Phụ đề cấp cao (ÁP DỤNG CHO..., DÀNH CHO..., PHẦN..., CHƯƠNG...) hoặc tiêu đề in hoa ngắn
+        is_h1_candidate = (
+            any(h.lower().startswith(p) for p in ("áp dụng cho", "ap dung cho", "dành cho", "danh cho", "phần", "phan", "chương", "chuong", "mục", "muc", "phụ lục", "phu luc")) or
+            (h.isupper() and len(h.split()) <= 10 and not h.startswith(("GHI CHÚ", "GHI CHU", "LƯU Ý", "LUU Y", "ĐIỀU", "DIEU")))
+        )
+        if is_h1_candidate:
+            self.h1 = h
+            self.h2 = None
+        elif self.h1 and h != self.h1:
+            self.h2 = h
+        else:
+            self.h1 = h
+
+    def get_breadcrumb(self) -> str:
+        tokens = [self.doc_title]
+        if self.h1 and self.h1 != self.doc_title:
+            tokens.append(self.h1)
+        if self.h2 and self.h2 != self.h1 and self.h2 != self.doc_title:
+            tokens.append(self.h2)
+        return " > ".join(tokens)
+
+    def get_section_title(self) -> str:
+        return self.h2 or self.h1 or self.doc_title
+
+
+def extract_real_pdf_title(page: object, fallback_stem: str) -> tuple[str, Optional[str]]:
+    """Trích xuất tiêu đề chính và phân cấp phụ đề H1 đầu tiên trên trang 1 (0% Regex)."""
+    try:
+        blocks = page.get_text("blocks")
+    except Exception:
+        blocks = []
+
+    top_candidates = []
+    for b in blocks:
+        if b[1] < 260 and b[4].strip():
+            txt = b[4].strip()
+            if txt.isdigit() or len(txt) < 3:
+                continue
+            txt_lower = txt.lower()
+            if any(txt_lower.startswith(p) for p in ("ngân hàng", "ngan hang", "mẫu số", "mau so", "số:", "so:", "cộng hòa", "cong hoa")):
+                continue
+            top_candidates.append((b[1], txt))
+
+    top_candidates.sort(key=lambda x: x[0])
+    doc_title = None
+    subheading = None
+    if top_candidates:
+        first_txt = top_candidates[0][1]
+        lines = [l.strip() for l in first_txt.splitlines() if l.strip()]
+        if lines:
+            doc_title = lines[0]
+            if len(lines) > 1 and _is_heading_line(lines[1]):
+                subheading = lines[1]
+        if len(top_candidates) > 1 and not subheading:
+            second_txt = top_candidates[1][1]
+            sec_lines = [l.strip() for l in second_txt.splitlines() if l.strip()]
+            if sec_lines and _is_heading_line(sec_lines[0]):
+                subheading = sec_lines[0]
+
+    return doc_title or clean_filename_fallback(fallback_stem), subheading
+
+
+# -----------------------------------------------------------------------------
+# 4. CORE PDF CHUNKER CLASS
 # -----------------------------------------------------------------------------
 class PDFChunker:
     """
@@ -366,22 +571,33 @@ class PDFChunker:
 
         total_pages = len(doc)
         limit_pages = min(total_pages, max_pages) if max_pages else total_pages
+        if limit_pages == 0:
+            doc.close()
+            return []
+
+        # Trích xuất tiêu đề văn bản thực tế từ trang đầu tiên (0% Regex)
+        doc_title, first_subheading = extract_real_pdf_title(doc[0], path.stem)
+        tracker = PDFHeadingTracker(doc_title=doc_title)
+        if first_subheading:
+            tracker.update(first_subheading)
+
+        chunks: list[dict] = []
+        counter = 0
 
         for page_idx in range(limit_pages):
             page = doc[page_idx]
             page_num = page_idx + 1
 
-            # 1. Bóc tách bảng biểu trên trang
-            tbl_chunks, counter = self._process_page_tables(page, page_num, path, doc_title, counter)
+            # 1. Bóc tách bảng biểu trên trang với Breadcrumb phân cấp thực tế
+            tbl_chunks, counter = self._process_page_tables(page, page_num, path, tracker, counter)
             chunks.extend(tbl_chunks)
 
             # 2. Bóc tách và phân đoạn văn bản trên trang
-            txt_chunks, counter, current_section = self._process_page_text(
+            txt_chunks, counter = self._process_page_text(
                 page=page,
                 page_num=page_num,
                 path=path,
-                doc_title=doc_title,
-                current_section=current_section,
+                tracker=tracker,
                 counter=counter,
                 is_first_page=(page_idx == 0)
             )
@@ -395,7 +611,7 @@ class PDFChunker:
         page: object,
         page_num: int,
         path: Path,
-        doc_title: str,
+        tracker: PDFHeadingTracker,
         counter: int
     ) -> tuple[list[dict], int]:
         """Trích xuất và định dạng toàn bộ bảng biểu trên một trang PDF bằng Dynamic Bounding Box."""
@@ -410,58 +626,88 @@ class PDFChunker:
         pw, ph = page.rect.width, page.rect.height
         page_chunks: list[dict] = []
 
-        for tbl in tables:
-            breadcrumb = f"{doc_title} > Bảng biểu Trang {page_num}"
-            section_title = f"Bảng biểu Trang {page_num}"
+        try:
+            page_blocks = page.get_text("blocks")
+        except Exception:
+            page_blocks = []
 
-            # 1. TÍNH TOÁN ĐÁY BẢNG ĐỘNG BẰNG TYPOGRAPHIC & SPATIAL PROXIMITY (0% CỐ ĐỊNH 8%)
+        for tbl in tables:
+            tbl_y0 = tbl.bbox[1]
+            cand_headings = []
+            for b in page_blocks:
+                if b[3] <= tbl_y0 + 8 and b[4].strip():
+                    for line in b[4].strip().splitlines():
+                        l_clean = line.strip()
+                        if _is_heading_line(l_clean) and l_clean != tracker.doc_title:
+                            cand_headings.append(l_clean)
+            if cand_headings:
+                tracker.update(cand_headings[-1])
+
+            breadcrumb = tracker.get_breadcrumb()
+            section_title = tracker.get_section_title()
+
+            # 1. Trích xuất ma trận ô thô để kiểm tra cấu trúc
+            try:
+                raw_df = tbl.extract()
+            except Exception:
+                raw_df = None
+
+            # 2. KIỂM ĐỊNH ĐIỀU KIỆN: BẢNG PHỨC TẠP vs BẢNG BÉ ĐƠN GIẢN
+            is_complex, reason = is_complex_pdf_table(tbl, df=raw_df)
+
+            # 3. Tính toán đáy bảng động bằng Typographic Proximity (0% CỐ ĐỊNH 8%)
             dynamic_bottom = detect_dynamic_table_bottom(
                 page=page,
                 table_bbox=tbl.bbox,
                 footer_margin_ratio=0.065
             )
 
-            # 2. Thử trích xuất qua VLM Table Extractor
             extracted_via_vlm = False
-            if self.vlm_extractor.is_available():
-                try:
-                    pix = page.get_pixmap(dpi=150)
-                    img_mode = "RGB" if pix.alpha == 0 else "RGBA"
-                    pil_page = Image.frombytes(img_mode, [pix.width, pix.height], pix.samples).convert("RGB")
 
-                    cropped_tbl = crop_pdf_table_image(
-                        page_image=pil_page,
-                        bbox=tbl.bbox,
-                        page_dim=(pw, ph),
-                        dynamic_bottom=dynamic_bottom,
-                        footer_margin_ratio=0.065
-                    )
+            # ĐIỀU KIỆN 1: BẢNG PHỨC TẠP (Gộp ô, nhiều ô, đa tầng) -> BẮT BUỘC CHẠY VLM
+            if is_complex:
+                logger.info(f"[PDFChunker] Bảng phức tạp ({reason}) -> Bắt buộc định tuyến VLM Table Extractor.")
+                if self.vlm_extractor.is_available():
+                    try:
+                        pix = page.get_pixmap(dpi=150)
+                        img_mode = "RGB" if pix.alpha == 0 else "RGBA"
+                        pil_page = Image.frombytes(img_mode, [pix.width, pix.height], pix.samples).convert("RGB")
 
-                    vlm_res = self.vlm_extractor.extract_table(cropped_tbl)
-                    table_chunks = self.table_formatter.format_vlm_result_to_chunks(
-                        vlm_result=vlm_res,
-                        source=path.name,
-                        chunk_id_prefix=f"{path.stem}_tbl",
-                        breadcrumb=breadcrumb,
-                        section_title=section_title,
-                        chunk_type="pdf_table",
-                        start_index=counter
-                    )
-                    if table_chunks:
-                        page_chunks.extend(table_chunks)
-                        counter += len(table_chunks)
-                        extracted_via_vlm = True
-                except Exception as e:
-                    logger.debug(f"[PDFChunker] VLM table extraction fallback: {e}")
+                        cropped_tbl = crop_pdf_table_image(
+                            page_image=pil_page,
+                            bbox=tbl.bbox,
+                            page_dim=(pw, ph),
+                            dynamic_bottom=dynamic_bottom,
+                            footer_margin_ratio=0.065
+                        )
 
-            # 3. Fallback sang trích xuất ma trận PyMuPDF nếu VLM không cho kết quả
+                        vlm_res = self.vlm_extractor.extract_table(cropped_tbl)
+                        table_chunks = self.table_formatter.format_vlm_result_to_chunks(
+                            vlm_result=vlm_res,
+                            source=path.name,
+                            chunk_id_prefix=f"{path.stem}_tbl",
+                            breadcrumb=breadcrumb,
+                            section_title=section_title,
+                            chunk_type="pdf_table",
+                            start_index=counter
+                        )
+                        if table_chunks:
+                            page_chunks.extend(table_chunks)
+                            counter += len(table_chunks)
+                            extracted_via_vlm = True
+                    except Exception as e:
+                        logger.warning(f"[PDFChunker] VLM table extraction gặp sự cố: {e}")
+                else:
+                    logger.warning(f"[PDFChunker] Bảng phức tạp nhưng VLM chưa bật -> Chạy PyMuPDF Smart Matrix Fallback.")
+
+            # ĐIỀU KIỆN 2: BẢNG BÉ ĐƠN GIẢN HOẶC FALLBACK THÔNG MINH (PYMUPDF)
             if not extracted_via_vlm:
-                try:
-                    df = tbl.extract()
-                    if df and len(df) >= 2:
-                        headers = [str(c).strip().replace("\n", " ") if c else f"Cột_{i+1}" for i, c in enumerate(df[0])]
-                        matrix = [[str(c).strip().replace("\n", " ") if c else "" for c in r] for r in df[1:]]
+                if not is_complex:
+                    logger.info(f"[PDFChunker] Bảng bé đơn giản ({reason}) -> Xử lý trực tiếp qua PyMuPDF.")
 
+                try:
+                    headers, matrix = clean_pdf_table_matrix(raw_df if raw_df is not None else tbl.extract())
+                    if headers and matrix:
                         # Gom footnote từ vùng chữ nằm dưới đáy bảng
                         fallback_footnotes = []
                         if dynamic_bottom > tbl.bbox[3]:
@@ -483,8 +729,8 @@ class PDFChunker:
                         )
                         page_chunks.extend(table_chunks)
                         counter += len(table_chunks)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[PDFChunker] PyMuPDF table extraction fallback failed: {e}")
 
         return page_chunks, counter
 
@@ -493,13 +739,42 @@ class PDFChunker:
         page: object,
         page_num: int,
         path: Path,
-        doc_title: str,
-        current_section: str,
+        tracker: PDFHeadingTracker,
         counter: int,
         is_first_page: bool = False
-    ) -> tuple[list[dict], int, str]:
+    ) -> tuple[list[dict], int]:
         """Trích xuất và phân đoạn khối văn bản thuần hoặc OCR scan trên trang PDF."""
-        raw_text = page.get_text("text", sort=True)
+        tab_rects = []
+        try:
+            tabs = page.find_tables()
+            if tabs and tabs.tables:
+                tab_rects = [t.bbox for t in tabs.tables]
+        except Exception:
+            pass
+
+        if tab_rects:
+            try:
+                blocks = page.get_text("blocks")
+                non_tab_blocks = []
+                for b in blocks:
+                    by0, by1 = b[1], b[3]
+                    in_tab = False
+                    for tr in tab_rects:
+                        ov = max(0, min(by1, tr[3]) - max(by0, tr[1]))
+                        if ov > 0.5 * max(1.0, by1 - by0):
+                            in_tab = True
+                            break
+                    if not in_tab and b[4].strip():
+                        txt_cand = b[4].strip()
+                        if page_num == 1 and by1 < 220 and (txt_cand == tracker.doc_title or any(txt_cand.lower().startswith(p) for p in ("ngân hàng", "mẫu số", "quyết định"))):
+                            continue
+                        non_tab_blocks.append(txt_cand)
+                raw_text = "\n\n".join(non_tab_blocks)
+            except Exception:
+                raw_text = page.get_text("text", sort=True)
+        else:
+            raw_text = page.get_text("text", sort=True)
+
         chunk_type = "pdf_text"
 
         # Tự động kích hoạt OCR Scan nếu trang ít chữ và chứa ảnh quét
@@ -510,7 +785,7 @@ class PDFChunker:
                 chunk_type = "pdf_ocr_scan"
 
         if not raw_text.strip():
-            return [], counter, current_section
+            return [], counter
 
         # Làm sạch và loại bỏ rác mép trang
         cleaned_text = clean_and_dehyphenate_text(raw_text)
@@ -518,25 +793,13 @@ class PDFChunker:
 
         lines = [l.strip() for l in cleaned_text.splitlines() if l.strip()]
 
-        # Cập nhật tiêu đề tài liệu nếu là trang đầu tiên
-        if is_first_page:
-            top_upper = []
-            for l in lines:
-                if l.isupper() and len(l) > 3:
-                    top_upper.append(l)
-                else:
-                    break
-            if top_upper:
-                current_section = " ".join(top_upper)
-
         # Cập nhật tiêu đề mục gần nhất nếu có dòng heading
         for l in lines:
-            if _is_heading_line(l):
-                current_section = l
-                break
+            if _is_heading_line(l) and l != tracker.doc_title:
+                tracker.update(l)
 
-        breadcrumb = f"{doc_title} > {current_section} (Trang {page_num})" if current_section != doc_title else f"{doc_title} (Trang {page_num})"
-        section_title = current_section
+        breadcrumb = tracker.get_breadcrumb()
+        section_title = tracker.get_section_title()
 
         # Phân tách văn bản dài theo ngân sách âm tiết đàn hồi không overlap nội dung (0% content overlap)
         split_chunks = self.syllable_manager.split_text_elastic(
@@ -557,12 +820,15 @@ class PDFChunker:
                 chunk_type=chunk_type,
                 breadcrumb=breadcrumb,
                 section_title=section_title,
-                content=group.strip()
+                content=group.strip(),
+                original_text=group.strip(),
+                parent_id=f"{path.stem}_p{page_num}",
+                location=[{"page": page_num}]
             )
             page_chunks.append(chunk_obj)
             counter += 1
 
-        return page_chunks, counter, current_section
+        return page_chunks, counter
 
 
 # -----------------------------------------------------------------------------
@@ -595,6 +861,15 @@ def is_valid_title_candidate(title: str) -> bool:
 
 def extract_document_title_dla(doc: object = None, pdf_path: object = None) -> str:
     """Trích xuất tiêu đề văn bản bằng Visual DLA hoặc fallback tên tệp."""
+    if doc is not None:
+        try:
+            if len(doc) > 0:
+                stem_hint = Path(pdf_path).stem if pdf_path else (Path(doc.name).stem if hasattr(doc, "name") and doc.name else "")
+                real_t, _ = extract_real_pdf_title(doc[0], stem_hint)
+                if real_t and is_valid_title_candidate(real_t):
+                    return real_t
+        except Exception:
+            pass
     if pdf_path is not None:
         return clean_filename_fallback(Path(pdf_path).stem)
     if doc is not None:
@@ -607,6 +882,8 @@ def extract_document_title_dla(doc: object = None, pdf_path: object = None) -> s
 
 __all__ = [
     "PDFChunker",
+    "is_complex_pdf_table",
+    "clean_pdf_table_matrix",
     "detect_dynamic_table_bottom",
     "_is_universal_structural_anchor",
     "_is_heading_line",

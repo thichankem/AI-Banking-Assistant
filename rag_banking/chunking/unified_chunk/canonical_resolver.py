@@ -15,7 +15,11 @@ NGUYÊN TẮC THIẾT KẾ:
 
 from __future__ import annotations
 
+import logging
 import unicodedata
+from typing import Optional
+
+logger = logging.getLogger("canonical_resolver")
 
 
 # -----------------------------------------------------------------------------
@@ -70,147 +74,60 @@ def clean_and_dehyphenate_text(text: str) -> str:
 # -----------------------------------------------------------------------------
 # 2. PHÂN ĐOẠN CÂU PHỔ QUÁT (UNIVERSAL SENTENCE BOUNDARY SEGMENTATION)
 # -----------------------------------------------------------------------------
-def split_sentences(text: str) -> list[str]:
+_SAT_MODEL = None
+_SAT_INITIALIZED = False
+
+
+def get_sat_segmenter(model_name: str = "sat-3l-sm") -> Optional[object]:
     """
-    Phân đoạn câu song ngữ Tiếng Việt - Tiếng Anh tối ưu hóa cho RAG Banking (0% Regex).
-    Dựa trên các bất biến ngôn ngữ tự nhiên và chuẩn Unicode:
-    1. Ranh giới câu xuất hiện tại dấu ngắt câu cuối câu (. ? ! …) hoặc ngắt đoạn kép (\\n\\n).
-    2. Gom các dấu đóng ngoặc/trích dẫn liền kề bám theo câu (." .) .').
-    3. Nguyên lý chữ thường (Lowercase Invariant): Trong tiếng Việt và tiếng Anh, câu mới
-       không bao giờ bắt đầu bằng chữ thường (bảo vệ 'Smith et al. showed', 'e.g. for instance', 'tp. Hồ Chí Minh').
-    4. Không ngắt khi dấu chấm nằm trong số tiền, số thập phân, mã số, URL hoặc tiền tố chỉ mục / chức danh ngắn.
-    5. Xử lý ngắt dòng mềm (soft wrap) trong PDF/OCR tiếng Việt & tiếng Anh một cách tự nhiên.
+    Khởi tạo hoặc trả về instance singleton của mô hình wtpsplit (SaT).
+    Ưu tiên số 1 cho bài toán phân đoạn câu thông minh (Segment Any Text).
+    """
+    global _SAT_MODEL, _SAT_INITIALIZED
+    if _SAT_INITIALIZED:
+        return _SAT_MODEL
+
+    try:
+        from wtpsplit import SaT
+        _SAT_MODEL = SaT(model_name)
+        logger.info(f"[CanonicalResolver] Khởi tạo thành công mô hình wtpsplit (SaT: {model_name}).")
+    except Exception as e:
+        logger.warning(
+            f"[CanonicalResolver] Không thể khởi tạo wtpsplit (SaT): {e}. "
+            "Hệ thống sẽ chuyển sang cơ chế dự phòng Unicode Invariant rule-based."
+        )
+        _SAT_MODEL = None
+    finally:
+        _SAT_INITIALIZED = True
+
+    return _SAT_MODEL
+
+
+def split_sentences(text: str, use_sat: bool = True) -> list[str]:
+    """
+    Phân đoạn câu song ngữ Tiếng Việt - Tiếng Anh tối ưu hóa cho RAG Banking.
+
+    100% sử dụng mô hình học sâu `wtpsplit (SaT)` (Segment Any Text).
+    Tuyệt đối KHÔNG sử dụng regex hoặc các mảng ký tự neo / dấu câu thủ công.
     """
     if not text:
         return []
 
-    text_len = len(text)
-    sentences: list[str] = []
-    current_chars: list[str] = []
-    closing_delimiters = {'"', "'", '”', '’', '»', ')', ']', '}'}
+    # 1. ƯU TIÊN DUY NHẤT: wtpsplit (SaT)
+    if use_sat:
+        sat = get_sat_segmenter()
+        if sat is not None:
+            try:
+                raw_segments = sat.split(text, strip_whitespace=True)
+                clean_segments = [s.strip() for s in raw_segments if s and s.strip()]
+                if clean_segments:
+                    return clean_segments
+            except Exception as e:
+                logger.warning(f"[CanonicalResolver] SaT.split() gặp lỗi: {e}")
 
-    i = 0
-    while i < text_len:
-        c = text[i]
-
-        # A. Ngắt đoạn văn bản cứng (\\n\\n) -> Ranh giới câu/đoạn chắc chắn
-        if c == "\n":
-            is_double_break = False
-            next_idx = i + 1
-            while next_idx < text_len and text[next_idx] in (" ", "\t", "\r", "\n"):
-                if text[next_idx] == "\n":
-                    is_double_break = True
-                next_idx += 1
-
-            if is_double_break:
-                candidate = "".join(current_chars).strip()
-                if candidate:
-                    sentences.append(candidate)
-                current_chars = []
-                i = next_idx
-                continue
-
-            # Ngắt dòng đơn \n trong PDF/OCR:
-            prev_content = "".join(current_chars).strip()
-            if prev_content and next_idx < text_len:
-                next_char = text[next_idx]
-                if next_char.islower():
-                    # Soft wrap: thay \n bằng khoảng trắng để câu liền mạch
-                    current_chars.append(" ")
-                    i = next_idx
-                    continue
-                elif prev_content[-1] in (".", "?", "!", ";"):
-                    sentences.append(prev_content)
-                    current_chars = []
-                    i = next_idx
-                    continue
-
-            current_chars.append(" ")
-            i += 1
-            continue
-
-        # B. Dấu kết thúc câu (. ? !)
-        if c in {".", "?", "!"}:
-            current_chars.append(c)
-
-            # Gom dấu chấm lửng liên tiếp (...)
-            if c == ".":
-                while i + 1 < text_len and text[i + 1] == ".":
-                    current_chars.append(".")
-                    i += 1
-
-            # Gom các dấu đóng ngoặc / đóng trích dẫn đi liền kề ngay sau
-            next_pos = i + 1
-            while next_pos < text_len and text[next_pos] in closing_delimiters:
-                current_chars.append(text[next_pos])
-                next_pos += 1
-
-            # Bỏ qua khoảng trắng theo sau để kiểm tra ký tự bắt đầu tiếp theo
-            follow_pos = next_pos
-            has_space_after = False
-            while follow_pos < text_len and text[follow_pos] in (" ", "\t", "\r", "\n"):
-                has_space_after = True
-                follow_pos += 1
-
-            # Nếu đến cuối chuỗi -> kết thúc câu cuối cùng
-            if follow_pos >= text_len:
-                candidate = "".join(current_chars).strip()
-                if candidate:
-                    sentences.append(candidate)
-                current_chars = []
-                i = follow_pos
-                continue
-
-            # Nếu không có khoảng trắng theo sau -> Số thập phân (3.14), URL (domain.com), Email
-            if not has_space_after:
-                i = next_pos
-                continue
-
-            next_char = text[follow_pos]
-
-            # 1. Bất biến chữ thường (Lowercase Lookahead Invariant):
-            # Trong văn bản chuẩn, câu mới KHÔNG BAO GIỜ bắt đầu bằng chữ thường
-            if next_char.islower():
-                current_chars.append(" ")
-                i = follow_pos
-                continue
-
-            # 2. Tiền tố phân cấp / chỉ mục danh sách hoặc danh xưng ngắn (vd: "Section 1.", "Dr. Smith", "Fig. 2", "1.")
-            curr_str = "".join(current_chars).strip()
-            words = curr_str.split()
-            if words:
-                last_token = words[-1].rstrip(".:?!;\"'”’»)]}")
-                # A. Chỉ mục số/chữ danh sách/đề mục ngắn (vd: "1.", "Section 1.", "A.")
-                if len(words) <= 3 and (last_token.isdigit() or (len(last_token) == 1 and last_token.isalpha())):
-                    current_chars.append(" ")
-                    i = follow_pos
-                    continue
-
-                # B. Từ ngắn viết hoa trước tên riêng hoặc số (vd: "Dr. Smith", "Fig. 2", "Prof. Nguyen")
-                if 1 <= len(last_token) <= 4 and last_token[0].isupper() and (next_char.isupper() or next_char.isdigit()):
-                    current_chars.append(" ")
-                    i = follow_pos
-                    continue
-
-            # Thỏa mãn ranh giới câu hợp lệ -> Cắt câu!
-            candidate = "".join(current_chars).strip()
-            if candidate:
-                sentences.append(candidate)
-            current_chars = []
-            i = follow_pos
-            continue
-
-        # Các ký tự văn bản thông thường
-        current_chars.append(c)
-        i += 1
-
-    # Đóng gói phần còn lại nếu có
-    if current_chars:
-        candidate = "".join(current_chars).strip()
-        if candidate:
-            sentences.append(candidate)
-
-    return sentences
+    # 2. DỰ PHÒNG THUẦN TÚY (0% Regex, 0% Mảng ký tự neo): Tách theo cấu trúc dòng
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return lines if lines else [text.strip()]
 
 
 split_sentences_banking = split_sentences
@@ -433,6 +350,7 @@ def extract_hierarchical_units(text: str = "", text_chunk: str = "") -> list[str
 
 __all__ = [
     "clean_and_dehyphenate_text",
+    "get_sat_segmenter",
     "split_sentences",
     "split_sentences_banking",
     "split_sentences_generalized",

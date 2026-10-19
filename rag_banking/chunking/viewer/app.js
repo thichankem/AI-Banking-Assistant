@@ -162,6 +162,93 @@ async function selectDocumentByIndex(index) {
 }
 
 /**
+ * Chuẩn hóa và tự động ánh xạ 2 chiều giữa Elements và Chunks (đảm bảo 100% Khung Chunk luôn hiển thị)
+ */
+function normalizeChunkElementLinks(layoutData) {
+  if (!layoutData || !layoutData.chunks || !layoutData.pages) return;
+  const chunks = layoutData.chunks;
+  const allElements = [];
+  layoutData.pages.forEach(p => {
+    (p.elements || []).forEach(el => allElements.push(el));
+  });
+
+  // 1. Ánh xạ 2 chiều c.element_ids <-> el.chunk_id
+  chunks.forEach(c => {
+    const cid = c.chunk_id;
+    if (!c.element_ids) c.element_ids = [];
+    const eids = new Set(c.element_ids);
+    allElements.forEach(el => {
+      if (eids.has(el.element_id)) {
+        el.chunk_id = cid;
+      } else if (el.chunk_id === cid) {
+        c.element_ids.push(el.element_id);
+      }
+    });
+  });
+
+  // 2. Với các elements vẫn chưa có chunk_id: Tự động gom theo loại và nội dung
+  chunks.forEach(c => {
+    const cid = c.chunk_id;
+    const isTable = (c.chunk_type || '').includes('table') || (c.content || '').includes('Cột:');
+    const cContent = (c.content || c.raw_content || '').toLowerCase();
+
+    allElements.forEach(el => {
+      if (el.type === 'header_footer') return;
+      if (el.chunk_id) return;
+
+      const elText = (el.text || '').trim().toLowerCase();
+      if (!elText) return;
+
+      if (isTable && el.type === 'table') {
+        el.chunk_id = cid;
+        if (!c.element_ids.includes(el.element_id)) c.element_ids.push(el.element_id);
+      } else if (!isTable && el.type !== 'table') {
+        if (cContent.includes(elText) || (elText.length >= 10 && cContent.includes(elText.slice(0, 20)))) {
+          el.chunk_id = cid;
+          if (!c.element_ids.includes(el.element_id)) c.element_ids.push(el.element_id);
+        }
+      }
+    });
+  });
+
+  // 3. Đảm bảo tuyệt đối KHÔNG có chunk nào bị 0 boxes
+  chunks.forEach(c => {
+    if (!c.element_ids || c.element_ids.length === 0) {
+      const pNums = c.page_numbers || (c.location ? c.location.map(l => l.page) : [c.page_start || 1]);
+      const candEls = allElements.filter(el => pNums.includes(el.page_num) && el.type !== 'header_footer');
+      if (candEls.length > 0) {
+        c.element_ids = candEls.map(e => e.element_id);
+        candEls.forEach(e => { if (!e.chunk_id) e.chunk_id = c.chunk_id; });
+      } else if (allElements.length > 0) {
+        c.element_ids = [allElements[0].element_id];
+      }
+    }
+  });
+
+  // 4. Quét lần cuối theo từng trang để không bỏ sót bất kỳ box nào
+  layoutData.pages.forEach(p => {
+    const pageEls = (p.elements || []).filter(el => el.type !== 'header_footer');
+    const pageChunks = chunks.filter(c => {
+      const pNums = c.page_numbers || (c.location ? c.location.map(l => l.page) : [c.page_start || 1]);
+      return pNums.includes(p.page_num);
+    });
+    const fallbackChunk = pageChunks.find(c => !(c.chunk_type || '').includes('table')) || pageChunks[0] || chunks[0];
+    if (fallbackChunk) {
+      const fcId = fallbackChunk.chunk_id;
+      if (!fallbackChunk.element_ids) fallbackChunk.element_ids = [];
+      pageEls.forEach(el => {
+        if (!el.chunk_id) {
+          el.chunk_id = fcId;
+          if (!fallbackChunk.element_ids.includes(el.element_id)) {
+            fallbackChunk.element_ids.push(el.element_id);
+          }
+        }
+      });
+    }
+  });
+}
+
+/**
  * Tải Layout DLA chuẩn và Tệp gốc (PDF / DOCX)
  */
 async function loadAndRenderDocument(docInfo) {
@@ -181,6 +268,9 @@ async function loadAndRenderDocument(docInfo) {
       console.error(`Không tìm thấy dữ liệu layout cho ${docInfo.name}`);
       return;
     }
+
+    // Luôn đảm bảo 100% ánh xạ giữa Elements và Khung Chunk
+    normalizeChunkElementLinks(layoutData);
 
     state.currentLayoutData = layoutData;
     state.activeBoxId = null;
@@ -362,11 +452,16 @@ async function renderPdfCanvasView(pdfDoc, layoutData) {
     // 1. Dựng các Ô BAO QUANH CHUNK (Chunk Boundary Envelope Boxes)
     const chunkMap = new Map();
     elements.forEach(el => {
-      if (el.chunk_id && el.box && el.box.length === 4) {
-        if (!chunkMap.has(el.chunk_id)) {
-          chunkMap.set(el.chunk_id, []);
+      let cId = el.chunk_id;
+      if (!cId && layoutData.chunks) {
+        const found = layoutData.chunks.find(c => c.element_ids && c.element_ids.includes(el.element_id));
+        if (found) cId = found.chunk_id;
+      }
+      if (cId && el.box && el.box.length === 4) {
+        if (!chunkMap.has(cId)) {
+          chunkMap.set(cId, []);
         }
-        chunkMap.get(el.chunk_id).push(el);
+        chunkMap.get(cId).push(el);
       }
     });
 
@@ -412,50 +507,76 @@ async function renderPdfCanvasView(pdfDoc, layoutData) {
       }
     });
 
+    // Gom nhóm các box theo cụm liên tục (Clusters) để không tạo ô bao trùm lên bảng biểu/đoạn khác
     chunkMap.forEach((chunkElements, chunkId) => {
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      chunkElements.forEach(el => {
-        const [x0, y0, x1, y1] = el.box;
-        if (x0 < minX) minX = x0;
-        if (y0 < minY) minY = y0;
-        if (x1 > maxX) maxX = x1;
-        if (y1 > maxY) maxY = y1;
+      const sortedEls = [...chunkElements].sort((a, b) => a.box[1] - b.box[1]);
+      const clusters = [];
+      let currentCluster = [];
+
+      sortedEls.forEach(el => {
+        if (currentCluster.length === 0) {
+          currentCluster.push(el);
+        } else {
+          const prevEl = currentCluster[currentCluster.length - 1];
+          const gap = el.box[1] - prevEl.box[3];
+          if (gap > 65) {
+            clusters.push(currentCluster);
+            currentCluster = [el];
+          } else {
+            currentCluster.push(el);
+          }
+        }
       });
+      if (currentCluster.length > 0) {
+        clusters.push(currentCluster);
+      }
 
-      if (isFinite(minX) && isFinite(minY) && isFinite(maxX) && isFinite(maxY)) {
-        const pad = 5;
-        const left = Math.max(0, (minX * scaleX) - pad);
-        const top = Math.max(0, (minY * scaleY) - pad);
-        const width = Math.min(viewport.width - left, ((maxX - minX) * scaleX) + (pad * 2));
-        const height = Math.min(viewport.height - top, ((maxY - minY) * scaleY) + (pad * 2));
-
-        const chunkBox = document.createElement('div');
-        chunkBox.className = 'chunk-boundary-box';
-        chunkBox.id = `chunk-boundary-${chunkId}-p${p}`;
-        chunkBox.setAttribute('data-chunk-id', chunkId);
-        chunkBox.setAttribute('data-page-num', p);
-        chunkBox.style.left = `${left}px`;
-        chunkBox.style.top = `${top}px`;
-        chunkBox.style.width = `${width}px`;
-        chunkBox.style.height = `${height}px`;
-
-        // Nhãn tag của Chunk
-        const tag = document.createElement('div');
-        tag.className = 'chunk-boundary-tag';
-        const chunkIdx = (layoutData.chunks || []).findIndex(c => c.chunk_id === chunkId);
-        const displayId = getCleanChunkLabel(chunkId, chunkIdx >= 0 ? chunkIdx : null);
-        tag.innerHTML = `<span>${escapeHtml(displayId)}</span>`;
-        chunkBox.appendChild(tag);
-
-        // Sự kiện Click vào Chunk Boundary: kích hoạt soi toàn bộ chunk
-        chunkBox.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const targetChunk = (layoutData.chunks || []).find(c => c.chunk_id === chunkId);
-          handleChunkClick(chunkId, targetChunk?.element_ids);
+      clusters.forEach((clusterEls, clusterIdx) => {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        clusterEls.forEach(el => {
+          const [x0, y0, x1, y1] = el.box;
+          if (x0 < minX) minX = x0;
+          if (y0 < minY) minY = y0;
+          if (x1 > maxX) maxX = x1;
+          if (y1 > maxY) maxY = y1;
         });
 
-        boxLayer.appendChild(chunkBox);
-      }
+        if (isFinite(minX) && isFinite(minY) && isFinite(maxX) && isFinite(maxY)) {
+          const pad = 6;
+          const left = Math.max(0, (minX * scaleX) - pad);
+          const top = Math.max(0, (minY * scaleY) - pad);
+          const width = Math.min(viewport.width - left, ((maxX - minX) * scaleX) + (pad * 2));
+          const height = Math.min(viewport.height - top, ((maxY - minY) * scaleY) + (pad * 2));
+
+          const chunkBox = document.createElement('div');
+          chunkBox.className = 'chunk-boundary-box';
+          chunkBox.id = `chunk-boundary-${chunkId}-p${p}-c${clusterIdx}`;
+          chunkBox.setAttribute('data-chunk-id', chunkId);
+          chunkBox.setAttribute('data-page-num', p);
+          chunkBox.style.left = `${left}px`;
+          chunkBox.style.top = `${top}px`;
+          chunkBox.style.width = `${width}px`;
+          chunkBox.style.height = `${height}px`;
+
+          // Nhãn tag của Chunk
+          const tag = document.createElement('div');
+          tag.className = 'chunk-boundary-tag';
+          const chunkIdx = (layoutData.chunks || []).findIndex(c => c.chunk_id === chunkId);
+          const displayId = getCleanChunkLabel(chunkId, chunkIdx >= 0 ? chunkIdx : null);
+          const partSuffix = clusters.length > 1 ? ` (Phần ${clusterIdx + 1})` : '';
+          tag.innerHTML = `<span>${escapeHtml(displayId + partSuffix)}</span>`;
+          chunkBox.appendChild(tag);
+
+          // Sự kiện Click vào Chunk Boundary: kích hoạt soi toàn bộ chunk
+          chunkBox.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const targetChunk = (layoutData.chunks || []).find(c => c.chunk_id === chunkId);
+            handleChunkClick(chunkId, targetChunk?.element_ids);
+          });
+
+          boxLayer.appendChild(chunkBox);
+        }
+      });
     });
 
     // 2. Vẽ từng Bounding Box Element con
@@ -1047,9 +1168,12 @@ function cleanChunkBreadcrumb(rawBreadcrumb) {
   let bc = String(rawBreadcrumb).trim();
   const parts = bc.split(/\s*>\s*/);
   if (parts.length > 1) {
-    // Bỏ phần cấp gốc (tên file hoặc tên tài liệu dài)
-    parts.shift();
-    return parts.join(' > ');
+    const p0 = parts[0].toLowerCase();
+    // Chỉ loại bỏ cấp đầu nếu nó thuần túy là tên file kỹ thuật
+    if (p0.endsWith('.pdf') || p0.endsWith('.docx') || p0.startsWith('vcb_pdf_') || p0.startsWith('vcb_docx_') || /^vcb\s+(pdf|docx)\s+\d+$/i.test(parts[0])) {
+      parts.shift();
+      return parts.join(' > ');
+    }
   }
   return bc;
 }
@@ -1061,8 +1185,8 @@ function cleanChunkBreadcrumb(rawBreadcrumb) {
 function cleanChunkContent(rawText, breadcrumbText = '', sectionTitle = '') {
   if (!rawText) return '';
   let text = String(rawText).trim();
-  // 1. Loại bỏ toàn bộ [Breadcrumbs: ...] hoặc [Breadcrumb: ...]
-  text = text.replace(/\[Breadcrumbs?:\s*[\s\S]*?\]\s*/gi, '').trim();
+  // 1. Loại bỏ toàn bộ [Breadcrumbs: ...], [Breadcrumb: ...] hoặc [Ngữ cảnh: ...]
+  text = text.replace(/\[(?:Breadcrumbs?|Ngữ cảnh):\s*[\s\S]*?\]\s*/gi, '').trim();
 
   // 2. Loại bỏ tiêu đề đầu dòng bị lặp lại (### Tiêu đề, ## Tiêu đề, # Tiêu đề)
   const lines = text.split('\n');
@@ -1092,7 +1216,33 @@ function cleanChunkContent(rawText, breadcrumbText = '', sectionTitle = '') {
 }
 
 /**
- * Tạo thẻ DOM Chunk Card
+ * Định dạng nội dung Chunk thành HTML đẹp mắt (hỗ trợ bullet points và tiêu đề đậm)
+ */
+function formatChunkContentHtml(rawText) {
+  if (!rawText) return '';
+  const lines = rawText.split('\n');
+  const formattedLines = lines.map(line => {
+    const trimmed = line.trim();
+    if (!trimmed) return '<div style="height: 8px;"></div>';
+    
+    // Dòng gạch đầu dòng bullet
+    if (trimmed.startsWith('- ') || trimmed.startsWith('* ') || trimmed.startsWith('• ')) {
+      const bulletContent = trimmed.slice(2).trim();
+      return `<div class="content-bullet-line"><span class="bullet-dot">•</span><span>${escapeHtml(bulletContent)}</span></div>`;
+    }
+    
+    // Tiêu đề in hoa / nhấn mạnh
+    if (trimmed.length > 3 && trimmed === trimmed.toUpperCase() && /[A-ZÀ-Ỹ]/.test(trimmed)) {
+      return `<div class="content-heading-line">${escapeHtml(trimmed)}</div>`;
+    }
+    
+    return `<div class="content-normal-line">${escapeHtml(line)}</div>`;
+  });
+  return formattedLines.join('');
+}
+
+/**
+ * Tạo thẻ DOM Chunk Card chuẩn giao diện hiện đại (Chunk Pill, Breadcrumb *, Content *)
  */
 function createChunkCard(chunk, idx = null) {
   const card = document.createElement('div');
@@ -1101,20 +1251,49 @@ function createChunkCard(chunk, idx = null) {
   card.setAttribute('data-chunk-id', chunk.chunk_id);
 
   const rawBc = (chunk.breadcrumb || chunk.section_title || '').trim();
-  const breadcrumbText = cleanChunkBreadcrumb(rawBc);
+  const breadcrumbText = cleanChunkBreadcrumb(rawBc) || rawBc;
   const displayContent = cleanChunkContent(chunk.content || chunk.raw_content || '', breadcrumbText, chunk.section_title);
   const wordCount = chunk.word_count || (displayContent ? displayContent.split(/\s+/).length : 0);
+  const chunkNumber = (idx !== null && idx !== undefined) ? (idx + 1) : 1;
 
   card.innerHTML = `
-    <div class="chunk-card-header">
-      <div class="chunk-breadcrumb">
-        <span>${escapeHtml(breadcrumbText || 'Nội dung')}</span>
+    <div class="chunk-card-top-bar">
+      <div class="chunk-badge-pill">
+        <span>Chunk ${chunkNumber}</span>
+        <button class="chunk-badge-btn" title="Chỉnh sửa (Chế độ xem)" tabindex="-1">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+          </svg>
+        </button>
+        <button class="chunk-badge-btn" title="Bỏ chọn" tabindex="-1">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
       </div>
-      <span class="chunk-word-count">${wordCount} từ</span>
+      <span class="chunk-word-count-tag">${wordCount} từ</span>
     </div>
 
-    <div class="chunk-card-content">
-      ${escapeHtml(displayContent)}
+    <div class="chunk-field-group">
+      <div class="chunk-field-label">
+        <span>Breadcrumb</span>
+        <span class="required-star">*</span>
+      </div>
+      <div class="chunk-field-value chunk-breadcrumb-value">
+        ${escapeHtml(breadcrumbText || 'Nội dung')}
+      </div>
+    </div>
+
+    <div class="chunk-field-group">
+      <div class="chunk-field-label">
+        <span>Content</span>
+        <span class="required-star">*</span>
+      </div>
+      <div class="chunk-field-value chunk-content-value chunk-card-content">
+        ${formatChunkContentHtml(displayContent)}
+      </div>
     </div>
   `;
 
@@ -1417,6 +1596,11 @@ function applyViewLayers() {
   document.querySelectorAll('.element-bbox, .element-box').forEach(b => {
     b.style.display = state.showBoxes ? '' : 'none';
     b.style.pointerEvents = state.showBoxes ? 'auto' : 'none';
+  });
+
+  document.querySelectorAll('.chunk-boundary-box, .docx-chunk-boundary').forEach(cb => {
+    cb.style.display = state.showChunkBoundaries ? '' : 'none';
+    cb.style.pointerEvents = state.showChunkBoundaries ? 'auto' : 'none';
   });
 
   document.querySelectorAll('.pdf-raw-canvas').forEach(c => {

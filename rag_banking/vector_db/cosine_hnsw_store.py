@@ -95,13 +95,20 @@ class CosineHNSWVectorStore:
                             vector=[float(x) for x in vec],
                             payload={
                                 "chunk_id": chunk.get("chunk_id", str(idx)),
+                                "parent_id": chunk.get("parent_id", ""),
                                 "source": chunk.get("source", ""),
                                 "breadcrumb": chunk.get("breadcrumb", ""),
                                 "section_title": chunk.get("section_title", ""),
                                 "chunk_type": chunk.get("chunk_type", "text"),
                                 "canonical_questions": chunk.get("canonical_questions", []),
                                 "content": chunk.get("content", ""),
-                                "word_count": chunk.get("word_count", 0)
+                                "original_text": chunk.get("original_text", chunk.get("content", "")),
+                                "word_count": chunk.get("word_count", 0),
+                                "token_count": chunk.get("token_count", 0),
+                                "location": chunk.get("location", []),
+                                "element_ids": chunk.get("element_ids", []),
+                                "is_active": chunk.get("is_active", True),
+                                "updated_time": chunk.get("updated_time", 0)
                             }
                         )
                     )
