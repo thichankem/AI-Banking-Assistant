@@ -6,3 +6,4 @@ pydantic>=2.8.0
 chromadb>=1.5.0
 qdrant-client>=1.19.0
 weaviate-client>=4.23.0
+wtpsplit>=2.1.0

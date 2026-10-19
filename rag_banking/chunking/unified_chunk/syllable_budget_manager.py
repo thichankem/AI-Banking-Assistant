@@ -42,7 +42,7 @@ def prepend_context_header(content: str, breadcrumb: str, section_title: str) ->
     clean_content = content.strip()
 
     prefix = ""
-    if clean_bc and clean_st and clean_st != clean_bc:
+    if clean_bc and clean_st and clean_st != clean_bc and not clean_bc.endswith(clean_st):
         prefix = f"[Ngữ cảnh: {clean_bc} > {clean_st}]\n"
     elif clean_bc:
         prefix = f"[Ngữ cảnh: {clean_bc}]\n"
@@ -56,6 +56,8 @@ def prepend_context_header(content: str, breadcrumb: str, section_title: str) ->
     return prefix + clean_content
 
 
+import time
+
 def build_7_field_chunk(
     chunk_id: str,
     source: str,
@@ -63,22 +65,54 @@ def build_7_field_chunk(
     breadcrumb: str,
     section_title: str,
     content: str,
-    word_count: Optional[int] = None
+    word_count: Optional[int] = None,
+    original_text: Optional[str] = None,
+    parent_id: Optional[str] = None,
+    location: Optional[list[dict]] = None,
+    token_count: Optional[int] = None,
+    element_ids: Optional[list[str]] = None,
+    is_active: bool = True,
+    updated_time: Optional[int] = None,
+    **kwargs
 ) -> dict:
     """
-    Hàm khởi tạo duy nhất tuân thủ tuyệt đối Hợp đồng 7 trường (7-Field Schema Contract):
-    `chunk_id`, `source`, `chunk_type`, `breadcrumb`, `section_title`, `content`, `word_count`.
+    Hàm khởi tạo chunk chuẩn mực cho toàn bộ hệ thống AI Banking Assistant:
+    - 7 trường cốt lõi bắt buộc: `chunk_id`, `source`, `chunk_type`, `breadcrumb`, `section_title`, `content`, `word_count`.
+    - Các trường mở rộng chuẩn Enterprise RAG:
+        + `parent_id`: Phục vụ kiến trúc Small-to-Big / Hierarchical Retrieval.
+        + `original_text`: Văn bản thô ban đầu trước khi prepend tiền tố ngữ cảnh.
+        + `token_count`: Ước tính/tính toán số subword token cho LLM prompt budget.
+        + `location`: Tọa độ trực quan [{"page": int, "bbox": [x0, y0, x1, y1]}] cho PDF Viewer highlight.
+        + `element_ids`: Danh sách ID atomic elements trong Document Layout Analysis (DLA).
+        + `is_active`: Cờ quản lý vòng đời văn bản (soft delete khi cập nhật biểu phí/chính sách mới).
+        + `updated_time`: Timestamp epoch ms của chunk.
     """
     final_content = prepend_context_header(content, breadcrumb, section_title)
-    return {
+    w_count = word_count if word_count is not None else len(final_content.split())
+    raw_text = original_text if original_text is not None else content.strip()
+    tok_count = token_count if token_count is not None else int(round(w_count * 1.25))
+    up_time = updated_time if updated_time is not None else int(time.time() * 1000)
+
+    chunk: dict = {
         "chunk_id": chunk_id,
+        "parent_id": parent_id,
         "source": source,
         "chunk_type": chunk_type,
         "breadcrumb": breadcrumb,
         "section_title": section_title,
         "content": final_content,
-        "word_count": word_count if word_count is not None else len(final_content.split())
+        "original_text": raw_text,
+        "word_count": w_count,
+        "token_count": tok_count,
+        "location": location if location is not None else [],
+        "element_ids": element_ids if element_ids is not None else [],
+        "is_active": is_active,
+        "updated_time": up_time
     }
+    return chunk
+
+
+build_banking_chunk = build_7_field_chunk
 
 
 class SyllableBudgetManager:
@@ -123,54 +157,6 @@ class SyllableBudgetManager:
             "ceiling_syllables": self.ceiling_syllables
         }
 
-    def find_optimal_elastic_split_point(
-        self,
-        words: list[str],
-        window_start: int = 250,
-        window_end: int = 420
-    ) -> int:
-        """
-        Tìm ranh giới ngắt đàn hồi tối ưu nhất trong cửa sổ [250, 420] từ
-        dựa trên thang điểm trọng số dấu câu (0% Regex):
-        - Đoạn xuống dòng kép (\\n\\n): 10.0 điểm
-        - Dấu ngắt câu dứt điểm (. ! ?): 8.0 điểm
-        - Dấu ngắt ý chính (; :): 5.0 điểm
-        - Dấu phẩy (,): 2.0 điểm
-        - Khoảng trắng thông thường: 1.0 điểm
-        """
-        total_words = len(words)
-        if total_words <= window_end:
-            return total_words
-
-        effective_start = min(window_start, total_words - 1)
-        effective_end = min(window_end, total_words)
-
-        best_idx = effective_end
-        best_score = -1.0
-
-        for idx in range(effective_start, effective_end):
-            w = words[idx]
-            score = 1.0
-
-            if "\n\n" in w:
-                score = 10.0
-            elif any(w.endswith(punct) for punct in (".", "!", "?")):
-                score = 8.0
-            elif any(w.endswith(punct) for punct in (";", ":")):
-                score = 5.0
-            elif w.endswith(","):
-                score = 2.0
-
-            # Ưu tiên các điểm ngắt gần biên 350-380 từ hơn
-            position_bias = 1.0 - (abs(idx - 350) / 350.0) * 0.2
-            total_candidate_score = score * position_bias
-
-            if total_candidate_score > best_score:
-                best_score = total_candidate_score
-                best_idx = idx + 1
-
-        return best_idx
-
     def split_text_elastic(
         self,
         text: str,
@@ -180,54 +166,29 @@ class SyllableBudgetManager:
         overlap: int = 0
     ) -> list[str]:
         """
-        Cắt văn bản dài thành các đoạn đạt chuẩn bằng cửa sổ ngắt đàn hồi.
-        Không cắt thô bạo tại 400 mà tìm điểm ngắt câu tự nhiên trong [250, 420].
-        Trần tuyệt đối không vượt quá ceiling (450 âm tiết).
-        Tuyệt đối không overlap nội dung giữa các chunk (0% content overlap, overlap=0).
+        Phân đoạn văn bản bằng wtpsplit (SaT) và gom nhóm theo ngân sách âm tiết.
+        Tuyệt đối không dùng regex hoặc các mảng ký tự neo / dấu câu thủ công.
         """
         words = text.split()
         if len(words) <= ceiling:
             return [text.strip()] if text.strip() else []
 
-        chunks: list[str] = []
-        start_idx = 0
+        # Phân đoạn câu trực tiếp bằng mô hình wtpsplit (SaT)
+        sentences = split_sentences_banking(text)
+        if len(sentences) <= 1:
+            chunks: list[str] = []
+            target = min(window_end, ceiling)
+            for i in range(0, len(words), target):
+                chunk = " ".join(words[i:i + target]).strip()
+                if chunk:
+                    chunks.append(chunk)
+            return chunks
 
-        while start_idx < len(words):
-            remaining_words = len(words) - start_idx
-            if remaining_words <= ceiling:
-                chunk_words = words[start_idx:]
-                chunks.append(" ".join(chunk_words))
-                break
-
-            # Cửa sổ tìm kiếm
-            win_s = min(window_start, remaining_words - 1)
-            win_e = min(window_end, remaining_words)
-
-            slice_words = words[start_idx:start_idx + win_e + 20]
-            relative_split_point = self.find_optimal_elastic_split_point(
-                slice_words,
-                window_start=win_s,
-                window_end=win_e
-            )
-
-            # Đảm bảo không vượt quá trần ceiling
-            relative_split_point = min(relative_split_point, ceiling)
-            end_idx = start_idx + relative_split_point
-
-            chunk_text = " ".join(words[start_idx:end_idx]).strip()
-            if chunk_text:
-                chunks.append(chunk_text)
-
-            # Tiến index không gối đầu nội dung (0% content overlap)
-            if overlap <= 0:
-                next_start = end_idx
-            else:
-                next_start = end_idx - overlap
-                if next_start <= start_idx:
-                    next_start = end_idx
-            start_idx = next_start
-
-        return chunks
+        return self.split_sentences_by_syllable_budget(
+            sentences=sentences,
+            max_syllables=min(window_end, ceiling),
+            overlap_syllables=overlap
+        )
 
     def split_sentences_by_syllable_budget(
         self,
@@ -237,6 +198,7 @@ class SyllableBudgetManager:
     ) -> list[str]:
         """
         Gom nhóm các câu thành các đoạn văn đạt ngân sách âm tiết mục tiêu kèm gối đầu (overlap).
+        Bảo toàn trọn vẹn ranh giới câu do wtpsplit (SaT) tạo ra, không cắt vụn giữa câu.
         """
         target_max = max_syllables or self.max_syllables
         target_overlap = overlap_syllables or self.overlap_syllables
@@ -244,14 +206,44 @@ class SyllableBudgetManager:
         if not sentences:
             return []
 
-        full_text = " ".join(sentences)
-        return self.split_text_elastic(
-            text=full_text,
-            window_start=250,
-            window_end=target_max,
-            ceiling=self.ceiling_syllables,
-            overlap=target_overlap
-        )
+        chunks: list[str] = []
+        current_chunk: list[str] = []
+        current_count = 0
+
+        for s in sentences:
+            s_clean = s.strip()
+            if not s_clean:
+                continue
+            s_words = len(s_clean.split())
+
+            # Trường hợp câu đơn lẻ đặc biệt vượt trần ceiling -> ngắt đàn hồi
+            if s_words > self.ceiling_syllables:
+                if current_chunk:
+                    chunks.append(" ".join(current_chunk))
+                    current_chunk = []
+                    current_count = 0
+                sub_parts = self.split_text_elastic(
+                    text=s_clean,
+                    window_start=250,
+                    window_end=target_max,
+                    ceiling=self.ceiling_syllables,
+                    overlap=target_overlap
+                )
+                chunks.extend(sub_parts)
+                continue
+
+            if current_count + s_words > target_max and current_chunk:
+                chunks.append(" ".join(current_chunk))
+                current_chunk = []
+                current_count = 0
+
+            current_chunk.append(s_clean)
+            current_count += s_words
+
+        if current_chunk:
+            chunks.append(" ".join(current_chunk))
+
+        return chunks
 
 
 __all__ = [
@@ -261,5 +253,6 @@ __all__ = [
     "CEILING_SYLLABLES",
     "SyllableBudgetManager",
     "prepend_context_header",
-    "build_7_field_chunk"
+    "build_7_field_chunk",
+    "build_banking_chunk"
 ]

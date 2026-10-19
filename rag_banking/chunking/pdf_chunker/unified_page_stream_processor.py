@@ -299,20 +299,22 @@ class UnifiedPageStreamProcessor:
         chunk_counter = 0
 
         # Gom các khối BODY liên tiếp vào một bộ đệm văn bản
-        body_buffer: list[str] = []
+        body_buffer: list[LayoutBlock] = []
 
         def flush_body_buffer() -> None:
             nonlocal chunk_counter
             if not body_buffer:
                 return
 
-            full_text = "\n\n".join(body_buffer).strip()
+            full_text = "\n\n".join(b.text for b in body_buffer if b.text.strip()).strip()
+            locations = [{"page": b.page_num, "bbox": list(b.bbox)} for b in body_buffer if b.page_num is not None]
             body_buffer.clear()
             if not full_text:
                 return
 
             bc = tracker.get_breadcrumb()
             st = tracker.get_section_title()
+            p_id = f"{source}_sec_{st.lower().replace(' ', '_')}"
 
             chunk_obj = build_7_field_chunk(
                 chunk_id=f"{source}_c{chunk_counter}",
@@ -320,7 +322,10 @@ class UnifiedPageStreamProcessor:
                 chunk_type="pdf_text",
                 breadcrumb=bc,
                 section_title=st,
-                content=full_text
+                content=full_text,
+                original_text=full_text,
+                parent_id=p_id,
+                location=locations
             )
             chunks.append(chunk_obj)
             chunk_counter += 1
@@ -352,21 +357,23 @@ class UnifiedPageStreamProcessor:
                     breadcrumb=bc,
                     section_title=st,
                     chunk_type="pdf_table",
-                    start_index=chunk_counter
+                    start_index=chunk_counter,
+                    page_num=block.page_num,
+                    bbox=list(block.bbox) if block.bbox else None
                 )
                 chunks.extend(table_chunks)
                 chunk_counter += len(table_chunks)
 
             elif block.block_type == LayoutBlockType.BODY:
-                body_buffer.append(block.text)
+                body_buffer.append(block)
                 # Nếu buffer gom được lượng từ tiệm cận ngân sách (>= 350 từ) thì flush
-                approx_words = sum(len(t.split()) for t in body_buffer)
+                approx_words = sum(len(b.text.split()) for b in body_buffer)
                 if approx_words >= target_syllable_budget:
                     flush_body_buffer()
 
         flush_body_buffer()
 
-        # Xác thực nghiêm ngặt Hợp đồng 7 trường (7-Field Schema Contract)
+        # Xác thực Hợp đồng trường cốt lõi
         for c in chunks:
             self._validate_7_field_schema(c)
 
@@ -517,13 +524,17 @@ class UnifiedPageStreamProcessor:
 
     @staticmethod
     def _validate_7_field_schema(chunk: dict) -> None:
-        """Đảm bảo mọi chunk chỉ chứa đúng và đủ 7 trường bắt buộc."""
+        """Đảm bảo mọi chunk chứa đúng và đủ các trường bắt buộc, loại bỏ rác legacy."""
         required_keys = {"chunk_id", "source", "chunk_type", "breadcrumb", "section_title", "content", "word_count"}
-        current_keys = set(chunk.keys())
-        if current_keys != required_keys:
-            extra_keys = current_keys - required_keys
-            for k in extra_keys:
-                del chunk[k]
+        for k in required_keys:
+            if k not in chunk:
+                chunk[k] = "" if k != "word_count" else 0
+
+        # Loại bỏ các trường rác không thuộc chuẩn
+        forbidden_keys = {"ref", "legal_ref", "raw_content", "char_length", "format"}
+        for f in forbidden_keys:
+            if f in chunk:
+                del chunk[f]
 
 
 __all__ = [

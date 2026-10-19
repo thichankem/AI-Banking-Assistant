@@ -70,11 +70,16 @@ class WeaviateStore:
                     name=self.collection_name,
                     properties=[
                         Property(name="chunk_id", data_type=DataType.TEXT),
+                        Property(name="parent_id", data_type=DataType.TEXT),
                         Property(name="source", data_type=DataType.TEXT),
                         Property(name="breadcrumb", data_type=DataType.TEXT),
                         Property(name="section_title", data_type=DataType.TEXT),
                         Property(name="chunk_type", data_type=DataType.TEXT),
                         Property(name="content", data_type=DataType.TEXT),
+                        Property(name="original_text", data_type=DataType.TEXT),
+                        Property(name="word_count", data_type=DataType.INT),
+                        Property(name="token_count", data_type=DataType.INT),
+                        Property(name="is_active", data_type=DataType.BOOL),
                     ],
                     vector_index_config=Configure.VectorIndex.hnsw(
                         distance_metric=Configure.VectorIndex.DistanceMetric.COSINE
@@ -105,11 +110,16 @@ class WeaviateStore:
                     obj = {
                         "properties": {
                             "chunk_id": chunk.get("chunk_id", ""),
+                            "parent_id": chunk.get("parent_id", "") or "",
                             "source": chunk.get("source", ""),
                             "breadcrumb": chunk.get("breadcrumb", ""),
                             "section_title": chunk.get("section_title", ""),
                             "chunk_type": chunk.get("chunk_type", ""),
                             "content": chunk.get("content", ""),
+                            "original_text": chunk.get("original_text", chunk.get("content", "")),
+                            "word_count": int(chunk.get("word_count", 0)),
+                            "token_count": int(chunk.get("token_count", 0)),
+                            "is_active": bool(chunk.get("is_active", True)),
                         },
                         "vector": vec
                     }

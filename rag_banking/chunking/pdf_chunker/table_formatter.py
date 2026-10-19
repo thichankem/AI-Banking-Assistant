@@ -66,9 +66,7 @@ def contains_anchor_exact(cell_text: str, anchor: str) -> bool:
         # 1. Ranh giới phía trước (preceding boundary)
         if start > 0:
             prev_char = cell_text[start - 1]
-            if anchor_clean == "*" and prev_char in ("*", "("):
-                is_valid = False
-            elif anchor_clean.startswith("*") and prev_char == "*":
+            if anchor_clean.startswith("*") and (prev_char == "*" or prev_char == "("):
                 is_valid = False
             elif anchor_clean.startswith("(") and prev_char == "(":
                 is_valid = False
@@ -80,9 +78,7 @@ def contains_anchor_exact(cell_text: str, anchor: str) -> bool:
         # 2. Ranh giới phía sau (following boundary)
         if end < len(cell_text):
             next_char = cell_text[end]
-            if anchor_clean == "*" and next_char in ("*", ")"):
-                is_valid = False
-            elif anchor_clean.endswith("*") and next_char == "*":
+            if anchor_clean.endswith("*") and (next_char == "*" or next_char == ")"):
                 is_valid = False
             elif anchor_clean.endswith(")") and next_char == ")":
                 is_valid = False
@@ -211,7 +207,10 @@ class TableFormatter:
         breadcrumb: str,
         section_title: str,
         chunk_type: str = "pdf_table",
-        start_index: int = 0
+        start_index: int = 0,
+        page_num: Optional[int] = None,
+        bbox: Optional[list[float]] = None,
+        parent_id: Optional[str] = None
     ) -> list[dict]:
         """
         Phân đoạn kết quả trích xuất VLM thành danh sách các chunk chuẩn 7 trường.
@@ -297,13 +296,18 @@ class TableFormatter:
                         row_lines=current_row_lines,
                         footnote_block=footnote_block
                     )
+                    table_loc = [{"page": page_num, "bbox": bbox}] if page_num is not None else []
+                    p_id = parent_id or f"{chunk_id_prefix}_parent"
                     chunk_obj = build_7_field_chunk(
                         chunk_id=f"{chunk_id_prefix}_c{counter}",
                         source=source,
                         chunk_type=chunk_type,
                         breadcrumb=breadcrumb,
                         section_title=section_title,
-                        content=chunk_text
+                        content=chunk_text,
+                        original_text=chunk_text,
+                        parent_id=p_id,
+                        location=table_loc
                     )
                     chunks.append(chunk_obj)
                     counter += 1
@@ -322,13 +326,18 @@ class TableFormatter:
                     row_lines=current_row_lines,
                     footnote_block=footnote_block
                 )
+                table_loc = [{"page": page_num, "bbox": bbox}] if page_num is not None else []
+                p_id = parent_id or f"{chunk_id_prefix}_parent"
                 chunk_obj = build_7_field_chunk(
                     chunk_id=f"{chunk_id_prefix}_c{counter}",
                     source=source,
                     chunk_type=chunk_type,
                     breadcrumb=breadcrumb,
                     section_title=section_title,
-                    content=chunk_text
+                    content=chunk_text,
+                    original_text=chunk_text,
+                    parent_id=p_id,
+                    location=table_loc
                 )
                 chunks.append(chunk_obj)
                 counter += 1
@@ -357,7 +366,7 @@ class TableFormatter:
         parts: list[str] = []
 
         # 1. Header ngữ cảnh phả hệ
-        if breadcrumb and section_title and section_title != breadcrumb:
+        if breadcrumb and section_title and section_title != breadcrumb and not breadcrumb.endswith(section_title):
             parts.append(f"[Ngữ cảnh: {breadcrumb} > {section_title}]")
         elif breadcrumb:
             parts.append(f"[Ngữ cảnh: {breadcrumb}]")
@@ -365,16 +374,18 @@ class TableFormatter:
             parts.append(f"[Ngữ cảnh: {section_title}]")
 
         # 2. Tiêu đề bảng
-        if table_title:
-            parts.append(f"Bảng biểu: {table_title}")
+        clean_tbl_title = table_title.strip() if table_title else ""
+        if clean_tbl_title and clean_tbl_title.lower() not in ("null", "none", "string or null", "string"):
+            parts.append(f"Bảng biểu: {clean_tbl_title}")
 
         # 3. Tiêu đề cột
         if col_header_line:
             parts.append(col_header_line)
 
         # 4. Nhóm chỉ tiêu / Danh mục (Stateful)
-        if group_name:
-            parts.append(self.group_prefix_template.format(group_name=group_name))
+        clean_group = group_name.strip() if group_name else ""
+        if clean_group and clean_group.lower() not in ("null", "none", "string or null", "string"):
+            parts.append(self.group_prefix_template.format(group_name=clean_group))
 
         # 5. Dòng dữ liệu
         parts.extend(row_lines)

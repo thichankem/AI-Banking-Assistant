@@ -155,7 +155,9 @@ class DOCXChunker:
                     chunk_type="docx_text",
                     breadcrumb=breadcrumb,
                     section_title=current_section,
-                    content=group.strip()
+                    content=group.strip(),
+                    original_text=group.strip(),
+                    parent_id=f"{path.stem}_sec_{counter}"
                 )
                 chunks.append(chunk_obj)
                 counter += 1
@@ -247,8 +249,28 @@ class DOCXChunker:
                 logger.debug(f"[DOCXChunker] VLM table extraction failed: {e}")
 
         # Bảng đơn giản hoặc fallback: Trích xuất ma trận ô và định dạng chuẩn
-        headers = [c.text.strip().replace("\n", " ") for c in table.rows[0].cells]
-        headers = [h or f"Cột_{i+1}" for i, h in enumerate(headers)]
+        raw_headers = [c.text.strip().replace("\n", " ") for c in table.rows[0].cells]
+        last_hdr = ""
+        headers: list[str] = []
+        for h in raw_headers:
+            if h:
+                last_hdr = h
+                headers.append(h)
+            elif last_hdr:
+                headers.append(f"{last_hdr} (Chi tiết)")
+            else:
+                headers.append("Nội dung")
+
+        # Khử trùng lặp tiêu đề
+        seen: dict[str, int] = {}
+        unique_headers: list[str] = []
+        for h in headers:
+            if h not in seen:
+                seen[h] = 1
+                unique_headers.append(h)
+            else:
+                seen[h] += 1
+                unique_headers.append(f"{h} ({seen[h]})")
 
         matrix: list[list[str]] = []
         for row in table.rows[1:]:
@@ -256,7 +278,7 @@ class DOCXChunker:
             matrix.append(vals)
 
         table_chunks = self.table_formatter.format_matrix_to_chunks(
-            headers=headers,
+            headers=unique_headers,
             matrix=matrix,
             source=path.name,
             chunk_id_prefix=f"{path.stem}_tbl",
