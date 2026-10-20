@@ -102,16 +102,9 @@ rag_banking/storage/*.json
 !benchmarks/datasets/**
 !benchmarks/results/**
 
-# DLA Chunking Viewer Layouts, Sample Data & Generated Manifests
-**/viewer/layouts/
-**/viewer/sample_data/
-**/viewer/temp_audit/
-**/viewer/visual_audit/
-**/viewer/manifest_108.json
-**/viewer/manifest_108.js
-**/viewer/raw_samples_b64.js
-**/viewer/datasets.js
-**/viewer/embedded_sample.js
+# DLA Chunking Viewer
+viewer/
+**/viewer/
 
 # Experiments & Benchmark Directories
 experiments/
