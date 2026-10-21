@@ -1,7 +1,7 @@
 """
 Module Syllable Budget Manager (Chuẩn hóa Đơn vị Âm tiết Tiếng Việt & Phân tách Động)
 ========================================================================================
-Quản lý ngân sách âm tiết tiếng Việt chuẩn hóa cố định (MIN=100, MAX=400, OVERLAP=50, CEILING=500).
+Quản lý ngân sách âm tiết tiếng Việt chuẩn hóa cố định (MIN=100, MAX=400, CEILING=500).
 Tích hợp:
 1. Phân tách đàn hồi (Elastic Window Splitting [250, 420]): Tìm ranh giới ngắt câu/đoạn
    tối ưu nhất dựa trên trọng số dấu câu (\\n\\n, . ? !, ; :, ,).
@@ -28,7 +28,6 @@ except (ImportError, ValueError):
 # =============================================================================
 MIN_SYLLABLES: int = 100
 MAX_SYLLABLES: int = 400
-OVERLAP_SYLLABLES: int = 0  # Tuyệt đối không overlap content (0% content overlap)
 CEILING_SYLLABLES: int = 500
 
 
@@ -124,13 +123,11 @@ class SyllableBudgetManager:
         self,
         min_syllables: int = MIN_SYLLABLES,
         max_syllables: int = MAX_SYLLABLES,
-        overlap_syllables: int = OVERLAP_SYLLABLES,
         ceiling_syllables: int = CEILING_SYLLABLES,
         **kwargs
     ):
         self.min_syllables = min_syllables
         self.max_syllables = max_syllables
-        self.overlap_syllables = overlap_syllables
         self.ceiling_syllables = ceiling_syllables
 
     def count_syllables(self, text: str) -> int:
@@ -163,7 +160,7 @@ class SyllableBudgetManager:
         window_start: int = 250,
         window_end: int = 420,
         ceiling: int = 450,
-        overlap: int = 0
+        **kwargs
     ) -> list[str]:
         """
         Phân đoạn văn bản bằng wtpsplit (SaT) và gom nhóm theo ngân sách âm tiết.
@@ -186,22 +183,20 @@ class SyllableBudgetManager:
 
         return self.split_sentences_by_syllable_budget(
             sentences=sentences,
-            max_syllables=min(window_end, ceiling),
-            overlap_syllables=overlap
+            max_syllables=min(window_end, ceiling)
         )
 
     def split_sentences_by_syllable_budget(
         self,
         sentences: list[str],
         max_syllables: Optional[int] = None,
-        overlap_syllables: Optional[int] = None
+        **kwargs
     ) -> list[str]:
         """
-        Gom nhóm các câu thành các đoạn văn đạt ngân sách âm tiết mục tiêu kèm gối đầu (overlap).
+        Gom nhóm các câu thành các đoạn văn đạt ngân sách âm tiết mục tiêu.
         Bảo toàn trọn vẹn ranh giới câu do wtpsplit (SaT) tạo ra, không cắt vụn giữa câu.
         """
         target_max = max_syllables or self.max_syllables
-        target_overlap = overlap_syllables or self.overlap_syllables
 
         if not sentences:
             return []
@@ -226,8 +221,7 @@ class SyllableBudgetManager:
                     text=s_clean,
                     window_start=250,
                     window_end=target_max,
-                    ceiling=self.ceiling_syllables,
-                    overlap=target_overlap
+                    ceiling=self.ceiling_syllables
                 )
                 chunks.extend(sub_parts)
                 continue
@@ -249,7 +243,6 @@ class SyllableBudgetManager:
 __all__ = [
     "MIN_SYLLABLES",
     "MAX_SYLLABLES",
-    "OVERLAP_SYLLABLES",
     "CEILING_SYLLABLES",
     "SyllableBudgetManager",
     "prepend_context_header",

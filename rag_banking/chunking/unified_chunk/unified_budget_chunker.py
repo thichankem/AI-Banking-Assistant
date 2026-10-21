@@ -39,7 +39,6 @@ except (ImportError, ValueError):
 from .syllable_budget_manager import (
     MIN_SYLLABLES,
     MAX_SYLLABLES,
-    OVERLAP_SYLLABLES,
     CEILING_SYLLABLES,
     SyllableBudgetManager,
     prepend_context_header
@@ -57,18 +56,15 @@ class UnifiedDOCXChunker:
         self,
         min_syllables: int = MIN_SYLLABLES,
         max_syllables: int = MAX_SYLLABLES,
-        overlap_syllables: int = OVERLAP_SYLLABLES,
         ceiling_syllables: int = CEILING_SYLLABLES,
         **kwargs
     ):
         self.min_syllables = min_syllables
         self.max_syllables = max_syllables
-        self.overlap_syllables = overlap_syllables
         self.ceiling_syllables = ceiling_syllables
         self.budget_manager = SyllableBudgetManager(
             min_syllables=min_syllables,
             max_syllables=max_syllables,
-            overlap_syllables=overlap_syllables,
             ceiling_syllables=ceiling_syllables
         )
 
@@ -105,13 +101,12 @@ class UnifiedDOCXChunker:
             breadcrumb = get_current_breadcrumb()
             section_title = active_headers.get(max(active_headers.keys(), default=1), doc_title)
 
-            # Nếu văn bản dài quá trần max_syllables: chia nhỏ theo ngân sách âm tiết (0% content overlap)
+            # Nếu văn bản dài quá trần max_syllables: chia nhỏ theo ngân sách âm tiết
             if syl_count > self.max_syllables:
                 sentences = split_sentences_banking(full_text)
                 sub_parts = self.budget_manager.split_sentences_by_syllable_budget(
                     sentences=sentences,
-                    max_syllables=self.max_syllables,
-                    overlap_syllables=self.overlap_syllables
+                    max_syllables=self.max_syllables
                 )
                 for part in sub_parts:
                     content_str = prepend_context_header(part, breadcrumb, section_title)
@@ -195,24 +190,20 @@ class UnifiedStructureChunker:
         self,
         min_syllables: int = MIN_SYLLABLES,
         max_syllables: int = MAX_SYLLABLES,
-        overlap_syllables: int = OVERLAP_SYLLABLES,
         ceiling_syllables: int = CEILING_SYLLABLES,
         **kwargs
     ):
         self.min_syllables = min_syllables
         self.max_syllables = max_syllables
-        self.overlap_syllables = overlap_syllables
         self.ceiling_syllables = ceiling_syllables
         self.budget_manager = SyllableBudgetManager(
             min_syllables=min_syllables,
             max_syllables=max_syllables,
-            overlap_syllables=overlap_syllables,
             ceiling_syllables=ceiling_syllables
         )
         self.base_chunker = DocumentStructureChunker(
             chunk_size=max_syllables,
-            min_section_size=min_syllables,
-            chunk_overlap=overlap_syllables
+            min_section_size=min_syllables
         )
 
     def chunk_structure(self, text: str, source_name: str) -> list[dict]:
@@ -261,8 +252,7 @@ class UnifiedStructureChunker:
             sentences = split_sentences_banking(full_text)
             grouped_texts = self.budget_manager.split_sentences_by_syllable_budget(
                 sentences=sentences,
-                max_syllables=self.max_syllables,
-                overlap_syllables=self.overlap_syllables
+                max_syllables=self.max_syllables
             )
 
             for g_txt in grouped_texts:

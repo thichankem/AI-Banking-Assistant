@@ -135,25 +135,22 @@ split_sentences_generalized = split_sentences
 
 
 # -----------------------------------------------------------------------------
-# 3. GOM NHÓM CÂU THEO NGÂN SÁCH (SENTENCE GROUPING - 0% CONTENT OVERLAP)
+# 3. GOM NHÓM CÂU THEO NGÂN SÁCH (SENTENCE GROUPING)
 # -----------------------------------------------------------------------------
 def group_sentences(
     sentences: list[str],
     max_words: int = 350,
-    overlap_words: int = 0,
     max_chunk_size: int | None = None,
-    chunk_overlap: int | None = None
+    **kwargs
 ) -> list[str]:
     """
     Gom các câu thành từng nhóm (chunk) với kích thước từ tối đa.
-    Tuyệt đối không overlap nội dung (0% content overlap) giữa các chunk liền kề.
-    Đảm bảo không bao giờ cắt vụn giữa chừng một câu văn.
+    Phân đoạn câu tuần tự, độc lập và trọn vẹn, không cắt vụn giữa chừng một câu văn.
     """
     if not sentences:
         return []
 
     limit = max_words if max_words is not None else (max_chunk_size // 2 if max_chunk_size else 350)
-    overlap = overlap_words if overlap_words is not None else (chunk_overlap // 2 if chunk_overlap else 0)
 
     chunks: list[str] = []
     current_sentences: list[str] = []
@@ -163,21 +160,8 @@ def group_sentences(
         s_words = len(s.split())
         if current_word_count + s_words > limit and current_sentences:
             chunks.append(" ".join(current_sentences))
-            if overlap <= 0:
-                current_sentences = []
-                current_word_count = 0
-            else:
-                overlap_sentences: list[str] = []
-                overlap_count = 0
-                for prev_s in reversed(current_sentences):
-                    prev_w = len(prev_s.split())
-                    if overlap_count + prev_w <= overlap:
-                        overlap_sentences.insert(0, prev_s)
-                        overlap_count += prev_w
-                    else:
-                        break
-                current_sentences = overlap_sentences
-                current_word_count = overlap_count
+            current_sentences = []
+            current_word_count = 0
 
         current_sentences.append(s)
         current_word_count += s_words

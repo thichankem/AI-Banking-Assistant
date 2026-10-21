@@ -42,8 +42,7 @@ class BankingRAGPipeline:
         # 1. Khởi tạo DLA Chunker (Hỗ trợ DOCX & PDF)
         print("[1/6] Khởi tạo DLA Chunker (Chuyên trách DOCX & PDF)...")
         self.dla_chunker = DLAChunker(
-            max_chunk_size=self.config.CHUNK_MAX_SIZE,
-            chunk_overlap=self.config.CHUNK_OVERLAP
+            max_chunk_size=self.config.CHUNK_MAX_SIZE
         )
         self.chunker = self.dla_chunker
 

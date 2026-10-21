@@ -17,6 +17,7 @@ import base64
 import io
 import json
 import logging
+import os
 import socket
 import threading
 import time
@@ -165,27 +166,85 @@ class TableExtractionResult:
     @classmethod
     def from_dict(cls, data: dict) -> TableExtractionResult:
         row_groups: list[RowGroup] = []
+        # 1. Hỗ trợ row_groups tiêu chuẩn
         for g in data.get("row_groups", []):
             if isinstance(g, dict):
-                rows = [
-                    TableRow(
-                        row_header=str(r.get("row_header", "")),
-                        cells=[str(c) for c in r.get("cells", [])]
-                    )
-                    for r in g.get("rows", [])
-                    if isinstance(r, dict)
-                ]
-                row_groups.append(RowGroup(group_name=g.get("group_name"), rows=rows))
+                rows = []
+                for r in g.get("rows", []):
+                    if isinstance(r, dict):
+                        rh = str(r.get("row_header", "")).strip()
+                        cells = [str(c).strip() for c in r.get("cells", [])]
+                        # Loại bỏ hàng mẫu giả tưởng bị VLM copy từ prompt
+                        if (rh in ("Hàng 1", "Tên dòng 1") and any("Giá trị" in c for c in cells)):
+                            continue
+                        rows.append(TableRow(row_header=rh, cells=cells))
+                    elif isinstance(r, (list, tuple)) and r:
+                        rh = str(r[0]).strip()
+                        cells = [str(c).strip() for c in r[1:]]
+                        rows.append(TableRow(row_header=rh, cells=cells))
+                if rows:
+                    row_groups.append(RowGroup(group_name=g.get("group_name"), rows=rows))
+
+        # 2. Hỗ trợ trường hợp model trả về top-level rows
+        if not row_groups and "rows" in data and isinstance(data["rows"], list):
+            top_rows = []
+            for r in data["rows"]:
+                if isinstance(r, dict):
+                    rh = str(r.get("row_header", "")).strip()
+                    cells = [str(c).strip() for c in r.get("cells", [])]
+                    if (rh in ("Hàng 1", "Tên dòng 1") and any("Giá trị" in c for c in cells)):
+                        continue
+                    top_rows.append(TableRow(row_header=rh, cells=cells))
+                elif isinstance(r, (list, tuple)) and r:
+                    rh = str(r[0]).strip()
+                    cells = [str(c).strip() for c in r[1:]]
+                    top_rows.append(TableRow(row_header=rh, cells=cells))
+            if top_rows:
+                row_groups.append(RowGroup(group_name=None, rows=top_rows))
+
+        # 3. Hỗ trợ data / table / matrix
+        if not row_groups:
+            matrix_cand = data.get("data") or data.get("table") or data.get("matrix")
+            if isinstance(matrix_cand, list):
+                m_rows = []
+                for item in matrix_cand:
+                    if isinstance(item, (list, tuple)) and item:
+                        rh = str(item[0]).strip()
+                        cells = [str(c).strip() for c in item[1:]]
+                        m_rows.append(TableRow(row_header=rh, cells=cells))
+                    elif isinstance(item, dict):
+                        keys = list(item.keys())
+                        rh = str(item[keys[0]]).strip() if keys else ""
+                        cells = [str(item[k]).strip() for k in keys[1:]]
+                        m_rows.append(TableRow(row_header=rh, cells=cells))
+                if m_rows:
+                    row_groups.append(RowGroup(group_name=None, rows=m_rows))
 
         raw_fns = data.get("footnotes", [])
         parsed_fns: list[FootnoteItem] = []
         for item in raw_fns:
+            fn_obj: Optional[FootnoteItem] = None
             if isinstance(item, FootnoteItem):
-                parsed_fns.append(item)
+                fn_obj = item
             elif isinstance(item, dict):
-                parsed_fns.append(FootnoteItem.from_dict(item))
+                fn_obj = FootnoteItem.from_dict(item)
             elif isinstance(item, str):
-                parsed_fns.append(FootnoteItem.from_dict(item))
+                fn_obj = FootnoteItem.from_dict(item)
+
+            if fn_obj:
+                c_low = fn_obj.content.lower().strip()
+                if not c_low:
+                    continue
+                # Bộ lọc rò rỉ prompt phổ quát (loại trừ các chuỗi placeholder từ system prompt)
+                is_prompt_echo = any(echo in c_low for echo in (
+                    "nội dung giải thích điều kiện",
+                    "ghi chú chung toàn bảng",
+                    "nội dung giải thích",
+                    "giải thích điều kiện",
+                    "string or null"
+                ))
+                if not is_prompt_echo:
+                    parsed_fns.append(fn_obj)
 
         return cls(
             table_title=data.get("table_title"),
@@ -379,28 +438,31 @@ def render_docx_table_to_image(table: object, max_width_px: int = 1400) -> Image
 TABLE_JSON_PROMPT = """Bạn là chuyên gia phân tích cấu trúc bảng biểu thị giác đa lĩnh vực (Tài chính, Y tế, Kỹ thuật, Hành chính, Học thuật...).
 Nhiệm vụ: Đọc hình ảnh và trích xuất TOÀN BỘ cấu trúc bảng cùng các ghi chú chân bảng sang định dạng JSON nghiêm ngặt:
 1. "table_title": Tiêu đề bảng biểu (string hoặc null).
-2. "column_headers": Tiêu đề các cột. Nếu ô gộp nhiều tầng, làm phẳng bằng " -> " (vd: "Kỳ hạn -> 6 tháng").
+2. "column_headers": Danh sách tiêu đề các cột. Nếu ô gộp nhiều tầng theo chiều dọc hoặc ngang, làm phẳng bằng " -> ".
 3. "row_groups": Danh sách nhóm hàng (group_name: string hoặc null). Mỗi nhóm chứa "rows": [{"row_header": str, "cells": [str]}].
-   * YÊU CẦU QUAN TRỌNG: Bảo toàn 100% mọi ký hiệu tham chiếu xuất hiện trong ô dữ liệu hoặc tiêu đề (ví dụ: (*), (1), [a], †...). Bảo toàn số liệu và mọi đơn vị đo lường (%, mg/dL, mm, VND, USD...).
-4. "footnotes": Danh sách các mục chú thích chân bảng, điều kiện ràng buộc hoặc nguồn dữ liệu:
-   * Nếu có ký hiệu neo (*, (1), [a], †...), tách vào "anchor_symbol" và phần nội dung còn lại vào "content".
-   * Nếu là chú thích chung toàn bảng, nguồn trích dẫn, hoặc câu giải thích độc lập không có ký hiệu neo, đặt "anchor_symbol": null.
+   * BẢO TOÀN NGUYÊN VĂN: Bảo toàn 100% chữ tiếng Việt, thuật ngữ, số liệu thực tế, dấu câu, tỷ lệ %, đơn vị tiền tệ/đo lường. Không tự ý thay đổi hay đoán chữ.
+4. "footnotes": Danh sách các mục chú thích/điều kiện thực tế xuất hiện dưới chân bảng:
+   * Nếu có ký hiệu tham chiếu (*, (1), [a], †...), tách vào "anchor_symbol", phần nội dung giải thích vào "content".
+   * Nếu là ghi chú chung không có ký hiệu, đặt "anchor_symbol": null.
+   * RÀNG BUỘC BẮT BUỘC VỀ CHÚ THÍCH: Chỉ trích xuất khi nhìn thấy rõ ràng dưới chân bảng hoặc bên trong ảnh. Nếu bảng KHÔNG CÓ chú thích hoặc điều kiện ghi chú dưới đáy, BẮT BUỘC trả về mảng rỗng: "footnotes": []. TUYỆT ĐỐI KHÔNG tự tạo chú thích giả, không sao chép văn bản mẫu.
 
-CHỈ TRẢ VỀ DUY NHẤT 1 KHỐI JSON:
+CẤU TRÚC JSON ĐẦU RA:
 ```json
 {
-  "table_title": "string or null",
-  "column_headers": ["Cột 1", "Cột 2"],
+  "table_title": null,
+  "column_headers": ["Tên cột 1", "Tên cột 2"],
   "row_groups": [
     {
-      "group_name": "string or null",
-      "rows": [{"row_header": "Hàng 1", "cells": ["Giá trị 1 (*)", "Giá trị 2"]}]
+      "group_name": null,
+      "rows": [
+        {
+          "row_header": "Tên dòng 1",
+          "cells": ["Giá trị dòng 1 cột 2"]
+        }
+      ]
     }
   ],
-  "footnotes": [
-    {"anchor_symbol": "(*)", "content": "Nội dung giải thích điều kiện"},
-    {"anchor_symbol": null, "content": "Ghi chú chung toàn bảng"}
-  ]
+  "footnotes": []
 }
 ```"""
 
@@ -409,33 +471,47 @@ CHỈ TRẢ VỀ DUY NHẤT 1 KHỐI JSON:
 # 6. CORE VLM TABLE EXTRACTOR CLASS
 # -----------------------------------------------------------------------------
 class VLMTableExtractor:
-    """Engine trích xuất bảng biểu bằng Vision LLM chạy cục bộ với GPUQueueLock và fallback."""
+    """Engine trích xuất bảng biểu bằng Vision LLM (Google Colab GPU / Local RTX 4060)."""
 
     def __init__(
         self,
-        model_name: str = "qwen2-vl",
+        model_name: Optional[str] = None,
         ollama_endpoint: str = "http://127.0.0.1:11434/api/generate",
-        timeout_seconds: int = 45,
+        timeout_seconds: int = 420,
         custom_prompt_context: Optional[str] = None,
         config: object | None = None
     ):
-        self.model_name = model_name
         self.ollama_endpoint = ollama_endpoint
-        self.timeout_seconds = timeout_seconds
+        self.model_name = model_name or self._detect_local_vision_model()
+        self.timeout_seconds = int(os.getenv("VLM_TIMEOUT", timeout_seconds))
         self.custom_prompt_context = custom_prompt_context or (config.custom_prompt_context if config else None)
         self.gpu_lock = GPUQueueLock()
         self._last_probe_time: float = 0.0
         self._is_server_alive: bool = False
         self._active_engine: str = "offline"  # "colab" | "ollama" | "offline"
 
+    def _detect_local_vision_model(self) -> str:
+        """Tự động phát hiện model Vision LLM khả dụng trên Ollama Local (RTX 4060)."""
+        try:
+            req = urllib.request.Request("http://127.0.0.1:11434/api/tags")
+            with urllib.request.urlopen(req, timeout=1.0) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                models = [m.get("name", "") for m in data.get("models", [])]
+                for cand in ["gemma4:12b", "gemma4", "qwen2-vl", "qwen2.5-vl", "llama3.2-vision", "minicpm-v"]:
+                    if any(cand in m for m in models):
+                        return cand
+        except Exception:
+            pass
+        return "gemma4:12b"
+
     def get_prompt_text(self, custom_context: Optional[str] = None) -> str:
         ctx = custom_context or self.custom_prompt_context
         return f"{TABLE_JSON_PROMPT}\n\n[Ngữ cảnh]: {ctx}" if ctx else TABLE_JSON_PROMPT
 
     def is_available(self) -> bool:
-        """Kiểm tra kết nối: Ưu tiên 1 Google Colab GPU Cloud, Dự phòng 2 Ollama Local."""
+        """Kiểm tra kết nối: Ưu tiên 1 Google Colab GPU Cloud, Dự phòng 2 Ollama Local (RTX 4060)."""
         now = time.time()
-        if now - self._last_probe_time < 10.0:
+        if now - self._last_probe_time < 5.0:
             return self._is_server_alive
         self._last_probe_time = now
 
@@ -451,15 +527,15 @@ class VLMTableExtractor:
         except Exception:
             pass
 
-        # 2. Thử kết nối Ollama Local (Dự phòng)
+        # 2. Thử kết nối Ollama Local (RTX 4060)
         try:
             parsed = urlparse(self.ollama_endpoint)
             host = parsed.hostname or "127.0.0.1"
-            port = parsed.port or (443 if parsed.scheme == "https" else 80)
-            with socket.create_connection((host, port), timeout=0.2):
+            port = parsed.port or 11434
+            with socket.create_connection((host, port), timeout=0.5):
                 self._is_server_alive = True
                 self._active_engine = "ollama"
-                logger.info("⚡ [VLMTableExtractor] Colab offline -> Sử dụng Ollama Local.")
+                logger.info(f"⚡ [VLMTableExtractor] Colab offline -> Ưu tiên 2: Sử dụng Local GPU RTX 4060 (model: {self.model_name}).")
                 return True
         except Exception:
             pass
@@ -493,7 +569,7 @@ class VLMTableExtractor:
         return json.loads(text)
 
     def _call_vlm_raw(self, prompt: str, image_b64: str) -> str:
-        """Định tuyến gọi mô hình VLM: Ưu tiên 1 Colab GPU, Dự phòng 2 Ollama."""
+        """Định tuyến gọi mô hình VLM: Ưu tiên 1 Colab GPU, Dự phòng 2 Ollama RTX 4060."""
         if self._active_engine == "colab":
             url = f"{router.endpoint}/vlm/extract_table"
             payload = {
@@ -517,8 +593,14 @@ class VLMTableExtractor:
                 "model": self.model_name,
                 "prompt": prompt,
                 "images": [image_b64],
+                "format": "json",
                 "stream": False,
-                "options": {"temperature": 0.0, "num_predict": 2048}
+                "think": False,
+                "options": {
+                    "temperature": 0.1,
+                    "repeat_penalty": 1.15,
+                    "num_predict": 4096
+                }
             }
             req = urllib.request.Request(
                 self.ollama_endpoint,
@@ -537,7 +619,7 @@ class VLMTableExtractor:
         image: Optional[Image.Image] = None,
         raw_fallback_text: Optional[str] = None
     ) -> TableExtractionResult:
-        """Fallback hình học xác định khi VLM offline hoặc lỗi JSON (0% Regex)."""
+        """Fallback hình học xác định khi được phép rõ ràng (0% Regex)."""
         rows: list[TableRow] = []
         raw_fn_lines: list[str] = []
 
@@ -559,13 +641,20 @@ class VLMTableExtractor:
                         rows.append(TableRow(row_header=line, cells=[]))
 
         if not rows:
-            rows.append(TableRow(row_header="Dữ liệu bảng quét thị giác", cells=["Không thể đọc tự động"]))
+            return TableExtractionResult(
+                table_title=None,
+                column_headers=[],
+                row_groups=[],
+                footnotes=parse_fallback_footnotes_no_regex(raw_fn_lines)
+            )
 
         parsed_footnotes = parse_fallback_footnotes_no_regex(raw_fn_lines)
+        col_count = max(len(r.cells) for r in rows) if rows else 0
+        col_headers = [f"Cột {i+1}" for i in range(col_count)] if col_count > 0 else []
 
         return TableExtractionResult(
             table_title=None,
-            column_headers=["Nội dung trích xuất dự phòng"],
+            column_headers=col_headers,
             row_groups=[RowGroup(group_name=None, rows=rows)],
             footnotes=parsed_footnotes
         )
@@ -574,11 +663,22 @@ class VLMTableExtractor:
         self,
         table_image: Union[Image.Image, np.ndarray, bytes],
         raw_fallback_text: Optional[str] = None,
-        custom_prompt_context: Optional[str] = None
+        custom_prompt_context: Optional[str] = None,
+        allow_fallback: bool = False
     ) -> TableExtractionResult:
-        """Trích xuất bảng biểu qua VLM tuần tự hóa trên GPUQueueLock kèm retry 2 bước."""
+        """
+        Trích xuất bảng biểu qua Vision LLM (Google Colab GPU Tesla T4 / Local GPU RTX 4060).
+        TUYỆT ĐỐI KHÔNG FALLBACK khi allow_fallback=False (Mặc định). Báo lỗi thẳng khi VLM offline hoặc lỗi!
+        """
         pil_img = _to_pil_image(table_image)
         if not self.is_available():
+            err_msg = (
+                "🚨 [VLMTableExtractor] Cả Google Colab GPU (Ưu tiên 1) và Local RTX 4060 (Ưu tiên 2) "
+                "đều không khả dụng hoặc offline! Theo chỉ thị nghiêm ngặt: Tuyệt đối không fallback sang trích xuất chữ thô."
+            )
+            logger.error(err_msg)
+            if not allow_fallback:
+                raise RuntimeError(err_msg)
             return self._deterministic_fallback(pil_img, raw_fallback_text)
 
         img_b64 = self._image_to_base64(pil_img)
@@ -586,16 +686,24 @@ class VLMTableExtractor:
 
         with self.gpu_lock:
             try:
-                resp = self._call_ollama_raw(prompt, img_b64)
+                resp = self._call_vlm_raw(prompt, img_b64)
                 return TableExtractionResult.from_dict(self._parse_strict_json(resp))
             except Exception as e1:
                 try:
-                    retry_p = f"{prompt}\n\n[LỖI JSON LẦN TRƯỚC: {e1}]. Hãy CHỈ trả về đúng chuỗi JSON thô hợp lệ."
-                    resp2 = self._call_ollama_raw(retry_p, img_b64)
+                    retry_p = f"{prompt}\n\n[LỖI JSON LẦN TRƯỚC: {e1}]. Hãy CHỈ trả về đúng chuỗi JSON thô hợp lệ theo đúng cấu trúc schema."
+                    resp2 = self._call_vlm_raw(retry_p, img_b64)
                     return TableExtractionResult.from_dict(self._parse_strict_json(resp2))
                 except Exception as e2:
-                    logger.warning(f"[VLMTableExtractor] Lỗi trích xuất VLM: {e2}. Dùng deterministic fallback.")
+                    err_msg = (
+                        f"🚨 [VLMTableExtractor] Lỗi trích xuất Vision LLM sau 2 lượt gọi "
+                        f"(Lần 1: {e1}, Lần 2: {e2}). Tuyệt đối không fallback theo quy định bắt buộc!"
+                    )
+                    logger.error(err_msg)
+                    if not allow_fallback:
+                        raise RuntimeError(err_msg)
 
+        if not allow_fallback:
+            raise RuntimeError("🚨 [VLMTableExtractor] Trích xuất bảng thất bại và cấm fallback.")
         return self._deterministic_fallback(pil_img, raw_fallback_text)
 
 

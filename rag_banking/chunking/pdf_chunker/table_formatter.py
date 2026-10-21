@@ -237,6 +237,21 @@ class TableFormatter:
                 normalized_footnotes.append(FootnoteItem.from_dict(fn))
 
         if not row_groups:
+            if table_title or normalized_footnotes:
+                fn_text = "\n".join(f"  * {str(fn)}" for fn in normalized_footnotes)
+                content = f"[Bảng: {table_title or 'Bảng dữ liệu'}]\n{fn_text}".strip()
+                chunk_obj = build_7_field_chunk(
+                    chunk_id=f"{chunk_id_prefix}_c{start_index}",
+                    source=source,
+                    chunk_type=chunk_type,
+                    breadcrumb=breadcrumb,
+                    section_title=section_title,
+                    content=content,
+                    original_text=content,
+                    parent_id=parent_id or f"{chunk_id_prefix}_parent",
+                    location=[{"page": page_num, "bbox": bbox}] if page_num is not None else []
+                )
+                return [chunk_obj]
             return []
 
         # BƯỚC 1: Format toàn bộ các hàng và xác định các anchor đã được nhúng nội dòng
@@ -256,6 +271,11 @@ class TableFormatter:
                 all_consumed_anchors.update(consumed)
                 if row_str:
                     g_lines.append(row_str)
+                elif row.row_header or row.cells:
+                    # Đảm bảo không bỏ sót dòng nếu _format_row_bullet_with_inlining bỏ qua
+                    fallback_r = f"- {row.row_header} | {' | '.join(row.cells)}".strip(" | -")
+                    if fallback_r:
+                        g_lines.append(f"- {fallback_r}")
             if g_lines:
                 formatted_groups.append((g_name, g_lines))
 
@@ -406,16 +426,25 @@ class TableFormatter:
         section_title: str,
         chunk_type: str = "table",
         start_index: int = 0,
-        footnotes: Optional[list[Union[str, FootnoteItem]]] = None
+        footnotes: Optional[list[Union[str, FootnoteItem]]] = None,
+        row_groups: Optional[list[RowGroup]] = None,
+        table_title: Optional[str] = None,
+        page_num: Optional[int] = None,
+        bbox: Optional[list[float]] = None,
+        parent_id: Optional[str] = None
     ) -> list[dict]:
-        """Hỗ trợ phân đoạn trực tiếp từ ma trận ô 2D (cho PDF/DOCX đơn giản)."""
-        table_rows: list[TableRow] = []
-        for r in matrix:
-            if not r:
-                continue
-            r_hdr = r[0] if len(r) > 0 else ""
-            cells = r[1:] if len(r) > 1 else []
-            table_rows.append(TableRow(row_header=r_hdr, cells=cells))
+        """Hỗ trợ phân đoạn trực tiếp từ ma trận ô 2D hoặc danh sách RowGroup chuẩn Topo học."""
+        if row_groups is not None:
+            active_groups = row_groups
+        else:
+            table_rows: list[TableRow] = []
+            for r in matrix:
+                if not r:
+                    continue
+                r_hdr = r[0] if len(r) > 0 else ""
+                cells = r[1:] if len(r) > 1 else []
+                table_rows.append(TableRow(row_header=r_hdr, cells=cells))
+            active_groups = [RowGroup(group_name=None, rows=table_rows)]
 
         fn_items: list[FootnoteItem] = []
         if footnotes:
@@ -426,9 +455,9 @@ class TableFormatter:
                     fn_items.append(FootnoteItem.from_dict(f))
 
         vlm_res = TableExtractionResult(
-            table_title=None,
+            table_title=table_title,
             column_headers=headers[1:] if len(headers) > 1 else headers,
-            row_groups=[RowGroup(group_name=None, rows=table_rows)],
+            row_groups=active_groups,
             footnotes=fn_items
         )
         return self.format_vlm_result_to_chunks(
@@ -438,7 +467,10 @@ class TableFormatter:
             breadcrumb=breadcrumb,
             section_title=section_title,
             chunk_type=chunk_type,
-            start_index=start_index
+            start_index=start_index,
+            page_num=page_num,
+            bbox=bbox,
+            parent_id=parent_id
         )
 
     # =========================================================================

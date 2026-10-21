@@ -68,6 +68,15 @@ class SmartComputeRouter:
 
         # 1. Thử kết nối Colab GPU
         colab_data = self.check_colab_status()
+        if not colab_data or colab_data.get("status") != "ok":
+            # Tự động kích hoạt ngầm Colab qua Autonomous Manager nếu đang offline
+            try:
+                from gg_colab.auto_colab_manager import ensure_colab_online
+                if ensure_colab_online(wait_timeout=15):
+                    colab_data = self.check_colab_status()
+            except Exception:
+                pass
+
         if colab_data and colab_data.get("status") == "ok":
             gpu_name = colab_data.get("gpu", "Cloud GPU")
             print(f"🚀 [Compute Router] Ưu tiên 1: Đã kết nối Google Colab GPU ({gpu_name})!")
