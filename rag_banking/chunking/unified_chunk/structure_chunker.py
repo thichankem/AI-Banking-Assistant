@@ -24,8 +24,7 @@ from .canonical_resolver import (
 )
 from .syllable_budget_manager import (
     MIN_SYLLABLES,
-    MAX_SYLLABLES,
-    OVERLAP_SYLLABLES
+    MAX_SYLLABLES
 )
 
 
@@ -103,12 +102,10 @@ class DocumentStructureChunker:
         self,
         chunk_size: int = MAX_SYLLABLES,        # Ngân sách âm tiết mục tiêu cho mỗi chunk (400)
         min_section_size: int = MIN_SYLLABLES,  # Ngưỡng tối thiểu để kích hoạt Section_length_aware gộp mục (100)
-        chunk_overlap: int = OVERLAP_SYLLABLES, # Tuyệt đối không overlap content (0% content overlap = 0)
         **kwargs
     ):
         self.chunk_size = chunk_size
         self.min_section_size = min_section_size
-        self.chunk_overlap = chunk_overlap
 
     # -------------------------------------------------------------------------
     # BƯỚC 1: PARSING VĂN BẢN THÀNH DOCUMENT STRUCTURE & SUB-SECTIONS
@@ -241,7 +238,7 @@ class DocumentStructureChunker:
                         current_syllables = 0
 
                     sentences = split_sentences_banking(el.content)
-                    sub_parts = group_sentences_banking(sentences, max_words=self.chunk_size, overlap_words=0)
+                    sub_parts = group_sentences_banking(sentences, max_words=self.chunk_size)
                     for part in sub_parts:
                         sub_el = DocumentElement(element_type="text", content=part)
                         emit_chunk([sub_el])

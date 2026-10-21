@@ -96,8 +96,7 @@ def run_full_chunking_test(max_pages_per_large_pdf=3):
         raise FileNotFoundError(f"Không tìm thấy thư mục dataset: {dataset_dir}")
 
     chunker = LayoutAwareChunker(
-        max_chunk_size=config.CHUNK_MAX_SIZE,
-        chunk_overlap=config.CHUNK_OVERLAP
+        max_chunk_size=config.CHUNK_MAX_SIZE
     )
 
     start_total_time = time.time()

@@ -45,7 +45,7 @@ class TestDLAChunking(unittest.TestCase):
         self.assertTrue(len(docx_files) > 0, "Không tìm thấy tệp .docx trong dataset!")
 
         sample_docx = docx_files[0]
-        chunker = DOCXChunker(max_chunk_size=800, chunk_overlap=100)
+        chunker = DOCXChunker(max_chunk_size=800)
         chunks = chunker.chunk_docx(sample_docx)
 
         self.assertGreater(len(chunks), 0, "DOCXChunker không sinh ra chunk nào!")
@@ -76,7 +76,7 @@ class TestDLAChunking(unittest.TestCase):
         self.assertTrue(len(pdf_files) > 0, "Không tìm thấy tệp .pdf trong dataset!")
 
         sample_pdf = pdf_files[0]
-        chunker = PDFChunker(max_chunk_size=800, chunk_overlap=0)
+        chunker = PDFChunker(max_chunk_size=800)
         chunks = chunker.chunk_pdf(sample_pdf, max_pages=2)
 
         self.assertGreater(len(chunks), 0, "PDFChunker không sinh ra chunk nào!")
@@ -91,7 +91,7 @@ class TestDLAChunking(unittest.TestCase):
 
     def test_04_unified_dla_chunker(self):
         """Kiểm tra LayoutAwareChunker (DLAChunker) tự động định tuyến theo extension (.docx, .pdf)."""
-        dla = DLAChunker(max_chunk_size=800, chunk_overlap=100)
+        dla = DLAChunker(max_chunk_size=800)
 
         # 1. Test định tuyến .docx
         docx_files = list(self.docx_dir.glob("*.docx"))
@@ -130,7 +130,7 @@ class TestDLAChunking(unittest.TestCase):
             "| Nâng cao | 500.000.000 VND | 100.000.000 VND |\n"
         )
 
-        chunker = DocumentStructureChunker(chunk_size=300, min_section_size=30, chunk_overlap=20)
+        chunker = DocumentStructureChunker(chunk_size=300, min_section_size=30)
         sub_sections = chunker.parse_structure(sample_markdown, source_name="quy_che_sample.docx")
         self.assertGreater(len(sub_sections), 0, "Không phân tích được văn bản cấu trúc thành sub-sections!")
 

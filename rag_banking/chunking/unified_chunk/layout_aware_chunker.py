@@ -25,7 +25,6 @@ class LayoutAwareChunker:
         self,
         max_chunk_size: int = 800,
         min_section_size: int = 120,
-        chunk_overlap: int = 0,
         table_rows_per_chunk: int = 4,
         target_chunk_tokens: int = 400,
         max_chunk_words: int = 300,
@@ -38,22 +37,21 @@ class LayoutAwareChunker:
 
         self.max_chunk_size = max_chunk_size
         self.min_section_size = min_section_size
-        self.chunk_overlap = chunk_overlap
         self.config = config
 
         # Khởi tạo sub-chunker chuyên trách cho DOCX & PDF
         self.docx_chunker = DOCXChunker(
             max_chunk_size=max_chunk_size,
             min_section_size=min_section_size,
-            chunk_overlap=chunk_overlap,
-            table_rows_per_chunk=table_rows_per_chunk
+            table_rows_per_chunk=table_rows_per_chunk,
+            **kwargs
         )
         self.pdf_chunker = PDFChunker(
             max_chunk_size=max_chunk_size,
             min_section_size=min_section_size,
-            chunk_overlap=chunk_overlap,
             table_rows_per_chunk=table_rows_per_chunk,
-            config=config
+            config=config,
+            **kwargs
         )
         # Giữ ocr_extractor reference cho backward-compatibility
         self.ocr_extractor = self.pdf_chunker.ocr_extractor

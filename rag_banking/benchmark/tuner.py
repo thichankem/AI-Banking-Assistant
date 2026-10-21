@@ -122,7 +122,7 @@ def run_parameter_tuning(chunks=None, vectors=None):
     # 1. Chuẩn bị dữ liệu nếu chưa truyền vào
     if not chunks or not vectors:
         print("[*] Đang nạp dữ liệu kiểm định từ bộ tài liệu cốt lõi...")
-        chunker = LayoutAwareChunker(max_chunk_size=config.CHUNK_MAX_SIZE, chunk_overlap=config.CHUNK_OVERLAP)
+        chunker = LayoutAwareChunker(max_chunk_size=config.CHUNK_MAX_SIZE)
         
         target_docs = [
             "vcb_bieu_lai_suat_va_ty_gia_ngoai_te.xlsx",
