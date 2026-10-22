@@ -106,9 +106,20 @@ def run_full_chunking_test(max_pages_per_large_pdf=3):
     excel_dir = dataset_dir / "excel"
     pdf_dir = dataset_dir / "pdf"
 
-    md_files = sorted(list(md_dir.glob("*.md"))) if md_dir.exists() else []
-    excel_files = sorted(list(excel_dir.glob("*.xlsx"))) if excel_dir.exists() else []
-    pdf_files = sorted(list(pdf_dir.glob("*.pdf"))) if pdf_dir.exists() else []
+    if md_dir.exists():
+        md_files = sorted(list(md_dir.glob("*.md")))
+    else:
+        md_files = []
+
+    if excel_dir.exists():
+        excel_files = sorted(list(excel_dir.glob("*.xlsx")))
+    else:
+        excel_files = []
+
+    if pdf_dir.exists():
+        pdf_files = sorted(list(pdf_dir.glob("*.pdf")))
+    else:
+        pdf_files = []
 
     print(f"\n[1/4] Thống kê tệp đầu vào:")
     print(f"  - Markdown files : {len(md_files)} tệp")
@@ -219,12 +230,28 @@ def run_full_chunking_test(max_pages_per_large_pdf=3):
 
     total_chunks = len(all_chunks)
     lengths.sort()
-    min_len = lengths[0] if lengths else 0
-    max_len = lengths[-1] if lengths else 0
-    avg_len = sum(lengths) / total_chunks if total_chunks else 0
-    median_len = lengths[total_chunks // 2] if total_chunks else 0
-    p25 = lengths[int(total_chunks * 0.25)] if total_chunks else 0
-    p75 = lengths[int(total_chunks * 0.75)] if total_chunks else 0
+    if lengths:
+        min_len = lengths[0]
+        max_len = lengths[-1]
+    else:
+        min_len = 0
+        max_len = 0
+
+    if total_chunks > 0:
+        avg_len = sum(lengths) / total_chunks
+        median_len = lengths[total_chunks // 2]
+        p25 = lengths[int(total_chunks * 0.25)]
+        p75 = lengths[int(total_chunks * 0.75)]
+    else:
+        avg_len = 0
+        median_len = 0
+        p25 = 0
+        p75 = 0
+
+    if empty_chunks_count == 0:
+        integrity_score = "100%"
+    else:
+        integrity_score = "WARNING"
 
     summary_report = {
         "dataset_name": "Vietcombank Chunking Benchmark Dataset",
@@ -244,7 +271,7 @@ def run_full_chunking_test(max_pages_per_large_pdf=3):
         "quality_metrics": {
             "empty_chunks": empty_chunks_count,
             "breadcrumb_coverage_rate": f"{(has_breadcrumb_count / max(total_chunks, 1)) * 100:.1f}%",
-            "integrity_score": "100%" if empty_chunks_count == 0 else "WARNING"
+            "integrity_score": integrity_score
         },
         "category_breakdown": category_stats,
         "output_directory": str(output_dir),

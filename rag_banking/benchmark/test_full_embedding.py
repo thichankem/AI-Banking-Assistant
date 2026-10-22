@@ -26,7 +26,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from rag_banking.config import Config
-from rag_banking.embeddings.embedding_model import EmbeddingModel
+from rag_banking.embedding.embedder import BankingEmbedder as EmbeddingModel
 from rag_banking.benchmark.test_full_chunking import run_full_chunking_test
 
 def run_full_embedding_test(chunks=None):
@@ -108,12 +108,16 @@ def run_full_embedding_test(chunks=None):
             norm_errors += 1
 
     integrity_passed = (nan_count == 0 and inf_count == 0 and dim_mismatch_count == 0)
+    if integrity_passed:
+        status_text = "HOÀN HẢO (100% VALID)"
+    else:
+        status_text = "CÓ LỖI"
 
     print(f"  - Số lượng vectors sinh ra: {len(vectors)}")
     print(f"  - Sai lệch số chiều (Khác {config.EMBEDDING_DIM}): {dim_mismatch_count}")
     print(f"  - Lỗi NaN (Not a Number)   : {nan_count}")
     print(f"  - Lỗi Inf (Vô cực)          : {inf_count}")
-    print(f"  - Trạng thái kiểm định      : {'HOÀN HẢO (100% VALID)' if integrity_passed else 'CÓ LỖI'}")
+    print(f"  - Trạng thái kiểm định      : {status_text}")
 
     report = {
         "model_name": config.LOCAL_EMBEDDING_MODEL,

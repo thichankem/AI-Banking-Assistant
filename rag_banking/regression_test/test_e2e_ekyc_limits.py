@@ -36,10 +36,7 @@ def main():
     chunks = pipeline.chunker.chunk_text(text, source_name="phap_ly__quy_che_ekyc_vietcombank_han_muc.md")
     
     # Dual-Indexing: Vector Store 1024-d + BM25
-    vectors = pipeline.embedding_model.embed_documents([c["content"] for c in chunks])
-    pipeline.vector_store.add_chunks(chunks, vectors)
-    pipeline.bm25_search.index(chunks)
-    pipeline.indexed_chunks = chunks
+    pipeline.ingest_chunks(chunks)
     print(f"[*] Đã lập chỉ mục kép (Dual-Index) thành công {len(chunks)} chunks quy chế eKYC.\n")
 
     # 3. Thực thi truy vấn End-to-End

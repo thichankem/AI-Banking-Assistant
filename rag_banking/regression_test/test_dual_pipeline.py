@@ -43,16 +43,8 @@ def main():
     print(f" -> Đã trích xuất tổng cộng {len(all_chunks)} chunks có bảo toàn Breadcrumbs.", flush=True)
 
     # Nạp song song vào Dual-Index:
-    # 1. Cosine HNSW 1024-d
-    print(" -> Lập chỉ mục Dense Vector Store (Cosine HNSW 1024 chiều)...", flush=True)
-    texts_to_embed = [c["content"] for c in all_chunks]
-    vectors = pipe.embedding_model.embed_documents(texts_to_embed, batch_size=32)
-    pipe.vector_store.add_chunks(all_chunks, vectors)
-
-    # 2. Sparse Okapi BM25
-    print(" -> Lập chỉ mục Sparse Okapi BM25...", flush=True)
-    pipe.bm25_search.index(all_chunks)
-    pipe.indexed_chunks = all_chunks
+    print(" -> Nạp song song vào Dual-Index (Dense Vector 1024-d + Sparse BM25)...", flush=True)
+    pipe.ingest_chunks(all_chunks)
     print(f"[Thành công] Hoàn tất nạp {len(all_chunks)} chunks vào Dual-Index!", flush=True)
 
     # Thử nghiệm câu hỏi điển hình chứa các từ viết tắt chuyên ngành: eKYC, TKTT, Smart OTP, VCB Digibank

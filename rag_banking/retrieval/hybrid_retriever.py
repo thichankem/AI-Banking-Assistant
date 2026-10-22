@@ -1,44 +1,61 @@
 """
-Hybrid Retriever (Bước 2: Truy vấn Kết hợp Dense Vector & BM25 + Reciprocal Rank Fusion)
+Module Hybrid Retriever (Bước 2: Truy vấn Kết hợp Dense Vector & BM25 + Reciprocal Rank Fusion)
+======================================================================
 Nhiệm vụ:
-1. Truy vấn đồng thời trên Dense Vector Store (Cosine HNSW 1024 chiều) bằng normalized query.
-2. Truy vấn đồng thời trên BM25 Okapi bằng từ khóa chuyên ngành (keywords).
-3. Hợp nhất danh sách bằng thuật toán Reciprocal Rank Fusion (RRF k=60).
-4. Lấy ra chính xác Top-5 ứng viên tiềm năng nhất.
+1. Nhận ParsedQuery từ Query Parser (với normalized_query và keywords_str).
+2. Truy vấn đồng thời trên Dense Vector Store (Cosine HNSW 1024 chiều) bằng normalized query.
+3. Truy vấn đồng thời trên BM25 Okapi bằng từ khóa chuyên ngành (keywords).
+4. Hợp nhất danh sách bằng thuật toán Reciprocal Rank Fusion (RRF k=60).
+5. Trả về đúng Top-K ứng viên (mặc định Top-5) cho Bước 3 Reranking.
+
+NGUYÊN TẮC THIẾT KẾ:
+1. 0% REGEX LAW: Tuyệt đối không dùng regex methods.
+2. ZERO TERNARY: Ưu tiên if/else tường minh, dễ đọc.
+3. NO __INIT__.PY: Import trực tiếp file module.
 """
 
 import time
-from typing import List, Dict, Any, Union
-from ..query_parser.banking_query_parser import ParsedQuery
+
+try:
+    from rag_banking.query_parser.banking_query_parser import ParsedQuery
+except ImportError:
+    from ..query_parser.banking_query_parser import ParsedQuery
+
 
 class HybridRetriever:
+    """
+    Bộ truy xuất lai kết hợp Dense Vector 1024 chiều và Sparse Okapi BM25
+    sử dụng thuật toán Reciprocal Rank Fusion (RRF).
+    """
+
     def __init__(
         self,
         vector_store,
-        bm25_search,
         embedding_model,
-        rrf_k: int = 60,
-        dense_weight: float = 0.5
+        bm25_search=None,
+        rrf_k=60,
+        dense_weight=0.5
     ):
         self.vector_store = vector_store
-        self.bm25_search = bm25_search
         self.embedding_model = embedding_model
+        self.bm25_search = bm25_search
         self.rrf_k = rrf_k
         self.dense_weight = dense_weight
 
     def retrieve(
         self,
-        query: Union[str, ParsedQuery],
-        top_k: int = 5,
-        candidate_k: int = 15
-    ) -> List[Dict[str, Any]]:
+        query,
+        top_k=5,
+        candidate_k=15,
+        filter_dict=None
+    ):
         """
-        Thực hiện Hybrid Retrieval và hợp nhất thứ hạng với RRF k=60.
-        Trả về đúng Top-5 ứng viên.
+        Thực hiện Hybrid Retrieval và hợp nhất thứ hạng với RRF.
+        Trả về đúng Top-K ứng viên kèm siêu dữ liệu xếp hạng.
         """
-        # 1. Xác định chuỗi truy vấn cho từng kênh
+        # 1. Xác định chuỗi truy vấn tối ưu cho từng kênh
         if isinstance(query, ParsedQuery):
-            dense_query_text = query.normalized_query
+            dense_query_text = query.normalized_query or query.raw_query
             bm25_query_text = query.keywords_str or query.raw_query
             raw_query_text = query.raw_query
         else:
@@ -49,19 +66,41 @@ class HybridRetriever:
         # 2. Dense Vector Search (Cosine HNSW 1024-dim)
         t_dense_start = time.time()
         query_vector = self.embedding_model.embed_query(dense_query_text)
-        dense_results = self.vector_store.search_vector(query_vector, top_k=candidate_k)
+        dense_results = self.vector_store.search_vector(
+            query_vector=query_vector,
+            top_k=candidate_k,
+            filter_dict=filter_dict
+        )
         t_dense_duration = (time.time() - t_dense_start) * 1000
 
         # 3. Sparse BM25 Okapi Search
         t_bm25_start = time.time()
-        bm25_results = self.bm25_search.search(bm25_query_text, top_k=candidate_k)
+        if self.bm25_search is not None and hasattr(self.bm25_search, "search"):
+            bm25_results = self.bm25_search.search(
+                bm25_query_text,
+                top_k=candidate_k,
+                filter_dict=filter_dict
+            )
+        elif hasattr(self.vector_store, "search_bm25"):
+            bm25_results = self.vector_store.search_bm25(
+                query_text=bm25_query_text,
+                top_k=candidate_k,
+                filter_dict=filter_dict
+            )
+        else:
+            bm25_results = []
         t_bm25_duration = (time.time() - t_bm25_start) * 1000
 
         # 4. Hợp nhất bằng thuật toán Reciprocal Rank Fusion (RRF k=60)
         candidates = {}
 
         # Ghi nhận kết quả Dense
-        for rank, (chunk, score) in enumerate(dense_results, start=1):
+        for rank, item in enumerate(dense_results, start=1):
+            if isinstance(item, tuple):
+                chunk, score = item
+            else:
+                chunk, score = item, 0.0
+
             chunk_id = chunk.get("chunk_id", str(id(chunk)))
             if chunk_id not in candidates:
                 candidates[chunk_id] = {
@@ -77,7 +116,12 @@ class HybridRetriever:
                 candidates[chunk_id]["dense_score"] = float(score)
 
         # Ghi nhận kết quả BM25
-        for rank, (chunk, score) in enumerate(bm25_results, start=1):
+        for rank, item in enumerate(bm25_results, start=1):
+            if isinstance(item, tuple):
+                chunk, score = item
+            else:
+                chunk, score = item, 0.0
+
             chunk_id = chunk.get("chunk_id", str(id(chunk)))
             if chunk_id not in candidates:
                 candidates[chunk_id] = {
@@ -92,7 +136,7 @@ class HybridRetriever:
                 candidates[chunk_id]["bm25_rank"] = rank
                 candidates[chunk_id]["bm25_score"] = float(score)
 
-        # Tính toán điểm số RRF chuẩn k=60:
+        # Tính toán điểm số RRF:
         # RRF(d) = (w_dense / (k + rank_dense)) + (w_bm25 / (k + rank_bm25))
         bm25_weight = 1.0 - self.dense_weight
         for item in candidates.values():
@@ -106,7 +150,7 @@ class HybridRetriever:
         # Sắp xếp các ứng viên theo điểm RRF giảm dần
         sorted_candidates = sorted(candidates.values(), key=lambda x: x["rrf_score"], reverse=True)
 
-        # Trích xuất chính xác Top-5 ứng viên
+        # Trích xuất chính xác Top-K ứng viên
         top_candidates = []
         for rank, item in enumerate(sorted_candidates[:top_k], start=1):
             top_candidates.append({
@@ -120,7 +164,8 @@ class HybridRetriever:
                 "retrieval_meta": {
                     "dense_latency_ms": round(t_dense_duration, 2),
                     "bm25_latency_ms": round(t_bm25_duration, 2),
-                    "rrf_k": self.rrf_k
+                    "rrf_k": self.rrf_k,
+                    "dense_weight": self.dense_weight
                 }
             })
 
