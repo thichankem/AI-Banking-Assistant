@@ -94,7 +94,16 @@ ablation_raw_results.json
 master_ablation_results.json
 benchmark_summary.json
 visual_audit_report.json
-rag_banking/storage/*.json
+rag_banking/vector_db/qdrant_db/
+rag_banking/tracing/traces/
+rag_banking/vector_db/phoenix_db/
+rag_banking/vector_db/*.db
+rag_banking/vector_db/*.db-wal
+rag_banking/vector_db/*.db-shm
+rag_banking/vector_db/*.json
+storage/
+**/storage/
+
 
 # Allow independent benchmark suite to be tracked
 !benchmarks/

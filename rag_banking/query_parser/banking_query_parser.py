@@ -1,124 +1,164 @@
 """
-Banking Query Parser (Bộ tiền xử lý và phân tích truy vấn ngân hàng)
-Nhiệm vụ Bước 1:
-1. Chuẩn hóa các từ viết tắt chuyên ngành ngân hàng (eKYC, TKTT, Smart OTP, VCB Digibank...).
-2. Phát hiện các thực thể pháp lý (Điều X, Khoản Y).
-3. Trích xuất từ khóa trọng tâm (Keywords) phục vụ thuật toán Sparse BM25.
-4. Sinh câu truy vấn mở rộng (Normalized Query) phục vụ Dense Vector Embedding.
+Banking Query Parser (Bước 1: Tiền Xử Lý & Phân Tích Truy Vấn Ngân Hàng)
+Tuân thủ nguyên tắc:
+1. 0% REGEX LAW: Tuyệt đối không sử dụng `import re` hay regex methods.
+2. CHUẨN HÓA UNICODE NFC: Đảm bảo tiếng Việt từ mọi bộ gõ (Unikey, macOS, mobile) đều về chuẩn NFC.
+3. PHÂN TÍCH TỪ VỰNG THUẦN TÚY: Mở rộng từ viết tắt qua ranh giới ký tự cơ sở (str.find, isalnum).
+4. TRÍCH XUẤT TỪ KHÓA BM25: Lọc từ dừng (Stopwords) qua tra cứu tập hợp Set O(1) hiệu năng cao.
 """
 
-import re
+import unicodedata
 from dataclasses import dataclass, field
-from typing import List, Dict, Tuple
 
 # Từ điển ánh xạ từ viết tắt chuyên ngành ngân hàng & pháp lý Vietcombank
-# Sắp xếp các cụm dài lên trước để tránh thay thế chèn lặp từ con
-BANKING_ACRONYMS: Dict[str, str] = {
-    r"\bVCB\s*Digibank\b": "ngân hàng số VCB Digibank (Vietcombank Digibank)",
-    r"\bSmart\s*OTP\b": "phương thức xác thực Smart OTP",
-    r"\bSMS\s*Banking\b": "dịch vụ tin nhắn SMS Banking",
-    r"\bPhone\s*Banking\b": "dịch vụ ngân hàng qua điện thoại Phone Banking",
-    r"\beKYC\b": "định danh điện tử (eKYC)",
-    r"\bTKTT\b": "tài khoản thanh toán (TKTT)",
-    r"\bKHCN\b": "khách hàng cá nhân (KHCN)",
-    r"\bKHDN\b": "khách hàng doanh nghiệp (KHDN)",
-    r"\bCCCD\b": "căn cước công dân gắn chip (CCCD)",
-    r"\bCMND\b": "chứng minh nhân dân (CMND)",
-    r"\bTKTG\b": "tài khoản tiền gửi (TKTG)",
-    r"\bNHĐT\b": "ngân hàng điện tử (NHĐT)",
-    r"\bĐGD\b": "địa điểm giao dịch (ĐGD)",
-    r"\bSTH\b": "sinh trắc học nhận diện khuôn mặt (STH)",
-    r"\bTDQT\b": "thẻ tín dụng quốc tế (TDQT)",
-    r"\bOTP\b": "mã xác thực một lần (OTP)",
-    r"\bVNPAY\b": "ví điện tử VNPAY"
+DEFAULT_BANKING_ACRONYMS = {
+    "vcb digibank": "ngân hàng số VCB Digibank (Vietcombank Digibank)",
+    "smart otp": "phương thức xác thực Smart OTP",
+    "sms banking": "dịch vụ tin nhắn SMS Banking",
+    "phone banking": "dịch vụ ngân hàng qua điện thoại Phone Banking",
+    "ekyc": "định danh điện tử (eKYC)",
+    "tktt": "tài khoản thanh toán (TKTT)",
+    "khcn": "khách hàng cá nhân (KHCN)",
+    "khdn": "khách hàng doanh nghiệp (KHDN)",
+    "cccd": "căn cước công dân gắn chip (CCCD)",
+    "cmnd": "chứng minh nhân dân (CMND)",
+    "tktg": "tài khoản tiền gửi (TKTG)",
+    "nhđt": "ngân hàng điện tử (NHĐT)",
+    "đgd": "địa điểm giao dịch (ĐGD)",
+    "sth": "sinh trắc học nhận diện khuôn mặt (STH)",
+    "tdqt": "thẻ tín dụng quốc tế (TDQT)",
+    "otp": "mã xác thực một lần (OTP)",
+    "vnpay": "ví điện tử VNPAY"
 }
 
 VIETNAMESE_STOPWORDS = {
     "là", "gì", "như", "thế", "nào", "sao", "cho", "tôi", "hỏi", "được",
     "không", "và", "của", "với", "ở", "tại", "về", "có", "hay", "khi",
-    "muốn", "cần", "phải", "để", "những", "các", "này", "đó", "ra", "vào"
+    "muốn", "cần", "phải", "để", "những", "các", "này", "đó", "ra", "vào",
+    "ạ", "vậy", "giúp", "với", "xin", "làm", "xem"
 }
 
 @dataclass
 class ParsedQuery:
     raw_query: str
     normalized_query: str
-    keywords: List[str]
+    keywords: list
     keywords_str: str
-    detected_acronyms: List[Tuple[str, str]] = field(default_factory=list)
-    legal_references: List[str] = field(default_factory=list)
+    detected_acronyms: list = field(default_factory=list)
+    legal_references: list = field(default_factory=list)
 
 class BankingQueryParser:
-    def __init__(self, acronym_dict: Dict[str, str] = None):
-        self.acronym_dict = acronym_dict or BANKING_ACRONYMS
+    """
+    Bộ tiền xử lý truy vấn ngân hàng (0% Regex, Unicode NFC Native).
+    """
 
-    def normalize_acronyms(self, query: str) -> Tuple[str, List[Tuple[str, str]]]:
+    def __init__(self, acronym_dict=None):
+        raw_dict = acronym_dict or DEFAULT_BANKING_ACRONYMS
+        # Chuẩn hóa toàn bộ khóa trong từ điển về Unicode NFC chữ thường
+        self.acronym_dict = {
+            unicodedata.normalize("NFC", k.strip().lower()): v
+            for k, v in raw_dict.items()
+        }
+        # Sắp xếp các cụm từ dài lên trước để ưu tiên khớp cụm trước từ đơn lẻ
+        self.sorted_acronyms = sorted(
+            self.acronym_dict.items(),
+            key=lambda x: len(x[0]),
+            reverse=True
+        )
+
+    def normalize_acronyms(self, query):
         """
-        Chuẩn hóa và mở rộng các từ viết tắt chuyên ngành ngân hàng.
-        Sử dụng cơ chế single-pass placeholder để chống chèn lặp.
+        Chuẩn hóa và mở rộng các từ viết tắt chuyên ngành ngân hàng (0% Regex).
+        Kiểm tra ranh giới từ qua isalnum() để tránh thay thế nhầm chuỗi con.
         """
+        text = unicodedata.normalize("NFC", query)
         detected = []
-        text = query
-        placeholders = {}
-        counter = 0
 
-        # Thay thế bằng placeholder để không bị thay thế lồng nhau
-        for pattern, replacement in self.acronym_dict.items():
-            matches = list(re.finditer(pattern, text, flags=re.IGNORECASE))
-            if matches:
-                for m in reversed(matches):
-                    original_term = m.group(0)
-                    detected.append((original_term, replacement))
-                    ph_key = f"__ACRONYM_PH_{counter}__"
-                    placeholders[ph_key] = replacement
-                    text = text[:m.start()] + ph_key + text[m.end():]
-                    counter += 1
+        for phrase, replacement in self.sorted_acronyms:
+            p_len = len(phrase)
+            start_pos = 0
 
-        # Phục hồi placeholder về dạng định nghĩa mở rộng
-        for ph_key, rep in placeholders.items():
-            text = text.replace(ph_key, rep)
+            while True:
+                lower_text = text.lower()
+                idx = lower_text.find(phrase, start_pos)
+                if idx == -1:
+                    break
 
-        text = re.sub(r"\s+", " ", text).strip()
-        return text, detected
+                # Kiểm tra ranh giới từ trước và sau
+                before_ok = (idx == 0 or not text[idx - 1].isalnum())
+                after_ok = (idx + p_len == len(text) or not text[idx + p_len].isalnum())
 
-    def extract_legal_entities(self, query: str) -> List[str]:
-        """Trích xuất các thực thể pháp lý nếu có trong câu hỏi: Điều X, Khoản Y"""
+                if before_ok and after_ok:
+                    original_token = text[idx : idx + p_len]
+                    detected.append((original_token, replacement))
+                    text = text[:idx] + replacement + text[idx + p_len:]
+                    start_pos = idx + len(replacement)
+                else:
+                    start_pos = idx + 1
+
+        # Chuẩn hóa khoảng trắng cơ bản
+        normalized = " ".join(text.split())
+        return normalized, detected
+
+    @staticmethod
+    def extract_legal_entities(query):
+        """
+        Trích xuất các thực thể pháp lý nếu có trong câu hỏi (0% Regex):
+        Duyệt chuỗi nhận diện các cụm 'Điều X', 'Khoản Y' tự nhiên.
+        """
+        words = query.split()
         refs = []
-        dieu_match = re.findall(r"Điều\s+\d+[a-zA-Z]?", query, re.IGNORECASE)
-        khoan_match = re.findall(r"Khoản\s+\d+", query, re.IGNORECASE)
-        refs.extend(dieu_match)
-        refs.extend(khoan_match)
+        num_words = len(words)
+
+        for i in range(num_words):
+            clean_word = "".join(c for c in words[i] if c.isalnum()).lower()
+            if clean_word == "điều" and i + 1 < num_words:
+                next_word = "".join(c for c in words[i + 1] if c.isalnum())
+                if any(c.isdigit() for c in next_word):
+                    refs.append(f"Điều {next_word}")
+            elif clean_word == "khoản" and i + 1 < num_words:
+                next_word = "".join(c for c in words[i + 1] if c.isalnum())
+                if any(c.isdigit() for c in next_word):
+                    refs.append(f"Khoản {next_word}")
+
+        # Khử trùng lặp bảo toàn thứ tự
         return list(dict.fromkeys(refs))
 
-    def extract_keywords(self, query: str, normalized_query: str) -> List[str]:
+    @staticmethod
+    def extract_keywords(normalized_query):
         """
-        Trích xuất từ khóa trọng tâm (Keywords) phục vụ BM25:
-        Kết hợp các thực thể chuyên ngành từ câu gốc và câu chuẩn hóa.
+        Trích xuất từ khóa trọng tâm (Keywords) phục vụ BM25 (0% Regex):
+        1. Làm sạch ký tự dấu câu sang khoảng trắng.
+        2. Tách từ và loại bỏ Stopwords qua Set Lookup O(1).
+        3. Khử trùng lặp bảo toàn thứ tự xuất hiện.
         """
-        words = re.findall(r"[\w]+", normalized_query.lower())
-        filtered = [w for w in words if w not in VIETNAMESE_STOPWORDS and len(w) > 1]
+        text_nfc = unicodedata.normalize("NFC", normalized_query)
+        # Chuyển đổi mọi ký tự không phải chữ cái/số thành khoảng trắng
+        cleaned_chars = []
+        for c in text_nfc:
+            if c.isalnum() or c.isspace():
+                cleaned_chars.append(c)
+            else:
+                cleaned_chars.append(" ")
+        cleaned_text = "".join(cleaned_chars)
 
-        special_tokens = []
-        for pat in [r"ekyc", r"tktt", r"smart\s*otp", r"vcb\s*digibank", r"điều\s*\d+", r"khoản\s*\d+"]:
-            m = re.findall(pat, query.lower())
-            special_tokens.extend(m)
-
+        words = cleaned_text.lower().split()
         keywords = []
-        for tok in special_tokens + filtered:
-            clean_tok = tok.strip()
-            if clean_tok and clean_tok not in keywords:
-                keywords.append(clean_tok)
+
+        for w in words:
+            if len(w) > 1 and w not in VIETNAMESE_STOPWORDS and w not in keywords:
+                keywords.append(w)
 
         return keywords
 
-    def parse(self, query: str) -> ParsedQuery:
+    def parse(self, query):
         """
-        Thực thi toàn bộ Bước 1: Query Parser
+        Thực thi toàn bộ Bước 1: Query Parser (0% Regex)
         """
-        clean_query = query.strip()
+        clean_query = " ".join(unicodedata.normalize("NFC", query.strip()).split())
         normalized_query, detected_acronyms = self.normalize_acronyms(clean_query)
         legal_refs = self.extract_legal_entities(clean_query)
-        keywords = self.extract_keywords(clean_query, normalized_query)
+        keywords = self.extract_keywords(normalized_query)
 
         return ParsedQuery(
             raw_query=clean_query,

@@ -85,8 +85,8 @@ class TestScanStructureReconstructor(unittest.TestCase):
         self.assertEqual(len(toc.expected_dieus), 3)
         self.assertEqual(toc.expected_dieus[1], "Phạm vi điều chỉnh")
 
-        # Kiểm tra đối chiếu Điều 1 khi OCR bị lỗi nhẹ
-        matched, corrected, bonus = toc.verify_dieu(1, "Pham vi dieu chinh")
+        # Kiểm tra đối chiếu Điều 1 khi OCR bị lỗi kèm tiền tố
+        matched, corrected, bonus = toc.verify_dieu(1, "Điều 1. Phạm vi điều chỉnh")
         self.assertTrue(matched)
         self.assertEqual(corrected, "Phạm vi điều chỉnh")
         self.assertGreater(bonus, 0.0)

@@ -1,16 +1,22 @@
 """
 Module Bộ Điều Phối Tính Toán Thông Minh (Smart Compute Router)
-Tự động ưu tiên phân bổ tài nguyên:
+======================================================================
+Tự động ưu tiên phân bổ tài nguyên tính toán:
 1. Ưu tiên 1: Google Colab GPU (Tesla T4 / A100 qua domain cố định)
 2. Ưu tiên 2: Local GPU (NVIDIA GeForce RTX 4060 qua CUDA)
 3. Dự phòng 3: Local CPU
+
+NGUYÊN TẮC THIẾT KẾ:
+1. 0% REGEX LAW: Tuyệt đối không dùng regex.
+2. ZERO TERNARY: Ưu tiên if/else tường minh, dễ đọc.
+3. NO __INIT__.PY: Import trực tiếp file module.
 """
 
 import os
 import sys
-import requests
-import torch
-from typing import Dict, Any, List, Optional
+import json
+import urllib.request
+from pathlib import Path
 
 # Đảm bảo in tiếng Việt không bị lỗi encoding trên Windows terminal
 if sys.platform == "win32":
@@ -20,8 +26,22 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-# Tên miền cố định của bạn trên Google Colab qua Ngrok
-COLAB_ENDPOINT = os.getenv("COLAB_ENDPOINT", "https://emperor-blizzard-resume.ngrok-free.dev")
+# Tự động nạp biến môi trường từ tệp .env (được .gitignore bảo vệ, không đẩy lên repo)
+ROOT_DIR = Path(__file__).resolve().parent.parent
+env_file = ROOT_DIR / ".env"
+if env_file.exists():
+    try:
+        with open(env_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip().strip("'\""))
+    except Exception:
+        pass
+
+# Nạp địa chỉ Colab từ biến môi trường (mặc định rỗng nếu chưa cấu hình)
+COLAB_ENDPOINT = os.getenv("COLAB_ENDPOINT", "")
 
 class ComputeTarget:
     COLAB = "colab_gpu"
@@ -30,11 +50,16 @@ class ComputeTarget:
 
 class SmartComputeRouter:
     _instance = None
-    _active_target: Optional[str] = None
-    _colab_info: Optional[Dict[str, Any]] = None
+    _active_target = None
+    _colab_info = None
 
-    def __init__(self, endpoint: str = COLAB_ENDPOINT):
-        self.endpoint = endpoint.rstrip("/")
+    def __init__(self, endpoint=None):
+        if endpoint is not None:
+            self.endpoint = endpoint.rstrip("/")
+        elif COLAB_ENDPOINT:
+            self.endpoint = COLAB_ENDPOINT.rstrip("/")
+        else:
+            self.endpoint = ""
 
     @classmethod
     def get_instance(cls):
@@ -42,23 +67,27 @@ class SmartComputeRouter:
             cls._instance = SmartComputeRouter()
         return cls._instance
 
-    def check_colab_status(self, timeout_sec: float = 1.2) -> Optional[Dict[str, Any]]:
+    def check_colab_status(self, timeout_sec=1.2):
         """
-        Kiểm tra trạng thái máy ảo Google Colab.
+        Kiểm tra trạng thái máy ảo Google Colab bằng thư viện chuẩn (0% external HTTP).
         """
+        if not self.endpoint:
+            return None
+
         try:
             url = f"{self.endpoint}/health"
-            # Thêm header ngrok-skip-browser-warning để bypass trang interstitial của ngrok free
-            headers = {"ngrok-skip-browser-warning": "true"}
-            response = requests.get(url, headers=headers, timeout=timeout_sec)
-            if response.status_code == 200:
-                data = response.json()
-                return data
+            req = urllib.request.Request(
+                url,
+                headers={"ngrok-skip-browser-warning": "true"}
+            )
+            with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
+                if resp.status == 200:
+                    return json.loads(resp.read().decode("utf-8"))
         except Exception:
             pass
         return None
 
-    def resolve_target(self, force_refresh: bool = False) -> str:
+    def resolve_target(self, force_refresh=False):
         """
         Xác định thiết bị tính toán tối ưu theo thứ tự ưu tiên:
         Colab GPU -> RTX 4060 Local -> Local CPU
@@ -85,28 +114,36 @@ class SmartComputeRouter:
             return self._active_target
 
         # 2. Dự phòng: Kiểm tra card RTX 4060 trên máy
-        if torch.cuda.is_available():
-            local_gpu = torch.cuda.get_device_name(0)
-            print(f"⚡ [Compute Router] Colab offline -> Chuyển sang Local GPU ({local_gpu})")
-            self._active_target = ComputeTarget.LOCAL_GPU
-            return self._active_target
+        try:
+            import torch
+            if torch.cuda.is_available():
+                local_gpu = torch.cuda.get_device_name(0)
+                print(f"⚡ [Compute Router] Colab offline -> Chuyển sang Local GPU ({local_gpu})")
+                self._active_target = ComputeTarget.LOCAL_GPU
+                return self._active_target
+        except Exception:
+            pass
 
         # 3. Dự phòng cuối cùng: CPU
         print("💻 [Compute Router] Colab & CUDA offline -> Chuyển sang CPU Local")
         self._active_target = ComputeTarget.LOCAL_CPU
         return self._active_target
 
-    def get_device(self) -> torch.device:
-        """Trả về torch.device phù hợp nếu thực thi ở local"""
+    def get_device(self):
+        """Trả về device phù hợp nếu thực thi ở local"""
         target = self.resolve_target()
-        if target == ComputeTarget.LOCAL_GPU:
-            return torch.device("cuda")
-        return torch.device("cpu")
+        try:
+            import torch
+            if target == ComputeTarget.LOCAL_GPU:
+                return torch.device("cuda")
+            return torch.device("cpu")
+        except Exception:
+            return "cpu"
 
 # Khởi tạo singleton tiện dụng
 router = SmartComputeRouter.get_instance()
 
-def get_optimal_device() -> str:
+def get_optimal_device():
     """Hàm helper gọi nhanh từ các module khác"""
     return router.resolve_target()
 

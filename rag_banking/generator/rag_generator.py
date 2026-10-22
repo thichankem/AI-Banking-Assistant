@@ -1,17 +1,42 @@
 """
-RAG Generator & Banking Guardrails (Bước 5: LLM Serving với System Guardrails Ngân hàng)
+Module RAG Generator & LLM Serving (Bước 5: LLM Serving với System Guardrails Ngân hàng)
+======================================================================
 Nhiệm vụ:
 1. Tiếp nhận ngữ cảnh Markdown đã tổng hợp (gắn thẻ [Điều X, Khoản Y]) và câu hỏi người dùng.
 2. Áp dụng Hệ thống Banking System Guardrails nghiêm ngặt chống bịa đặt số liệu tài chính.
 3. Phục vụ suy luận qua DeepSeek-V4-Flash (FPT Cloud / OpenAI API) hoặc Google Gemini.
 4. Trả về câu trả lời chuẩn mực ngân hàng, dẫn chứng số liệu minh bạch và bảo mật.
+
+NGUYÊN TẮC THIẾT KẾ:
+1. 0% REGEX LAW: Tuyệt đối không sử dụng `import re` hay regex methods.
+2. ZERO TERNARY: Ưu tiên if/else tường minh, dễ đọc.
+3. NO __INIT__.PY: Import trực tiếp file module.
 """
 
 import os
-import re
-from typing import Dict, Any, Union
 from openai import OpenAI
-from ..synthesizer.context_synthesizer import SynthesizedContext
+
+class ContextBundle:
+    def __init__(self, markdown_context="", total_tokens=0, legal_citations=None, sources_used=None, chunks_included=0):
+        self.markdown_context = markdown_context
+        self.total_tokens = total_tokens
+        if legal_citations is not None:
+            self.legal_citations = legal_citations
+        else:
+            self.legal_citations = []
+        if sources_used is not None:
+            self.sources_used = sources_used
+        else:
+            self.sources_used = []
+        self.chunks_included = chunks_included
+
+    @property
+    def citations(self):
+        return self.legal_citations
+
+
+# Tương thích ngược với các hàm gọi cũ
+SynthesizedContext = ContextBundle
 
 # HỆ THỐNG SYSTEM GUARDRAILS NGÂN HÀNG (VIETCOMBANK GRADE GUARDRAILS)
 BANKING_SYSTEM_GUARDRAILS = """Bạn là Trợ lý AI Chuyên viên Tư vấn Khách hàng Cao cấp của Ngân hàng TMCP Ngoại thương Việt Nam (Vietcombank AI Assistant).
@@ -48,15 +73,15 @@ HỆ THỐNG NGUYÊN TẮC AN TOÀN & BẢO VỆ NGÂN HÀNG (SYSTEM GUARDRAILS)
 class RAGGenerator:
     def __init__(
         self,
-        api_key: str = None,
-        base_url: str = None,
-        model: str = None,
-        temperature: float = 0.2,
-        max_tokens: int = 2500
+        api_key=None,
+        base_url=None,
+        model=None,
+        temperature=0.2,
+        max_tokens=2500
     ):
         self.api_key = api_key or os.getenv("API_KEY", "")
-        self.base_url = base_url or os.getenv("BASE_URL", "https://mkp-api.fptcloud.com/v1")
-        self.model = model or os.getenv("MODEL", "DeepSeek-V4-Flash")
+        self.base_url = base_url or os.getenv("BASE_URL", "")
+        self.model = model or os.getenv("MODEL", "")
         self.temperature = temperature
         self.max_tokens = max_tokens
 
@@ -67,32 +92,90 @@ class RAGGenerator:
             except Exception as e:
                 print(f"[RAG Generator] OpenAI Client init error: {e}")
 
-    def generate_answer(
-        self,
-        query: str,
-        synthesized_context: Union[SynthesizedContext, str, list]
-    ) -> Dict[str, Any]:
+    @staticmethod
+    def format_chunks(chunks):
         """
-        Thực thi Bước 5: Truyền ngữ cảnh kèm System Guardrails vào LLM để sinh câu trả lời.
+        Đóng gói danh sách chunks thành văn bản Markdown rõ ràng kèm nguồn và trích dẫn pháp lý.
+        Hoàn toàn không regex, không phụ thuộc thư viện ngoài.
+        """
+        if not chunks:
+            return ContextBundle()
+
+        blocks = []
+        sources = []
+        citations = []
+
+        for idx, item in enumerate(chunks, start=1):
+            if isinstance(item, dict) and "chunk" in item:
+                chunk = item["chunk"]
+            else:
+                chunk = item
+
+            source = chunk.get("source", "Tài liệu ngân hàng")
+            breadcrumb = chunk.get("breadcrumb", "")
+            content = chunk.get("content", "")
+
+            if source and source not in sources:
+                sources.append(source)
+
+            # Trích xuất nhãn tham chiếu [Điều ...] có sẵn trong text (0% regex)
+            if "[" in content:
+                start = 0
+                while True:
+                    o = content.find("[", start)
+                    if o == -1:
+                        break
+                    c = content.find("]", o)
+                    if c == -1:
+                        break
+                    tag = content[o + 1 : c].strip()
+                    if 1 <= len(tag) <= 60 and "\n" not in tag:
+                        full_tag = f"[{tag}]"
+                        if full_tag not in citations:
+                            citations.append(full_tag)
+                    start = c + 1
+
+            meta_lines = [f"### [TRÍCH DẪN {idx}] Nguồn tài liệu: {source}"]
+            if breadcrumb:
+                meta_lines.append(f"- **Phân cấp:** `{breadcrumb}`")
+            meta_lines.append(f"- **Nội dung xác thực:**\n{content}")
+            blocks.append("\n".join(meta_lines))
+
+        context_text = "\n\n---\n\n".join(blocks)
+        total_tokens = max(int(len(context_text.split()) * 1.25), int(len(context_text) / 3.5))
+
+        return ContextBundle(
+            markdown_context=context_text,
+            total_tokens=total_tokens,
+            legal_citations=citations,
+            sources_used=sources,
+            chunks_included=len(chunks)
+        )
+
+    def generate_answer(self, query, synthesized_context):
+        """
+        Thực thi LLM Serving: Truyền ngữ cảnh kèm System Guardrails vào LLM để sinh câu trả lời.
         """
         # Trích xuất nội dung ngữ cảnh và danh sách trích dẫn
-        if isinstance(synthesized_context, SynthesizedContext):
+        if isinstance(synthesized_context, ContextBundle):
             context_text = synthesized_context.markdown_context
             legal_citations = synthesized_context.legal_citations
             sources_used = synthesized_context.sources_used
             tokens_used = synthesized_context.total_tokens
+        elif isinstance(synthesized_context, list):
+            # Nhận danh sách chunks trực tiếp từ Reranker
+            bundle = self.format_chunks(synthesized_context)
+            context_text = bundle.markdown_context
+            legal_citations = bundle.legal_citations
+            sources_used = bundle.sources_used
+            tokens_used = bundle.total_tokens
         elif isinstance(synthesized_context, str):
             context_text = synthesized_context
             legal_citations = []
             sources_used = []
             tokens_used = len(context_text) // 4
         else:
-            # Dạng list chunks thô
-            blocks = []
-            for item in synthesized_context:
-                c = item.get("chunk", item)
-                blocks.append(f"[{c.get('source', '')} - {c.get('breadcrumb', '')}]\n{c.get('content', '')}")
-            context_text = "\n\n".join(blocks)
+            context_text = str(synthesized_context)
             legal_citations = []
             sources_used = []
             tokens_used = len(context_text) // 4
@@ -153,35 +236,60 @@ class RAGGenerator:
         }
 
     @staticmethod
-    def _clean_bot_response(text: str) -> str:
+    def _clean_bot_response(text):
         """
-        Loại bỏ hoàn toàn tư duy nội bộ (thinking / scratchpad) khỏi câu trả lời của bot.
+        Loại bỏ hoàn toàn tư duy nội bộ (thinking / scratchpad) khỏi câu trả lời của bot (0% Regex Law).
         """
         if not text:
             return ""
 
-        # 1. Bỏ thẻ <think>...</think>
-        text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+        # 1. Bỏ toàn bộ thẻ <think>...</think> thuần túy bằng string search
+        while "<think>" in text:
+            start_idx = text.find("<think>")
+            end_idx = text.find("</think>", start_idx)
+            if end_idx != -1:
+                text = text[:start_idx] + text[end_idx + 8:]
+            else:
+                text = text[:start_idx]
+                break
+        text = text.strip()
 
         # 2. Bỏ nháp suy nghĩ nội bộ nếu bắt đầu bằng các cụm từ phân tích
         meta_phrases = [
+            "Viết phản hồi:",
             "Soạn câu trả lời:",
             "Soạn thảo câu trả lời:",
             "Câu trả lời của bot:",
             "Câu trả lời:",
-            "Nội dung phản hồi:"
+            "Nội dung phản hồi:",
+            "Phản hồi Quý khách:",
+            "Phản hồi chính thức:"
         ]
         for phrase in meta_phrases:
             if phrase in text:
-                parts = text.split(phrase, 1)
-                if len(parts) > 1 and len(parts[1].strip()) > 30:
-                    text = parts[1].strip()
+                parts = text.split(phrase)
+                last_part = parts[-1].strip()
+                if len(last_part) > 30:
+                    text = last_part
                     break
 
-        # 3. Nếu còn dính "Chúng ta cần trả lời..." hoặc "Tôi cần...", cắt tới lời chào hoặc trích dẫn chính thức
-        if text.startswith(("Chúng ta cần", "Ta cần", "Tôi cần", "Để trả lời", "Cần trả lời")):
-            match = re.search(r'(Kính thưa Quý khách|Kính chào Quý khách|Chào Quý khách|Theo quy định|Về hạn mức)', text)
-            if match:
-                text = text[match.start():].strip()
+        # 3. Nếu còn dính "Chúng ta cần trả lời..." hoặc "Tôi cần...", cắt tới lời chào hoặc trích dẫn chính thức (0% Regex)
+        prefixes = ("Chúng ta cần", "Ta cần", "Tôi cần", "Để trả lời", "Cần trả lời")
+        if text.startswith(prefixes):
+            official_anchors = [
+                "Kính thưa Quý khách",
+                "Kính chào Quý khách",
+                "Chào Quý khách",
+                "Theo quy định",
+                "Về hạn mức"
+            ]
+            earliest_idx = -1
+            for anchor in official_anchors:
+                idx = text.find(anchor)
+                if idx != -1:
+                    if earliest_idx == -1 or idx < earliest_idx:
+                        earliest_idx = idx
+            if earliest_idx != -1:
+                text = text[earliest_idx:].strip()
 
         return text.strip()

@@ -31,10 +31,13 @@ def run_test():
     # 1. Khởi tạo Pipeline RAG
     pipeline = BankingRAGPipeline()
 
-    # 2. Nạp dữ liệu đa phương thức từ dataset/chunking_dataset (hỗ trợ fallback sang retrieval_dataset)
-    chunking_dir = PROJECT_ROOT / "dataset" / "chunking_dataset"
-    retrieval_dir = PROJECT_ROOT / "dataset" / "retrieval_study" / "retrieval_dataset"
-    dataset_dir = chunking_dir if chunking_dir.exists() else retrieval_dir
+    from rag_banking.config import Config
+    chunking_dir = Config.CHUNKING_DATASET_DIR
+    retrieval_dir = Config.RETRIEVAL_DATASET_DIR
+    if chunking_dir.exists():
+        dataset_dir = chunking_dir
+    else:
+        dataset_dir = retrieval_dir
     print(f"[*] Đang nạp dữ liệu kiểm thử từ: {dataset_dir}")
     
     if dataset_dir == chunking_dir:

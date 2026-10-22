@@ -1,46 +1,73 @@
 """
 Module Cấu hình Hệ thống RAG Banking (AI Banking Assistant)
-Chứa các tham số cấu hình đường dẫn, mô hình, Weaviate, và ngưỡng truy xuất.
+======================================================================
+Quản lý tập trung các tham số cấu hình:
+- Đường dẫn lưu trữ (vector_db, dataset)
+- Cấu hình mô hình Embedding (1024 chiều) & Qdrant HNSW
+- Cấu hình BM25 Okapi & Hybrid RRF Search
+- Cấu hình Cross-Encoder Reranker & LLM Serving
+- Cấu hình Tracing (Langfuse & Arize Phoenix)
+
+NGUYÊN TẮC THIẾT KẾ:
+1. 0% REGEX LAW: Tuyệt đối không dùng regex.
+2. ZERO TERNARY: Ưu tiên if/else tường minh, dễ đọc.
+3. NO __INIT__.PY: Import trực tiếp file module.
 """
 
 import os
 from pathlib import Path
-from dotenv import load_dotenv
 
-# Tải biến môi trường từ file .env ở thư mục gốc dự án
+# Tải biến môi trường từ file .env ở thư mục gốc dự án (thuần Python, không cần thư viện dotenv)
 ROOT_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT_DIR / ".env")
+env_file = ROOT_DIR / ".env"
+if env_file.exists():
+    try:
+        with open(env_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip().strip("'\""))
+    except Exception:
+        pass
+
+# Xác định đường dẫn thư mục dataset
+retrieval_dir = ROOT_DIR / "dataset" / "retrieval_study" / "retrieval_dataset"
+chunking_dir_candidate = ROOT_DIR / "rag_banking" / "chunking" / "chunking_dataset"
+
+if chunking_dir_candidate.exists():
+    chunking_dir = chunking_dir_candidate
+else:
+    chunking_dir = ROOT_DIR / "dataset" / "chunking_dataset"
+
+if retrieval_dir.exists():
+    active_dataset_dir = retrieval_dir
+else:
+    active_dataset_dir = chunking_dir
+
 
 class Config:
     # 1. Đường dẫn dữ liệu
     ROOT_DIR = ROOT_DIR
-    RETRIEVAL_DATASET_DIR = ROOT_DIR / "dataset" / "retrieval_study" / "retrieval_dataset"
-    CHUNKING_DATASET_DIR = (
-        ROOT_DIR / "rag_banking" / "chunking" / "chunking_dataset"
-        if (ROOT_DIR / "rag_banking" / "chunking" / "chunking_dataset").exists()
-        else ROOT_DIR / "dataset" / "chunking_dataset"
-    )
-    DATASET_DIR = RETRIEVAL_DATASET_DIR if RETRIEVAL_DATASET_DIR.exists() else CHUNKING_DATASET_DIR
-    OUTPUT_DATASET_DIR = CHUNKING_DATASET_DIR / "output_dataset"
-    STORAGE_DIR = ROOT_DIR / "rag_banking" / "storage"
+    RETRIEVAL_DATASET_DIR = retrieval_dir
+    CHUNKING_DATASET_DIR = chunking_dir
+    DATASET_DIR = active_dataset_dir
+    STORAGE_DIR = ROOT_DIR / "rag_banking" / "vector_db"
+    TRACE_DIR = ROOT_DIR / "rag_banking" / "tracing" / "traces"
 
     # 2. Cấu hình Chunking (Layout-Aware)
     CHUNK_MAX_SIZE = 800          # Kích thước ký tự tối đa cho 1 text chunk
     KEEP_TABLE_ATOMIC = True      # Giữ nguyên bảng biểu làm 1 đơn vị dữ liệu độc lập
 
     # 3. Cấu hình Embedding (1024 chiều)
-    # Hỗ trợ FPT Cloud multilingual-e5-large / Vietnamese_Embedding (1024-dim) kèm offline 1024-dim projection
-    EMBEDDING_MODEL_1024 = os.getenv("EMBEDDING_MODEL", "multilingual-e5-large")
-    EMBEDDING_URL = os.getenv("EMBEDDING_URL", "https://mkp-api.fptcloud.com/v1/embeddings")
-    LOCAL_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+    EMBEDDING_MODEL_1024 = os.getenv("EMBEDDING_MODEL", "")
+    EMBEDDING_URL = os.getenv("EMBEDDING_URL", "")
+    LOCAL_EMBEDDING_MODEL = os.getenv("LOCAL_EMBEDDING_MODEL", "")
     EMBEDDING_DIM = 1024
 
-    # 4. Cấu hình Vector Database (Cosine HNSW 1024 chiều)
-    WEAVIATE_HOST = os.getenv("WEAVIATE_HOST", "localhost")
-    WEAVIATE_PORT = int(os.getenv("WEAVIATE_PORT", "8080"))
-    WEAVIATE_GRPC_PORT = int(os.getenv("WEAVIATE_GRPC_PORT", "50051"))
-    WEAVIATE_COLLECTION_NAME = "BankingDocumentChunk"
-    QDRANT_COLLECTION = "banking_dual_index_1024"
+    # 4. Cấu hình Vector Database (Qdrant Localhost 1024 chiều)
+    QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "banking_dual_index_1024")
+    QDRANT_STORAGE_PATH = "rag_banking/vector_db/qdrant_db"
 
     # 5. Cấu hình Keyword Search (BM25 Okapi)
     BM25_K1 = 1.5                 # Tham số điều chỉnh độ bão hòa tần suất từ
@@ -52,20 +79,32 @@ class Config:
     RRF_K = 60                    # Hằng số điều hòa trong Reciprocal Rank Fusion (k=60)
     DENSE_WEIGHT = 0.5            # Cân bằng 50/50 giữa Dense Cosine HNSW và Sparse BM25
     RERANK_TOP_K = 3              # Bước 3: Tinh lọc ra Top-3 chunks chính xác nhất
-    RERANKER_MODEL = "bge-reranker-v2-m3"
+    RERANKER_MODEL = os.getenv("RERANKER_MODEL", "")
 
     # 7. Cấu hình Context Synthesizer (Bước 4)
     MAX_CONTEXT_TOKENS = 2000     # Kiểm soát giới hạn token cho ngữ cảnh Markdown
 
     # 8. Cấu hình LLM Generator & Guardrails (Bước 5)
     LLM_API_KEY = os.getenv("API_KEY", "")
-    LLM_BASE_URL = os.getenv("BASE_URL", "https://mkp-api.fptcloud.com/v1")
-    LLM_MODEL = os.getenv("MODEL", "DeepSeek-V4-Flash")
+    LLM_BASE_URL = os.getenv("BASE_URL", "")
+    LLM_MODEL = os.getenv("MODEL", "")
     LLM_TEMPERATURE = 0.2         # Nhiệt độ thấp để trả lời chính xác, tránh hallucination
     LLM_MAX_TOKENS = 2500
 
-    # 9. Cấu hình Tracing
+    # 9. Cấu hình Tracing & Observability (Langfuse & Arize Phoenix)
     ENABLE_TRACING = os.getenv("ENABLE_TRACING", "true").lower() == "true"
-    LANGSMITH_TRACING = os.getenv("LANGSMITH_TRACING", "false").lower() == "true"
-    LANGSMITH_PROJECT = os.getenv("LANGSMITH_PROJECT", "ai-banking-rag")
-    LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY", "")
+
+    # Cấu hình Langfuse (LLM Observability & Evaluation)
+    ENABLE_LANGFUSE = os.getenv("ENABLE_LANGFUSE", "true").lower() == "true"
+    LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+    LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "")
+    LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "")
+
+    # Cấu hình Arize Phoenix (RAG OpenTelemetry Tracing)
+    ENABLE_PHOENIX = os.getenv("ENABLE_PHOENIX", "true").lower() == "true"
+    PHOENIX_COLLECTOR_ENDPOINT = os.getenv("PHOENIX_COLLECTOR_ENDPOINT", "")
+    PHOENIX_PROJECT_NAME = os.getenv("PHOENIX_PROJECT_NAME", "")
+
+    # 10. Cấu hình Compute Router & Google Colab GPU
+    COLAB_ENDPOINT = os.getenv("COLAB_ENDPOINT", "")
+

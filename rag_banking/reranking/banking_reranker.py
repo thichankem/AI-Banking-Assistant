@@ -1,218 +1,193 @@
 """
-Banking Reranker (Bước 3: Tinh lọc Top-3 Chunks bằng So khớp Câu hỏi chuẩn & Độ trùng lặp từ vựng)
-Nhiệm vụ:
-1. So khớp câu hỏi người dùng với danh sách câu hỏi chuẩn (Canonical Questions) trong từng chunk.
-2. Đo lường độ trùng lặp từ vựng (Lexical Overlap / Keyword Containment) giữa truy vấn và ngữ cảnh.
-3. Kết hợp điểm số RRF và Cross-Encoder (bge-reranker-v2-m3 nếu khả dụng).
-4. Tinh lọc từ Top-5 ứng viên xuống chính xác Top-3 chunks chất lượng và phù hợp nhất.
+Module Banking Document Reranker (Tối Giản - Gọn Nhẹ - Chuẩn Xác)
+======================================================================
+Chuyên trách:
+1. Nhận danh sách Top-K ứng viên từ Hybrid Search (Dense + BM25).
+2. Gọi Cross-Encoder API trên FPT Cloud (model: bge-reranker-v2-m3) để chấm điểm tương quan ngữ nghĩa sâu giữa Query và Context.
+3. Tinh lọc danh sách từ Top-5/10 xuống Top-3 chunks chính xác nhất cho LLM.
+4. Tự động chuyển sang Local Token Fallback nếu mất mạng hoặc API lỗi, đảm bảo pipeline không bao giờ bị crash.
+
+NGUYÊN TẮC THIẾT KẾ:
+1. 0% REGEX LAW: Tuyệt đối không dùng regex methods.
+2. ZERO TERNARY: Ưu tiên if/else tường minh, dễ đọc.
+3. NO __INIT__.PY: Import trực tiếp file module.
 """
 
-import re
 import os
-import httpx
-from typing import List, Dict, Any, Union
-from ..query_parser.banking_query_parser import ParsedQuery
+import json
+import urllib.request
+
 
 class BankingReranker:
+    """
+    Bộ tái xếp hạng (Reranker) tối giản sử dụng Cross-Encoder bge-reranker-v2-m3.
+    """
+
     def __init__(
         self,
-        model_name: str = "bge-reranker-v2-m3",
-        api_key: str = None,
-        base_url: str = None,
-        canonical_weight: float = 0.40,
-        lexical_weight: float = 0.35,
-        rrf_weight: float = 0.25
+        model_name=None,
+        api_key=None,
+        rerank_url=None,
+        base_url=None
     ):
-        self.model_name = model_name
-        self.api_key = api_key or os.getenv("API_KEY", "")
-        self.base_url = base_url or os.getenv("BASE_URL", "https://mkp-api.fptcloud.com/v1")
-        self.canonical_weight = canonical_weight
-        self.lexical_weight = lexical_weight
-        self.rrf_weight = rrf_weight
+        if model_name:
+            self.model_name = model_name
+        else:
+            self.model_name = os.getenv("RERANKER_MODEL", "bge-reranker-v2-m3")
 
-    def _tokenize(self, text: str) -> set:
-        """Tách từ đơn giản và loại bỏ ký tự đặc biệt"""
-        return set(re.findall(r"\w+", text.lower()))
+        if api_key:
+            self.api_key = api_key
+        else:
+            self.api_key = os.getenv("API_KEY", "")
 
-    def _match_canonical_questions(self, query_tokens: set, raw_query: str, chunk: dict) -> float:
+        # Xác định URL endpoint chuẩn của FPT Cloud Rerank
+        if rerank_url:
+            self.rerank_url = rerank_url
+        elif base_url:
+            self.rerank_url = f"{base_url.rstrip('/')}/rerank"
+        else:
+            env_base = os.getenv("BASE_URL", "")
+            if env_base:
+                self.rerank_url = os.getenv("RERANK_URL", f"{env_base.rstrip('/')}/rerank")
+            else:
+                self.rerank_url = os.getenv("RERANK_URL", "")
+
+    @staticmethod
+    def _extract_text(item):
+        """Trích xuất chuỗi văn bản từ đối tượng ứng viên bất kỳ"""
+        if isinstance(item, str):
+            return item
+        if isinstance(item, tuple) and len(item) > 0:
+            item = item[0]
+        if isinstance(item, dict):
+            # Nếu là kết quả từ Qdrant search_hybrid: {"chunk": {...}, ...}
+            chunk = item.get("chunk", item)
+            text = chunk.get("content") or chunk.get("original_text") or chunk.get("text") or ""
+            bc = chunk.get("breadcrumb", "")
+            title = chunk.get("section_title", "")
+            prefix = ""
+            if bc and title:
+                prefix = f"[{bc} > {title}]\n"
+            elif title:
+                prefix = f"[{title}]\n"
+            return f"{prefix}{text}".strip()
+        return str(item)
+
+    def _fallback_local_rerank(self, query, candidates, top_k=3):
         """
-        Tính điểm so khớp câu hỏi với các câu hỏi chuẩn (Canonical Questions):
-        Kiểm tra danh mục canonical_questions của chunk hoặc tiêu đề phần mục.
+        Dự phòng cục bộ bằng so khớp từ vựng Jaccard khi mất mạng hoặc API lỗi (0% Regex Law).
         """
-        canonical_qs = chunk.get("canonical_questions", [])
-        section_title = chunk.get("section_title", "")
-        if section_title and section_title not in canonical_qs:
-            canonical_qs = list(canonical_qs) + [section_title]
+        def _get_tokens(s: str) -> set[str]:
+            if not s:
+                return set()
+            cleaned = []
+            for ch in s.lower():
+                if ch.isalnum() or ch == "_":
+                    cleaned.append(ch)
+                else:
+                    cleaned.append(" ")
+            return set("".join(cleaned).split())
 
-        if not canonical_qs:
-            # Thử trích xuất câu hỏi từ content nếu có 'Câu X: ...'
-            inline_qs = re.findall(r"(?:Câu\s*\d+|Hỏi)\s*[:\.\-]\s*([^\n\?]+\?)", chunk.get("raw_content", ""))
-            canonical_qs.extend(inline_qs)
+        q_tokens = _get_tokens(query)
+        scored = []
+        for idx, item in enumerate(candidates):
+            text = self._extract_text(item)
+            doc_tokens = _get_tokens(text)
+            intersection = q_tokens.intersection(doc_tokens)
+            union = q_tokens.union(doc_tokens)
+            if len(union) > 0:
+                score = len(intersection) / len(union)
+            else:
+                score = 0.0
+            scored.append((item, score, idx))
 
-        if not canonical_qs:
-            return 0.1  # Điểm sàn mặc định nếu không có câu hỏi chuẩn
+        scored.sort(key=lambda x: x[1], reverse=True)
+        results = []
+        for rank, (item, score, orig_idx) in enumerate(scored[:top_k], start=1):
+            if isinstance(item, dict):
+                item_copy = dict(item)
+                item_copy["relevance_score"] = round(float(score), 4)
+                item_copy["rerank_score"] = round(float(score), 4)
+                item_copy["rerank_rank"] = rank
+                results.append(item_copy)
+            else:
+                results.append({
+                    "document": item,
+                    "relevance_score": round(float(score), 4),
+                    "rerank_score": round(float(score), 4),
+                    "rerank_rank": rank
+                })
+        return results
 
-        max_sim = 0.0
-        q_clean = raw_query.lower()
-
-        for cq in canonical_qs:
-            cq_clean = cq.lower()
-            cq_tokens = self._tokenize(cq_clean)
-            if not cq_tokens:
-                continue
-
-            # Jaccard Token Similarity
-            intersection = query_tokens.intersection(cq_tokens)
-            union = query_tokens.union(cq_tokens)
-            jaccard = len(intersection) / len(union) if union else 0.0
-
-            # Substring / Exact match boost
-            sub_boost = 0.2 if any(term in cq_clean for term in query_tokens if len(term) > 3) else 0.0
-            
-            sim = min(jaccard * 1.5 + sub_boost, 1.0)
-            if sim > max_sim:
-                max_sim = sim
-
-        return round(max_sim, 4)
-
-    def _compute_lexical_overlap(self, query_tokens: set, keywords: list, chunk_text: str) -> float:
+    def rerank(self, query, candidates, top_k=3):
         """
-        Tính độ trùng lặp từ vựng (Lexical Overlap):
-        Tỷ lệ từ khóa trong câu hỏi xuất hiện trong nội dung chunk.
-        """
-        if not query_tokens:
-            return 0.0
-
-        chunk_tokens = self._tokenize(chunk_text)
-        if not chunk_tokens:
-            return 0.0
-
-        # 1. Tỷ lệ token trùng lặp
-        common_tokens = query_tokens.intersection(chunk_tokens)
-        token_ratio = len(common_tokens) / len(query_tokens)
-
-        # 2. Tỷ lệ keyword chuyên ngành khớp chính xác
-        kw_matches = 0
-        total_kws = max(len(keywords), 1)
-        chunk_lower = chunk_text.lower()
-        for kw in keywords:
-            if kw.lower() in chunk_lower:
-                kw_matches += 1
-        kw_ratio = kw_matches / total_kws
-
-        # Điểm trùng lặp từ vựng tổng hợp
-        lexical_score = 0.5 * token_ratio + 0.5 * kw_ratio
-        return round(min(lexical_score, 1.0), 4)
-
-    def _try_api_rerank(self, query: str, candidate_chunks: list) -> list:
-        """Thử gọi Cross-Encoder API bge-reranker-v2-m3 trên FPT Cloud nếu khả dụng"""
-        if not self.api_key or not self.base_url:
-            return []
-
-        try:
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
-            docs = [c["chunk"].get("content", "")[:1000] for c in candidate_chunks]
-            payload = {
-                "model": self.model_name,
-                "query": query,
-                "documents": docs
-            }
-            with httpx.Client(timeout=8.0) as client:
-                r = client.post(f"{self.base_url}/rerank", json=payload, headers=headers)
-                if r.status_code == 200:
-                    data = r.json()
-                    scores = [0.0] * len(candidate_chunks)
-                    for item in data.get("results", []):
-                        idx = item.get("index", 0)
-                        score = float(item.get("relevance_score", 0.0))
-                        scores[idx] = score
-                    return scores
-        except Exception:
-            pass
-        return []
-
-    def rerank(
-        self,
-        query: Union[str, ParsedQuery],
-        candidates: List[Dict[str, Any]],
-        top_k: int = 3
-    ) -> List[Dict[str, Any]]:
-        """
-        Tinh lọc danh sách ứng viên từ Top-5 xuống Top-3 chunks.
+        Tái xếp hạng danh sách candidates theo query.
+        Tham số:
+        - query: Câu hỏi người dùng (str hoặc object có .raw_query / .query)
+        - candidates: Danh sách chunks (list dict hoặc list str)
+        - top_k: Số lượng tài liệu tinh lọc cần lấy (mặc định 3)
         """
         if not candidates:
             return []
 
-        # Chuẩn bị dữ liệu truy vấn
-        if isinstance(query, ParsedQuery):
-            raw_query = query.raw_query
-            keywords = query.keywords
-        else:
-            raw_query = str(query)
-            keywords = [w for w in re.findall(r"\w+", raw_query.lower()) if len(w) > 2]
+        # Chuẩn hóa câu hỏi dạng text
+        query_text = getattr(query, "raw_query", getattr(query, "query", str(query))).strip()
+        if not query_text:
+            return candidates[:top_k]
 
-        query_tokens = self._tokenize(raw_query)
+        # Trích xuất danh sách văn bản tương ứng
+        docs = [self._extract_text(c)[:2500] for c in candidates]
 
-        # Tính toán điểm RRF chuẩn hóa (0..1)
-        max_rrf = max((c.get("rrf_score", 0.0001) for c in candidates), default=1.0)
+        # 1. Gọi FPT Cloud Rerank API (bge-reranker-v2-m3)
+        if self.api_key and self.rerank_url:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                }
+                payload = {
+                    "model": self.model_name,
+                    "query": query_text,
+                    "documents": docs,
+                    "top_n": min(len(candidates), max(top_k, 5))
+                }
 
-        # Thử lấy điểm Cross-Encoder nếu có
-        api_scores = self._try_api_rerank(raw_query, candidates)
+                data = json.dumps(payload).encode("utf-8")
+                req = urllib.request.Request(self.rerank_url, data=data, headers=headers)
+                with urllib.request.urlopen(req, timeout=20.0) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        api_results = data.get("results", [])
 
-        scored_candidates = []
-        for i, item in enumerate(candidates):
-            chunk = item["chunk"]
-            chunk_content = chunk.get("content", "")
+                        # Sắp xếp và gắn điểm vào candidates
+                        reranked = []
+                        for rank, res in enumerate(api_results[:top_k], start=1):
+                            idx = res.get("index", 0)
+                            score = float(res.get("relevance_score", 0.0))
+                            orig_item = candidates[idx]
 
-            # 1. So khớp câu hỏi với câu hỏi chuẩn
-            canonical_score = self._match_canonical_questions(query_tokens, raw_query, chunk)
+                            if isinstance(orig_item, dict):
+                                item_copy = dict(orig_item)
+                                item_copy["relevance_score"] = round(score, 4)
+                                item_copy["rerank_score"] = round(score, 4)
+                                item_copy["rerank_rank"] = rank
+                                reranked.append(item_copy)
+                            else:
+                                reranked.append({
+                                    "document": orig_item,
+                                    "relevance_score": round(score, 4),
+                                    "rerank_score": round(score, 4),
+                                    "rerank_rank": rank
+                                })
 
-            # 2. Độ trùng lặp từ vựng
-            lexical_score = self._compute_lexical_overlap(query_tokens, keywords, chunk_content)
+                        return reranked
+            except Exception as e:
+                print(f"⚠️ [Reranker] Lỗi gọi FPT Cloud API: {e}. Đang chuyển sang Local Fallback...")
 
-            # 3. Chuẩn hóa điểm RRF
-            norm_rrf = item.get("rrf_score", 0.0) / max_rrf if max_rrf > 0 else 0.5
+        # 2. Local Fallback an toàn nếu API không khả dụng
+        print("⚡ [Reranker] Sử dụng Local Fallback Token Overlap")
+        return self._fallback_local_rerank(query_text, candidates, top_k=top_k)
 
-            # 4. Điểm API Cross-Encoder (nếu có)
-            api_score = api_scores[i] if (api_scores and i < len(api_scores)) else None
 
-            # Tổng hợp Rerank Score
-            if api_score is not None:
-                # Kết hợp 4 tín hiệu khi có API
-                final_score = (
-                    0.30 * canonical_score +
-                    0.30 * lexical_score +
-                    0.20 * norm_rrf +
-                    0.20 * max(0.0, min(1.0, api_score))
-                )
-            else:
-                # Chuẩn 3 tín hiệu theo quy định đề tài
-                final_score = (
-                    self.canonical_weight * canonical_score +
-                    self.lexical_weight * lexical_score +
-                    self.rrf_weight * norm_rrf
-                )
-
-            scored_candidates.append({
-                "chunk": chunk,
-                "final_rerank_score": round(final_score, 4),
-                "canonical_matching_score": canonical_score,
-                "lexical_overlap_score": lexical_score,
-                "rrf_score": item.get("rrf_score", 0.0),
-                "cross_encoder_score": round(api_score, 4) if api_score is not None else None,
-                "original_hybrid_rank": item.get("candidate_rank", i + 1)
-            })
-
-        # Sắp xếp theo final_rerank_score giảm dần
-        scored_candidates.sort(key=lambda x: x["final_rerank_score"], reverse=True)
-
-        # Trích xuất đúng Top-3 chunks
-        top_reranked = []
-        for rank, item in enumerate(scored_candidates[:top_k], start=1):
-            item["rerank_rank"] = rank
-            top_reranked.append(item)
-
-        return top_reranked
+# Alias tiện dụng
+Reranker = BankingReranker
