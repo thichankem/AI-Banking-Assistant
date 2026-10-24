@@ -38,8 +38,8 @@ class ContextBundle:
 # Tương thích ngược với các hàm gọi cũ
 SynthesizedContext = ContextBundle
 
-# HỆ THỐNG SYSTEM GUARDRAILS NGÂN HÀNG (VIETCOMBANK GRADE GUARDRAILS)
-BANKING_SYSTEM_GUARDRAILS = """Bạn là Trợ lý AI Chuyên viên Tư vấn Khách hàng Cao cấp của Ngân hàng TMCP Ngoại thương Việt Nam (Vietcombank AI Assistant).
+# HỆ THỐNG SYSTEM GUARDRAILS NGÂN HÀNG (BANKING GRADE GUARDRAILS)
+BANKING_SYSTEM_GUARDRAILS = """Bạn là Trợ lý AI Chuyên viên Tư vấn Khách hàng Cao cấp của Ngân hàng (AI Banking Assistant).
 Nhiệm vụ cốt lõi của bạn là giải đáp chính xác, khách quan và chuyên nghiệp mọi thắc mắc của khách hàng dựa trên ngữ cảnh tài liệu nội bộ và văn bản pháp lý được cung cấp.
 
 HỆ THỐNG NGUYÊN TẮC AN TOÀN & BẢO VỆ NGÂN HÀNG (SYSTEM GUARDRAILS) - BẮT BUỘC TUÂN THỦ 100%:
@@ -52,15 +52,15 @@ HỆ THỐNG NGUYÊN TẮC AN TOÀN & BẢO VỆ NGÂN HÀNG (SYSTEM GUARDRAILS)
    - Khi giải thích quy chế, quyền hạn, nghĩa vụ hoặc điều kiện mở tài khoản, BẮT BUỘC phải trích dẫn kèm mã điều khoản cụ thể theo định dạng: `[Điều X, Khoản Y]` hoặc `[Điều X]` đã được cung cấp trong ngữ cảnh.
 
 3. NGUYÊN TẮC AN TOÀN BẢO MẬT THÔNG TIN:
-   - Tuyệt đối không yêu cầu khách hàng cung cấp các thông tin bảo mật nhạy cảm: Mật khẩu VCB Digibank, Mã OTP, Mã PIN thẻ ATM, Mã bảo mật CVV/CVC.
+   - Tuyệt đối không yêu cầu khách hàng cung cấp các thông tin bảo mật nhạy cảm: Mật khẩu ngân hàng số, Mã OTP, Mã PIN thẻ ATM, Mã bảo mật CVV/CVC.
    - Luôn chủ động kèm câu cảnh báo bảo mật khi khách hàng hỏi về các giao dịch trực tuyến hoặc phương thức xác thực Smart OTP.
 
 4. NGUYÊN TẮC MINH BẠCH VỀ GIỚI HẠN THÔNG TIN:
    - Nếu ngữ cảnh tài liệu KHÔNG chứa câu trả lời cho câu hỏi của khách hàng, hãy lịch sự và trung thực thông báo rằng hiện chưa có thông tin quy định trong tài liệu được cung cấp.
-   - Hướng dẫn khách hàng liên hệ Tổng đài Trung tâm Hỗ trợ Khách hàng Vietcombank 24/7 qua hotline chính thức: 1900 54 54 13 hoặc đến quầy giao dịch Vietcombank gần nhất.
+   - Hướng dẫn khách hàng liên hệ Tổng đài Trung tâm Hỗ trợ Khách hàng 24/7 qua hotline chính thức hoặc đến quầy giao dịch gần nhất.
 
 5. PHONG CÁCH DIỄN ĐẠT:
-   - Lịch thiệp, chuẩn mực ngôn phong tài chính ngân hàng, sử dụng đại từ "Vietcombank" và "Quý khách".
+   - Lịch thiệp, chuẩn mực ngôn phong tài chính ngân hàng, xưng "Ngân hàng" hoặc "Trợ lý AI" và gọi "Quý khách". Tuyệt đối không tự ý chèn tên bất kỳ ngân hàng thương mại cụ thể nào vào câu trả lời.
    - Trả lời súc tích, trực diện vào nội dung câu hỏi, tránh dài dòng.
    - Sử dụng gạch đầu dòng, bảng Markdown rõ ràng khi liệt kê các bước quy trình, biểu phí hoặc so sánh sản phẩm.
 
@@ -182,7 +182,7 @@ class RAGGenerator:
 
         # Xây dựng User Prompt
         user_prompt = (
-            f"NGỮ CẢNH TÀI LIỆU NỘI BỘ & CĂN CỨ PHÁP LÝ VIETCOMBANK:\n\n"
+            f"NGỮ CẢNH TÀI LIỆU NỘI BỘ & CĂN CỨ PHÁP LÝ NGÂN HÀNG:\n\n"
             f"{context_text}\n\n"
             f"CÂU HỎI CỦA QUÝ KHÁCH HÀNG:\n"
             f"{query}\n\n"
@@ -210,9 +210,9 @@ class RAGGenerator:
                 print(f"[RAG Generator] Lỗi gọi API {self.model}: {e}")
                 answer_text = (
                     f"**[Chế độ Dự phòng Ngữ cảnh Xác thực - Không thể kết nối API AI: {e}]**\n\n"
-                    f"Dưới đây là căn cứ pháp lý và nội dung chính thức được tìm thấy trong tài liệu Vietcombank:\n\n"
+                    f"Dưới đây là căn cứ pháp lý và nội dung chính thức được tìm thấy trong tài liệu ngân hàng:\n\n"
                     f"{context_text[:1200]}...\n\n"
-                    f"Quý khách vui lòng liên hệ Hotline 1900 54 54 13 để được nhân viên quầy giải đáp trực tiếp."
+                    f"Quý khách vui lòng liên hệ Hotline hỗ trợ để được nhân viên quầy giải đáp trực tiếp."
                 )
         else:
             answer_text = (

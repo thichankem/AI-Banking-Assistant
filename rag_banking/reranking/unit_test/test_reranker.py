@@ -10,8 +10,10 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+RAG_ROOT = Path(__file__).resolve().parents[2]
+for p in (str(ROOT), str(RAG_ROOT)):
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
 if sys.platform == "win32":
     try:
@@ -19,9 +21,12 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from rag_banking.embedding.embedder import BankingEmbedder
-from rag_banking.vector_db.qdrant_store import QdrantBankingStore
-from rag_banking.reranking.banking_reranker import BankingReranker
+from embedding.embedder import BankingEmbedder
+from vector_db.qdrant_store import QdrantBankingStore
+from reranking.rag_reranker import BankingReranker
+
+def test_reranker_suite():
+    main()
 
 
 def main():
@@ -56,8 +61,15 @@ def main():
     print("▶ 2. KIỂM THỬ TÍCH HỢP: CHUNKS VCB -> EMBED -> QDRANT -> RERANK")
     print("=" * 70)
 
-    # 1. Đọc dữ liệu mẫu từ Vietcombank FAQ
-    chunk_file = ROOT / "rag_banking/chunking/chunking_dataset/dataset_1/chunks_per_file/vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.json"
+    # 1. Đọc dữ liệu mẫu từ FAQ ngân hàng
+    cand_files = [
+        ROOT / "rag_banking/chunking/output/chunks_per_file/01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.json",
+        Path("chunking/output/chunks_per_file/01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.json"),
+        ROOT / "rag_banking/chunking/chunking_dataset/dataset_1/chunks_per_file/vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.json"
+    ]
+    chunk_file = next((p for p in cand_files if p.exists()), None)
+    if chunk_file is None:
+        raise FileNotFoundError("Không tìm thấy tệp chunk JSON mẫu để kiểm thử.")
     with open(chunk_file, "r", encoding="utf-8") as f:
         raw_chunks = json.load(f)[:10]
 

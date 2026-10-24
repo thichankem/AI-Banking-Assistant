@@ -17,9 +17,9 @@ NGUYÊN TẮC THIẾT KẾ:
 import time
 
 try:
-    from rag_banking.query_parser.banking_query_parser import ParsedQuery
+    from rag_banking.query_parser.rag_query_parser import ParsedQuery
 except ImportError:
-    from ..query_parser.banking_query_parser import ParsedQuery
+    from ..query_parser.rag_query_parser import ParsedQuery
 
 
 class HybridRetriever:
@@ -47,10 +47,12 @@ class HybridRetriever:
         query,
         top_k=5,
         candidate_k=15,
-        filter_dict=None
+        filter_dict=None,
+        breadcrumb_boost=1.5
     ):
         """
         Thực hiện Hybrid Retrieval và hợp nhất thứ hạng với RRF.
+        Hỗ trợ đánh giá điểm cao hơn cho Breadcrumb (BM25F field-weighting).
         Trả về đúng Top-K ứng viên kèm siêu dữ liệu xếp hạng.
         """
         # 1. Xác định chuỗi truy vấn tối ưu cho từng kênh
@@ -66,6 +68,7 @@ class HybridRetriever:
         # 2. Dense Vector Search (Cosine HNSW 1024-dim)
         t_dense_start = time.time()
         query_vector = self.embedding_model.embed_query(dense_query_text)
+        self.last_query_vector = query_vector
         dense_results = self.vector_store.search_vector(
             query_vector=query_vector,
             top_k=candidate_k,
@@ -73,7 +76,7 @@ class HybridRetriever:
         )
         t_dense_duration = (time.time() - t_dense_start) * 1000
 
-        # 3. Sparse BM25 Okapi Search
+        # 3. Sparse BM25 Okapi Search (Có Breadcrumb Field-weighting Boost)
         t_bm25_start = time.time()
         if self.bm25_search is not None and hasattr(self.bm25_search, "search"):
             bm25_results = self.bm25_search.search(
@@ -82,11 +85,19 @@ class HybridRetriever:
                 filter_dict=filter_dict
             )
         elif hasattr(self.vector_store, "search_bm25"):
-            bm25_results = self.vector_store.search_bm25(
-                query_text=bm25_query_text,
-                top_k=candidate_k,
-                filter_dict=filter_dict
-            )
+            try:
+                bm25_results = self.vector_store.search_bm25(
+                    query_text=bm25_query_text,
+                    top_k=candidate_k,
+                    filter_dict=filter_dict,
+                    breadcrumb_boost=breadcrumb_boost
+                )
+            except TypeError:
+                bm25_results = self.vector_store.search_bm25(
+                    query_text=bm25_query_text,
+                    top_k=candidate_k,
+                    filter_dict=filter_dict
+                )
         else:
             bm25_results = []
         t_bm25_duration = (time.time() - t_bm25_start) * 1000

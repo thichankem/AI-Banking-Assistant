@@ -65,7 +65,8 @@ class BankingEmbedder:
             conn.close()
 
     def _get_hash(self, text):
-        return hashlib.sha256(f"{self.model_name}:{self.dimension}:{text.strip()}".encode()).hexdigest()
+        clean_text = (text or "").strip()
+        return hashlib.sha256(f"{self.model_name}:{self.dimension}:{clean_text}".encode()).hexdigest()
 
     def _get_cached_vector(self, text):
         h = self._get_hash(text)
@@ -189,15 +190,21 @@ class BankingEmbedder:
                 chunk["vector"] = cached
             else:
                 to_fetch_indices.append(idx)
-                # Ghép breadcrumb đơn giản nếu có
-                bc = chunk.get("breadcrumb", "").strip()
+                # Ghép breadcrumb và tránh lặp kép tiền tố ngữ cảnh nếu text đã chứa sẵn [Ngữ cảnh:
+                bc = (chunk.get("breadcrumb") or "").strip()
+                has_context = text.startswith("[Ngữ cảnh:")
+
                 if "e5" in self.model_name.lower():
-                    if bc:
+                    if has_context:
+                        prefix_text = f"passage: {text}"
+                    elif bc:
                         prefix_text = f"passage: [Ngữ cảnh: {bc}]\n{text}"
                     else:
                         prefix_text = f"passage: {text}"
                 else:
-                    if bc:
+                    if has_context:
+                        prefix_text = text
+                    elif bc:
                         prefix_text = f"[{bc}]\n{text}"
                     else:
                         prefix_text = text
@@ -213,7 +220,8 @@ class BankingEmbedder:
                 vectors = self._call_api(sub_texts, input_type="passage")
                 for orig_idx, vec, raw_t in zip(sub_indices, vectors, sub_texts):
                     chunks[orig_idx]["vector"] = vec
-                    cache_to_save.append((self._get_hash(chunks[orig_idx].get("content", raw_t)), vec))
+                    c_text = chunks[orig_idx].get("content") or chunks[orig_idx].get("original_text") or raw_t or ""
+                    cache_to_save.append((self._get_hash(c_text), vec))
 
             self._save_cache_batch(cache_to_save)
 

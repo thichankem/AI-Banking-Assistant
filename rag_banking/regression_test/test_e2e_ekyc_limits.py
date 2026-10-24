@@ -1,5 +1,5 @@
 """
-Kiểm thử End-to-End: Nghiệp vụ Hạn mức mở tài khoản eKYC Vietcombank (Mục 1.4)
+Kiểm thử End-to-End: Nghiệp vụ Hạn mức mở tài khoản eKYC (Mục 1.4)
 Câu hỏi: "Hạn mức mở tài khoản eKYC tối đa bao nhiêu 1 ngày?"
 Code siêu clean, siêu đơn giản, minh bạch từng bước và đo lường độ trễ thực tế.
 """
@@ -22,7 +22,7 @@ from rag_banking.config import Config
 
 def main():
     print("=" * 70)
-    print("1.4. KẾT QUẢ KIỂM THỬ END-TO-END VÀ ĐỘ TRỄ THỰC TẾ (VIETCOMBANK EKYC)")
+    print("1.4. KẾT QUẢ KIỂM THỬ END-TO-END VÀ ĐỘ TRỄ THỰC TẾ (EKYC)")
     print("=" * 70)
 
     # 1. Khởi tạo Pipeline

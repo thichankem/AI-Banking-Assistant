@@ -1,6 +1,6 @@
 """
 Kiểm thử toàn diện QdrantBankingStore:
-1. Nạp chunks và vectors thực tế từ Vietcombank.
+1. Nạp chunks và vectors thực tế từ ngân hàng.
 2. Tìm kiếm Dense Vector (Cosine HNSW 1024-d).
 3. Tìm kiếm Từ khóa (BM25 Okapi).
 4. Lọc Metadata (Payload Filter).
@@ -12,8 +12,10 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+RAG_ROOT = Path(__file__).resolve().parents[2]
+for p in (str(ROOT), str(RAG_ROOT)):
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
 if sys.platform == "win32":
     try:
@@ -21,8 +23,11 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from rag_banking.embedding.embedder import BankingEmbedder
-from rag_banking.vector_db.qdrant_store import QdrantBankingStore
+from embedding.embedder import BankingEmbedder
+from vector_db.qdrant_store import QdrantBankingStore
+
+def test_qdrant_store_suite():
+    main()
 
 
 def main():
@@ -37,8 +42,15 @@ def main():
         use_memory=True
     )
 
-    # Đọc 10 chunks thật từ file Vietcombank
-    chunk_file = ROOT / "rag_banking/chunking/chunking_dataset/dataset_1/chunks_per_file/vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.json"
+    # Đọc 10 chunks thật từ file ngân hàng
+    cand_files = [
+        ROOT / "rag_banking/chunking/output/chunks_per_file/01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.json",
+        Path("chunking/output/chunks_per_file/01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.json"),
+        ROOT / "rag_banking/chunking/chunking_dataset/dataset_1/chunks_per_file/vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.json"
+    ]
+    chunk_file = next((p for p in cand_files if p.exists()), None)
+    if chunk_file is None:
+        raise FileNotFoundError("Không tìm thấy tệp chunk JSON mẫu để kiểm thử.")
     with open(chunk_file, "r", encoding="utf-8") as f:
         raw_chunks = json.load(f)[:10]
 

@@ -112,7 +112,7 @@ FRAUD_CATEGORIES = {
         "rút tiền không cần",
         "web giả mạo",
         "web nhái",
-        "phishing vietcombank",
+        "phishing ngân hàng",
         "khai thác lỗ hổng",
         "tấn công ddos",
         "ddos"
@@ -148,10 +148,28 @@ class BankingGuardrailManager:
         pass
 
     def _check_prompt_injection(self, text_lower: str) -> str | None:
-        """Kiểm tra tấn công Prompt Injection (0% Regex)"""
+        """Kiểm tra tấn công Prompt Injection bao gồm cả biến thể Leetspeak (0% Regex)"""
         for phrase in INJECTION_PHRASES:
             if phrase in text_lower:
                 return phrase
+
+        # Chuẩn hóa leetspeak (1 -> i, 0 -> o, 3 -> e, 4 -> a, @ -> a, $ -> s, 5 -> s, ! -> i, 7 -> t)
+        trans_map = str.maketrans({
+            "1": "i",
+            "0": "o",
+            "3": "e",
+            "4": "a",
+            "@": "a",
+            "$": "s",
+            "5": "s",
+            "!": "i",
+            "7": "t",
+        })
+        normalized_leet = " ".join(text_lower.translate(trans_map).split())
+        for phrase in INJECTION_PHRASES:
+            if phrase in normalized_leet:
+                return phrase
+
         return None
 
     def _check_fraud_and_crime(self, text_lower: str) -> tuple[str | None, str | None]:
@@ -173,7 +191,7 @@ class BankingGuardrailManager:
         for kw in ["mật khẩu", "password", "pass vcb", "pass digibank"]:
             if kw in text_lower:
                 msg = (
-                    "⚠️ CẢNH BÁO BẢO MẬT: Vietcombank TUYỆT ĐỐI KHÔNG BAO GIỜ yêu cầu Quý khách "
+                    "⚠️ CẢNH BÁO BẢO MẬT: Ngân hàng TUYỆT ĐỐI KHÔNG BAO GIỜ yêu cầu Quý khách "
                     "cung cấp Mật khẩu ngân hàng số. Vui lòng bảo mật thông tin để bảo vệ tài sản."
                 )
                 return True, msg
@@ -195,7 +213,7 @@ class BankingGuardrailManager:
                 if token.isdigit():
                     if len(token) == 6:
                         msg = (
-                            "⚠️ CẢNH BÁO BẢO MẬT: Vietcombank TUYỆT ĐỐI KHÔNG BAO GIỜ yêu cầu Quý khách "
+                            "⚠️ CẢNH BÁO BẢO MẬT: Ngân hàng TUYỆT ĐỐI KHÔNG BAO GIỜ yêu cầu Quý khách "
                             "cung cấp mã OTP hoặc Smart OTP. Quý khách vui lòng không chia sẻ mã này cho bất kỳ ai."
                         )
                         return True, msg
@@ -213,7 +231,7 @@ class BankingGuardrailManager:
                 if token.isdigit():
                     if len(token) in (4, 6):
                         msg = (
-                            "⚠️ CẢNH BÁO BẢO MẬT: Vietcombank TUYỆT ĐỐI KHÔNG BAO GIỜ yêu cầu Quý khách "
+                            "⚠️ CẢNH BÁO BẢO MẬT: Ngân hàng TUYỆT ĐỐI KHÔNG BAO GIỜ yêu cầu Quý khách "
                             "cung cấp mã PIN thẻ ATM. Quý khách vui lòng giữ bí mật mã PIN của mình."
                         )
                         return True, msg
@@ -222,13 +240,28 @@ class BankingGuardrailManager:
 
     def _mask_pii_numbers(self, text: str) -> tuple[str, bool]:
         """
-        Tự động che dấu (Masking) số CCCD (12 số) và Số tài khoản (10-14 số) (0% Regex).
+        Tự động che dấu (Masking) số CCCD (12 số), Số tài khoản (10-14 số) và Số thẻ (16 số liền hoặc 4 cụm 4 số) (0% Regex).
         """
         words = text.split()
         cleaned_words = []
         has_pii = False
+        i = 0
+        total_words = len(words)
 
-        for w in words:
+        while i < total_words:
+            # 1. Kiểm tra cụm 4 khối 4 chữ số cách nhau bởi khoảng trắng hoặc dấu gạch ngang (4532 0156 7890 1234)
+            if i + 3 < total_words:
+                d0 = "".join(c for c in words[i] if c.isdigit())
+                d1 = "".join(c for c in words[i+1] if c.isdigit())
+                d2 = "".join(c for c in words[i+2] if c.isdigit())
+                d3 = "".join(c for c in words[i+3] if c.isdigit())
+                if len(d0) == 4 and len(d1) == 4 and len(d2) == 4 and len(d3) == 4:
+                    cleaned_words.append("[CARD_NUMBER_REDACTED]")
+                    has_pii = True
+                    i += 4
+                    continue
+
+            w = words[i]
             # Lọc các ký tự số thuần túy
             digits = "".join(c for c in w if c.isdigit())
 
@@ -247,6 +280,8 @@ class BankingGuardrailManager:
             else:
                 cleaned_words.append(w)
 
+            i += 1
+
         sanitized_text = " ".join(cleaned_words)
         return sanitized_text, has_pii
 
@@ -259,7 +294,7 @@ class BankingGuardrailManager:
                 is_safe=False,
                 sanitized_query="",
                 trigger_reason="EMPTY_QUERY",
-                refusal_message="Quý khách vui lòng nhập nội dung câu hỏi để Vietcombank AI hỗ trợ."
+                refusal_message="Quý khách vui lòng nhập nội dung câu hỏi để Trợ lý AI hỗ trợ."
             )
 
         raw_query = query.strip()
@@ -269,7 +304,7 @@ class BankingGuardrailManager:
         matched_inject = self._check_prompt_injection(query_lower)
         if matched_inject:
             refusal = (
-                "Vietcombank AI xin thông báo: Yêu cầu của Quý khách chứa nội dung hoặc cấu trúc "
+                "Hệ thống AI xin thông báo: Yêu cầu của Quý khách chứa nội dung hoặc cấu trúc "
                 "không phù hợp với quy chuẩn an toàn của hệ thống ngân hàng. Để được hỗ trợ các nghiệp vụ "
                 "hợp lệ, Quý khách vui lòng đặt câu hỏi rõ ràng về sản phẩm dịch vụ hoặc liên hệ Hotline 1900 54 54 13."
             )
@@ -286,20 +321,20 @@ class BankingGuardrailManager:
         if fraud_category:
             if fraud_category == "EKYC_BIOMETRIC_FRAUD":
                 refusal = (
-                    "Vietcombank AI xin thông báo: Hệ thống từ chối hỗ trợ các yêu cầu có dấu hiệu "
+                    "Hệ thống AI xin thông báo: Hệ thống từ chối hỗ trợ các yêu cầu có dấu hiệu "
                     "can thiệp, giả mạo hoặc lách quy trình định danh eKYC và xác thực sinh trắc học. "
                     "Theo Quyết định 2345/QĐ-NHNN, các hành vi này là vi phạm pháp luật và sẽ bị "
                     "tạm khóa dịch vụ ngân hàng điện tử để bảo vệ an toàn hệ thống."
                 )
             elif fraud_category == "CYBER_ATTACK_FRAUD":
                 refusal = (
-                    "Vietcombank AI xin từ chối giải đáp các yêu cầu liên quan đến việc xâm nhập trái phép, "
+                    "Hệ thống AI xin từ chối giải đáp các yêu cầu liên quan đến việc xâm nhập trái phép, "
                     "chiếm đoạt tài khoản ngân hàng hoặc khai thác lỗ hổng bảo mật. Mọi hoạt động của "
                     "khách hàng trên ngân hàng số đều được lưu trữ và giám sát chặt chẽ theo quy định an ninh mạng."
                 )
             else:
                 refusal = (
-                    "Vietcombank AI xin thông báo: Ngân hàng nghiêm cấm và không hỗ trợ bất kỳ hành vi "
+                    "Hệ thống AI xin thông báo: Ngân hàng nghiêm cấm và không hỗ trợ bất kỳ hành vi "
                     "nào liên quan đến rửa tiền, trốn thuế hoặc luân chuyển dòng tiền phi pháp theo "
                     "Luật Phòng, chống rửa tiền của nước CHXHCN Việt Nam."
                 )
@@ -366,5 +401,7 @@ class BankingGuardrailManager:
         )
 
 
-# Khởi tạo singleton
+# Khởi tạo singleton & aliases
 guardrail_manager = BankingGuardrailManager()
+RAGGuardrailManager = BankingGuardrailManager
+GuardrailManager = BankingGuardrailManager

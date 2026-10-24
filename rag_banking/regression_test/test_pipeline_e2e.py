@@ -34,20 +34,27 @@ def main():
     config = Config()
     pipeline = BankingRAGPipeline(config=config, use_memory=True)
 
-    # 2. Nạp dữ liệu mẫu thực tế từ Vietcombank FAQ và Pháp lý
-    chunks_dir = ROOT_DIR / "rag_banking" / "chunking" / "chunking_dataset" / "dataset_1" / "chunks_per_file"
-    sample_files = [
-        "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.json",
-        "vcb_md_03__phap_ly__dieu_kien_dieu_khoan_mo_tai_khoan_truc_tuyen_ekyc.json"
+    # 2. Nạp dữ liệu mẫu thực tế từ FAQ và Pháp lý ngân hàng
+    cand_dirs = [
+        ROOT_DIR / "rag_banking" / "chunking" / "output" / "chunks_per_file",
+        ROOT_DIR / "rag_banking" / "chunking" / "chunking_dataset" / "dataset_1" / "chunks_per_file",
+        ROOT_DIR / "dataset" / "dataset_1" / "chunks_per_file",
     ]
-
     all_test_chunks = []
-    for sf in sample_files:
-        p = chunks_dir / sf
-        if p.exists():
-            with open(p, "r", encoding="utf-8") as fp:
-                data = json.load(fp)
-                all_test_chunks.extend(data[:15])  # Lấy 15 chunks mỗi file
+    for d in cand_dirs:
+        if d.exists():
+            for f in d.glob("*.json"):
+                try:
+                    with open(f, "r", encoding="utf-8") as fp:
+                        data = json.load(fp)
+                        if isinstance(data, list):
+                            all_test_chunks.extend(data[:15])
+                except Exception:
+                    pass
+                if len(all_test_chunks) >= 30:
+                    break
+        if len(all_test_chunks) >= 30:
+            break
 
     print(f"▶ Nạp {len(all_test_chunks)} chunks mẫu vào Pipeline...")
     pipeline.ingest_chunks(all_test_chunks)

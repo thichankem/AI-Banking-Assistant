@@ -39,12 +39,12 @@ from .config import Config
 from .chunking.unified_chunk.layout_aware_chunker import DLAChunker
 from .embedding.embedder import BankingEmbedder
 from .vector_db.qdrant_store import QdrantBankingStore, QdrantVectorStore
-from .query_parser.banking_query_parser import BankingQueryParser, ParsedQuery
+from .query_parser.rag_query_parser import BankingQueryParser, ParsedQuery
 from .retrieval.hybrid_retriever import HybridRetriever
-from .reranking.banking_reranker import BankingReranker
+from .reranking.rag_reranker import BankingReranker
 from .generator.rag_generator import RAGGenerator, ContextBundle
 from .tracing.tracer import BankingTracer
-from .guardrails.banking_guardrails import BankingGuardrailManager
+from .guardrails.rag_guardrails import BankingGuardrailManager
 
 
 class BankingRAGPipeline:
@@ -64,7 +64,7 @@ class BankingRAGPipeline:
         print("=" * 70)
 
         # 1. Khởi tạo DLA Chunker (Hỗ trợ DOCX & PDF)
-        print("[1/6] Khởi tạo DLA Chunker (Chuyên trách DOCX & PDF)...")
+        print("[1/6] Khởi tạo Canonical DOCX Chunker (Chuẩn hóa Hợp đồng dữ liệu DOCX 100%)...")
         self.dla_chunker = DLAChunker(
             max_chunk_size=self.config.CHUNK_MAX_SIZE
         )
@@ -192,7 +192,7 @@ class BankingRAGPipeline:
         max_pdf_pages=None
     ):
         """
-        Pha Ingestion & Dual-Indexing từ tài liệu thô (.docx, .pdf):
+        Pha Ingestion & Dual-Indexing từ tài liệu chuẩn hóa (.docx):
         1. Phân đoạn bảo toàn theo dạng Breadcrumbs (DLA Chunker).
         2. Lập chỉ mục kép song song vào Dense Vector Store và Okapi BM25.
         """
@@ -209,7 +209,7 @@ class BankingRAGPipeline:
         if extensions:
             target_exts = extensions
         else:
-            target_exts = [".docx", ".pdf"]
+            target_exts = [".docx"]
 
         # Phân đoạn DLA Layout-Aware
         t0 = time.time()
@@ -337,7 +337,7 @@ class BankingRAGPipeline:
     ):
         """
         Thực thi toàn trình 5 bước AI Banking RAG:
-        Tự động bảo vệ qua 2 lớp Banking Guardrails và ghi nhận telemetry lên Langfuse & Phoenix.
+        Tự động bảo vệ qua 2 lớp Banking Guardrails và ghi nhận telemetry lên Arize Phoenix & Local traces.
         """
         t_start = time.time()
         print(f"\n[QUERY] '{query}'")
@@ -460,7 +460,7 @@ class BankingRAGPipeline:
 
             total_latency_ms = round((time.time() - t_start) * 1000, 1)
 
-            # Kết thúc phiên truy vết đồng bộ Langfuse & Phoenix
+            # Kết thúc phiên truy vết đồng bộ Arize Phoenix & Local traces
             trace.finish(
                 answer=answer,
                 citations=synthesized_context.legal_citations,

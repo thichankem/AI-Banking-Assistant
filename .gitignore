@@ -1,10 +1,14 @@
+# ==============================================================================
 # Python Virtual Environments
+# ==============================================================================
 .venv/
 venv/
 env/
 ENV/
 
-# Environment Variables & Secrets
+# ==============================================================================
+# Environment Variables & Secrets (MANDATORY: DO NOT REMOVE)
+# ==============================================================================
 .env
 .env.*
 *.env
@@ -16,7 +20,9 @@ service_account*.json
 token.json
 token.pickle
 
+# ==============================================================================
 # Application & API Configurations
+# ==============================================================================
 config.yaml
 config.yml
 config.json
@@ -25,34 +31,52 @@ api_config.yaml
 llm_config.json
 gateway_config.*
 
-# Python Cache & Bytecode
+# ==============================================================================
+# Python Cache, Bytecode & Build Artifacts
+# ==============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .pytest_cache/
+build/
+dist/
+*.egg-info/
 
-# Streamlit
+# ==============================================================================
+# Streamlit & UI Cache
+# ==============================================================================
 .streamlit/secrets.toml
 
+# ==============================================================================
 # IDEs & Code Editors
+# ==============================================================================
 .idea/
 .vscode/
 .gemini/
 
+# ==============================================================================
 # Operating System & Temporary Files
+# ==============================================================================
 .DS_Store
 Thumbs.db
 *.tmp
+*.temp
 *.log
 ~$*
+temp/
+tmp/
 
+# ==============================================================================
 # Scripts & Crawlers
+# ==============================================================================
 scripts/
 .scripts/
 crawl scripts/
 
-# AI Agent Directories & Rules
+# ==============================================================================
+# AI Agent Directories & Rules (MANDATORY: DO NOT REMOVE)
+# ==============================================================================
 .agent/
 agent/
 .agents/
@@ -60,30 +84,67 @@ GEMINI.md
 gemini.md
 AGENTS.md
 
+# ==============================================================================
 # Knowledge Base & Study Modules
+# ==============================================================================
 knowledge_base/
 notebooks_study/
 rag_modular_study/
 rag_modular/
 
-# Datasets & Benchmarks
-benchmark/
-!rag_banking/benchmark/
+# ==============================================================================
+# Datasets, Pipeline Data & I/O Folders
+# ==============================================================================
+data/
+**/data/
 dataset/
-*dataset/
+**/dataset/
 *dataset*/
 *datasets/
 *_dataset/
+pipeline_io/
+**/pipeline_io/
+input/
+**/input/
+output/
+**/output/
+chunks_per_file/
+**/chunks_per_file/
 retrieval_dataset/
 retrieval dataset/
 retival_dataset/
 retival dataset/
 chunking_dataset/
 output_dataset/
-all_chunks.json
-*.jsonl
 
+# Dataset files & manifests
+all_chunks.json
+*_manifest.json
+*embeddings*.json
+*.jsonl
+*.parquet
+*.csv
+*.tsv
+
+# ==============================================================================
 # Test Results, Benchmark & Tuning JSON Outputs
+# ==============================================================================
+benchmark/
+!rag_banking/benchmark/
+benchmarks/
+**/benchmarks/
+experiment/
+**/experiment/
+experiments/
+**/experiments/
+*experiment*/
+scratch/
+**/scratch/
+viewer/
+**/viewer/
+storage/
+**/storage/
+
 test_results.json
 *_test_results.json
 *tests_summary.json
@@ -94,44 +155,52 @@ ablation_raw_results.json
 master_ablation_results.json
 benchmark_summary.json
 visual_audit_report.json
-rag_banking/vector_db/qdrant_db/
-rag_banking/tracing/traces/
-rag_banking/vector_db/phoenix_db/
-rag_banking/vector_db/*.db
-rag_banking/vector_db/*.db-wal
-rag_banking/vector_db/*.db-shm
-rag_banking/vector_db/*.json
-storage/
-**/storage/
 
+# ==============================================================================
+# Databases, Traces, Vector DB & Runtime Caches
+# ==============================================================================
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.wasm
+phoenix_db/
+**/phoenix_db/
+qdrant_db/
+**/qdrant_db/
+traces/
+**/traces/
+embedding_cache.db
+**/embedding_cache.db
+rag_banking/rag_banking/
 
-# Allow independent benchmark suite to be tracked
-!benchmarks/
-!benchmarks/**
-!benchmarks/datasets/**
-!benchmarks/results/**
+# ==============================================================================
+# Documentation, Reports, Proposals & Office Files
+# ==============================================================================
+docs/
+**/docs/
+problem.md
+*.docx
+*.doc
+*.pdf
+*.pptx
+*.ppt
+*.xlsx
+*.xls
 
-# DLA Chunking Viewer
-viewer/
-**/viewer/
+# ==============================================================================
+# Jupyter Notebook Checkpoints
+# ==============================================================================
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
 
-# Experiments & Benchmark Directories
-experiments/
-**/experiments/
-experiment/
-**/experiment/
-*experiment*/
-benchmarks/
-**/benchmarks/
-scratch/
-**/scratch/
-
-# Documentation Exclusions (Only ignore study_flow, documentation & research)
-docs/study_flow/
-docs/api documentation/
-docs/documentation/
-docs/research/
-
-# Google Colab Workflows, Scripts & Skills
-gg_colab/
-
+# ==============================================================================
+# Unit Tests & Regression Test Cache/Logs
+# ==============================================================================
+unit_test/
+**/unit_test/
+unit_tests/
+**/unit_tests/
+regression_test/
+**/regression_test/

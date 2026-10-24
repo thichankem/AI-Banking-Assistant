@@ -33,40 +33,108 @@ class LayoutAwareChunker:
         **kwargs
     ):
         from ..docx_chunker.docx_chunker import DOCXChunker
-        from ..pdf_chunker.pdf_chunker import PDFChunker
 
         self.max_chunk_size = max_chunk_size
         self.min_section_size = min_section_size
         self.config = config
 
-        # Khởi tạo sub-chunker chuyên trách cho DOCX & PDF
+        # 1. Khởi tạo DOCX Chunker chuẩn hóa (Canonical Chunker)
         self.docx_chunker = DOCXChunker(
             max_chunk_size=max_chunk_size,
             min_section_size=min_section_size,
-            table_rows_per_chunk=table_rows_per_chunk,
             **kwargs
         )
-        self.pdf_chunker = PDFChunker(
-            max_chunk_size=max_chunk_size,
-            min_section_size=min_section_size,
-            table_rows_per_chunk=table_rows_per_chunk,
-            config=config,
-            **kwargs
-        )
-        # Giữ ocr_extractor reference cho backward-compatibility
-        self.ocr_extractor = self.pdf_chunker.ocr_extractor
+
+        # 2. Khởi tạo PDF Chunker thử nghiệm (độc lập tại experiments/pdf_chunker)
+        self.pdf_chunker = None
+        self.ocr_extractor = None
+        try:
+            from experiments.pdf_chunker.pdf_chunker import PDFChunker
+            self.pdf_chunker = PDFChunker(
+                max_chunk_size=max_chunk_size,
+                min_section_size=min_section_size,
+                table_rows_per_chunk=table_rows_per_chunk,
+                config=config,
+                **kwargs
+            )
+            self.ocr_extractor = getattr(self.pdf_chunker, "ocr_extractor", None)
+        except Exception:
+            pass
 
     def chunk_docx(self, file_path: str | Path) -> list[dict]:
-        """Phân đoạn tệp Word DOCX."""
+        """Phân đoạn tệp Word DOCX chuẩn mực (Canonical Golden Document)."""
         return self.docx_chunker.chunk_docx(file_path)
 
+    def chunk_text(
+        self,
+        text: str,
+        source_name: str = "text_input",
+        breadcrumb: str = "",
+        section_title: str = ""
+    ) -> list[dict]:
+        """
+        Phân đoạn văn bản thuần túy (Markdown / Text) thành các chunk chuẩn 7 trường.
+        """
+        if not text or not text.strip():
+            return []
+
+        try:
+            from .structure_chunker import DocumentStructureChunker
+            struct_chunker = DocumentStructureChunker(
+                max_chunk_size=self.max_chunk_size,
+                min_section_size=self.min_section_size
+            )
+            sections = struct_chunker.parse_structure(text)
+            chunks = struct_chunker.chunk_strategy_1_structure_based(sections, source_name=source_name)
+            if chunks:
+                return chunks
+        except Exception as e:
+            logger.warning(f"[LayoutAwareChunker] Lỗi phân đoạn structure chunker: {e}")
+
+        # Fallback SyllableBudgetManager
+        clean_text = text.strip()
+        sec_title = section_title if section_title else source_name.replace("_", " ").title()
+        b_crumb = breadcrumb if breadcrumb else sec_title
+
+        split_groups = self.docx_chunker.syllable_manager.split_text_elastic(
+            text=clean_text,
+            window_start=200,
+            window_end=380,
+            ceiling=420
+        )
+        if not split_groups:
+            split_groups = [clean_text]
+
+        chunks = []
+        for idx, grp in enumerate(split_groups):
+            c_obj = build_7_field_chunk(
+                chunk_id=f"{Path(source_name).stem}_c{idx}",
+                source=source_name,
+                chunk_type="docx_text",
+                breadcrumb=b_crumb,
+                section_title=sec_title,
+                content=grp,
+                original_text=grp,
+                parent_id=f"{Path(source_name).stem}_sec_0"
+            )
+            chunks.append(c_obj)
+        return chunks
+
     def chunk_pdf(self, file_path: str | Path, max_pages: int | None = None, **kwargs) -> list[dict]:
-        """Phân đoạn tệp PDF (hỗ trợ cả tài liệu số và scan OCR)."""
-        return self.pdf_chunker.chunk_pdf(file_path, max_pages=max_pages, **kwargs)
+        """Phân đoạn tệp PDF (Module thử nghiệm R&D lưu tại experiments/pdf_chunker)."""
+        if self.pdf_chunker is not None:
+            return self.pdf_chunker.chunk_pdf(file_path, max_pages=max_pages, **kwargs)
+        logger.info(
+            f"[Canonical Ingestion Contract] Bỏ qua {Path(file_path).name}: "
+            "Phân hệ PDF thử nghiệm được lưu tại experiments/pdf_chunker/. "
+            "Lõi RAG Banking chuẩn hóa 100% đầu vào qua định dạng DOCX để bảo đảm độ chính xác tối đa."
+        )
+        return []
 
     def chunk_file(self, file_path: str | Path, max_pdf_pages: int | None = None, **kwargs) -> list[dict]:
         """
-        Tự động phân đoạn tệp tài liệu dựa trên phần mở rộng (chỉ hỗ trợ .docx và .pdf).
+        Tự động phân đoạn tệp tài liệu:
+        Mặc định chuẩn hóa 100% theo định dạng .docx (Canonical Contract).
         """
         path = Path(file_path)
         ext = path.suffix.lower()
@@ -74,9 +142,17 @@ class LayoutAwareChunker:
         if ext == ".docx":
             return self.chunk_docx(path)
         elif ext == ".pdf":
-            return self.chunk_pdf(path, max_pages=max_pdf_pages, **kwargs)
+            # Chỉ kích hoạt PDF nếu người dùng chỉ định cờ thử nghiệm force_experimental_pdf=True
+            if kwargs.get("force_experimental_pdf", False) and self.pdf_chunker is not None:
+                return self.pdf_chunker.chunk_pdf(path, max_pages=max_pdf_pages, **kwargs)
+            logger.info(
+                f"[Canonical Ingestion Contract] Bỏ qua {path.name}: "
+                "Lõi RAG Banking chuẩn hóa đầu vào duy nhất qua định dạng DOCX. "
+                "Luồng PDF thử nghiệm đã được lưu trữ tại experiments/pdf_chunker/."
+            )
+            return []
         else:
-            logger.warning(f"[LayoutAwareChunker] Bỏ qua định dạng chưa hỗ trợ: {ext} (Hệ thống hiện tại chỉ xử lý .docx và .pdf)")
+            logger.warning(f"[LayoutAwareChunker] Bỏ qua định dạng chưa hỗ trợ: {ext}")
             return []
 
     def chunk_directory(
@@ -87,13 +163,13 @@ class LayoutAwareChunker:
         max_pdf_pages: int | None = None
     ) -> list[dict]:
         """
-        Duyệt và phân đoạn toàn bộ tệp trong thư mục (mặc định chỉ .docx và .pdf).
+        Duyệt và phân đoạn toàn bộ tệp trong thư mục (mặc định chuẩn hóa 100% tệp .docx).
         """
         target_dir = Path(dir_path)
         if not target_dir.exists():
             return []
 
-        allowed_exts = set(extensions or [".docx", ".pdf"])
+        allowed_exts = set(extensions or [".docx"])
         files = [p for p in target_dir.rglob("*") if p.is_file() and p.suffix.lower() in allowed_exts]
         files.sort()
 
