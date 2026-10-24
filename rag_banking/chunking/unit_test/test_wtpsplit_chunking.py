@@ -5,6 +5,7 @@ Unit Test cho phân đoạn câu thông minh với wtpsplit (SaT)
 
 import sys
 import unittest
+from pathlib import Path
 
 if sys.platform == "win32":
     try:
@@ -12,11 +13,19 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from rag_banking.chunking.unified_chunk.canonical_resolver import (
+CURRENT_DIR = Path(__file__).resolve().parent
+RAG_BANKING_ROOT = CURRENT_DIR.parent.parent
+PROJECT_ROOT = RAG_BANKING_ROOT.parent
+
+for p in (str(PROJECT_ROOT), str(RAG_BANKING_ROOT)):
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+from chunking.unified_chunk.canonical_resolver import (
     split_sentences,
     get_sat_segmenter
 )
-from rag_banking.chunking.unified_chunk.syllable_budget_manager import SyllableBudgetManager
+from chunking.unified_chunk.syllable_budget_manager import SyllableBudgetManager
 
 
 class TestWTPSplitSaT(unittest.TestCase):

@@ -6,7 +6,7 @@ Quản lý tập trung các tham số cấu hình:
 - Cấu hình mô hình Embedding (1024 chiều) & Qdrant HNSW
 - Cấu hình BM25 Okapi & Hybrid RRF Search
 - Cấu hình Cross-Encoder Reranker & LLM Serving
-- Cấu hình Tracing (Langfuse & Arize Phoenix)
+- Cấu hình Tracing (Arize Phoenix & Local Tracing)
 
 NGUYÊN TẮC THIẾT KẾ:
 1. 0% REGEX LAW: Tuyệt đối không dùng regex.
@@ -72,6 +72,7 @@ class Config:
     # 5. Cấu hình Keyword Search (BM25 Okapi)
     BM25_K1 = 1.5                 # Tham số điều chỉnh độ bão hòa tần suất từ
     BM25_B = 0.75                 # Tham số phạt độ dài tài liệu
+    BREADCRUMB_BOOST = 1.5        # Hệ số nhân ưu tiên cho từ khóa xuất hiện trong Breadcrumb (BM25F)
 
     # 6. Cấu hình Hybrid Retrieval & Reranking
     HYBRID_TOP_K = 5              # Bước 2: Top-5 ứng viên sau khi hợp nhất RRF
@@ -91,20 +92,10 @@ class Config:
     LLM_TEMPERATURE = 0.2         # Nhiệt độ thấp để trả lời chính xác, tránh hallucination
     LLM_MAX_TOKENS = 2500
 
-    # 9. Cấu hình Tracing & Observability (Langfuse & Arize Phoenix)
+    # 9. Cấu hình Tracing & Observability (Arize Phoenix & Local Tracing)
     ENABLE_TRACING = os.getenv("ENABLE_TRACING", "true").lower() == "true"
-
-    # Cấu hình Langfuse (LLM Observability & Evaluation)
-    ENABLE_LANGFUSE = os.getenv("ENABLE_LANGFUSE", "true").lower() == "true"
-    LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "")
-    LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "")
-    LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "")
 
     # Cấu hình Arize Phoenix (RAG OpenTelemetry Tracing)
     ENABLE_PHOENIX = os.getenv("ENABLE_PHOENIX", "true").lower() == "true"
     PHOENIX_COLLECTOR_ENDPOINT = os.getenv("PHOENIX_COLLECTOR_ENDPOINT", "")
     PHOENIX_PROJECT_NAME = os.getenv("PHOENIX_PROJECT_NAME", "")
-
-    # 10. Cấu hình Compute Router & Google Colab GPU
-    COLAB_ENDPOINT = os.getenv("COLAB_ENDPOINT", "")
-

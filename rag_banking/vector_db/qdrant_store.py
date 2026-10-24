@@ -60,6 +60,7 @@ class QdrantBankingStore:
         # 3. Bộ nhớ đệm BM25 Okapi cục bộ
         self._bm25_corpus = []
         self._bm25_tokenized = []
+        self._bm25_breadcrumb_tokens = []
         self._bm25_doc_len = []
         self._bm25_avgdl = 0.0
         self._bm25_idf = {}
@@ -141,6 +142,8 @@ class QdrantBankingStore:
                 "token_count": chunk.get("token_count", 0),
                 "is_active": chunk.get("is_active", True)
             }
+            if "images" in chunk and chunk["images"]:
+                payload["images"] = chunk["images"]
 
             points.append(
                 PointStruct(
@@ -184,9 +187,10 @@ class QdrantBankingStore:
         return "".join(cleaned_chars).split()
 
     def _build_bm25_index(self, chunks):
-        """Xây dựng bảng tần suất từ và IDF cho BM25"""
+        """Xây dựng bảng tần suất từ, tập hợp tokens Breadcrumb và IDF cho BM25"""
         self._bm25_corpus = list(chunks)
         self._bm25_tokenized = []
+        self._bm25_breadcrumb_tokens = []
         self._bm25_doc_len = []
 
         word_doc_freq = {}
@@ -196,6 +200,11 @@ class QdrantBankingStore:
             self._bm25_tokenized.append(tokens)
             doc_len = len(tokens)
             self._bm25_doc_len.append(doc_len)
+
+            # Lập chỉ mục tokens cho Breadcrumb & Section Title (phục vụ BM25F Field-weighting)
+            bc_str = f"{chunk.get('breadcrumb', '')} {chunk.get('section_title', '')}"
+            bc_tokens = set(self._tokenize(bc_str))
+            self._bm25_breadcrumb_tokens.append(bc_tokens)
 
             for w in set(tokens):
                 word_doc_freq[w] = word_doc_freq.get(w, 0) + 1
@@ -256,11 +265,12 @@ class QdrantBankingStore:
             return []
 
     # -------------------------------------------------------------------------
-    # 5. TÌM KIẾM TỪ KHÓA (BM25 OKAPI SEARCH)
+    # 5. TÌM KIẾM TỪ KHÓA (BM25 OKAPI SEARCH CÓ FIELD-WEIGHTED BREADCRUMB BOOST)
     # -------------------------------------------------------------------------
-    def search_bm25(self, query_text, top_k=5, filter_dict=None):
+    def search_bm25(self, query_text, top_k=5, filter_dict=None, breadcrumb_boost=1.5):
         """
-        Tìm kiếm từ khóa chính xác qua thuật toán Okapi BM25 kèm lọc Metadata.
+        Tìm kiếm từ khóa chính xác qua thuật toán Okapi BM25 kèm lọc Metadata
+        và đánh giá điểm cao hơn cho Breadcrumb (BM25F / Field-weighting).
         """
         if not self._bm25_corpus or not query_text:
             return []
@@ -292,13 +302,30 @@ class QdrantBankingStore:
             for t in doc_tokens:
                 tf[t] = tf.get(t, 0) + 1
 
+            bc_set = set()
+            if i < len(self._bm25_breadcrumb_tokens):
+                bc_set = self._bm25_breadcrumb_tokens[i]
+
             score = 0.0
             for term in q_tokens:
+                term_matched = False
                 if term in tf:
                     freq = tf[term]
                     idf = self._bm25_idf.get(term, 0.0)
                     denom = freq + self.k1 * (1.0 - self.b + self.b * (doc_len / self._bm25_avgdl))
-                    score += idf * (freq * (self.k1 + 1.0)) / denom
+                    term_score = idf * (freq * (self.k1 + 1.0)) / denom
+
+                    # Đánh giá điểm cao hơn cho Breadcrumb nếu term xuất hiện trong Breadcrumb
+                    if term in bc_set:
+                        score += term_score * breadcrumb_boost
+                    else:
+                        score += term_score
+                    term_matched = True
+
+                # Nếu từ khóa nằm trực tiếp trong breadcrumb nhưng thân chunk không lặp lại:
+                if not term_matched and term in bc_set:
+                    idf = self._bm25_idf.get(term, 1.0)
+                    score += idf * (breadcrumb_boost * 0.5)
 
             if score > 0.0:
                 scored_items.append((chunk, float(score)))
@@ -318,17 +345,23 @@ class QdrantBankingStore:
         candidate_k=15,
         alpha=0.5,
         rrf_k=60,
-        filter_dict=None
+        filter_dict=None,
+        breadcrumb_boost=1.5
     ):
         """
         Tìm kiếm lai đồng thời:
         1. Dense Vector (hiểu ngữ nghĩa sâu) qua Qdrant HNSW.
-        2. Sparse BM25 (bắt chính xác mã thẻ, số thông tư, lãi suất).
+        2. Sparse BM25 (bắt chính xác mã thẻ, số thông tư, lãi suất) kèm ưu tiên Breadcrumb.
         3. Hợp nhất thứ hạng bằng Reciprocal Rank Fusion (RRF).
         """
         # 1. Gọi song song
         dense_hits = self.search_vector(query_vector, top_k=candidate_k, filter_dict=filter_dict)
-        bm25_hits = self.search_bm25(query_text, top_k=candidate_k, filter_dict=filter_dict)
+        bm25_hits = self.search_bm25(
+            query_text,
+            top_k=candidate_k,
+            filter_dict=filter_dict,
+            breadcrumb_boost=breadcrumb_boost
+        )
 
         # 2. Hợp nhất RRF
         candidates = {}

@@ -280,7 +280,7 @@ class UnifiedBudgetOrchestrator:
     def __init__(self, **kwargs):
         self.docx_chunker = UnifiedDOCXChunker(**kwargs)
         try:
-            from rag_banking.chunking.pdf_chunker.pdf_chunker import PDFChunker
+            from experiments.pdf_chunker.pdf_chunker import PDFChunker
             self.pdf_chunker = PDFChunker(**kwargs)
         except Exception as e:
             logger.warning(f"[UnifiedBudgetOrchestrator] Không thể khởi tạo PDFChunker: {e}")

@@ -25,7 +25,7 @@ from rag_banking.pipeline import BankingRAGPipeline
 
 def run_test():
     print("\n" + "#" * 70)
-    print("      CHƯƠNG TRÌNH KIỂM THỬ RAG BANKING (VIETCOMBANK AI ASSISTANT)")
+    print("      CHƯƠNG TRÌNH KIỂM THỬ RAG BANKING (AI ASSISTANT)")
     print("#" * 70 + "\n")
 
     # 1. Khởi tạo Pipeline RAG
@@ -41,31 +41,18 @@ def run_test():
     print(f"[*] Đang nạp dữ liệu kiểm thử từ: {dataset_dir}")
     
     if dataset_dir == chunking_dir:
-        # Kiểm thử toàn diện 2 định dạng cốt lõi trong chunking_dataset:
-        # 1. Word tài liệu cấu trúc (.docx)
-        # 2. PDF số có bảng biểu (.pdf)
-        # 3. PDF scan hình ảnh cần OCR (.pdf)
+        # Kiểm thử định dạng DOCX chuẩn hóa của hệ thống:
         target_docs = [
             "vcb_md_15__tien_ich__bieu_lai_suat_tien_gui_va_ty_gia_20_ngoai_te.docx",
-            "vcb_pdf_22_bieu_phi_the_tdqt_2026.pdf",
-            "vcb_pdf_21_nq_hdqt_cctg_vcbs.pdf",
             "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.docx"
         ]
-        # Giới hạn 2 trang cho PDF dài để test nhanh
-        pipeline.ingest_documents(dataset_dir=dataset_dir, filenames=target_docs, max_pdf_pages=2)
+        pipeline.ingest_documents(dataset_dir=dataset_dir, filenames=target_docs)
 
-        # Danh sách câu hỏi kiểm thử cho chunking_dataset
         test_queries = [
             # Test Case 1: Tra cứu Biểu lãi suất và tỷ giá (DOCX Layout-Aware)
-            "Lãi suất tiền gửi tiết kiệm VND tại quầy của Vietcombank kỳ hạn 12 tháng là bao nhiêu %/năm và tỷ giá USD mua chuyển khoản là bao nhiêu?",
+            "Lãi suất tiền gửi tiết kiệm VND tại quầy kỳ hạn 12 tháng là bao nhiêu %/năm và tỷ giá USD mua chuyển khoản là bao nhiêu?",
 
-            # Test Case 2: Tra cứu Digital PDF (PDF Layout-Aware & Table Extraction)
-            "Theo biểu phí dịch vụ thẻ tín dụng quốc tế Vietcombank 2026, phí thường niên của thẻ chính Vietcombank Vibe là bao nhiêu VNĐ/năm?",
-
-            # Test Case 3: Tra cứu Scanned PDF với Tesseract OCR v5 (PDF OCR Scan)
-            "Nghị quyết HĐQT số 28154/VCB-CLTKHDQT ngày 31/12/2025 phê duyệt nội dung gì liên quan đến chứng chỉ tiền gửi CCTG?",
-
-            # Test Case 4: Tra cứu DOCX FAQ & Điều khoản thẻ (DOCX Layout-Aware)
+            # Test Case 2: Tra cứu DOCX FAQ & Điều khoản thẻ (DOCX Layout-Aware)
             "Khi bị mất thẻ tín dụng hoặc phát hiện giao dịch thẻ lạ, khách hàng cần thực hiện những bước khẩn cấp nào?"
         ]
     else:
@@ -78,9 +65,9 @@ def run_test():
         pipeline.ingest_documents(dataset_dir=dataset_dir, filenames=target_docs)
 
         test_queries = [
-            "Lãi suất tiền gửi tiết kiệm tại quầy của Vietcombank cho kỳ hạn 12 tháng là bao nhiêu %/năm?",
-            "Tỷ giá mua chuyển khoản và giá bán ra của đồng USD tại Vietcombank là bao nhiêu VNĐ?",
-            "Mức trách nhiệm bồi thường bảo hiểm du lịch toàn cầu tối đa của thẻ Vietcombank Vibe Platinum là bao nhiêu?",
+            "Lãi suất tiền gửi tiết kiệm tại quầy cho kỳ hạn 12 tháng là bao nhiêu %/năm?",
+            "Tỷ giá mua chuyển khoản và giá bán ra của đồng USD là bao nhiêu VNĐ?",
+            "Mức trách nhiệm bồi thường bảo hiểm du lịch toàn cầu tối đa của thẻ Vibe Platinum là bao nhiêu?",
             "Quy trình chụp ảnh CCCD gắn chip và quét chip NFC khi mở tài khoản eKYC trên VCB Digibank được thực hiện như thế nào?"
         ]
 

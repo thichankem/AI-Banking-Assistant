@@ -3,169 +3,172 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Banking Assistant & RAG Benchmark Suite</title>
+    <title>AI Banking Assistant - Trực Quan Hóa Đường Ống 7 Nodes</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div class="chat-container">
-        <!-- HEADER -->
-        <header class="chat-header">
+    <div class="app-layout">
+        <!-- TOP HEADER -->
+        <header class="app-header">
             <div class="header-left">
-                <h2>🏦 AI Banking Assistant</h2>
-                <span class="badge" id="modelBadge">DeepSeek-V4-Flash</span>
+                <div class="brand-icon">🏦</div>
+                <div class="brand-text">
+                    <h1>AI Banking Assistant</h1>
+                    <span class="subtext">Đường ống RAG 7 Nodes (Folder-to-Folder Data Flow)</span>
+                </div>
             </div>
+
+            <div class="header-center">
+                <div class="stat-pill" title="Mô hình LLM">
+                    <span class="dot green"></span>
+                    <span class="stat-label">LLM:</span>
+                    <strong id="modelBadge">Loading...</strong>
+                </div>
+                <div class="stat-pill" title="Tổng số Chunks trong Vector DB & BM25">
+                    <span class="dot blue"></span>
+                    <span class="stat-label">Indexed Chunks:</span>
+                    <strong id="chunksCountBadge">--</strong>
+                </div>
+            </div>
+
             <div class="header-right">
-                <select id="modeSelect" class="header-select">
-                    <option value="rag">🛡️ RAG Grounded (EXP-001)</option>
-                    <option value="baseline">⚡ Baseline thuần (EXP-000)</option>
-                </select>
-                <button type="button" id="openBenchmarkBtn" class="btn-benchmark">
-                    📊 Chấm Điểm & Benchmark
+                <button id="openFolderModalBtn" class="btn btn-secondary">
+                    📁 Quản Lý Folder Nodes
+                </button>
+                <button id="triggerPipelineBtn" class="btn btn-primary">
+                    ▶️ Chạy Pipeline Từ Folder
                 </button>
             </div>
         </header>
 
-        <!-- CHAT MESSAGES -->
-        <main class="chat-messages" id="chatMessages">
-            <div class="message bot-message">
-                <div class="bubble">
-                    Xin chào! Tôi là Trợ lý AI Banking của Ngân hàng Mẫu (Mock Banking).<br>
-                    Tôi hỗ trợ giải đáp quy trình mở tài khoản và phát hành thẻ qua eKYC theo chuẩn quy chế <strong>QT-NH-2024/01</strong>.<br>
-                    <em>Hệ thống đã tích hợp bộ chấm điểm & benchmark toàn diện (RAG Triad, RAGAS, Faithfulness, Negative Rejection).</em>
+        <!-- MAIN WORKSPACE -->
+        <main class="main-content">
+            <!-- CHAT VIEW -->
+            <div class="chat-container">
+                <div class="chat-messages" id="chatMessages">
+                    <div class="message bot-message">
+                        <div class="bubble">
+                            <p><strong>Xin chào! Tôi là Trợ lý AI Banking.</strong></p>
+                            <p>Hệ thống đã kết nối trực tiếp toàn bộ <strong>7 Nodes</strong> độc lập với các thư mục <code>input/</code> và <code>output/</code>:</p>
+                            <div class="node-chips-mini">
+                                <span>1. Chunking</span> ➔ 
+                                <span>2. Embedding</span> ➔ 
+                                <span>3. Vector DB</span> ➔ 
+                                <span>4. Query Parser</span> ➔ 
+                                <span>5. Retrieval</span> ➔ 
+                                <span>6. Reranking</span> ➔ 
+                                <span>7. Generator</span>
+                            </div>
+                            <p style="margin-top: 10px; font-size: 0.88rem; color: #94a3b8;">
+                                💡 Bạn có thể hỏi bất kỳ câu hỏi nào dưới đây hoặc tự nhập để xem luồng dữ liệu <strong>Input & Output chi tiết của từng Node</strong> được cập nhật trực tiếp:
+                            </p>
+                            <div class="sample-queries" id="sampleQueries">
+                                <button class="query-chip" data-q="Hạn mức giao dịch mở tài khoản eKYC tối đa bao nhiêu một ngày?">
+                                    💰 Hạn mức mở tài khoản eKYC
+                                </button>
+                                <button class="query-chip" data-q="Bị nuốt thẻ ATM tại cây ATM thì liên hệ tổng đài số nào?">
+                                    💳 Bị nuốt thẻ ATM
+                                </button>
+                                <button class="query-chip" data-q="Thủ tục mở tài khoản thanh toán cho cá nhân cần giấy tờ gì?">
+                                    📑 Giấy tờ mở tài khoản
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
+
+                <!-- CHAT INPUT -->
+                <form class="chat-input-area" id="chatForm">
+                    <div class="input-wrapper">
+                        <input 
+                            type="text" 
+                            id="userInput" 
+                            placeholder="Nhập câu hỏi ngân hàng để theo dõi luồng 7 nodes..." 
+                            autocomplete="off" 
+                            required
+                        >
+                        <button type="submit" id="sendBtn" class="btn-send">
+                            <span>Gửi</span>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="22" y1="2" x2="11" y2="13"></line>
+                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                            </svg>
+                        </button>
+                    </div>
+                </form>
             </div>
         </main>
-
-        <!-- CHAT INPUT -->
-        <form class="chat-input-area" id="chatForm">
-            <input 
-                type="text" 
-                id="userInput" 
-                placeholder="Hỏi về quy trình eKYC, hạn mức, điều kiện thẻ..." 
-                autocomplete="off" 
-                required
-            >
-            <button type="submit" id="sendBtn">Gửi</button>
-        </form>
     </div>
 
-    <!-- BENCHMARK MODAL / DRAWER -->
-    <div class="modal-overlay" id="benchmarkModal" style="display: none;">
-        <div class="modal-content">
+    <!-- NODE DETAILS INSPECTION MODAL (XEM INPUT & OUTPUT CỦA TỪNG NODE TRONG CÂU HỎI) -->
+    <div class="modal-overlay" id="nodeDetailModal" style="display: none;">
+        <div class="modal-content modal-lg">
             <div class="modal-header">
-                <div class="modal-title">
-                    <h3>🏆 BỘ CHẤM ĐIỂM & ĐỐI SOÁT HỌC THUẬT RAG (GR2)</h3>
-                    <p>Khung đo lường chuẩn hóa theo <strong>TruLens RAG Triad</strong> và <strong>RAGAS Harmonic Mean</strong></p>
+                <div>
+                    <h3 id="nodeDetailTitle">Chi Tiết Node</h3>
+                    <p class="modal-sub" id="nodeDetailSub">Input & Output trung gian</p>
                 </div>
-                <button class="modal-close-btn" id="closeBenchmarkBtn">&times;</button>
+                <button class="modal-close-btn" id="closeNodeDetailBtn">&times;</button>
             </div>
-
-            <!-- TABS -->
-            <div class="modal-tabs">
-                <button class="tab-btn active" data-tab="tab-compare">📊 So Sánh Đối Đầu (EXP-000 vs EXP-001)</button>
-                <button class="tab-btn" data-tab="tab-dataset">📋 Bộ Dữ Liệu Kiểm Chuẩn (FinanceBench)</button>
-            </div>
-
-            <!-- TAB 1: RUN BENCHMARK & COMPARISON -->
-            <div class="tab-pane active" id="tab-compare">
-                <div class="benchmark-controls">
-                    <div class="control-group">
-                        <label>Chế độ kiểm thử:</label>
-                        <select id="benchmarkModeSelect">
-                            <option value="compare">⚔️ So sánh Đối đầu (EXP-000 vs EXP-001)</option>
-                            <option value="rag">🛡️ Chỉ đo RAG Grounded (EXP-001)</option>
-                            <option value="baseline">⚡ Chỉ đo Baseline (EXP-000)</option>
-                        </select>
-                    </div>
-                    <div class="control-group">
-                        <label>Quy mô mẫu test:</label>
-                        <select id="benchmarkSampleSelect">
-                            <option value="4">4 kịch bản mẫu (Chạy nhanh ~10s)</option>
-                            <option value="12" selected>Tất cả 12 kịch bản (Đầy đủ ~35s)</option>
-                        </select>
-                    </div>
-                    <button id="runBenchmarkBtn" class="btn-run-benchmark">🚀 Bắt Đầu Đo Lường</button>
+            <div class="modal-body">
+                <div class="io-tabs">
+                    <button class="io-tab active" data-tab="tab-input">📥 Dữ Liệu Đầu Vào (Input)</button>
+                    <button class="io-tab" data-tab="tab-output">📤 Dữ Liệu Đầu Ra (Output)</button>
                 </div>
-
-                <div id="benchmarkLoading" class="benchmark-loading" style="display: none;">
-                    <div class="spinner"></div>
-                    <p id="benchmarkLoadingText">Đang thực thi các kịch bản kiểm thử qua LLM Judge...</p>
+                <div class="io-panel active" id="tab-input">
+                    <div class="path-badge" id="nodeInputPath">Folder: --</div>
+                    <pre class="code-preview" id="nodeInputContent">Đang tải...</pre>
                 </div>
-
-                <!-- KPI SUMMARY CARDS -->
-                <div id="benchmarkResultsArea" style="display: none;">
-                    <div class="kpi-grid">
-                        <div class="kpi-card">
-                            <div class="kpi-title">Faithfulness (Chống Ảo Giác)</div>
-                            <div class="kpi-value highlight" id="kpiFaithfulness">--</div>
-                            <div class="kpi-sub" id="kpiFaithfulnessDelta">So với baseline: --</div>
-                        </div>
-                        <div class="kpi-card">
-                            <div class="kpi-title">TruLens RAG Triad Score</div>
-                            <div class="kpi-value" id="kpiTriad">--</div>
-                            <div class="kpi-sub" id="kpiTriadDelta">Context + Grounded + Relevance</div>
-                        </div>
-                        <div class="kpi-card">
-                            <div class="kpi-title">RAGAS Harmonic Mean</div>
-                            <div class="kpi-value highlight" id="kpiRagas">--</div>
-                            <div class="kpi-sub" id="kpiRagasDelta">Điểm điều hòa toàn diện</div>
-                        </div>
-                        <div class="kpi-card">
-                            <div class="kpi-title">Negative Rejection Rate</div>
-                            <div class="kpi-value" id="kpiRejection">--</div>
-                            <div class="kpi-sub" id="kpiRejectionDelta">Bắt bẫy câu hỏi ngoài phạm vi</div>
-                        </div>
-                    </div>
-
-                    <!-- DETAILED COMPARISON TABLE -->
-                    <h4 style="margin: 20px 0 10px 0; color: #cbd5e1;">Bảng Tổng Hợp Chi Tiết Chỉ Số Kỹ Thuật:</h4>
-                    <table class="benchmark-table" id="summaryTable">
-                        <thead>
-                            <tr>
-                                <th>Chỉ Số Đo Lường</th>
-                                <th>EXP-000: Baseline</th>
-                                <th>EXP-001: RAG Grounded</th>
-                                <th>Chênh Lệch (Delta)</th>
-                            </tr>
-                        </thead>
-                        <tbody id="summaryTableBody">
-                            <!-- Injected by JS -->
-                        </tbody>
-                    </table>
-
-                    <!-- DETAILED TEST CASES ACCORDION -->
-                    <h4 style="margin: 24px 0 10px 0; color: #cbd5e1;">Chi Tiết Từng Kịch Bản Kiểm Thử & Lời Phê Giám Khảo:</h4>
-                    <div id="detailedTestCasesList" class="test-cases-accordion">
-                        <!-- Injected by JS -->
-                    </div>
-                </div>
-            </div>
-
-            <!-- TAB 2: DATASET EXPLORER -->
-            <div class="tab-pane" id="tab-dataset" style="display: none;">
-                <p style="margin-bottom: 12px; color: #94a3b8; font-size: 0.9rem;">
-                    Bộ câu hỏi kiểm chuẩn được xây dựng theo chuẩn <strong>FinanceBench</strong> bao gồm 3 phân nhóm: 
-                    <em>Factual (Dữ kiện cụ thể)</em>, <em>Conditional (Điều kiện loại trừ)</em>, và <em>Unanswerable Trap (Bẫy ảo giác)</em>.
-                </p>
-                <div id="datasetListContainer" class="dataset-list">
-                    <!-- Injected by JS -->
+                <div class="io-panel" id="tab-output" style="display: none;">
+                    <div class="path-badge" id="nodeOutputPath">Folder: --</div>
+                    <pre class="code-preview" id="nodeOutputContent">Đang tải...</pre>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- LIVE EVALUATION MODAL -->
-    <div class="modal-overlay" id="liveEvalModal" style="display: none;">
-        <div class="modal-content modal-sm">
+    <!-- FOLDER NODES EXPLORER MODAL (QUẢN LÝ 7 THƯ MỤC INPUT / OUTPUT TRÊN ĐĨA) -->
+    <div class="modal-overlay" id="folderExplorerModal" style="display: none;">
+        <div class="modal-content modal-xl">
             <div class="modal-header">
-                <h3>🔍 KẾT QUẢ ĐÁNH GIÁ REAL-TIME (LLM JUDGE)</h3>
-                <button class="modal-close-btn" id="closeLiveEvalBtn">&times;</button>
+                <div>
+                    <h3>📂 Quản Lý 7 Thư Mục Node (Folder-to-Folder Explorer)</h3>
+                    <p class="modal-sub">Xem trực tiếp tệp tin và dữ liệu nằm trong thư mục <code>rag_banking/&lt;node&gt;/input</code> và <code>output</code></p>
+                </div>
+                <button class="modal-close-btn" id="closeFolderExplorerBtn">&times;</button>
             </div>
-            <div id="liveEvalContent" class="live-eval-body">
-                <!-- Injected by JS -->
+            <div class="modal-body folder-explorer-layout">
+                <div class="nodes-list-sidebar" id="nodesSidebar">
+                    <!-- Danh sách 7 nodes injected by JS -->
+                </div>
+                <div class="node-folder-files" id="nodeFolderFiles">
+                    <div class="empty-state">Chọn một Node bên trái để xem các tệp tin trong thư mục Input & Output</div>
+                </div>
             </div>
         </div>
     </div>
+
+    <!-- FILE CONTENT VIEWER MODAL -->
+    <div class="modal-overlay" id="fileViewerModal" style="display: none;">
+        <div class="modal-content modal-lg">
+            <div class="modal-header">
+                <div>
+                    <h3 id="viewerFileName">Tên Tệp</h3>
+                    <p class="modal-sub" id="viewerFilePath">Đường dẫn tệp</p>
+                </div>
+                <button class="modal-close-btn" id="closeFileViewerBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <pre class="code-preview" id="viewerFileContent">Đang tải...</pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST NOTIFICATION -->
+    <div class="toast" id="toastNotification" style="display: none;"></div>
 
     <script src="/static/app.js"></script>
 </body>

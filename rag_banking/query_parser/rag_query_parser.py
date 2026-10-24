@@ -10,9 +10,9 @@ Tuân thủ nguyên tắc:
 import unicodedata
 from dataclasses import dataclass, field
 
-# Từ điển ánh xạ từ viết tắt chuyên ngành ngân hàng & pháp lý Vietcombank
+# Từ điển ánh xạ từ viết tắt chuyên ngành ngân hàng & pháp lý
 DEFAULT_BANKING_ACRONYMS = {
-    "vcb digibank": "ngân hàng số VCB Digibank (Vietcombank Digibank)",
+    "vcb digibank": "ngân hàng số VCB Digibank",
     "smart otp": "phương thức xác thực Smart OTP",
     "sms banking": "dịch vụ tin nhắn SMS Banking",
     "phone banking": "dịch vụ ngân hàng qua điện thoại Phone Banking",
@@ -46,6 +46,21 @@ class ParsedQuery:
     keywords_str: str
     detected_acronyms: list = field(default_factory=list)
     legal_references: list = field(default_factory=list)
+
+    @property
+    def entities(self) -> list:
+        return self.detected_acronyms
+
+    def to_dict(self) -> dict:
+        return {
+            "raw_query": self.raw_query,
+            "normalized_query": self.normalized_query,
+            "keywords": self.keywords,
+            "keywords_str": self.keywords_str,
+            "detected_acronyms": self.detected_acronyms,
+            "legal_references": self.legal_references,
+            "entities": self.detected_acronyms
+        }
 
 class BankingQueryParser:
     """
@@ -168,3 +183,8 @@ class BankingQueryParser:
             detected_acronyms=detected_acronyms,
             legal_references=legal_refs
         )
+
+
+# Aliases
+RAGQueryParser = BankingQueryParser
+QueryParser = BankingQueryParser

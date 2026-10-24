@@ -7,8 +7,10 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+RAG_ROOT = Path(__file__).resolve().parents[2]
+for p in (str(ROOT), str(RAG_ROOT)):
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
 if sys.platform == "win32":
     try:
@@ -16,14 +18,17 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from rag_banking.embedding.embedder import BankingEmbedder
+from embedding.embedder import BankingEmbedder
+
+def test_embedder_suite():
+    main()
 
 def main():
     print("▶ Khởi tạo BankingEmbedder...")
     embedder = BankingEmbedder(dimension=1024)
 
     # 1. Test embed đơn lẻ
-    text = "Lãi suất tiền gửi tiết kiệm Vietcombank kỳ hạn 12 tháng"
+    text = "Lãi suất tiền gửi tiết kiệm ngân hàng kỳ hạn 12 tháng"
     vec = embedder.embed_text(text)
     print(f"  [OK] embed_text thành công! Số chiều: {len(vec)}, Norm: {sum(x*x for x in vec):.4f}")
 
@@ -32,8 +37,13 @@ def main():
     print(f"  [OK] embed_query thành công! Số chiều: {len(q_vec)}, Norm: {sum(x*x for x in q_vec):.4f}")
 
     # 3. Test embed chunks từ tệp chunk thật
-    chunk_file = ROOT / "rag_banking/chunking/chunking_dataset/dataset_1/chunks_per_file/vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.json"
-    if chunk_file.exists():
+    cand_files = [
+        ROOT / "rag_banking/chunking/output/chunks_per_file/01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.json",
+        Path("chunking/output/chunks_per_file/01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.json"),
+        ROOT / "rag_banking/chunking/chunking_dataset/dataset_1/chunks_per_file/vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.json"
+    ]
+    chunk_file = next((p for p in cand_files if p.exists()), None)
+    if chunk_file and chunk_file.exists():
         with open(chunk_file, "r", encoding="utf-8") as f:
             chunks = json.load(f)[:5]
 

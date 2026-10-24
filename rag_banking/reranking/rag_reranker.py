@@ -62,7 +62,10 @@ class BankingReranker:
         if isinstance(item, dict):
             # Nếu là kết quả từ Qdrant search_hybrid: {"chunk": {...}, ...}
             chunk = item.get("chunk", item)
-            text = chunk.get("content") or chunk.get("original_text") or chunk.get("text") or ""
+            text = (chunk.get("content") or chunk.get("original_text") or chunk.get("text") or "").strip()
+            # Tránh trùng lặp tiền tố nếu text đã được prepend [Ngữ cảnh:
+            if text.startswith("[Ngữ cảnh:"):
+                return text
             bc = chunk.get("breadcrumb", "")
             title = chunk.get("section_title", "")
             prefix = ""
@@ -70,12 +73,15 @@ class BankingReranker:
                 prefix = f"[{bc} > {title}]\n"
             elif title:
                 prefix = f"[{title}]\n"
+            elif bc:
+                prefix = f"[{bc}]\n"
             return f"{prefix}{text}".strip()
         return str(item)
 
     def _fallback_local_rerank(self, query, candidates, top_k=3):
         """
         Dự phòng cục bộ bằng so khớp từ vựng Jaccard khi mất mạng hoặc API lỗi (0% Regex Law).
+        Tích hợp đánh giá điểm cao hơn cho Breadcrumb (Breadcrumb Boost).
         """
         def _get_tokens(s: str) -> set[str]:
             if not s:
@@ -93,12 +99,25 @@ class BankingReranker:
         for idx, item in enumerate(candidates):
             text = self._extract_text(item)
             doc_tokens = _get_tokens(text)
+
+            chunk = item.get("chunk", item) if isinstance(item, dict) else {}
+            bc_str = f"{chunk.get('breadcrumb', '')} {chunk.get('section_title', '')}"
+            bc_tokens = _get_tokens(bc_str)
+            bc_matches = q_tokens.intersection(bc_tokens)
+
             intersection = q_tokens.intersection(doc_tokens)
             union = q_tokens.union(doc_tokens)
             if len(union) > 0:
-                score = len(intersection) / len(union)
+                base_score = len(intersection) / len(union)
             else:
-                score = 0.0
+                base_score = 0.0
+
+            # Đánh giá cao hơn cho Breadcrumb: cộng bonus khi query khớp thực thể trong breadcrumb
+            if bc_matches:
+                score = base_score * 1.3 + (len(bc_matches) / max(len(q_tokens), 1)) * 0.1
+            else:
+                score = base_score
+
             scored.append((item, score, idx))
 
         scored.sort(key=lambda x: x[1], reverse=True)
@@ -159,12 +178,21 @@ class BankingReranker:
                         data = json.loads(resp.read().decode("utf-8"))
                         api_results = data.get("results", [])
 
-                        # Sắp xếp và gắn điểm vào candidates
+                        # Sắp xếp và gắn điểm vào candidates (kèm Breadcrumb Entity Alignment)
                         reranked = []
                         for rank, res in enumerate(api_results[:top_k], start=1):
                             idx = res.get("index", 0)
                             score = float(res.get("relevance_score", 0.0))
                             orig_item = candidates[idx]
+
+                            # Đánh giá cao hơn cho Breadcrumb: cộng bonus nhẹ khi từ khóa chính khớp Breadcrumb
+                            chunk = orig_item.get("chunk", orig_item) if isinstance(orig_item, dict) else {}
+                            if isinstance(chunk, dict):
+                                bc_str = f"{chunk.get('breadcrumb', '')} {chunk.get('section_title', '')}".lower()
+                                for token in query_text.lower().split():
+                                    if len(token) >= 3 and token in bc_str:
+                                        score = min(1.0, score + 0.02)
+                                        break
 
                             if isinstance(orig_item, dict):
                                 item_copy = dict(orig_item)
@@ -191,3 +219,4 @@ class BankingReranker:
 
 # Alias tiện dụng
 Reranker = BankingReranker
+RAGReranker = BankingReranker

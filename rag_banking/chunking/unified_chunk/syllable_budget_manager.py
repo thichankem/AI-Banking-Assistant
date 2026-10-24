@@ -15,7 +15,6 @@ Tích hợp:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 try:
     from rag_banking.chunking.unified_chunk.canonical_resolver import split_sentences_banking
@@ -64,14 +63,15 @@ def build_7_field_chunk(
     breadcrumb: str,
     section_title: str,
     content: str,
-    word_count: Optional[int] = None,
-    original_text: Optional[str] = None,
-    parent_id: Optional[str] = None,
-    location: Optional[list[dict]] = None,
-    token_count: Optional[int] = None,
-    element_ids: Optional[list[str]] = None,
+    word_count: int | None = None,
+    original_text: str | None = None,
+    parent_id: str | None = None,
+    location: list[dict] | None = None,
+    token_count: int | None = None,
+    element_ids: list[str] | None = None,
     is_active: bool = True,
-    updated_time: Optional[int] = None,
+    updated_time: int | None = None,
+    images: list[dict] | None = None,
     **kwargs
 ) -> dict:
     """
@@ -108,6 +108,11 @@ def build_7_field_chunk(
         "is_active": is_active,
         "updated_time": up_time
     }
+    if images is not None and len(images) > 0:
+        chunk["images"] = images
+    else:
+        if "images" in kwargs and kwargs["images"]:
+            chunk["images"] = kwargs["images"]
     return chunk
 
 
@@ -189,7 +194,7 @@ class SyllableBudgetManager:
     def split_sentences_by_syllable_budget(
         self,
         sentences: list[str],
-        max_syllables: Optional[int] = None,
+        max_syllables: int | None = None,
         **kwargs
     ) -> list[str]:
         """

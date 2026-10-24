@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import unicodedata
-from typing import Optional
 
 logger = logging.getLogger("canonical_resolver")
 
@@ -78,7 +77,7 @@ _SAT_MODEL = None
 _SAT_INITIALIZED = False
 
 
-def get_sat_segmenter(model_name: str = "sat-3l-sm") -> Optional[object]:
+def get_sat_segmenter(model_name: str = "sat-3l-sm") -> object | None:
     """
     Khởi tạo hoặc trả về instance singleton của mô hình wtpsplit (SaT).
     Ưu tiên số 1 cho bài toán phân đoạn câu thông minh (Segment Any Text).

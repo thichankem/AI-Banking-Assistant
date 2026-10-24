@@ -1,16 +1,14 @@
 """
 Module Tracing & Observability Chuyên Sâu cho AI Banking Assistant
 ======================================================================
-Tích hợp đồng thời 2 nền tảng giám sát hàng đầu:
-1. Langfuse:
-   - Nền tảng LLM Observability & Evaluation mã nguồn mở.
-   - Ghi nhận chi tiết traces, spans, generations, token usage, cost và latency.
-   - Đồng bộ lên Langfuse Cloud hoặc self-hosted Langfuse server.
-2. Arize Phoenix:
+Tích hợp nền tảng giám sát AI Observability hàng đầu:
+1. Arize Phoenix:
    - Nền tảng AI Observability chuyên sâu cho RAG & AI Agents.
    - Chuẩn hóa theo OpenTelemetry & OpenInference Semantic Conventions.
    - Trực quan hóa đồ thị RAG (Retriever, Reranker, Chain, LLM Generation).
    - Xem dashboard trực quan qua Arize Phoenix Web UI.
+2. Local Tracing:
+   - Lưu trữ nhật ký vết định dạng JSONL (rag_traces.jsonl).
 
 NGUYÊN TẮC THIẾT KẾ:
 1. 0% REGEX LAW: Tuyệt đối không dùng regex methods.
@@ -24,6 +22,7 @@ import time
 import json
 import socket
 import logging
+import math
 from urllib.parse import urlparse
 from pathlib import Path
 
@@ -38,20 +37,11 @@ if sys.platform == "win32":
 logger = logging.getLogger("rag_banking.tracing")
 
 # ---------------------------------------------------------------------------
-# Import Langfuse (v5+)
-# ---------------------------------------------------------------------------
-LANGFUSE_AVAILABLE = False
-try:
-    from langfuse import Langfuse
-    LANGFUSE_AVAILABLE = True
-except ImportError:
-    pass
-
-# ---------------------------------------------------------------------------
 # Import Arize Phoenix & OpenTelemetry & OpenInference
 # ---------------------------------------------------------------------------
 PHOENIX_AVAILABLE = False
 _PHOENIX_REGISTERED = False
+_GLOBAL_PX_TRACER = None
 
 try:
     import phoenix as px
@@ -95,7 +85,7 @@ def _check_endpoint_reachable(endpoint_url, timeout=0.5):
 class ActiveTrace:
     """
     Quản lý vòng đời và dữ liệu của một phiên truy vết (Trace) cho một câu hỏi khách hàng.
-    Đồng bộ dữ liệu đồng thời vào Langfuse và Phoenix.
+    Đồng bộ dữ liệu vào Arize Phoenix và lưu trữ cục bộ.
     """
 
     def __init__(self, tracer, query):
@@ -104,76 +94,291 @@ class ActiveTrace:
         self.start_time = time.time()
         self.spans = []
         self.finished = False
-
-        # 1. Langfuse Root Observation
         self.lf_root = None
-        if self.tracer.is_langfuse_active and self.tracer.lf_client:
-            try:
-                self.lf_root = self.tracer.lf_client.start_observation(
-                    name="banking_rag_pipeline",
-                    input={"query": query},
-                    metadata={"project": "ai-banking-assistant", "domain": "vietcombank"}
-                )
-            except Exception as e:
-                logger.debug(f"Langfuse start_observation error: {e}")
 
-        # 2. Phoenix OpenTelemetry Root Span
+        # Phoenix OpenTelemetry Root Span
         self.px_root_span = None
         self.px_context = None
         if self.tracer.is_phoenix_active and self.tracer.px_tracer:
             try:
-                self.px_root_span = self.tracer.px_tracer.start_span("banking_rag_pipeline")
+                self.px_root_span = self.tracer.px_tracer.start_span("rag_query_pipeline")
                 if PHOENIX_AVAILABLE:
                     self.px_root_span.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, OpenInferenceSpanKindValues.CHAIN.value)
-                    self.px_root_span.set_attribute(SpanAttributes.INPUT_VALUE, query)
+                    root_inp = {
+                        "user_query": query,
+                        "pipeline": "Hybrid RAG Pipeline (Query Parser -> Embedding -> VectorDB -> Reranking)",
+                        "tracked_stages": [
+                            "1. query_parser",
+                            "2. dense_embedding",
+                            "3. vectordb_retrieval",
+                            "4. cross_encoder_reranker"
+                        ]
+                    }
+                    self.px_root_span.set_attribute(SpanAttributes.INPUT_MIME_TYPE, "application/json")
+                    self.px_root_span.set_attribute(SpanAttributes.INPUT_VALUE, json.dumps(root_inp, ensure_ascii=False, indent=2))
                 self.px_context = otel_trace.set_span_in_context(self.px_root_span)
             except Exception as e:
                 logger.debug(f"Phoenix root span error: {e}")
 
-    def record_chunking(self, file_path, num_chunks, duration_ms, details=None):
-        """Bước 0: Ghi nhận vết phân đoạn văn bản DLA Layout-Aware Chunker"""
+    def record_chunking(self, file_path, num_chunks, duration_ms, details=None, chunks=None, sample_chunks=None):
+        """Bước 0: Ghi nhận vết phân đoạn văn bản DLA Layout-Aware Chunker toàn diện tất cả chunks"""
+        if details:
+            dt_dict = details
+        else:
+            dt_dict = {}
+
+        if chunks is not None:
+            raw_chunks = chunks
+        elif sample_chunks is not None:
+            raw_chunks = sample_chunks
+        else:
+            raw_chunks = []
+
+        extracted_chunks_list = []
+        total_characters = 0
+        total_tokens = 0
+
+        for i, c in enumerate(raw_chunks):
+            if isinstance(c, dict):
+                c_id = c.get("chunk_id", f"chunk_{i + 1}")
+                c_bc = c.get("breadcrumb", "")
+                c_title = c.get("section_title", "")
+                c_tok = c.get("token_count", 0)
+                c_raw = c.get("content", "") or c.get("original_text", "") or c.get("text", "")
+            else:
+                c_id = getattr(c, "chunk_id", f"chunk_{i + 1}")
+                c_bc = getattr(c, "breadcrumb", "")
+                c_title = getattr(c, "section_title", "")
+                c_tok = getattr(c, "token_count", 0)
+                c_raw = getattr(c, "content", "") or getattr(c, "original_text", "") or getattr(c, "text", "")
+
+            char_cnt = len(c_raw)
+            total_characters += char_cnt
+            if isinstance(c_tok, (int, float)):
+                total_tokens += int(c_tok)
+
+            extracted_chunks_list.append({
+                "chunk_index": i + 1,
+                "chunk_id": str(c_id),
+                "breadcrumb": c_bc,
+                "section_title": c_title,
+                "token_count": c_tok,
+                "char_count": char_cnt,
+                "content": c_raw,
+                "full_text_content": c_raw
+            })
+
+        if num_chunks:
+            final_count = num_chunks
+        else:
+            final_count = len(extracted_chunks_list)
+
+        if extracted_chunks_list:
+            avg_tok = round(total_tokens / len(extracted_chunks_list), 1)
+            avg_ch = round(total_characters / len(extracted_chunks_list), 1)
+        else:
+            avg_tok = 0
+            avg_ch = 0
+
         span_data = {
-            "name": "Step 0: DLA Layout-Aware Chunking",
+            "name": "DLA Layout-Aware Chunking",
             "duration_ms": duration_ms,
             "file_path": str(file_path),
-            "num_chunks": num_chunks,
-            "details": details or {}
+            "num_chunks": final_count,
+            "total_tokens": total_tokens,
+            "details": dt_dict
         }
         self.spans.append(span_data)
 
         if self.tracer.is_phoenix_active and self.tracer.px_tracer:
             try:
-                s_px = self.tracer.px_tracer.start_span("dla_layout_aware_chunking", context=self.px_context)
+                s_px = self.tracer.px_tracer.start_span("chunking_dla_layout_aware", context=self.px_context)
                 if PHOENIX_AVAILABLE:
                     s_px.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, OpenInferenceSpanKindValues.CHAIN.value)
-                    s_px.set_attribute(SpanAttributes.INPUT_VALUE, f"Tài liệu đầu vào: {file_path}")
-                    s_px.set_attribute(SpanAttributes.OUTPUT_VALUE, f"Trích xuất {num_chunks} chunks cấu trúc Breadcrumb bảo toàn bố cục Layout")
-                    s_px.set_attribute("chunking.num_chunks", num_chunks)
+
+                    inp_payload = {
+                        "action": "document_layout_aware_chunking",
+                        "file_path": str(file_path),
+                        "file_name": Path(file_path).name,
+                        "chunking_strategy": "DLA Layout-Aware Hierarchy Chunking (Breadcrumb preserved)",
+                        "hierarchy_rules": [
+                            "Preserve document heading hierarchy (I. -> 1. -> a) -> Điều)",
+                            "Attach contextual breadcrumb navigation prefix to each chunk",
+                            "Preserve table structures and legal clauses"
+                        ],
+                        "options": dt_dict
+                    }
+
+                    out_payload = {
+                        "status": "SUCCESS",
+                        "total_chunks_extracted": final_count,
+                        "chunking_duration_ms": duration_ms,
+                        "summary_statistics": {
+                            "total_chunks": final_count,
+                            "total_characters": total_characters,
+                            "total_tokens": total_tokens,
+                            "average_tokens_per_chunk": avg_tok,
+                            "average_characters_per_chunk": avg_ch
+                        },
+                        "extracted_chunks": extracted_chunks_list
+                    }
+
+                    s_px.set_attribute(SpanAttributes.INPUT_MIME_TYPE, "application/json")
+                    s_px.set_attribute(SpanAttributes.INPUT_VALUE, json.dumps(inp_payload, ensure_ascii=False, indent=2))
+                    s_px.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, "application/json")
+                    s_px.set_attribute(SpanAttributes.OUTPUT_VALUE, json.dumps(out_payload, ensure_ascii=False, indent=2))
+                    s_px.set_attribute("chunking.num_chunks", final_count)
                     s_px.set_attribute("chunking.file_path", str(file_path))
-                    if details:
-                        for k, v in details.items():
-                            s_px.set_attribute(f"chunking.{k}", str(v))
+                    s_px.set_attribute("chunking.duration_ms", duration_ms)
+                    s_px.set_attribute("chunking.total_characters", total_characters)
+                    s_px.set_attribute("chunking.total_tokens", total_tokens)
                 s_px.end()
             except Exception as e:
                 logger.debug(f"Phoenix chunking error: {e}")
 
-    def record_embedding(self, num_texts, dimension, duration_ms, model_name=None, cache_hits=0, is_query=False):
-        """Ghi nhận vết nhúng vector 1024 chiều (Dense Vector Store)"""
-        if is_query:
-            span_name = "dense_query_embedding"
-            disp_name = "Dense Query Embedding (1024-dim)"
-            inp_text = f"Nhúng vector câu hỏi người dùng ({num_texts} query)"
+    def record_embedding(
+        self,
+        num_texts,
+        dimension,
+        duration_ms,
+        model_name=None,
+        cache_hits=0,
+        is_query=False,
+        query_text=None,
+        query_vector=None,
+        chunks=None
+    ):
+        """Ghi nhận vết nhúng vector 1024 chiều (Dense Vector Store) chi tiết vector"""
+        if model_name:
+            chosen_model = model_name
         else:
-            span_name = "dense_chunk_embedding"
+            chosen_model = "multilingual-e5-large"
+
+        if is_query:
+            span_name = "dense_embedding"
+            disp_name = "Dense Query Embedding (1024-dim)"
+            if query_text:
+                q_content = query_text
+            else:
+                q_content = self.query
+
+            formatted_query_input = f"query: {q_content}"
+
+            inp_obj = {
+                "action": "query_dense_embedding",
+                "input_query": q_content,
+                "model": chosen_model,
+                "instruction_prefix": "query: ",
+                "formatted_embedding_input": formatted_query_input,
+                "target_dimension": dimension
+            }
+
+            if query_vector is not None and isinstance(query_vector, (list, tuple)):
+                q_vec_list = list(query_vector)
+                first_8 = [round(float(x), 5) for x in q_vec_list[:8]]
+                first_10 = [round(float(x), 6) for x in q_vec_list[:10]]
+                norm_val = round(math.sqrt(sum(float(x) * float(x) for x in q_vec_list)), 4)
+                vector_preview_str = f"[{', '.join(str(x) for x in first_8)}, ... ({len(q_vec_list)} dimensions)]"
+            else:
+                first_8 = []
+                first_10 = []
+                norm_val = 1.0
+                vector_preview_str = f"[{dimension}-dim normalized vector, dimension={dimension}]"
+
+            out_obj = {
+                "status": "QUERY_EMBEDDED_SUCCESS",
+                "output_dimension": dimension,
+                "l2_normalized": True,
+                "vector_norm": norm_val,
+                "cache_hits": cache_hits,
+                "vector_preview": vector_preview_str,
+                "first_10_floats": first_10,
+                "vector_sample_first_10_floats": first_10,
+                "duration_ms": duration_ms
+            }
+        else:
+            span_name = "dense_embedding"
             disp_name = "Dense Chunk Embedding (1024-dim)"
-            inp_text = f"Nhúng vector cho {num_texts} chunks tài liệu"
+
+            input_chunks_summary = []
+            embedded_chunks_details = []
+
+            if chunks:
+                for i, c in enumerate(chunks):
+                    if isinstance(c, dict):
+                        c_id = c.get("chunk_id", f"chunk_{i + 1}")
+                        c_bc = c.get("breadcrumb", "")
+                        c_raw = c.get("content", "") or c.get("original_text", "") or c.get("text", "")
+                        c_vec = c.get("vector")
+                    else:
+                        c_id = getattr(c, "chunk_id", f"chunk_{i + 1}")
+                        c_bc = getattr(c, "breadcrumb", "")
+                        c_raw = getattr(c, "content", "") or getattr(c, "original_text", "") or getattr(c, "text", "")
+                        c_vec = getattr(c, "vector", None)
+
+                    if c_bc:
+                        formatted_passage = f"passage: [Ngữ cảnh: {c_bc}]\n{c_raw}"
+                    else:
+                        formatted_passage = f"passage: {c_raw}"
+
+                    input_chunks_summary.append({
+                        "chunk_index": i + 1,
+                        "chunk_id": str(c_id),
+                        "breadcrumb": c_bc,
+                        "formatted_input_for_model": formatted_passage
+                    })
+
+                    if c_vec is not None and isinstance(c_vec, (list, tuple)):
+                        v_list = list(c_vec)
+                        v_first8 = [round(float(x), 5) for x in v_list[:8]]
+                        v_first10 = [round(float(x), 6) for x in v_list[:10]]
+                        v_norm = round(math.sqrt(sum(float(x) * float(x) for x in v_list)), 4)
+                        v_prev = f"[{', '.join(str(x) for x in v_first8)}, ... ({len(v_list)} dimensions)]"
+                        v_dim = len(v_list)
+                    else:
+                        v_first8 = []
+                        v_first10 = []
+                        v_norm = 1.0
+                        v_prev = f"[{dimension}-dim vector generated]"
+                        v_dim = dimension
+
+                    embedded_chunks_details.append({
+                        "chunk_index": i + 1,
+                        "chunk_id": str(c_id),
+                        "breadcrumb": c_bc,
+                        "vector_dimension": v_dim,
+                        "l2_norm": v_norm,
+                        "vector_preview": v_prev,
+                        "first_10_floats": v_first10,
+                        "vector_sample_first_10_floats": v_first10,
+                        "content": c_raw,
+                        "full_text_content": c_raw,
+                        "raw_content": c_raw
+                    })
+
+            inp_obj = {
+                "action": "chunk_batch_embedding",
+                "num_chunks": num_texts,
+                "model": chosen_model,
+                "instruction_prefix": "passage: ",
+                "target_dimension": dimension,
+                "chunks_to_embed": input_chunks_summary
+            }
+            out_obj = {
+                "status": "BATCH_EMBEDDED_SUCCESS",
+                "total_vectors_generated": num_texts,
+                "dimension": dimension,
+                "sqlite_cache_hits": cache_hits,
+                "duration_ms": duration_ms,
+                "embedded_chunks_details": embedded_chunks_details
+            }
 
         span_data = {
             "name": disp_name,
             "duration_ms": duration_ms,
             "num_texts": num_texts,
             "dimension": dimension,
-            "model": model_name or "multilingual-e5-large",
+            "model": chosen_model,
             "cache_hits": cache_hits
         }
         self.spans.append(span_data)
@@ -183,9 +388,11 @@ class ActiveTrace:
                 s_px = self.tracer.px_tracer.start_span(span_name, context=self.px_context)
                 if PHOENIX_AVAILABLE:
                     s_px.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, OpenInferenceSpanKindValues.EMBEDDING.value)
-                    s_px.set_attribute(SpanAttributes.EMBEDDING_MODEL_NAME, model_name or "multilingual-e5-large")
-                    s_px.set_attribute(SpanAttributes.INPUT_VALUE, inp_text)
-                    s_px.set_attribute(SpanAttributes.OUTPUT_VALUE, f"Tạo vector {dimension} chiều chuẩn hóa L2 (SQLite Cache hits: {cache_hits})")
+                    s_px.set_attribute(SpanAttributes.EMBEDDING_MODEL_NAME, chosen_model)
+                    s_px.set_attribute(SpanAttributes.INPUT_MIME_TYPE, "application/json")
+                    s_px.set_attribute(SpanAttributes.INPUT_VALUE, json.dumps(inp_obj, ensure_ascii=False, indent=2))
+                    s_px.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, "application/json")
+                    s_px.set_attribute(SpanAttributes.OUTPUT_VALUE, json.dumps(out_obj, ensure_ascii=False, indent=2))
                     s_px.set_attribute("embedding.num_texts", num_texts)
                     s_px.set_attribute("embedding.dimension", dimension)
                     s_px.set_attribute("embedding.cache_hits", cache_hits)
@@ -210,133 +417,155 @@ class ActiveTrace:
         }
         self.spans.append(span_data)
 
-        # Langfuse span
-        if self.lf_root:
-            try:
-                s1 = self.lf_root.start_observation(
-                    name="step1_query_parser",
-                    input={"raw_query": input_query},
-                    metadata={"step": 1, "duration_ms": duration_ms}
-                )
-                s1.update(output={
-                    "normalized_query": norm_query,
-                    "keywords": keywords,
-                    "acronyms_detected": acronyms,
-                    "legal_references": legal_refs
-                })
-                s1.end()
-            except Exception as e:
-                logger.debug(f"Langfuse s1 error: {e}")
-
         # Phoenix span
         if self.tracer.is_phoenix_active and self.tracer.px_tracer:
             try:
-                s_px = self.tracer.px_tracer.start_span("step1_query_parser", context=self.px_context)
+                s_px = self.tracer.px_tracer.start_span("query_parser", context=self.px_context)
                 if PHOENIX_AVAILABLE:
                     s_px.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, OpenInferenceSpanKindValues.CHAIN.value)
-                    s_px.set_attribute(SpanAttributes.INPUT_VALUE, input_query)
-                    out_desc = f"Query chuẩn hóa: '{norm_query}' | Từ khóa: {', '.join(keywords[:5])}"
-                    if acronyms:
-                        out_desc = out_desc + f" | Viết tắt giải nghĩa: {', '.join(acronyms)}"
-                    s_px.set_attribute(SpanAttributes.OUTPUT_VALUE, out_desc)
+
+                    acronym_list = []
+                    if isinstance(acronyms, list):
+                        for item in acronyms:
+                            if isinstance(item, tuple) and len(item) == 2:
+                                acronym_list.append({"acronym": str(item[0]), "expanded": str(item[1])})
+                            elif isinstance(item, dict):
+                                acronym_list.append(item)
+                            else:
+                                acronym_list.append({"acronym": str(item)})
+                    elif isinstance(acronyms, dict):
+                        for k, v in acronyms.items():
+                            acronym_list.append({"acronym": k, "expanded": str(v)})
+
+                    inp_obj = {
+                        "raw_user_query": input_query
+                    }
+                    out_obj = {
+                        "normalized_query": norm_query,
+                        "extracted_keywords": keywords,
+                        "detected_banking_acronyms": acronym_list,
+                        "legal_references_found": legal_refs,
+                        "parsing_duration_ms": duration_ms
+                    }
+                    s_px.set_attribute(SpanAttributes.INPUT_MIME_TYPE, "application/json")
+                    s_px.set_attribute(SpanAttributes.INPUT_VALUE, json.dumps(inp_obj, ensure_ascii=False, indent=2))
+                    s_px.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, "application/json")
+                    s_px.set_attribute(SpanAttributes.OUTPUT_VALUE, json.dumps(out_obj, ensure_ascii=False, indent=2))
                     s_px.set_attribute("query_parser.normalized_query", norm_query)
                     s_px.set_attribute("query_parser.keywords", json.dumps(keywords, ensure_ascii=False))
-                    s_px.set_attribute("query_parser.acronyms", json.dumps(acronyms, ensure_ascii=False))
+                    s_px.set_attribute("query_parser.acronyms", json.dumps(acronym_list, ensure_ascii=False))
                     s_px.set_attribute("query_parser.legal_references", json.dumps(legal_refs, ensure_ascii=False))
                 s_px.end()
             except Exception as e:
-                logger.debug(f"Phoenix s1 error: {e}")
+                logger.debug(f"Phoenix query parser error: {e}")
 
-    def record_retrieval(self, query, candidates, duration_ms):
-        """Bước 2: Ghi nhận vết Hybrid Retrieval (Dense Vector + BM25 hợp nhất RRF)"""
+    def record_retrieval(self, query, candidates, duration_ms, params=None):
+        """Bước 2: Ghi nhận vết Hybrid Retrieval (Dense Vector + BM25 hợp nhất RRF) đầy đủ tất cả chunk"""
         doc_count = len(candidates)
         top_chunks_summary = []
-        for i, doc in enumerate(candidates[:5]):
+        candidate_details = []
+
+        for i, doc in enumerate(candidates):
             if isinstance(doc, dict):
-                chunk = doc.get("chunk", doc)
-                score = doc.get("rrf_score", doc.get("score", 0.0))
+                c_item = doc.get("chunk", doc)
+                c_score = doc.get("rrf_score", doc.get("score", 0.0))
+                dense_sc = doc.get("dense_score", 0.0)
+                bm25_sc = doc.get("bm25_score", 0.0)
             elif isinstance(doc, tuple) and len(doc) >= 2:
-                chunk = doc[0]
-                score = doc[1]
+                c_item = doc[0]
+                c_score = doc[1]
+                dense_sc = 0.0
+                bm25_sc = 0.0
             else:
-                chunk = doc
-                score = 0.0
+                c_item = doc
+                c_score = 0.0
+                dense_sc = 0.0
+                bm25_sc = 0.0
 
-            doc_text = chunk.get("content") or chunk.get("original_text") or chunk.get("text") or ""
-            if len(doc_text) > 120:
-                doc_preview = doc_text[:120] + "..."
-            else:
-                doc_preview = doc_text
+            doc_text = c_item.get("content") or c_item.get("original_text") or c_item.get("text") or ""
+            title = c_item.get("section_title") or c_item.get("breadcrumb") or ""
+            cid = c_item.get("chunk_id", f"c_{i}")
+            c_source = c_item.get("source", "")
 
-            title = chunk.get("section_title") or chunk.get("breadcrumb") or ""
-            cid = chunk.get("chunk_id", f"c_{i}")
+            c_info = {
+                "rank": i + 1,
+                "chunk_id": str(cid),
+                "rrf_score": round(float(c_score), 4),
+                "dense_score": round(float(dense_sc), 4),
+                "bm25_score": round(float(bm25_sc), 2),
+                "source_file": c_source,
+                "breadcrumb": title,
+                "content": doc_text,
+                "char_count": len(doc_text)
+            }
+            candidate_details.append(c_info)
 
             top_chunks_summary.append({
                 "index": i + 1,
-                "chunk_id": cid,
+                "chunk_id": str(cid),
                 "title": title,
-                "score": round(float(score), 4),
-                "preview": doc_preview
+                "score": round(float(c_score), 4),
+                "content": doc_text
             })
 
         span_data = {
             "name": "Step 2: Hybrid Retrieval",
             "duration_ms": duration_ms,
             "retrieved_candidates": doc_count,
-            "top_candidates": top_chunks_summary
+            "candidates": candidate_details
         }
         self.spans.append(span_data)
-
-        # Langfuse span
-        if self.lf_root:
-            try:
-                s2 = self.lf_root.start_observation(
-                    name="step2_hybrid_retrieval",
-                    input={"query": query},
-                    metadata={"step": 2, "candidate_count": doc_count, "duration_ms": duration_ms}
-                )
-                s2.update(output={"candidates": top_chunks_summary})
-                s2.end()
-            except Exception as e:
-                logger.debug(f"Langfuse s2 error: {e}")
 
         # Phoenix span (Chuẩn OpenInference RETRIEVER)
         if self.tracer.is_phoenix_active and self.tracer.px_tracer:
             try:
-                s_px = self.tracer.px_tracer.start_span("step2_hybrid_retrieval", context=self.px_context)
+                s_px = self.tracer.px_tracer.start_span("vectordb_retrieval", context=self.px_context)
                 if PHOENIX_AVAILABLE:
                     s_px.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, OpenInferenceSpanKindValues.RETRIEVER.value)
-                    s_px.set_attribute(SpanAttributes.INPUT_VALUE, query)
-                    s_px.set_attribute(SpanAttributes.OUTPUT_VALUE, f"Truy xuất {doc_count} ứng viên qua Dual-Index Hybrid RRF k=60 (Dense + BM25)")
-                    for i, doc in enumerate(candidates[:10]):
-                        if isinstance(doc, dict):
-                            c_item = doc.get("chunk", doc)
-                            c_score = doc.get("rrf_score", doc.get("score", 0.0))
-                        elif isinstance(doc, tuple) and len(doc) >= 2:
-                            c_item = doc[0]
-                            c_score = doc[1]
-                        else:
-                            c_item = doc
-                            c_score = 0.0
+                    
+                    if params:
+                        ret_params = params
+                    else:
+                        ret_params = {
+                            "dense_k": 20,
+                            "bm25_k": 20,
+                            "rrf_k": 60,
+                            "returned_candidates": doc_count
+                        }
 
-                        c_text = c_item.get("content") or c_item.get("original_text") or c_item.get("text") or ""
-                        c_id = c_item.get("chunk_id", f"chunk_{i}")
+                    inp_obj = {
+                        "search_query": query,
+                        "retrieval_strategy": "Hybrid RRF (Dense Vector Qdrant HNSW + Okapi BM25)",
+                        "fusion_algorithm": "Reciprocal Rank Fusion (k=60)",
+                        "parameters": ret_params
+                    }
+                    out_obj = {
+                        "total_candidates_retrieved": doc_count,
+                        "retrieval_latency_ms": duration_ms,
+                        "candidates": candidate_details
+                    }
+                    s_px.set_attribute(SpanAttributes.INPUT_MIME_TYPE, "application/json")
+                    s_px.set_attribute(SpanAttributes.INPUT_VALUE, json.dumps(inp_obj, ensure_ascii=False, indent=2))
+                    s_px.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, "application/json")
+                    s_px.set_attribute(SpanAttributes.OUTPUT_VALUE, json.dumps(out_obj, ensure_ascii=False, indent=2))
 
+                    for i, cand in enumerate(candidate_details):
                         prefix = f"{SpanAttributes.RETRIEVAL_DOCUMENTS}.{i}"
-                        s_px.set_attribute(f"{prefix}.document.id", str(c_id))
-                        s_px.set_attribute(f"{prefix}.document.content", c_text[:500])
-                        s_px.set_attribute(f"{prefix}.document.score", float(c_score))
+                        s_px.set_attribute(f"{prefix}.document.id", cand["chunk_id"])
+                        s_px.set_attribute(f"{prefix}.document.content", cand["content"])
+                        s_px.set_attribute(f"{prefix}.document.score", cand["rrf_score"])
                         s_px.set_attribute(f"{prefix}.document.metadata", json.dumps({
-                            "source": c_item.get("source", ""),
-                            "breadcrumb": c_item.get("breadcrumb", ""),
-                            "section_title": c_item.get("section_title", "")
+                            "source": cand["source_file"],
+                            "breadcrumb": cand["breadcrumb"],
+                            "dense_score": cand["dense_score"],
+                            "bm25_score": cand["bm25_score"]
                         }, ensure_ascii=False))
                 s_px.end()
             except Exception as e:
-                logger.debug(f"Phoenix s2 error: {e}")
+                logger.debug(f"Phoenix vectordb_retrieval error: {e}")
 
     def record_rerank(self, query, candidates, reranked, duration_ms):
-        """Bước 3: Ghi nhận vết Reranking qua Cross-Encoder bge-reranker-v2-m3"""
+        """Bước 3: Ghi nhận vết Reranking qua Cross-Encoder bge-reranker-v2-m3 đầy đủ tất cả chunk"""
         rerank_summary = []
         for i, doc in enumerate(reranked):
             if isinstance(doc, dict):
@@ -350,11 +579,6 @@ class ActiveTrace:
                 score = 0.0
 
             doc_text = chunk.get("content") or chunk.get("original_text") or chunk.get("text") or ""
-            if len(doc_text) > 120:
-                doc_preview = doc_text[:120] + "..."
-            else:
-                doc_preview = doc_text
-
             title = chunk.get("breadcrumb") or chunk.get("section_title") or ""
             article = chunk.get("section_title") or ""
             cid = chunk.get("chunk_id", f"c_{i}")
@@ -365,7 +589,7 @@ class ActiveTrace:
                 "rerank_score": round(float(score), 4),
                 "article": article,
                 "title": title,
-                "preview": doc_preview
+                "content": doc_text
             })
 
         span_data = {
@@ -377,46 +601,47 @@ class ActiveTrace:
         }
         self.spans.append(span_data)
 
-        # Langfuse span
-        if self.lf_root:
-            try:
-                s3 = self.lf_root.start_observation(
-                    name="step3_reranking",
-                    input={"query": query, "input_candidates": len(candidates)},
-                    metadata={"step": 3, "rerank_model": "bge-reranker-v2-m3", "duration_ms": duration_ms}
-                )
-                s3.update(output={"top_reranked": rerank_summary})
-                s3.end()
-            except Exception as e:
-                logger.debug(f"Langfuse s3 error: {e}")
-
         # Phoenix span (Chuẩn OpenInference RERANKER)
         if self.tracer.is_phoenix_active and self.tracer.px_tracer:
             try:
-                s_px = self.tracer.px_tracer.start_span("step3_reranking", context=self.px_context)
+                s_px = self.tracer.px_tracer.start_span("cross_encoder_reranker", context=self.px_context)
                 if PHOENIX_AVAILABLE:
                     s_px.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, OpenInferenceSpanKindValues.RERANKER.value)
-                    s_px.set_attribute(SpanAttributes.INPUT_VALUE, query)
-
-                    if reranked:
-                        first_doc = reranked[0]
-                        if isinstance(first_doc, dict):
-                            best_score = first_doc.get("rerank_score", first_doc.get("relevance_score", first_doc.get("score", 0.0)))
-                        elif isinstance(first_doc, tuple) and len(first_doc) >= 2:
-                            best_score = first_doc[1]
-                        else:
-                            best_score = 0.0
-                    else:
-                        best_score = 0.0
-
-                    s_px.set_attribute(
-                        SpanAttributes.OUTPUT_VALUE,
-                        f"Đã xếp hạng lại {len(candidates)} ứng viên -> Top {len(reranked)} chunks chuẩn xác nhất (Điểm cao nhất: {best_score:.4f})"
-                    )
                     s_px.set_attribute(RerankerAttributes.RERANKER_QUERY, query)
                     s_px.set_attribute(RerankerAttributes.RERANKER_MODEL_NAME, "bge-reranker-v2-m3")
                     s_px.set_attribute(RerankerAttributes.RERANKER_TOP_K, len(reranked))
 
+                    # 1. Input candidates summary
+                    input_candidates_summary = []
+                    for i, doc in enumerate(candidates):
+                        if isinstance(doc, dict):
+                            c_item = doc.get("chunk", doc)
+                            c_score = doc.get("rrf_score", doc.get("score", 0.0))
+                        elif isinstance(doc, tuple) and len(doc) >= 2:
+                            c_item = doc[0]
+                            c_score = doc[1]
+                        else:
+                            c_item = doc
+                            c_score = 0.0
+
+                        c_id = c_item.get("chunk_id", f"c_{i}")
+                        c_title = c_item.get("breadcrumb") or c_item.get("section_title") or ""
+                        c_text = c_item.get("content") or c_item.get("original_text") or c_item.get("text") or ""
+                        c_source = c_item.get("source", "")
+
+                        input_candidates_summary.append({
+                            "input_rank": i + 1,
+                            "chunk_id": str(c_id),
+                            "initial_score": round(float(c_score), 4),
+                            "source": c_source,
+                            "breadcrumb": c_title,
+                            "content": c_text,
+                            "char_count": len(c_text)
+                        })
+
+                    # 2. Output reranked summary
+                    reranked_results = []
+                    best_score = 0.0
                     for i, doc in enumerate(reranked):
                         if isinstance(doc, dict):
                             c_item = doc.get("chunk", doc)
@@ -431,26 +656,78 @@ class ActiveTrace:
                         c_text = c_item.get("content") or c_item.get("original_text") or c_item.get("text") or ""
                         c_id = c_item.get("chunk_id", f"chunk_{i}")
                         c_title = c_item.get("breadcrumb") or c_item.get("section_title") or ""
+                        c_source = c_item.get("source", "")
 
-                        # Chuẩn OpenInference RERANKER output documents
+                        if i == 0:
+                            best_score = round(float(c_score), 4)
+
+                        orig_rank = None
+                        for inc in input_candidates_summary:
+                            if inc["chunk_id"] == str(c_id):
+                                orig_rank = inc["input_rank"]
+                                break
+
+                        if orig_rank is not None:
+                            rank_shift = orig_rank - (i + 1)
+                        else:
+                            rank_shift = 0
+
+                        if rank_shift > 0:
+                            shift_str = f"+{rank_shift}"
+                        else:
+                            shift_str = str(rank_shift)
+
+                        reranked_results.append({
+                            "final_rank": i + 1,
+                            "chunk_id": str(c_id),
+                            "cross_encoder_score": round(float(c_score), 4),
+                            "original_rank": orig_rank,
+                            "rank_shift": shift_str,
+                            "source": c_source,
+                            "breadcrumb": c_title,
+                            "content": c_text,
+                            "char_count": len(c_text)
+                        })
+
+                        # OpenInference RERANKER_OUTPUT_DOCUMENTS
                         r_prefix = f"{RerankerAttributes.RERANKER_OUTPUT_DOCUMENTS}.{i}"
                         s_px.set_attribute(f"{r_prefix}.document.id", str(c_id))
                         s_px.set_attribute(f"{r_prefix}.document.score", float(c_score))
-                        s_px.set_attribute(f"{r_prefix}.document.content", c_text[:500])
+                        s_px.set_attribute(f"{r_prefix}.document.content", c_text)
 
-                        # Chuẩn OpenInference RETRIEVAL_DOCUMENTS để hiển thị bảng tài liệu trên Phoenix
+                        # OpenInference RETRIEVAL_DOCUMENTS
                         ret_prefix = f"{SpanAttributes.RETRIEVAL_DOCUMENTS}.{i}"
                         s_px.set_attribute(f"{ret_prefix}.document.id", str(c_id))
                         s_px.set_attribute(f"{ret_prefix}.document.score", float(c_score))
-                        s_px.set_attribute(f"{ret_prefix}.document.content", c_text[:500])
+                        s_px.set_attribute(f"{ret_prefix}.document.content", c_text)
                         s_px.set_attribute(f"{ret_prefix}.document.metadata", json.dumps({
-                            "title": c_title,
+                            "source": c_source,
+                            "breadcrumb": c_title,
                             "rank": i + 1,
-                            "rerank_score": float(c_score)
+                            "cross_encoder_score": float(c_score)
                         }, ensure_ascii=False))
+
+                    inp_obj = {
+                        "query": query,
+                        "model": "bge-reranker-v2-m3",
+                        "total_input_candidates": len(candidates),
+                        "requested_top_k": len(reranked),
+                        "candidates_before_rerank": input_candidates_summary
+                    }
+                    out_obj = {
+                        "model": "bge-reranker-v2-m3",
+                        "rerank_latency_ms": duration_ms,
+                        "reranked_top_k": len(reranked),
+                        "best_relevance_score": best_score,
+                        "reranked_results": reranked_results
+                    }
+                    s_px.set_attribute(SpanAttributes.INPUT_MIME_TYPE, "application/json")
+                    s_px.set_attribute(SpanAttributes.INPUT_VALUE, json.dumps(inp_obj, ensure_ascii=False, indent=2))
+                    s_px.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, "application/json")
+                    s_px.set_attribute(SpanAttributes.OUTPUT_VALUE, json.dumps(out_obj, ensure_ascii=False, indent=2))
                 s_px.end()
             except Exception as e:
-                logger.debug(f"Phoenix s3 error: {e}")
+                logger.debug(f"Phoenix cross_encoder_reranker error: {e}")
 
     def record_synthesis(self, synthesized, duration_ms):
         """Bước 4: Ghi nhận vết Context Synthesizer (Markdown Context, Legal Citations)"""
@@ -470,47 +747,7 @@ class ActiveTrace:
         }
         self.spans.append(span_data)
 
-        # Langfuse span
-        if self.lf_root:
-            try:
-                s4 = self.lf_root.start_observation(
-                    name="step4_context_synthesizer",
-                    input={"sources_count": len(sources)},
-                    metadata={"step": 4, "tokens_estimated": tokens_est, "duration_ms": duration_ms, "chunks_included": chunks_used}
-                )
-                if len(formatted_context) > 200:
-                    ctx_preview = formatted_context[:200] + "..."
-                else:
-                    ctx_preview = formatted_context
-
-                s4.update(output={
-                    "legal_citations": citations,
-                    "sources_used": sources,
-                    "context_preview": ctx_preview,
-                    "tokens": tokens_est
-                })
-                s4.end()
-            except Exception as e:
-                logger.debug(f"Langfuse s4 error: {e}")
-
-        # Phoenix span
-        if self.tracer.is_phoenix_active and self.tracer.px_tracer:
-            try:
-                s_px = self.tracer.px_tracer.start_span("step4_context_synthesizer", context=self.px_context)
-                if PHOENIX_AVAILABLE:
-                    s_px.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, OpenInferenceSpanKindValues.CHAIN.value)
-                    s_px.set_attribute(SpanAttributes.INPUT_VALUE, f"Đầu vào {chunks_used} chunks từ kết quả Reranking")
-                    s_px.set_attribute(
-                        SpanAttributes.OUTPUT_VALUE,
-                        f"Đóng gói Markdown Context ({tokens_est} tokens) kèm {len(citations)} trích dẫn pháp lý [Điều/Khoản]"
-                    )
-                    s_px.set_attribute("synthesis.citations", json.dumps(citations, ensure_ascii=False))
-                    s_px.set_attribute("synthesis.sources", json.dumps(sources, ensure_ascii=False))
-                    s_px.set_attribute("synthesis.estimated_tokens", tokens_est)
-                    s_px.set_attribute("synthesis.chunks_included", chunks_used)
-                s_px.end()
-            except Exception as e:
-                logger.debug(f"Phoenix s4 error: {e}")
+        # (Phoenix span omitted for Step 4 to keep dashboard focused strictly on Chunking, Query Parser, Embedding, VectorDB, Reranker)
 
     def record_llm_serving(self, query, result, model, duration_ms):
         """Bước 5: Ghi nhận vết LLM Serving (Model, Guardrails, Tokens & Generation)"""
@@ -536,43 +773,7 @@ class ActiveTrace:
         }
         self.spans.append(span_data)
 
-        # Langfuse Generation observation
-        if self.lf_root:
-            try:
-                gen = self.lf_root.start_observation(
-                    name="step5_llm_serving",
-                    as_type="generation",
-                    model=model,
-                    input=[{"role": "user", "content": query}],
-                    metadata={"step": 5, "duration_ms": duration_ms}
-                )
-                gen.update(
-                    output=answer,
-                    usage_details={
-                        "input": prompt_tokens,
-                        "output": completion_tokens,
-                        "total": total_tokens
-                    }
-                )
-                gen.end()
-            except Exception as e:
-                logger.debug(f"Langfuse s5 error: {e}")
-
-        # Phoenix span (Chuẩn OpenInference LLM)
-        if self.tracer.is_phoenix_active and self.tracer.px_tracer:
-            try:
-                s_px = self.tracer.px_tracer.start_span("step5_llm_serving", context=self.px_context)
-                if PHOENIX_AVAILABLE:
-                    s_px.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, OpenInferenceSpanKindValues.LLM.value)
-                    s_px.set_attribute(SpanAttributes.LLM_MODEL_NAME, model)
-                    s_px.set_attribute(SpanAttributes.INPUT_VALUE, query)
-                    s_px.set_attribute(SpanAttributes.OUTPUT_VALUE, answer)
-                    s_px.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_PROMPT, prompt_tokens)
-                    s_px.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_COMPLETION, completion_tokens)
-                    s_px.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_TOTAL, total_tokens)
-                s_px.end()
-            except Exception as e:
-                logger.debug(f"Phoenix s5 error: {e}")
+        # (Phoenix span omitted for Step 5 to keep dashboard focused strictly on Chunking, Query Parser, Embedding, VectorDB, Reranker)
 
     def record_guardrail_block(self, reason, details=None, duration_ms=0.0):
         """Ghi nhận vết chặn an ninh từ Banking Guardrails (Prompt Injection, Fraud, PII)"""
@@ -589,55 +790,24 @@ class ActiveTrace:
         }
         self.spans.append(span_data)
 
-        # Langfuse span
-        if self.lf_root:
-            try:
-                sg = self.lf_root.start_observation(
-                    name="guardrail_block",
-                    input={"reason": reason},
-                    metadata={"blocked": True, "details": dt_str}
-                )
-                sg.update(output={"status": "BLOCKED", "reason": reason})
-                sg.end()
-            except Exception as e:
-                logger.debug(f"Langfuse guardrail error: {e}")
-
-        # Phoenix span
-        if self.tracer.is_phoenix_active and self.tracer.px_tracer:
-            try:
-                s_px = self.tracer.px_tracer.start_span("guardrail_block", context=self.px_context)
-                if PHOENIX_AVAILABLE:
-                    s_px.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, OpenInferenceSpanKindValues.GUARDRAIL.value)
-                    s_px.set_attribute(SpanAttributes.INPUT_VALUE, self.query)
-                    s_px.set_attribute(SpanAttributes.OUTPUT_VALUE, f"BLOCKED: {reason}")
-                    s_px.set_attribute("guardrail.blocked", True)
-                    s_px.set_attribute("guardrail.reason", reason)
-                s_px.end()
-            except Exception as e:
-                logger.debug(f"Phoenix guardrail error: {e}")
+        # (Phoenix span omitted for guardrail to keep dashboard focused strictly on Chunking, Query Parser, Embedding, VectorDB, Reranker)
 
     def record_guardrail_check(self, layer, is_safe, details=None, duration_ms=0.0):
         """Ghi nhận vết kiểm duyệt an toàn nội dung (Output Guardrail audit)"""
+        if details:
+            dt_list = details
+        else:
+            dt_list = []
+
         span_data = {
             "name": f"Guardrail Check: {layer}",
             "duration_ms": duration_ms,
             "is_safe": is_safe,
-            "details": details or []
+            "details": dt_list
         }
         self.spans.append(span_data)
 
-        if self.tracer.is_phoenix_active and self.tracer.px_tracer:
-            try:
-                s_px = self.tracer.px_tracer.start_span("guardrail_check", context=self.px_context)
-                if PHOENIX_AVAILABLE:
-                    s_px.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, OpenInferenceSpanKindValues.GUARDRAIL.value)
-                    s_px.set_attribute(SpanAttributes.INPUT_VALUE, layer)
-                    s_px.set_attribute(SpanAttributes.OUTPUT_VALUE, f"Safe: {is_safe} | Details: {details or []}")
-                    s_px.set_attribute("guardrail.is_safe", is_safe)
-                    s_px.set_attribute("guardrail.layer", layer)
-                s_px.end()
-            except Exception as e:
-                logger.debug(f"Phoenix guardrail check error: {e}")
+        # (Phoenix span omitted for guardrail check to keep dashboard focused strictly on Chunking, Query Parser, Embedding, VectorDB, Reranker)
 
     def finish(
         self,
@@ -653,31 +823,43 @@ class ActiveTrace:
         self.finished = True
         total_latency_ms = round((time.time() - self.start_time) * 1000, 1)
 
-        # Đóng Langfuse Root
-        if self.lf_root:
-            try:
-                self.lf_root.update(
-                    output={"answer": answer, "citations": citations or [], "sources": sources or []},
-                    metadata={
-                        "total_latency_ms": total_latency_ms,
-                        "is_blocked": is_blocked,
-                        "guardrail_trigger": guardrail_trigger or ""
-                    }
-                )
-                self.lf_root.end()
-                # Flush bất đồng bộ
-                if self.tracer.lf_client:
-                    self.tracer.lf_client.flush()
-            except Exception as e:
-                logger.debug(f"Langfuse flush error: {e}")
-
         # Đóng Phoenix Root
         if self.px_root_span:
             try:
                 if PHOENIX_AVAILABLE:
-                    self.px_root_span.set_attribute(SpanAttributes.OUTPUT_VALUE, answer)
-                    self.px_root_span.set_attribute("rag.citations", json.dumps(citations or [], ensure_ascii=False))
-                    self.px_root_span.set_attribute("rag.sources", json.dumps(sources or [], ensure_ascii=False))
+                    if is_blocked:
+                        status_str = "BLOCKED"
+                    else:
+                        status_str = "COMPLETED"
+
+                    if citations:
+                        cit_list = citations
+                    else:
+                        cit_list = []
+
+                    if sources:
+                        src_list = sources
+                    else:
+                        src_list = []
+
+                    if answer:
+                        ans_summary = answer[:200]
+                    else:
+                        ans_summary = ""
+
+                    root_out = {
+                        "status": status_str,
+                        "total_latency_ms": total_latency_ms,
+                        "selected_sources_count": len(src_list),
+                        "top_sources": src_list[:5],
+                        "legal_citations_count": len(cit_list),
+                        "legal_citations": cit_list,
+                        "answer_preview": ans_summary
+                    }
+                    self.px_root_span.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, "application/json")
+                    self.px_root_span.set_attribute(SpanAttributes.OUTPUT_VALUE, json.dumps(root_out, ensure_ascii=False, indent=2))
+                    self.px_root_span.set_attribute("rag.citations", json.dumps(cit_list, ensure_ascii=False))
+                    self.px_root_span.set_attribute("rag.sources", json.dumps(src_list, ensure_ascii=False))
                     self.px_root_span.set_attribute("rag.total_latency_ms", total_latency_ms)
                     self.px_root_span.set_attribute("rag.is_blocked", is_blocked)
                     if guardrail_trigger:
@@ -723,7 +905,7 @@ class ActiveTrace:
 class BankingTracer:
     """
     Trình quản lý Tracing tập trung cho toàn bộ hệ thống RAG Banking.
-    Điều phối trực tiếp Langfuse và Arize Phoenix.
+    Điều phối trực tiếp Arize Phoenix và Local Tracing.
     """
 
     def __init__(self, config=None):
@@ -731,7 +913,7 @@ class BankingTracer:
         self.config = config or Config()
 
         self.enabled = getattr(self.config, "ENABLE_TRACING", True)
-        self.enable_langfuse = getattr(self.config, "ENABLE_LANGFUSE", True)
+        self.enable_langfuse = False
         self.enable_phoenix = getattr(self.config, "ENABLE_PHOENIX", True)
 
         # Thư mục lưu vết (đặt trực tiếp trong phân hệ tracing)
@@ -742,7 +924,7 @@ class BankingTracer:
         self.trace_dir.mkdir(parents=True, exist_ok=True)
         self.trace_log_file = self.trace_dir / "rag_traces.jsonl"
 
-        # Khởi tạo trạng thái Langfuse & Phoenix
+        # Khởi tạo trạng thái Phoenix & Local Tracing
         self.lf_client = None
         self.is_langfuse_active = False
 
@@ -750,28 +932,7 @@ class BankingTracer:
         self.is_phoenix_active = False
 
         if self.enabled:
-            self._init_langfuse()
             self._init_phoenix()
-
-    def _init_langfuse(self):
-        """Khởi tạo kết nối Langfuse nếu có khóa API hoặc cấu hình đầy đủ"""
-        if not self.enable_langfuse or not LANGFUSE_AVAILABLE:
-            return
-
-        pk = getattr(self.config, "LANGFUSE_PUBLIC_KEY", "") or os.getenv("LANGFUSE_PUBLIC_KEY", "")
-        sk = getattr(self.config, "LANGFUSE_SECRET_KEY", "") or os.getenv("LANGFUSE_SECRET_KEY", "")
-        host = getattr(self.config, "LANGFUSE_HOST", "") or os.getenv("LANGFUSE_HOST", "")
-
-        if pk and sk and host:
-            try:
-                self.lf_client = Langfuse(public_key=pk, secret_key=sk, host=host)
-                self.is_langfuse_active = True
-                print(f"📡 [Langfuse] Đã kết nối Langfuse Observability ({host})")
-            except Exception as e:
-                logger.warning(f"Không thể khởi tạo Langfuse client: {e}")
-                self.is_langfuse_active = False
-        else:
-            logger.debug("[Langfuse] Thiếu LANGFUSE_PUBLIC_KEY/SECRET_KEY/HOST. Chế độ Langfuse tạm thời tắt.")
 
     def _init_phoenix(self):
         """Khởi tạo kết nối Arize Phoenix qua OpenTelemetry TracerProvider"""
@@ -789,16 +950,20 @@ class BankingTracer:
         # Kiểm tra nhanh xem collector có sẵn sàng không
         if _check_endpoint_reachable(endpoint, timeout=0.3):
             try:
-                if not _PHOENIX_REGISTERED:
-                    phoenix_register(
+                global _PHOENIX_REGISTERED, _GLOBAL_PX_TRACER
+                if not _PHOENIX_REGISTERED or _GLOBAL_PX_TRACER is None:
+                    provider = phoenix_register(
                         project_name=project_name,
                         endpoint=endpoint,
                         batch=False,
                         protocol="http/protobuf",
-                        verbose=False
+                        verbose=False,
+                        set_global_tracer_provider=False,
+                        auto_instrument=False
                     )
                     _PHOENIX_REGISTERED = True
-                self.px_tracer = otel_trace.get_tracer("rag_banking_tracer")
+                    _GLOBAL_PX_TRACER = provider.get_tracer("rag_banking_tracer")
+                self.px_tracer = _GLOBAL_PX_TRACER
                 self.is_phoenix_active = True
                 print(f"🔥 [Phoenix] Đã kết nối Arize Phoenix Observability ({endpoint})")
             except Exception as e:
@@ -809,53 +974,210 @@ class BankingTracer:
             self.is_phoenix_active = False
             logger.debug(f"[Phoenix] Server chưa bật tại {endpoint}. Khởi chạy bằng 'python scripts/run_phoenix.py'.")
 
-    def trace_chunking(self, file_path, num_chunks, duration_ms, details=None):
+    def trace_chunking(self, file_path, num_chunks, duration_ms, details=None, chunks=None, sample_chunks=None):
         """
         Ghi vết phân đoạn tài liệu DLA Layout-Aware độc lập (pha Ingestion).
+        Bao gồm toàn bộ tất cả chunks trích xuất được và nội dung đầy đủ.
         Hiển thị ngay trên Phoenix dashboard dưới dạng ROOT SPAN.
         """
         fname = Path(file_path).name
+        if details:
+            dt_dict = details
+        else:
+            dt_dict = {}
+
+        if chunks is not None:
+            raw_chunks = chunks
+        elif sample_chunks is not None:
+            raw_chunks = sample_chunks
+        else:
+            raw_chunks = []
+
+        extracted_chunks_list = []
+        total_characters = 0
+        total_tokens = 0
+
+        for i, c in enumerate(raw_chunks):
+            if isinstance(c, dict):
+                c_id = c.get("chunk_id", f"chunk_{i + 1}")
+                c_bc = c.get("breadcrumb", "")
+                c_title = c.get("section_title", "")
+                c_tok = c.get("token_count", 0)
+                c_raw = c.get("content", "") or c.get("original_text", "") or c.get("text", "")
+            else:
+                c_id = getattr(c, "chunk_id", f"chunk_{i + 1}")
+                c_bc = getattr(c, "breadcrumb", "")
+                c_title = getattr(c, "section_title", "")
+                c_tok = getattr(c, "token_count", 0)
+                c_raw = getattr(c, "content", "") or getattr(c, "original_text", "") or getattr(c, "text", "")
+
+            char_cnt = len(c_raw)
+            total_characters += char_cnt
+            if isinstance(c_tok, (int, float)):
+                total_tokens += int(c_tok)
+
+            extracted_chunks_list.append({
+                "chunk_index": i + 1,
+                "chunk_id": str(c_id),
+                "breadcrumb": c_bc,
+                "section_title": c_title,
+                "token_count": c_tok,
+                "char_count": char_cnt,
+                "content": c_raw,
+                "full_text_content": c_raw
+            })
+
+        if num_chunks:
+            final_count = num_chunks
+        else:
+            final_count = len(extracted_chunks_list)
+
+        if extracted_chunks_list:
+            avg_tok = round(total_tokens / len(extracted_chunks_list), 1)
+            avg_ch = round(total_characters / len(extracted_chunks_list), 1)
+        else:
+            avg_tok = 0
+            avg_ch = 0
+
         record = {
             "query": f"Ingestion Chunking: {fname}",
             "file_path": str(file_path),
-            "num_chunks": num_chunks,
+            "num_chunks": final_count,
+            "total_tokens": total_tokens,
             "total_latency_ms": duration_ms,
             "timestamp": time.time(),
             "spans": [{
                 "name": "DLA Layout-Aware Chunking",
                 "duration_ms": duration_ms,
                 "file_path": str(file_path),
-                "num_chunks": num_chunks,
-                "details": details or {}
+                "num_chunks": final_count,
+                "details": dt_dict
             }]
         }
         self.save_local_log(record)
 
         if self.is_phoenix_active and self.px_tracer:
             try:
-                s_px = self.px_tracer.start_span("dla_layout_aware_chunking")
+                s_px = self.px_tracer.start_span("chunking_dla_layout_aware")
                 if PHOENIX_AVAILABLE:
                     s_px.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, OpenInferenceSpanKindValues.CHAIN.value)
-                    s_px.set_attribute(SpanAttributes.INPUT_VALUE, f"Tài liệu ngân hàng đầu vào: {file_path}")
-                    s_px.set_attribute(
-                        SpanAttributes.OUTPUT_VALUE,
-                        f"Đã trích xuất {num_chunks} chunks cấu trúc Breadcrumb bảo toàn bố cục văn bản"
-                    )
+
+                    inp_payload = {
+                        "action": "document_layout_aware_chunking",
+                        "file_path": str(file_path),
+                        "file_name": fname,
+                        "chunking_strategy": "DLA Layout-Aware Hierarchy Chunking (Breadcrumb preserved)",
+                        "hierarchy_rules": [
+                            "Preserve document heading hierarchy (I. -> 1. -> a) -> Điều)",
+                            "Attach contextual breadcrumb navigation prefix to each chunk",
+                            "Preserve table structures and legal clauses"
+                        ],
+                        "options": dt_dict
+                    }
+
+                    out_payload = {
+                        "status": "SUCCESS",
+                        "total_chunks_extracted": final_count,
+                        "chunking_duration_ms": duration_ms,
+                        "summary_statistics": {
+                            "total_chunks": final_count,
+                            "total_characters": total_characters,
+                            "total_tokens": total_tokens,
+                            "average_tokens_per_chunk": avg_tok,
+                            "average_characters_per_chunk": avg_ch
+                        },
+                        "extracted_chunks": extracted_chunks_list
+                    }
+
+                    s_px.set_attribute(SpanAttributes.INPUT_MIME_TYPE, "application/json")
+                    s_px.set_attribute(SpanAttributes.INPUT_VALUE, json.dumps(inp_payload, ensure_ascii=False, indent=2))
+                    s_px.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, "application/json")
+                    s_px.set_attribute(SpanAttributes.OUTPUT_VALUE, json.dumps(out_payload, ensure_ascii=False, indent=2))
                     s_px.set_attribute("chunking.file_path", str(file_path))
-                    s_px.set_attribute("chunking.num_chunks", num_chunks)
+                    s_px.set_attribute("chunking.num_chunks", final_count)
                     s_px.set_attribute("chunking.duration_ms", duration_ms)
-                    if details:
-                        for k, v in details.items():
-                            s_px.set_attribute(f"chunking.{k}", str(v))
+                    s_px.set_attribute("chunking.total_characters", total_characters)
+                    s_px.set_attribute("chunking.total_tokens", total_tokens)
                 s_px.end()
             except Exception as e:
                 logger.debug(f"Phoenix trace_chunking error: {e}")
 
-    def trace_embedding(self, num_texts, dimension, duration_ms, model_name=None, cache_hits=0):
+    def trace_embedding(
+        self,
+        num_texts,
+        dimension,
+        duration_ms,
+        model_name=None,
+        cache_hits=0,
+        chunks=None,
+        vectors=None
+    ):
         """
         Ghi vết nhúng vector độc lập (pha Ingestion indexing).
+        Bao gồm thông tin mô hình, tiền tố instruction, vector preview và L2 norm.
         Hiển thị ngay trên Phoenix dashboard dưới dạng ROOT SPAN.
         """
+        if model_name:
+            chosen_model = model_name
+        else:
+            chosen_model = "multilingual-e5-large"
+
+        input_chunks_summary = []
+        embedded_chunks_details = []
+
+        if chunks:
+            for i, c in enumerate(chunks):
+                if isinstance(c, dict):
+                    c_id = c.get("chunk_id", f"chunk_{i + 1}")
+                    c_bc = c.get("breadcrumb", "")
+                    c_raw = c.get("content", "") or c.get("original_text", "") or c.get("text", "")
+                    c_vec = c.get("vector")
+                else:
+                    c_id = getattr(c, "chunk_id", f"chunk_{i + 1}")
+                    c_bc = getattr(c, "breadcrumb", "")
+                    c_raw = getattr(c, "content", "") or getattr(c, "original_text", "") or getattr(c, "text", "")
+                    c_vec = getattr(c, "vector", None)
+
+                if c_bc:
+                    formatted_passage = f"passage: [Ngữ cảnh: {c_bc}]\n{c_raw}"
+                else:
+                    formatted_passage = f"passage: {c_raw}"
+
+                input_chunks_summary.append({
+                    "chunk_index": i + 1,
+                    "chunk_id": str(c_id),
+                    "breadcrumb": c_bc,
+                    "formatted_input_for_model": formatted_passage
+                })
+
+                if c_vec is not None and isinstance(c_vec, (list, tuple)):
+                    v_list = list(c_vec)
+                    v_first8 = [round(float(x), 5) for x in v_list[:8]]
+                    v_first10 = [round(float(x), 6) for x in v_list[:10]]
+                    v_norm = round(math.sqrt(sum(float(x) * float(x) for x in v_list)), 4)
+                    v_prev = f"[{', '.join(str(x) for x in v_first8)}, ... ({len(v_list)} dimensions)]"
+                    v_dim = len(v_list)
+                else:
+                    v_first8 = []
+                    v_first10 = []
+                    v_norm = 1.0
+                    v_prev = f"[{dimension}-dim vector generated]"
+                    v_dim = dimension
+
+                embedded_chunks_details.append({
+                    "chunk_index": i + 1,
+                    "chunk_id": str(c_id),
+                    "breadcrumb": c_bc,
+                    "vector_dimension": v_dim,
+                    "l2_norm": v_norm,
+                    "vector_preview": v_prev,
+                    "first_10_floats": v_first10,
+                    "vector_sample_first_10_floats": v_first10,
+                    "content": c_raw,
+                    "full_text_content": c_raw,
+                    "raw_content": c_raw
+                })
+
         record = {
             "query": f"Ingestion Embedding ({num_texts} chunks)",
             "num_texts": num_texts,
@@ -867,7 +1189,7 @@ class BankingTracer:
                 "duration_ms": duration_ms,
                 "num_texts": num_texts,
                 "dimension": dimension,
-                "model": model_name or "multilingual-e5-large",
+                "model": chosen_model,
                 "cache_hits": cache_hits
             }]
         }
@@ -875,15 +1197,32 @@ class BankingTracer:
 
         if self.is_phoenix_active and self.px_tracer:
             try:
-                s_px = self.px_tracer.start_span("dense_chunk_embedding")
+                s_px = self.px_tracer.start_span("dense_embedding")
                 if PHOENIX_AVAILABLE:
                     s_px.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, OpenInferenceSpanKindValues.EMBEDDING.value)
-                    s_px.set_attribute(SpanAttributes.EMBEDDING_MODEL_NAME, model_name or "multilingual-e5-large")
-                    s_px.set_attribute(SpanAttributes.INPUT_VALUE, f"Nhúng vector cho {num_texts} chunks tài liệu vào Qdrant")
-                    s_px.set_attribute(
-                        SpanAttributes.OUTPUT_VALUE,
-                        f"Đã tạo {num_texts} vector {dimension} chiều (SQLite Cache hits: {cache_hits})"
-                    )
+                    s_px.set_attribute(SpanAttributes.EMBEDDING_MODEL_NAME, chosen_model)
+
+                    inp_payload = {
+                        "action": "ingestion_batch_embedding",
+                        "num_chunks": num_texts,
+                        "model": chosen_model,
+                        "instruction_prefix": "passage: ",
+                        "target_dimension": dimension,
+                        "chunks_to_embed": input_chunks_summary
+                    }
+                    out_payload = {
+                        "status": "BATCH_EMBEDDED_SUCCESS",
+                        "total_vectors_generated": num_texts,
+                        "dimension": dimension,
+                        "sqlite_cache_hits": cache_hits,
+                        "duration_ms": duration_ms,
+                        "embedded_chunks_details": embedded_chunks_details
+                    }
+
+                    s_px.set_attribute(SpanAttributes.INPUT_MIME_TYPE, "application/json")
+                    s_px.set_attribute(SpanAttributes.INPUT_VALUE, json.dumps(inp_payload, ensure_ascii=False, indent=2))
+                    s_px.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, "application/json")
+                    s_px.set_attribute(SpanAttributes.OUTPUT_VALUE, json.dumps(out_payload, ensure_ascii=False, indent=2))
                     s_px.set_attribute("embedding.num_texts", num_texts)
                     s_px.set_attribute("embedding.dimension", dimension)
                     s_px.set_attribute("embedding.cache_hits", cache_hits)
@@ -911,8 +1250,6 @@ class BankingTracer:
 
         # Chỉ báo đồng bộ
         sync_tags = []
-        if self.is_langfuse_active:
-            sync_tags.append("Langfuse: ON")
         if self.is_phoenix_active:
             sync_tags.append("Phoenix: ON")
 
