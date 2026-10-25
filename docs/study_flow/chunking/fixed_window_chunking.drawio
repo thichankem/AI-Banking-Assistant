@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="Electron" modified="2026-10-10T15:20:00.000Z" agent="DrawioEditor" version="24.0.0" type="device">
+  <diagram id="diagram-chunking-1" name="Fixed Window Chunking Algorithm">
+    <mxGraphModel dx="1400" dy="950" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="950" background="#FFFFFF">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- HEADER BANNER -->
+        <mxCell id="header_banner" value="&lt;div style=&quot;font-size: 18px; font-weight: bold; letter-spacing: 0.5px;&quot;&gt;GIẢI PHẪU THUẬT TOÁN: FIXED WINDOW CHUNKING (SLIDING WINDOW &amp; OVERLAP)&lt;/div&gt;&lt;div style=&quot;font-size: 12.5px; margin-top: 5px; opacity: 0.9; font-weight: normal;&quot;&gt;Chuyên Đề RAG Study Flow | Cơ Chế Cắt Đoạn Cửa Sổ Cố Định, Độ Gối Đầu (Overlap) &amp; Xử Lý Ngưỡng Biên Ngữ Cảnh&lt;/div&gt;" vertex="1" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#0F172A;strokeColor=#1E293B;strokeWidth=2;fontColor=#FFFFFF;align=center;verticalAlign=middle;shadow=1;">
+          <mxGeometry x="40" y="20" width="1320" height="65" as="geometry"/>
+        </mxCell>
+
+        <!-- SWIMLANE 1: INPUT & PARAMETERS -->
+        <mxCell id="lane_input" value="BƯỚC 1: ĐẦU VÀO &amp; CẤU HÌNH THAM SỐ (INPUT &amp; HYPERPARAMETERS)" vertex="1" parent="1" style="swimlane;whiteSpace=wrap;html=1;fillColor=#F8FAFC;strokeColor=#94A3B8;strokeWidth=2;fontSize=12;fontStyle=1;fontColor=#1E293B;startSize=28;rounded=1;arcSize=4;shadow=1;">
+          <mxGeometry x="40" y="105" width="370" height="400" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_raw_text" value="&lt;b&gt;📄 Văn Bản Nguồn (Raw Text)&lt;/b&gt;&lt;hr style=&quot;margin:4px 0;&quot;/&gt;Chuỗi ký tự/token ngân hàng liên tục:&lt;br/&gt;&lt;i&gt;T[0 ... L-1]&lt;/i&gt; với tổng độ dài &lt;b&gt;L&lt;/b&gt;&lt;br/&gt;&lt;span style=&quot;color:#64748B; font-size:10px;&quot;&gt;(Ví dụ: Quy chế eKYC, Thông tư 17/NHNN)&lt;/span&gt;" vertex="1" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EFF6FF;strokeColor=#3B82F6;strokeWidth=2;fontSize=11;fontColor=#1E40AF;align=left;spacingLeft=10;shadow=1;">
+          <mxGeometry x="60" y="150" width="330" height="80" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_params" value="&lt;b&gt;⚙️ Bộ Tham Số Cốt Lõi (Hyperparameters)&lt;/b&gt;&lt;hr style=&quot;margin:4px 0;&quot;/&gt;• &lt;b&gt;Window Size (W):&lt;/b&gt; 512 (Độ dài mỗi Chunk)&lt;br/&gt;• &lt;b&gt;Overlap (O):&lt;/b&gt; 128 (Độ gối đầu ngữ cảnh)&lt;br/&gt;• &lt;b&gt;Stride / Step (S):&lt;/b&gt; &lt;span style=&quot;color:#B45309; font-weight:bold;&quot;&gt;S = W - O = 384&lt;/span&gt;&lt;br/&gt;&lt;i style=&quot;font-size:10px; color:#475569;&quot;&gt;(Bước nhảy tịnh tiến của con trỏ đọc mỗi vòng lặp)&lt;/i&gt;" vertex="1" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#FEF3C7;strokeColor=#D97706;strokeWidth=2;fontSize=11;fontColor=#92400E;align=left;spacingLeft=10;shadow=1;">
+          <mxGeometry x="60" y="250" width="330" height="95" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_calc_rule" value="&lt;b&gt;📐 Công Thức Tính Số Lượng Chunk Dự Kiến:&lt;/b&gt;&lt;hr style=&quot;margin:4px 0;&quot;/&gt;&lt;div style=&quot;text-align:center; font-family:monospace; font-size:12px; font-weight:bold; color:#0F172A;&quot;&gt;N = ceil((L - W) / S) + 1&lt;/div&gt;&lt;div style=&quot;font-size:10px; color:#64748B; margin-top:4px;&quot;&gt;Nếu không có overlap (O = 0): &lt;b&gt;N = ceil(L / W)&lt;/b&gt;&lt;/div&gt;" vertex="1" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#F1F5F9;strokeColor=#64748B;strokeWidth=1.5;fontSize=10.5;fontColor=#334155;align=left;spacingLeft=8;">
+          <mxGeometry x="60" y="365" width="330" height="75" as="geometry"/>
+        </mxCell>
+
+        <!-- SWIMLANE 2: EXECUTION LOOP -->
+        <mxCell id="lane_loop" value="BƯỚC 2: VÒNG LẶP CON TRÒ TRƯỢT (SLIDING POINTER LOOP)" vertex="1" parent="1" style="swimlane;whiteSpace=wrap;html=1;fillColor=#F8FAFC;strokeColor=#0284C7;strokeWidth=2;fontSize=12;fontStyle=1;fontColor=#0369A1;startSize=28;rounded=1;arcSize=4;shadow=1;">
+          <mxGeometry x="430" y="105" width="550" height="400" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_init_ptr" value="&lt;b&gt;Khởi Tạo Con Trỏ:&lt;/b&gt;&lt;br/&gt;&lt;code&gt;start_ptr = 0&lt;/code&gt; | &lt;code&gt;chunk_id = 0&lt;/code&gt;" vertex="1" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EEF2FF;strokeColor=#6366F1;strokeWidth=1.5;fontSize=11;fontColor=#3730A3;align=center;shadow=1;">
+          <mxGeometry x="470" y="145" width="210" height="45" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_slice" value="&lt;b&gt;✂️ Cắt Lát (String Slicing):&lt;/b&gt;&lt;hr style=&quot;margin:4px 0;&quot;/&gt;• &lt;code&gt;end_ptr = min(start_ptr + W, L)&lt;/code&gt;&lt;br/&gt;• &lt;code&gt;chunk_text = T[start_ptr : end_ptr]&lt;/code&gt;" vertex="1" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#ECFEFF;strokeColor=#0891B2;strokeWidth=2;fontSize=11;fontColor=#155E75;align=left;spacingLeft=10;shadow=1;">
+          <mxGeometry x="470" y="215" width="210" height="65" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_decision" value="&lt;b&gt;Đã Quét Hết?&lt;/b&gt;&lt;br/&gt;&lt;code&gt;end_ptr &gt;= L ?&lt;/code&gt;" vertex="1" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FEF2F2;strokeColor=#EF4444;strokeWidth=2;fontSize=11;fontColor=#991B1B;fontStyle=1;shadow=1;">
+          <mxGeometry x="750" y="207.5" width="160" height="80" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_advance" value="&lt;b&gt;Tịnh Tiến Con Trỏ (Stride):&lt;/b&gt;&lt;hr style=&quot;margin:3px 0;&quot;/&gt;• &lt;code&gt;start_ptr += S&lt;/code&gt; &lt;span style=&quot;color:#D97706;&quot;&gt;(+384 ký tự)&lt;/span&gt;&lt;br/&gt;• &lt;code&gt;chunk_id += 1&lt;/code&gt;" vertex="1" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#FFFBEB;strokeColor=#F59E0B;strokeWidth=1.5;fontSize=10.5;fontColor=#78350F;align=left;spacingLeft=8;shadow=1;">
+          <mxGeometry x="470" y="325" width="210" height="65" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_end_loop" value="&lt;b&gt;Hoàn Tất Lặp&lt;/b&gt;&lt;br/&gt;Trả về &lt;code&gt;List[Chunk]&lt;/code&gt;" vertex="1" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#ECFDF5;strokeColor=#059669;strokeWidth=2;fontSize=11;fontColor=#065F46;fontStyle=1;align=center;shadow=1;">
+          <mxGeometry x="750" y="330" width="160" height="55" as="geometry"/>
+        </mxCell>
+
+        <!-- SWIMLANE 3: OUTPUT REGISTRY -->
+        <mxCell id="lane_output" value="BƯỚC 3: ĐÓNG GÓI CHUNKS &amp; METADATA" vertex="1" parent="1" style="swimlane;whiteSpace=wrap;html=1;fillColor=#F8FAFC;strokeColor=#059669;strokeWidth=2;fontSize=12;fontStyle=1;fontColor=#047857;startSize=28;rounded=1;arcSize=4;shadow=1;">
+          <mxGeometry x="1000" y="105" width="360" height="400" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_chunk_record" value="&lt;b&gt;📦 Cấu Trúc Bản Ghi Mỗi Chunk:&lt;/b&gt;&lt;hr style=&quot;margin:4px 0;&quot;/&gt;• &lt;b&gt;chunk_id:&lt;/b&gt; 0&lt;br/&gt;• &lt;b&gt;doc_source:&lt;/b&gt; &quot;thong_tu_17_ekyc.md&quot;&lt;br/&gt;• &lt;b&gt;start_idx:&lt;/b&gt; 0 | &lt;b&gt;end_idx:&lt;/b&gt; 512&lt;br/&gt;• &lt;b&gt;char_count:&lt;/b&gt; 512 ký tự&lt;br/&gt;• &lt;b&gt;content:&lt;/b&gt; &quot;Theo quy định mở tài khoản thanh toán bằng phương thức điện tử (eKYC)...&quot;" vertex="1" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#F0FDFA;strokeColor=#0D9488;strokeWidth=2;fontSize=10.5;fontColor=#115E59;align=left;spacingLeft=10;shadow=1;">
+          <mxGeometry x="1020" y="150" width="320" height="135" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="node_downstream" value="&lt;b&gt;🚀 Phục Vụ Các Khâu Tiếp Theo:&lt;/b&gt;&lt;hr style=&quot;margin:4px 0;&quot;/&gt;• &lt;b&gt;Embedding Module:&lt;/b&gt; Vector hóa 1024d từ &lt;code&gt;content&lt;/code&gt;&lt;br/&gt;• &lt;b&gt;BM25 Indexer:&lt;/b&gt; Tách từ vựng nạp Inverted Index&lt;br/&gt;• &lt;b&gt;Citation Linker:&lt;/b&gt; Dùng &lt;code&gt;start_idx, end_idx&lt;/code&gt; định vị chính xác vị trí trong văn bản gốc" vertex="1" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#FAF5FF;strokeColor=#7C3AED;strokeWidth=1.5;fontSize=10.5;fontColor=#4C1D95;align=left;spacingLeft=10;shadow=1;">
+          <mxGeometry x="1020" y="310" width="320" height="120" as="geometry"/>
+        </mxCell>
+
+        <!-- SWIMLANE 4: VISUAL WALKTHROUGH & TRADE-OFFS -->
+        <mxCell id="lane_walkthrough" value="MÔ PHỎNG TRỰC QUAN LÁT CẮT OVERLAP &amp; PHÂN TÍCH ĐÁNH GIÁ (DATA WALKTHROUGH &amp; TRADE-OFFS)" vertex="1" parent="1" style="swimlane;whiteSpace=wrap;html=1;fillColor=#F8FAFC;strokeColor=#475569;strokeWidth=2;fontSize=12;fontStyle=1;fontColor=#1E293B;startSize=28;rounded=1;arcSize=4;shadow=1;">
+          <mxGeometry x="40" y="525" width="1320" height="360" as="geometry"/>
+        </mxCell>
+
+        <!-- Walkthrough Bar Graphics -->
+        <mxCell id="box_chunk0" value="&lt;b&gt;Chunk 0: Ký tự [0 ... 512]&lt;/b&gt;&lt;br/&gt;&quot;...Quy định mở tài khoản thanh toán bằng phương thức điện tử (eKYC)...&quot;" vertex="1" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#EFF6FF;strokeColor=#3B82F6;strokeWidth=2;fontSize=11;fontColor=#1E40AF;align=center;shadow=1;">
+          <mxGeometry x="70" y="575" width="480" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="box_overlap" value="&lt;b&gt;VÙNG GỐI ĐẦU OVERLAP (128 ký tự)&lt;/b&gt;&lt;br/&gt;&lt;span style=&quot;font-size:10px;&quot;&gt;Khoảng [384 ... 512] xuất hiện đồng thời ở cả Chunk 0 và Chunk 1&lt;/span&gt;" vertex="1" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#FEF3C7;strokeColor=#D97706;strokeWidth=2;fontSize=11;fontColor=#92400E;align=center;strokeDasharray=4 4;shadow=1;">
+          <mxGeometry x="380" y="650" width="340" height="55" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="box_chunk1" value="&lt;b&gt;Chunk 1: Ký tự [384 ... 896]&lt;/b&gt;&lt;br/&gt;&quot;...phương thức điện tử (eKYC) phải thực hiện thu thập sinh trắc học và CCCD...&quot;" vertex="1" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#EEF2FF;strokeColor=#6366F1;strokeWidth=2;fontSize=11;fontColor=#3730A3;align=center;shadow=1;">
+          <mxGeometry x="380" y="720" width="480" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="box_box_compare" value="&lt;b&gt;⚖️ SO SÁNH: CÓ OVERLAP VS KHÔNG CÓ OVERLAP TRONG NGÂN HÀNG&lt;/b&gt;&lt;hr style=&quot;margin:4px 0;&quot;/&gt;• &lt;b&gt;Nếu KHÔNG có Overlap (Đoạn mã hiện tại trong fixed_window.py):&lt;/b&gt;&lt;br/&gt;&amp;nbsp;&amp;nbsp;❌ Dễ bị chặt đứt câu giữa chừng: &lt;i&gt;&quot;hạn mức giao dịch tối đa là&quot;&lt;/i&gt; nằm ở Chunk 0, còn &lt;i&gt;&quot;100 triệu VNĐ/ngày&quot;&lt;/i&gt; rơi sang Chunk 1.&lt;br/&gt;&amp;nbsp;&amp;nbsp;❌ Khi người dùng hỏi hạn mức, Retriever chỉ lấy Chunk 0 hoặc Chunk 1, dẫn tới câu trả lời bị cụt ý (*Context Fracture*).&lt;br/&gt;&lt;br/&gt;• &lt;b&gt;Khi CÓ Overlap (Khuyến nghị thực tế):&lt;/b&gt;&lt;br/&gt;&amp;nbsp;&amp;nbsp;✅ Mối liên kết giữa chủ ngữ và vị ngữ được lưu giữ liên tục trong vùng giao thoa.&lt;br/&gt;&amp;nbsp;&amp;nbsp;✅ Đảm bảo mô hình Embedding bắt trọn vẹn ngữ nghĩa của toàn bộ mệnh đề pháp lý." vertex="1" parent="1" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CBD5E1;strokeWidth=1.5;fontSize=11;fontColor=#1E293B;align=left;spacingLeft=10;shadow=1;">
+          <mxGeometry x="880" y="575" width="450" height="205" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="note_recommendation" value="&lt;b&gt;💡 Bước Cải Tiến Tiếp Theo Trong Khóa Học:&lt;/b&gt; Nâng cấp từ Fixed Window sang &lt;b&gt;Paragraph Splitter&lt;/b&gt; hoặc &lt;b&gt;Hierarchy Breadcrumb&lt;/b&gt; (cắt theo ranh giới tiêu đề &amp; dấu chấm câu để không bị cắt giữa một từ)." vertex="1" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#ECFDF5;strokeColor=#059669;strokeWidth=1.5;fontSize=10.5;fontColor=#065F46;align=left;spacingLeft=8;">
+          <mxGeometry x="70" y="800" width="1260" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- CONNECTING EDGES -->
+        <mxCell id="e_raw_params" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#3B82F6;strokeWidth=1.5;" edge="1" parent="1" source="node_raw_text" target="node_params">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e_params_calc" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#D97706;strokeWidth=1.5;" edge="1" parent="1" source="node_params" target="node_calc_rule">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e_config_init" value="Khởi tạo nạp dữ liệu" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#2563EB;strokeWidth=1.5;labelBackgroundColor=#FFFFFF;fontSize=10;fontColor=#1E40AF;" edge="1" parent="1" source="node_raw_text" target="node_init_ptr">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e_init_slice" value="Bắt đầu vòng lặp" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#6366F1;strokeWidth=1.5;labelBackgroundColor=#FFFFFF;fontSize=10;fontColor=#3730A3;" edge="1" parent="1" source="node_init_ptr" target="node_slice">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e_slice_decision" value="Kiểm tra biên" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#0891B2;strokeWidth=1.5;labelBackgroundColor=#FFFFFF;fontSize=10;fontColor=#155E75;" edge="1" parent="1" source="node_slice" target="node_decision">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Decision: Chưa hết -> Dịch Stride (Đi sang trái tránh node_end_loop) -->
+        <mxCell id="e_decision_advance" value="Chưa hết (end_ptr &lt; L)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#D97706;strokeWidth=1.5;labelBackgroundColor=#FFFFFF;fontSize=10;fontColor=#92400E;" edge="1" parent="1" source="node_decision" target="node_advance">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="715" y="247"/>
+              <mxPoint x="715" y="357"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Advance -> Quay lại Slicing (Chạy bên trái, trong swimlane) -->
+        <mxCell id="e_advance_loop" value="start_ptr += S" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#D97706;strokeWidth=1.5;strokeDasharray=4 4;labelBackgroundColor=#FFFFFF;fontSize=10;fontColor=#92400E;" edge="1" parent="1" source="node_advance" target="node_slice">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="450" y="357"/>
+              <mxPoint x="450" y="247"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Decision: Đúng -> Đi thẳng xuống node_end_loop -->
+        <mxCell id="e_decision_end" value="Đúng (Hết text)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#059669;strokeWidth=2;labelBackgroundColor=#FFFFFF;fontSize=10.5;fontColor=#065F46;" edge="1" parent="1" source="node_decision" target="node_end_loop">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- End Loop -> Lưu sang Output Registry -->
+        <mxCell id="e_end_record" value="Lưu trữ chunks" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#059669;strokeWidth=1.5;labelBackgroundColor=#FFFFFF;fontSize=10;fontColor=#047857;" edge="1" parent="1" source="node_end_loop" target="node_chunk_record">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="955" y="357"/>
+              <mxPoint x="955" y="217"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="e_chunk_downstream" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#0D9488;strokeWidth=1.5;" edge="1" parent="1" source="node_chunk_record" target="node_downstream">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

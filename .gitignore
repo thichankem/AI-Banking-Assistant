@@ -130,7 +130,7 @@ all_chunks.json
 # Test Results, Benchmark & Tuning JSON Outputs
 # ==============================================================================
 benchmark/
-!rag_banking/benchmark/
+!agent_banking/benchmark/
 benchmarks/
 **/benchmarks/
 experiment/
@@ -173,13 +173,11 @@ traces/
 **/traces/
 embedding_cache.db
 **/embedding_cache.db
-rag_banking/rag_banking/
+agent_banking/agent_banking/
 
 # ==============================================================================
 # Documentation, Reports, Proposals & Office Files
 # ==============================================================================
-docs/
-**/docs/
 problem.md
 *.docx
 *.doc
@@ -188,6 +186,14 @@ problem.md
 *.ppt
 *.xlsx
 *.xls
+!docs/**
+!docs/**/*.pdf
+!docs/**/*.docx
+!docs/**/*.doc
+!docs/**/*.pptx
+!docs/**/*.ppt
+!docs/**/*.xlsx
+!docs/**/*.xls
 
 # ==============================================================================
 # Jupyter Notebook Checkpoints

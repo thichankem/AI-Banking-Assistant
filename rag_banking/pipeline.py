@@ -318,22 +318,25 @@ class BankingRAGPipeline:
     def step5_llm_serving(
         self,
         query,
-        synthesized_context
+        synthesized_context,
+        persona_config=None
     ):
         """
         Bước 5: LLM Serving
-        Truyền ngữ cảnh kèm System Guardrails ngân hàng vào LLM (DeepSeek / Gemini) sinh câu trả lời chính xác, tránh bịa đặt số liệu.
+        Truyền ngữ cảnh kèm Dynamic Persona & System Guardrails ngân hàng vào LLM (DeepSeek / Gemini) sinh câu trả lời chính xác, tránh bịa đặt số liệu.
         """
         serving_result = self.generator.generate_answer(
             query=query,
-            synthesized_context=synthesized_context
+            synthesized_context=synthesized_context,
+            persona_config=persona_config
         )
         return serving_result
 
     def run_pipeline(
         self,
         query,
-        filter_dict=None
+        filter_dict=None,
+        persona_config=None
     ):
         """
         Thực thi toàn trình 5 bước AI Banking RAG:
@@ -434,13 +437,16 @@ class BankingRAGPipeline:
 
             # Bước 5: LLM Serving
             t5 = time.time()
-            serving_result = self.step5_llm_serving(sanitized_query, synthesized_context)
+            serving_result = self.step5_llm_serving(sanitized_query, synthesized_context, persona_config=persona_config)
             t5_ms = round((time.time() - t5) * 1000, 1)
             trace.record_llm_serving(
                 query=sanitized_query,
                 result=serving_result,
                 model=self.config.LLM_MODEL,
-                duration_ms=t5_ms
+                duration_ms=t5_ms,
+                persona=serving_result.get("persona", "advisor"),
+                tone=serving_result.get("tone", "formal"),
+                format_style=serving_result.get("format_style", "standard")
             )
 
             # -------------------------------------------------------------
