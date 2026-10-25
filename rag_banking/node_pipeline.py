@@ -56,9 +56,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from rag_banking.config import Config
-from rag_banking.pipeline import BankingRAGPipeline
-from rag_banking.query_parser.rag_query_parser import ParsedQuery
+from agent_banking.config import Config
+from agent_banking.pipeline import BankingRAGPipeline
+from agent_banking.query_parser.rag_query_parser import ParsedQuery
 
 
 class NodePipeline:
@@ -577,18 +577,18 @@ class NodePipeline:
         return final_answers
 
     # =========================================================================
-    # QUẢN LÝ VÀ CHẠY PIPELINE TỪ FOLDER CỦA TỪNG NODE (rag_banking/<node>/)
+    # QUẢN LÝ VÀ CHẠY PIPELINE TỪ FOLDER CỦA TỪNG NODE (agent_banking/<node>/)
     # =========================================================================
     @staticmethod
     def get_node_folders() -> dict[str, dict[str, Path]]:
         """
-        Trả về đường dẫn thư mục input và output cố định tại từng node trong rag_banking.
+        Trả về đường dẫn thư mục input và output cố định tại từng node trong agent_banking.
         """
         nodes = ["chunking", "embedding", "vector_db", "query_parser", "retrieval", "reranking", "generator"]
         folders: dict[str, dict[str, Path]] = {}
         for n in nodes:
-            in_p = PROJECT_ROOT / "rag_banking" / n / "input"
-            out_p = PROJECT_ROOT / "rag_banking" / n / "output"
+            in_p = PROJECT_ROOT / "agent_banking" / n / "input"
+            out_p = PROJECT_ROOT / "agent_banking" / n / "output"
             in_p.mkdir(parents=True, exist_ok=True)
             out_p.mkdir(parents=True, exist_ok=True)
             folders[n] = {"input": in_p, "output": out_p}
@@ -598,13 +598,13 @@ class NodePipeline:
         """
         Chạy toàn trình pipeline bằng cách đọc trực tiếp từ thư mục input của từng Node
         và ghi kết quả sang thư mục output của từng Node:
-        1. rag_banking/chunking/input -> rag_banking/chunking/output
-        2. Chuyển chunks -> rag_banking/embedding/input -> rag_banking/embedding/output
-        3. Chuyển embedded_chunks -> rag_banking/vector_db/input -> rag_banking/vector_db/output
-        4. rag_banking/query_parser/input -> rag_banking/query_parser/output
-        5. Chuyển parsed_queries -> rag_banking/retrieval/input -> rag_banking/retrieval/output
-        6. Chuyển candidates -> rag_banking/reranking/input -> rag_banking/reranking/output
-        7. Chuyển top_chunks -> rag_banking/generator/input -> rag_banking/generator/output
+        1. agent_banking/chunking/input -> agent_banking/chunking/output
+        2. Chuyển chunks -> agent_banking/embedding/input -> agent_banking/embedding/output
+        3. Chuyển embedded_chunks -> agent_banking/vector_db/input -> agent_banking/vector_db/output
+        4. agent_banking/query_parser/input -> agent_banking/query_parser/output
+        5. Chuyển parsed_queries -> agent_banking/retrieval/input -> agent_banking/retrieval/output
+        6. Chuyển candidates -> agent_banking/reranking/input -> agent_banking/reranking/output
+        7. Chuyển top_chunks -> agent_banking/generator/input -> agent_banking/generator/output
         """
         f = self.get_node_folders()
 
@@ -682,10 +682,11 @@ class NodePipeline:
             "node_folders": {k: {"input": str(v["input"]), "output": str(v["output"])} for k, v in f.items()}
         }
 
-    def run_single_query_with_node_trace(self, query_text: str) -> dict:
+    def run_single_query_with_node_trace(self, query_text: str, persona_config: dict | None = None) -> dict:
         """
         Thực thi một câu hỏi qua toàn bộ 7 nodes, đồng thời ghi nhận chi tiết
         Input & Output của từng node và lưu file vết vào folder input/output của node đó.
+        Đồng thời kích hoạt Arize Phoenix Tracing và Local Traces.
         """
         t0 = time.time()
         f = self.get_node_folders()
@@ -693,100 +694,175 @@ class NodePipeline:
         # 1. Trạng thái Node 1 (Chunking) & Node 3 (Vector DB)
         total_chunks_stored = self.pipeline.vector_store.count()
 
-        # 2. Node 4: Query Parser
-        t_parse_0 = time.time()
-        parsed_q = self.pipeline.query_parser.parse(query_text)
-        t_parse_ms = round((time.time() - t_parse_0) * 1000, 1)
+        with self.pipeline.tracer.trace_query(query=query_text) as trace:
+            # 0. Node 1: Ghi nhận trạng thái Chunking cơ sở dữ liệu
+            trace.record_chunking_info(
+                total_chunks=total_chunks_stored,
+                max_size=self.config.CHUNK_MAX_SIZE,
+                strategy="DLA Layout-Aware Hierarchy Chunking"
+            )
 
-        # Lưu vết Node 4
-        with open(f["query_parser"]["input"] / "latest_query.json", "w", encoding="utf-8") as fp:
-            json.dump({"query": query_text, "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")}, fp, ensure_ascii=False, indent=2)
-        with open(f["query_parser"]["output"] / "latest_parsed.json", "w", encoding="utf-8") as fp:
-            json.dump(parsed_q.to_dict(), fp, ensure_ascii=False, indent=2)
+            # 1. Tầng 1: Input Guardrail
+            t_guard_in_0 = time.time()
+            input_guard = self.pipeline.guardrails.guard_input(query_text)
+            t_guard_in_ms = round((time.time() - t_guard_in_0) * 1000, 1)
+            in_details = getattr(input_guard, "details", getattr(input_guard, "flags", {}))
+            trace.record_guardrail_check("Input Safety Guardrail", is_safe=input_guard.is_safe, details=in_details, duration_ms=t_guard_in_ms)
 
-        # 3. Node 2: Embedding query
-        t_embed_0 = time.time()
-        q_vec = self.pipeline.embedder.embed_query(parsed_q.normalized_query)
-        t_embed_ms = round((time.time() - t_embed_0) * 1000, 1)
+            if not input_guard.is_safe:
+                reason = input_guard.trigger_reason
+                refusal_text = input_guard.refusal_message or "Yêu cầu bị từ chối do vi phạm quy tắc an toàn ngân hàng."
+                trace.record_guardrail_block(reason=reason, duration_ms=t_guard_in_ms)
+                trace.finish(answer=refusal_text, is_blocked=True, guardrail_trigger=reason)
+                return {
+                    "reply": refusal_text,
+                    "latency_ms": round((time.time() - t0) * 1000, 1),
+                    "citations": [],
+                    "sources": [],
+                    "nodes": {}
+                }
 
-        # Lưu vết Node 2
-        with open(f["embedding"]["input"] / "latest_text.json", "w", encoding="utf-8") as fp:
-            json.dump({"text": parsed_q.normalized_query}, fp, ensure_ascii=False, indent=2)
-        with open(f["embedding"]["output"] / "latest_vector.json", "w", encoding="utf-8") as fp:
-            json.dump({
-                "dimension": len(q_vec),
-                "model": self.config.EMBEDDING_MODEL_1024,
-                "first_5_values": [round(float(v), 5) for v in q_vec[:5]],
-                "latency_ms": t_embed_ms
-            }, fp, ensure_ascii=False, indent=2)
+            # 2. Node 4: Query Parser
+            t_parse_0 = time.time()
+            parsed_q = self.pipeline.query_parser.parse(query_text)
+            t_parse_ms = round((time.time() - t_parse_0) * 1000, 1)
+            trace.record_query_parser(input_query=query_text, parsed=parsed_q, duration_ms=t_parse_ms)
 
-        # 4. Node 5: Hybrid Retrieval (Dense + BM25 với RRF)
-        t_ret_0 = time.time()
-        candidates = self.pipeline.retriever.retrieve(
-            query=parsed_q,
-            top_k=self.config.HYBRID_TOP_K
-        )
-        t_ret_ms = round((time.time() - t_ret_0) * 1000, 1)
+            # Lưu vết Node 4
+            with open(f["query_parser"]["input"] / "latest_query.json", "w", encoding="utf-8") as fp:
+                json.dump({"query": query_text, "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")}, fp, ensure_ascii=False, indent=2)
+            with open(f["query_parser"]["output"] / "latest_parsed.json", "w", encoding="utf-8") as fp:
+                json.dump(parsed_q.to_dict(), fp, ensure_ascii=False, indent=2)
 
-        # Lưu vết Node 5
-        cand_dicts = candidates
-        with open(f["retrieval"]["input"] / "latest_parsed.json", "w", encoding="utf-8") as fp:
-            json.dump(parsed_q.to_dict(), fp, ensure_ascii=False, indent=2)
-        with open(f["retrieval"]["output"] / "latest_candidates.json", "w", encoding="utf-8") as fp:
-            json.dump(cand_dicts, fp, ensure_ascii=False, indent=2)
+            # 3. Node 2: Embedding query
+            t_embed_0 = time.time()
+            q_vec = self.pipeline.embedder.embed_query(parsed_q.normalized_query)
+            t_embed_ms = round((time.time() - t_embed_0) * 1000, 1)
+            trace.record_embedding(
+                num_texts=1,
+                dimension=len(q_vec),
+                duration_ms=t_embed_ms,
+                model_name=self.config.EMBEDDING_MODEL_1024,
+                is_query=True,
+                query_text=parsed_q.normalized_query,
+                query_vector=q_vec
+            )
 
-        # 5. Node 6: Reranking
-        t_rerank_0 = time.time()
-        reranked = self.pipeline.reranker.rerank(
-            query=query_text,
-            candidates=candidates,
-            top_k=self.config.RERANK_TOP_K
-        )
-        t_rerank_ms = round((time.time() - t_rerank_0) * 1000, 1)
+            # Lưu vết Node 2
+            with open(f["embedding"]["input"] / "latest_text.json", "w", encoding="utf-8") as fp:
+                json.dump({"text": parsed_q.normalized_query}, fp, ensure_ascii=False, indent=2)
+            with open(f["embedding"]["output"] / "latest_vector.json", "w", encoding="utf-8") as fp:
+                json.dump({
+                    "dimension": len(q_vec),
+                    "model": self.config.EMBEDDING_MODEL_1024,
+                    "first_5_values": [round(float(v), 5) for v in q_vec[:5]],
+                    "latency_ms": t_embed_ms
+                }, fp, ensure_ascii=False, indent=2)
 
-        # Lưu vết Node 6
-        rerank_dicts = reranked
-        with open(f["reranking"]["input"] / "latest_candidates.json", "w", encoding="utf-8") as fp:
-            json.dump(cand_dicts, fp, ensure_ascii=False, indent=2)
-        with open(f["reranking"]["output"] / "latest_reranked.json", "w", encoding="utf-8") as fp:
-            json.dump(rerank_dicts, fp, ensure_ascii=False, indent=2)
+            # 4. Node 5: Hybrid Retrieval (Dense + BM25 với RRF)
+            t_ret_0 = time.time()
+            candidates = self.pipeline.retriever.retrieve(
+                query=parsed_q,
+                top_k=self.config.HYBRID_TOP_K
+            )
+            t_ret_ms = round((time.time() - t_ret_0) * 1000, 1)
+            trace.record_retrieval(query=query_text, candidates=candidates, duration_ms=t_ret_ms)
 
-        # 6. Node 7: Generator & Guardrails
-        t_gen_0 = time.time()
-        synthesized_context = self.pipeline.step4_context_synthesizer(reranked)
-        serving_result = self.pipeline.step5_llm_serving(query_text, synthesized_context)
-        final_answer = serving_result.get("answer", "")
-        t_gen_ms = round((time.time() - t_gen_0) * 1000, 1)
+            # Lưu vết Node 5
+            cand_dicts = candidates
+            with open(f["retrieval"]["input"] / "latest_parsed.json", "w", encoding="utf-8") as fp:
+                json.dump(parsed_q.to_dict(), fp, ensure_ascii=False, indent=2)
+            with open(f["retrieval"]["output"] / "latest_candidates.json", "w", encoding="utf-8") as fp:
+                json.dump(cand_dicts, fp, ensure_ascii=False, indent=2)
 
-        # Lưu vết Node 7
-        with open(f["generator"]["input"] / "latest_context.json", "w", encoding="utf-8") as fp:
-            json.dump(rerank_dicts, fp, ensure_ascii=False, indent=2)
-        with open(f["generator"]["output"] / "latest_answer.json", "w", encoding="utf-8") as fp:
-            json.dump({
-                "query": query_text,
-                "answer": final_answer,
-                "latency_ms": t_gen_ms
-            }, fp, ensure_ascii=False, indent=2)
+            # 5. Node 6: Reranking
+            t_rerank_0 = time.time()
+            reranked = self.pipeline.reranker.rerank(
+                query=query_text,
+                candidates=candidates,
+                top_k=self.config.RERANK_TOP_K
+            )
+            t_rerank_ms = round((time.time() - t_rerank_0) * 1000, 1)
+            trace.record_rerank(query=query_text, candidates=candidates, reranked=reranked, duration_ms=t_rerank_ms)
 
-        total_lat_ms = round((time.time() - t0) * 1000, 1)
+            # Lưu vết Node 6
+            rerank_dicts = reranked
+            with open(f["reranking"]["input"] / "latest_candidates.json", "w", encoding="utf-8") as fp:
+                json.dump(cand_dicts, fp, ensure_ascii=False, indent=2)
+            with open(f["reranking"]["output"] / "latest_reranked.json", "w", encoding="utf-8") as fp:
+                json.dump(rerank_dicts, fp, ensure_ascii=False, indent=2)
 
-        # Trích dẫn nguồn
-        citations = serving_result.get("legal_citations", [])
-        sources = serving_result.get("sources_used", [])
-        if not citations:
-            for rc in reranked:
-                c = rc.get("chunk", rc) if isinstance(rc, dict) else rc
-                if isinstance(c, dict):
-                    bc = c.get("breadcrumb", "")
-                    if bc and bc not in citations:
-                        citations.append(bc)
-        if not sources:
-            for rc in reranked:
-                c = rc.get("chunk", rc) if isinstance(rc, dict) else rc
-                if isinstance(c, dict):
-                    src = c.get("source", "")
-                    if src and src not in sources:
-                        sources.append(src)
+            # 6. Node 7: Generator & Guardrails
+            t_synth_0 = time.time()
+            synthesized_context = self.pipeline.step4_context_synthesizer(reranked)
+            t_synth_ms = round((time.time() - t_synth_0) * 1000, 1)
+            trace.record_synthesis(synthesized=synthesized_context, duration_ms=t_synth_ms)
+
+            t_gen_0 = time.time()
+            serving_result = self.pipeline.step5_llm_serving(query_text, synthesized_context, persona_config=persona_config)
+            t_gen_ms = round((time.time() - t_gen_0) * 1000, 1)
+
+            raw_answer = serving_result.get("answer", "")
+            t_guard_out_0 = time.time()
+            output_guard = self.pipeline.guardrails.guard_output(raw_answer)
+            t_guard_out_ms = round((time.time() - t_guard_out_0) * 1000, 1)
+            final_answer = output_guard.sanitized_answer
+
+            trace.record_llm_serving(
+                query=query_text,
+                result=serving_result,
+                model=self.config.LLM_MODEL,
+                duration_ms=t_gen_ms,
+                persona=serving_result.get("persona", "advisor"),
+                tone=serving_result.get("tone", "formal"),
+                format_style=serving_result.get("format_style", "standard")
+            )
+            trace.record_guardrail_check(
+                "Output Sanitization Guardrail",
+                is_safe=output_guard.is_safe,
+                details=output_guard.flags,
+                duration_ms=t_guard_out_ms
+            )
+
+            # Lưu vết Node 7
+            with open(f["generator"]["input"] / "latest_context.json", "w", encoding="utf-8") as fp:
+                json.dump(rerank_dicts, fp, ensure_ascii=False, indent=2)
+            with open(f["generator"]["output"] / "latest_answer.json", "w", encoding="utf-8") as fp:
+                json.dump({
+                    "query": query_text,
+                    "answer": final_answer,
+                    "persona": serving_result.get("persona", "advisor"),
+                    "tone": serving_result.get("tone", "formal"),
+                    "format_style": serving_result.get("format_style", "standard"),
+                    "latency_ms": t_gen_ms
+                }, fp, ensure_ascii=False, indent=2)
+
+            total_lat_ms = round((time.time() - t0) * 1000, 1)
+
+            # Trích dẫn nguồn
+            citations = serving_result.get("legal_citations", [])
+            sources = serving_result.get("sources_used", [])
+            if not citations:
+                for rc in reranked:
+                    c = rc.get("chunk", rc) if isinstance(rc, dict) else rc
+                    if isinstance(c, dict):
+                        bc = c.get("breadcrumb", "")
+                        if bc and bc not in citations:
+                            citations.append(bc)
+            if not sources:
+                for rc in reranked:
+                    c = rc.get("chunk", rc) if isinstance(rc, dict) else rc
+                    if isinstance(c, dict):
+                        src = c.get("source", "")
+                        if src and src not in sources:
+                            sources.append(src)
+
+            trace.finish(
+                answer=final_answer,
+                citations=citations,
+                sources=sources,
+                is_blocked=False
+            )
 
         return {
             "reply": final_answer,
@@ -796,16 +872,16 @@ class NodePipeline:
             "nodes": {
                 "01_chunking": {
                     "name": "Node 1: Chunking (DLA Chunker)",
-                    "input_folder": "rag_banking/chunking/input/",
-                    "output_folder": "rag_banking/chunking/output/",
+                    "input_folder": "agent_banking/chunking/input/",
+                    "output_folder": "agent_banking/chunking/output/",
                     "status": "ready",
                     "total_chunks_in_store": total_chunks_stored,
                     "description": "Bảo toàn cấu trúc phân cấp Header, Bảng biểu và Breadcrumbs"
                 },
                 "02_embedding": {
                     "name": "Node 2: Dense Embedding (1024-dim)",
-                    "input_folder": "rag_banking/embedding/input/",
-                    "output_folder": "rag_banking/embedding/output/",
+                    "input_folder": "agent_banking/embedding/input/",
+                    "output_folder": "agent_banking/embedding/output/",
                     "model": self.config.EMBEDDING_MODEL_1024,
                     "dimension": len(q_vec),
                     "vector_sample": [round(float(v), 5) for v in q_vec[:6]],
@@ -813,16 +889,16 @@ class NodePipeline:
                 },
                 "03_vectordb": {
                     "name": "Node 3: Vector DB & BM25 Store",
-                    "input_folder": "rag_banking/vector_db/input/",
-                    "output_folder": "rag_banking/vector_db/output/",
+                    "input_folder": "agent_banking/vector_db/input/",
+                    "output_folder": "agent_banking/vector_db/output/",
                     "qdrant_collection": self.config.QDRANT_COLLECTION,
                     "qdrant_points_count": total_chunks_stored,
                     "bm25_indexed_chunks": total_chunks_stored
                 },
                 "04_query_parser": {
                     "name": "Node 4: Banking Query Parser",
-                    "input_folder": "rag_banking/query_parser/input/",
-                    "output_folder": "rag_banking/query_parser/output/",
+                    "input_folder": "agent_banking/query_parser/input/",
+                    "output_folder": "agent_banking/query_parser/output/",
                     "input_query": query_text,
                     "normalized_query": parsed_q.normalized_query,
                     "keywords": parsed_q.keywords,
@@ -831,8 +907,8 @@ class NodePipeline:
                 },
                 "05_retrieval": {
                     "name": "Node 5: Hybrid Retrieval (RRF k=60)",
-                    "input_folder": "rag_banking/retrieval/input/",
-                    "output_folder": "rag_banking/retrieval/output/",
+                    "input_folder": "agent_banking/retrieval/input/",
+                    "output_folder": "agent_banking/retrieval/output/",
                     "candidates_count": len(candidates),
                     "candidates": [
                         {
@@ -851,8 +927,8 @@ class NodePipeline:
                 },
                 "06_reranking": {
                     "name": "Node 6: Cross-Encoder Reranker",
-                    "input_folder": "rag_banking/reranking/input/",
-                    "output_folder": "rag_banking/reranking/output/",
+                    "input_folder": "agent_banking/reranking/input/",
+                    "output_folder": "agent_banking/reranking/output/",
                     "model": self.config.RERANKER_MODEL,
                     "top_chunks": [
                         {
@@ -869,8 +945,8 @@ class NodePipeline:
                 },
                 "07_generator": {
                     "name": "Node 7: Generator & Guardrails",
-                    "input_folder": "rag_banking/generator/input/",
-                    "output_folder": "rag_banking/generator/output/",
+                    "input_folder": "agent_banking/generator/input/",
+                    "output_folder": "agent_banking/generator/output/",
                     "model": self.config.LLM_MODEL,
                     "answer": final_answer,
                     "citations": citations,
@@ -893,7 +969,7 @@ def main():
     node_pipe = NodePipeline(use_memory=True)
 
     if args.demo:
-        demo_input = PROJECT_ROOT / "rag_banking" / "chunking" / "chunking_dataset" / "docx"
+        demo_input = PROJECT_ROOT / "agent_banking" / "chunking" / "chunking_dataset" / "docx"
         if not demo_input.exists():
             demo_input = PROJECT_ROOT / "dataset" / "dataset_1" / "docx"
 

@@ -44,8 +44,13 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import uvicorn
 
-from rag_banking.config import Config
-from rag_banking.node_pipeline import NodePipeline
+from agent_banking.config import Config
+from agent_banking.node_pipeline import NodePipeline
+from agent_banking.generator.rag_generator import (
+    PERSONA_PROFILES,
+    TONE_PROFILES,
+    FORMAT_PROFILES
+)
 
 # Khởi tạo FastAPI app
 app = FastAPI(
@@ -75,6 +80,11 @@ except RuntimeError as lock_err:
 # Pydantic Schemas
 class ChatRequest(BaseModel):
     message: str
+    persona: str | None = "advisor"
+    tone: str | None = "formal"
+    format_style: str | None = "standard"
+    custom_persona: str | None = ""
+    session_id: str | None = "default_session"
 
 
 # -----------------------------------------------------------------------------
@@ -84,13 +94,53 @@ class ChatRequest(BaseModel):
 def serve_index():
     index_file = ROOT_DIR / "static" / "index.html"
     if index_file.exists():
-        return FileResponse(str(index_file))
+        return FileResponse(
+            str(index_file),
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
+        )
     return {"message": "AI Banking Assistant Server đang chạy thành công!"}
 
 
 # -----------------------------------------------------------------------------
-# 2. CẤU HÌNH HỆ THỐNG
+# 2. CẤU HÌNH HỆ THỐNG & PERSONA PROFILES
 # -----------------------------------------------------------------------------
+@app.get("/api/persona/profiles")
+def get_persona_profiles():
+    """
+    Trả về danh mục cấu hình Persona, Tông giọng và Định dạng phản hồi cho giao diện Frontend.
+    """
+    return {
+        "personas": [
+            {
+                "id": k,
+                "name": v["name"],
+                "description": v["description"]
+            }
+            for k, v in PERSONA_PROFILES.items()
+        ],
+        "tones": [
+            {
+                "id": k,
+                "name": v.split(" (")[0] if " (" in v else v,
+                "description": v
+            }
+            for k, v in TONE_PROFILES.items()
+        ],
+        "formats": [
+            {
+                "id": k,
+                "name": v.split(":")[0].replace("Định dạng ", "") if ":" in v else v,
+                "description": v
+            }
+            for k, v in FORMAT_PROFILES.items()
+        ]
+    }
+
+
 @app.get("/api/config")
 def get_config():
     total_points = node_pipe.pipeline.vector_store.count()
@@ -100,6 +150,8 @@ def get_config():
         "reranker_model": node_pipe.config.RERANKER_MODEL,
         "qdrant_collection": node_pipe.config.QDRANT_COLLECTION,
         "points_count": total_points,
+        "tracing_enabled": node_pipe.pipeline.tracer.is_phoenix_active,
+        "phoenix_url": "http://127.0.0.1:6006",
         "nodes": [
             {"id": "chunking", "name": "Node 1: Chunking"},
             {"id": "embedding", "name": "Node 2: Embedding"},
@@ -113,7 +165,7 @@ def get_config():
 
 
 # -----------------------------------------------------------------------------
-# 3. TRUY VẤN HỎI ĐÁP & THEO DÕI LIÊN HOÀN 7 NODES
+# 3. TRUY VẤN HỎI ĐÁP & THEO DÕI LIÊN HOÀN 7 NODES (KÈM DYNAMIC PERSONA & TRACING)
 # -----------------------------------------------------------------------------
 @app.post("/api/chat")
 def handle_chat(req: ChatRequest):
@@ -121,11 +173,55 @@ def handle_chat(req: ChatRequest):
     if not query_text:
         raise HTTPException(status_code=400, detail="Nội dung câu hỏi không được để trống.")
 
+    persona_config = {
+        "persona": req.persona or "advisor",
+        "tone": req.tone or "formal",
+        "format_style": req.format_style or "standard",
+        "custom_persona": req.custom_persona or ""
+    }
+
     try:
-        result = node_pipe.run_single_query_with_node_trace(query_text)
+        result = node_pipe.run_single_query_with_node_trace(query_text, persona_config=persona_config)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi xử lý đường ống RAG: {e}")
+
+
+# -----------------------------------------------------------------------------
+# 3.1 LANGGRAPH AI AGENT (SELF-REFLECTIVE RAG & BANKING ACTION TOOLS)
+# -----------------------------------------------------------------------------
+_agent_pipeline_instance = None
+
+def get_agent_pipeline():
+    global _agent_pipeline_instance
+    if _agent_pipeline_instance is None:
+        from agent_banking.agent_pipeline import BankingAgentPipeline
+        _agent_pipeline_instance = BankingAgentPipeline(config=config, use_memory=node_pipe.use_memory)
+    return _agent_pipeline_instance
+
+
+@app.post("/api/agent/chat")
+def handle_agent_chat(req: ChatRequest):
+    """
+    Endpoint LangGraph Agentic RAG: Phân loại ý định, Self-Reflection, gọi Banking Tools và quản lý Memory.
+    """
+    query_text = req.message.strip()
+    if not query_text:
+        raise HTTPException(status_code=400, detail="Nội dung câu hỏi không được để trống.")
+
+    session_id = req.session_id or "default_session"
+    try:
+        agent = get_agent_pipeline()
+        result = agent.chat(
+            query=query_text,
+            session_id=session_id,
+            persona=req.persona or "advisor",
+            tone=req.tone or "formal",
+            format_type=req.format_style or "standard"
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi xử lý LangGraph Agent: {e}")
 
 
 # -----------------------------------------------------------------------------

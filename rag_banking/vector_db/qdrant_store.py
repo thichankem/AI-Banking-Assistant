@@ -38,7 +38,7 @@ class QdrantBankingStore:
         self,
         collection_name="banking_docs_1024",
         dimension=1024,
-        storage_path="rag_banking/vector_db/qdrant_db",
+        storage_path="agent_banking/vector_db/qdrant_db",
         use_memory=False
 
     ):
@@ -52,7 +52,12 @@ class QdrantBankingStore:
             self.client = QdrantClient(":memory:")
         else:
             Path(storage_path).mkdir(parents=True, exist_ok=True)
-            self.client = QdrantClient(path=storage_path)
+            try:
+                self.client = QdrantClient(path=storage_path)
+            except Exception as e:
+                print(f"⚠️ [Qdrant Storage Lock] Không thể mở độc quyền '{storage_path}' -> Chuyển sang In-Memory mode an toàn!")
+                self.client = QdrantClient(":memory:")
+                self.use_memory = True
 
         # 2. Khởi tạo Collection HNSW Cosine
         self._init_collection()

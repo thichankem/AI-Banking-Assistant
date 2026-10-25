@@ -1,6 +1,6 @@
 /**
- * AI Banking Assistant - Frontend Client
- * Kết nối liên hoàn 7 Nodes RAG và quản lý Folder-to-Folder Data Flow
+ * AI Banking Assistant - Modern Client
+ * Tối giản, thanh lịch, an toàn và chuyên nghiệp cho nghiệp vụ Ngân hàng
  */
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -9,438 +9,291 @@ document.addEventListener("DOMContentLoaded", () => {
     const userInput = document.getElementById("userInput");
     const sendBtn = document.getElementById("sendBtn");
     const chatMessages = document.getElementById("chatMessages");
-    const modelBadge = document.getElementById("modelBadge");
-    const chunksCountBadge = document.getElementById("chunksCountBadge");
-    const sampleQueries = document.getElementById("sampleQueries");
+    const modelStatusPill = document.getElementById("modelStatusPill");
+    const chunksCountText = document.getElementById("chunksCountText");
+    const suggestionGrid = document.getElementById("suggestionGrid");
+    const clearChatBtn = document.getElementById("clearChatBtn");
 
-    // Modal elements
-    const nodeDetailModal = document.getElementById("nodeDetailModal");
-    const closeNodeDetailBtn = document.getElementById("closeNodeDetailBtn");
-    const nodeDetailTitle = document.getElementById("nodeDetailTitle");
-    const nodeDetailSub = document.getElementById("nodeDetailSub");
-    const nodeInputPath = document.getElementById("nodeInputPath");
-    const nodeOutputPath = document.getElementById("nodeOutputPath");
-    const nodeInputContent = document.getElementById("nodeInputContent");
-    const nodeOutputContent = document.getElementById("nodeOutputContent");
-    const ioTabs = document.querySelectorAll(".io-tab");
-    const ioPanels = document.querySelectorAll(".io-panel");
+    // Lưu template chào ban đầu để khôi phục khi bấm "Làm mới"
+    const initialWelcomeHtml = chatMessages.innerHTML;
 
-    // Folder Explorer elements
-    const folderExplorerModal = document.getElementById("folderExplorerModal");
-    const openFolderModalBtn = document.getElementById("openFolderModalBtn");
-    const closeFolderExplorerBtn = document.getElementById("closeFolderExplorerBtn");
-    const nodesSidebar = document.getElementById("nodesSidebar");
-    const nodeFolderFiles = document.getElementById("nodeFolderFiles");
-    const triggerPipelineBtn = document.getElementById("triggerPipelineBtn");
-
-    // File Viewer elements
-    const fileViewerModal = document.getElementById("fileViewerModal");
-    const closeFileViewerBtn = document.getElementById("closeFileViewerBtn");
-    const viewerFileName = document.getElementById("viewerFileName");
-    const viewerFilePath = document.getElementById("viewerFilePath");
-    const viewerFileContent = document.getElementById("viewerFileContent");
-
-    // Toast
-    const toast = document.getElementById("toastNotification");
-
-    let currentNodesData = null;
-    let selectedNodeName = null;
-
-    // 1. Tải cấu hình ban đầu
-    async function fetchConfig() {
+    // 1. Tải thông số cấu hình hệ thống
+    async function fetchSystemConfig() {
         try {
             const res = await fetch("/api/config");
+            if (!res.ok) return;
             const data = await res.json();
-            if (modelBadge && data.default_model) {
-                modelBadge.textContent = data.default_model;
+            
+            if (modelStatusPill && data.default_model) {
+                const textElem = modelStatusPill.querySelector(".status-text");
+                if (textElem) textElem.textContent = data.default_model;
             }
-            if (chunksCountBadge) {
-                chunksCountBadge.textContent = data.points_count || 0;
+            if (chunksCountText && data.points_count !== undefined) {
+                chunksCountText.textContent = `${data.points_count.toLocaleString("vi-VN")} văn bản quy chuẩn`;
             }
         } catch (err) {
-            console.error("Không thể tải cấu hình:", err);
+            console.warn("Không thể tải cấu hình máy chủ:", err);
         }
     }
-    fetchConfig();
+    fetchSystemConfig();
 
-    // 2. Hiển thị thông báo Toast
-    function showToast(message, duration = 3000) {
-        if (!toast) return;
-        toast.textContent = message;
-        toast.style.display = "block";
-        setTimeout(() => {
-            toast.style.display = "none";
-        }, duration);
+    // 2. Thoát ký tự HTML an toàn (0% REGEX)
+    function escapeHtml(str) {
+        if (!str) return "";
+        return str
+            .split("&").join("&amp;")
+            .split("<").join("&lt;")
+            .split(">").join("&gt;")
+            .split('"').join("&quot;")
+            .split("'").join("&#039;");
     }
 
-    // 3. Render tin nhắn chat
-    function appendMessage(sender, text, nodesTrace = null) {
+    // 3. Xử lý định dạng chữ in đậm và code inline (0% REGEX)
+    function renderInlineFormatting(str) {
+        let safe = escapeHtml(str);
+
+        // Xử lý **in đậm**
+        let boldParts = safe.split("**");
+        if (boldParts.length > 1) {
+            let boldOut = [];
+            for (let i = 0; i < boldParts.length; i++) {
+                if (i % 2 === 1) {
+                    boldOut.push(`<strong>${boldParts[i]}</strong>`);
+                } else {
+                    boldOut.push(boldParts[i]);
+                }
+            }
+            safe = boldOut.join("");
+        }
+
+        // Xử lý `code inline`
+        let codeParts = safe.split("`");
+        if (codeParts.length > 1) {
+            let codeOut = [];
+            for (let i = 0; i < codeParts.length; i++) {
+                if (i % 2 === 1) {
+                    codeOut.push(`<code>${codeParts[i]}</code>`);
+                } else {
+                    codeOut.push(codeParts[i]);
+                }
+            }
+            safe = codeOut.join("");
+        }
+
+        return safe;
+    }
+
+    // 4. Định dạng Markdown đơn giản & an toàn cho câu trả lời ngân hàng
+    function formatMarkdown(text) {
+        if (!text) return "";
+        const lines = text.split("\n");
+        let htmlParts = [];
+        let inList = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            let rawLine = lines[i];
+            let trimmed = rawLine.trim();
+
+            if (trimmed.startsWith("### ")) {
+                if (inList) { htmlParts.push("</ul>"); inList = false; }
+                htmlParts.push(`<h4>${renderInlineFormatting(trimmed.substring(4))}</h4>`);
+                continue;
+            }
+            if (trimmed.startsWith("## ")) {
+                if (inList) { htmlParts.push("</ul>"); inList = false; }
+                htmlParts.push(`<h3>${renderInlineFormatting(trimmed.substring(3))}</h3>`);
+                continue;
+            }
+
+            // Gạch đầu dòng
+            if (trimmed.startsWith("* ") || trimmed.startsWith("- ")) {
+                if (!inList) {
+                    htmlParts.push("<ul>");
+                    inList = true;
+                }
+                htmlParts.push(`<li>${renderInlineFormatting(trimmed.substring(2))}</li>`);
+                continue;
+            } else {
+                if (inList) {
+                    htmlParts.push("</ul>");
+                    inList = false;
+                }
+            }
+
+            // Dòng trống
+            if (trimmed === "") {
+                htmlParts.push("<br>");
+                continue;
+            }
+
+            // Đoạn văn thường
+            htmlParts.push(`<p>${renderInlineFormatting(rawLine)}</p>`);
+        }
+
+        if (inList) {
+            htmlParts.push("</ul>");
+        }
+
+        return htmlParts.join("");
+    }
+
+    // 5. Thêm tin nhắn vào giao diện
+    function appendMessage(sender, content, meta = null) {
         const msgDiv = document.createElement("div");
         msgDiv.className = `message ${sender}-message`;
 
-        const bubble = document.createElement("div");
-        bubble.className = "bubble";
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
 
-        // Định dạng Markdown cơ bản (không dùng regex phức tạp)
-        let formatted = text
-            .split("\n\n").join("<br><br>")
-            .split("\n").join("<br>");
-
-        bubble.innerHTML = formatted;
-
-        // Nếu là bot và có dữ liệu trace 7 nodes, render thanh điều khiển tracker
-        if (sender === "bot" && nodesTrace) {
-            const trackerContainer = document.createElement("div");
-            trackerContainer.className = "node-tracker-container";
-            trackerContainer.innerHTML = `
-                <div class="node-tracker-title">
-                    <span>🔍 Luồng dữ liệu qua 7 Nodes (Bấm từng node để xem Input & Output):</span>
-                </div>
-                <div class="node-tracker-pills">
-                    <div class="node-pill" data-node="01_chunking">
-                        <span class="node-num">N1</span>
-                        <span class="node-name">Chunking</span>
-                        <span class="node-status">✓ DLA</span>
-                    </div>
-                    <div class="node-pill" data-node="02_embedding">
-                        <span class="node-num">N2</span>
-                        <span class="node-name">Embed</span>
-                        <span class="node-status">1024-d</span>
-                    </div>
-                    <div class="node-pill" data-node="03_vectordb">
-                        <span class="node-num">N3</span>
-                        <span class="node-name">Index</span>
-                        <span class="node-status">HNSW/BM25</span>
-                    </div>
-                    <div class="node-pill" data-node="04_query_parser">
-                        <span class="node-num">N4</span>
-                        <span class="node-name">Parser</span>
-                        <span class="node-status">${nodesTrace["04_query_parser"]?.latency_ms || 0}ms</span>
-                    </div>
-                    <div class="node-pill" data-node="05_retrieval">
-                        <span class="node-num">N5</span>
-                        <span class="node-name">Retrieval</span>
-                        <span class="node-status">Top-${nodesTrace["05_retrieval"]?.candidates_count || 5}</span>
-                    </div>
-                    <div class="node-pill" data-node="06_reranking">
-                        <span class="node-num">N6</span>
-                        <span class="node-name">Rerank</span>
-                        <span class="node-status">Top-3</span>
-                    </div>
-                    <div class="node-pill" data-node="07_generator">
-                        <span class="node-num">N7</span>
-                        <span class="node-name">Generate</span>
-                        <span class="node-status">${nodesTrace["07_generator"]?.latency_ms || 0}ms</span>
+        if (sender === "user") {
+            msgDiv.innerHTML = `
+                <div class="message-content">
+                    <div class="bubble">
+                        <p>${escapeHtml(content)}</p>
                     </div>
                 </div>
             `;
+        } else {
+            let sourcesHtml = "";
 
-            // Gắn sự kiện click cho từng node pill
-            trackerContainer.querySelectorAll(".node-pill").forEach(pill => {
-                pill.addEventListener("click", () => {
-                    const nodeKey = pill.getAttribute("data-node");
-                    openNodeDetail(nodeKey, nodesTrace[nodeKey]);
+            if (meta) {
+                const sourcesList = meta.sources || [];
+                const citationsList = meta.citations || [];
+                const combined = [];
+
+                citationsList.forEach(c => {
+                    if (c && !combined.includes(c)) combined.push(c);
                 });
-            });
+                sourcesList.forEach(s => {
+                    if (s && !combined.includes(s)) combined.push(s);
+                });
 
-            bubble.appendChild(trackerContainer);
+                if (combined.length > 0) {
+                    const tagsHtml = combined.slice(0, 4).map(src => `<span class="source-tag">${escapeHtml(src)}</span>`).join("");
+                    sourcesHtml = `
+                        <div class="sources-card">
+                            <div class="sources-header">
+                                <span>Căn cứ quy chuẩn & Nguồn tham chiếu:</span>
+                            </div>
+                            <div class="sources-pills">${tagsHtml}</div>
+                        </div>
+                    `;
+                }
+            }
+
+            msgDiv.innerHTML = `
+                <div class="message-content">
+                    <div class="bubble">
+                        ${formatMarkdown(content)}
+                        ${sourcesHtml}
+                    </div>
+                </div>
+            `;
         }
 
-        msgDiv.appendChild(bubble);
         chatMessages.appendChild(msgDiv);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+        scrollToBottom();
         return msgDiv;
     }
 
-    // 4. Mở modal chi tiết Input & Output của một Node
-    function openNodeDetail(nodeKey, nodeData) {
-        if (!nodeData) return;
-        nodeDetailTitle.textContent = nodeData.name || `Chi Tiết ${nodeKey}`;
-        nodeDetailSub.textContent = `Thư mục lưu vết: ${nodeData.input_folder} và ${nodeData.output_folder}`;
-
-        nodeInputPath.textContent = `📁 Input Folder: ${nodeData.input_folder}`;
-        nodeOutputPath.textContent = `📁 Output Folder: ${nodeData.output_folder}`;
-
-        // Định dạng nội dung hiển thị
-        let inContent = "";
-        let outContent = "";
-
-        if (nodeKey === "01_chunking") {
-            inContent = JSON.stringify({ "description": "Tài liệu thô từ " + nodeData.input_folder, "types": [".docx", ".pdf"] }, null, 2);
-            outContent = JSON.stringify({ "status": nodeData.status, "total_chunks_in_store": nodeData.total_chunks_in_store, "breadcrumbs_enabled": true }, null, 2);
-        } else if (nodeKey === "02_embedding") {
-            inContent = JSON.stringify({ "input_query_or_chunks": "Text strings to embed", "model": nodeData.model }, null, 2);
-            outContent = JSON.stringify({ "dimension": nodeData.dimension, "sample_values": nodeData.vector_sample, "latency_ms": nodeData.latency_ms }, null, 2);
-        } else if (nodeKey === "03_vectordb") {
-            inContent = JSON.stringify({ "embedded_chunks": "Dense vectors 1024-dim + full text" }, null, 2);
-            outContent = JSON.stringify({ "qdrant_collection": nodeData.qdrant_collection, "qdrant_points_count": nodeData.qdrant_points_count, "bm25_indexed_chunks": nodeData.bm25_indexed_chunks }, null, 2);
-        } else if (nodeKey === "04_query_parser") {
-            inContent = JSON.stringify({ "raw_query": nodeData.input_query }, null, 2);
-            outContent = JSON.stringify({ "normalized_query": nodeData.normalized_query, "keywords": nodeData.keywords, "entities": nodeData.entities, "latency_ms": nodeData.latency_ms }, null, 2);
-        } else if (nodeKey === "05_retrieval") {
-            inContent = JSON.stringify({ "query_vector": "1024-dim vector", "bm25_query": "Keyword tokens", "rrf_k": 60 }, null, 2);
-            outContent = JSON.stringify(nodeData.candidates, null, 2);
-        } else if (nodeKey === "06_reranking") {
-            inContent = JSON.stringify({ "model": nodeData.model, "candidates_count": 5 }, null, 2);
-            outContent = JSON.stringify(nodeData.top_chunks, null, 2);
-        } else if (nodeKey === "07_generator") {
-            inContent = JSON.stringify({ "top_context_chunks": "Top 3 Cross-Encoder verified chunks", "model": nodeData.model }, null, 2);
-            outContent = JSON.stringify({ "final_answer": nodeData.answer, "citations": nodeData.citations, "latency_ms": nodeData.latency_ms }, null, 2);
-        }
-
-        nodeInputContent.textContent = inContent;
-        nodeOutputContent.textContent = outContent;
-
-        // Reset về tab Input
-        ioTabs.forEach(t => t.classList.remove("active"));
-        ioPanels.forEach(p => { p.classList.remove("active"); p.style.display = "none"; });
-        const inputTab = document.querySelector('.io-tab[data-tab="tab-input"]');
-        const inputPanel = document.getElementById("tab-input");
-        if (inputTab && inputPanel) {
-            inputTab.classList.add("active");
-            inputPanel.classList.add("active");
-            inputPanel.style.display = "block";
-        }
-
-        nodeDetailModal.style.display = "flex";
+    // Cuộn mượt xuống đáy khung chat
+    function scrollToBottom() {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
-    // Đóng Modal Node Detail
-    closeNodeDetailBtn.addEventListener("click", () => {
-        nodeDetailModal.style.display = "none";
-    });
-
-    // Chuyển Tab Input / Output
-    ioTabs.forEach(tab => {
-        tab.addEventListener("click", () => {
-            ioTabs.forEach(t => t.classList.remove("active"));
-            ioPanels.forEach(p => { p.classList.remove("active"); p.style.display = "none"; });
-
-            tab.classList.add("active");
-            const targetId = tab.getAttribute("data-tab");
-            const targetPanel = document.getElementById(targetId);
-            if (targetPanel) {
-                targetPanel.classList.add("active");
-                targetPanel.style.display = "block";
-            }
-        });
-    });
-
-    // 5. Gửi câu hỏi Chat
+    // 6. Gửi câu hỏi đến Backend
     async function submitQuery(queryText) {
-        if (!queryText) return;
-        appendMessage("user", queryText);
+        const cleanQuery = queryText ? queryText.trim() : "";
+        if (!cleanQuery) return;
+
+        appendMessage("user", cleanQuery);
 
         userInput.value = "";
         userInput.disabled = true;
         sendBtn.disabled = true;
 
-        const loadingDiv = document.createElement("div");
-        loadingDiv.className = "message bot-message";
-        loadingDiv.innerHTML = `<div class="bubble"><span style="color: #38bdf8;">⏳ Đang định tuyến qua 7 Nodes (Chunking ➔ Embedding ➔ Retrieval ➔ Rerank ➔ LLM)...</span></div>`;
-        chatMessages.appendChild(loadingDiv);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+        // Hiển thị bong bóng chờ phản hồi
+        const typingDiv = document.createElement("div");
+        typingDiv.className = "message bot-message";
+        typingDiv.innerHTML = `
+            <div class="message-content">
+                <div class="bubble typing-bubble">
+                    <div class="typing-dots">
+                        <span class="typing-dot"></span>
+                        <span class="typing-dot"></span>
+                        <span class="typing-dot"></span>
+                    </div>
+                    <span class="typing-text">Trợ lý AI đang tra cứu dữ liệu quy chuẩn...</span>
+                </div>
+            </div>
+        `;
+        chatMessages.appendChild(typingDiv);
+        scrollToBottom();
 
         try {
             const res = await fetch("/api/chat", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: queryText })
+                body: JSON.stringify({ message: cleanQuery })
             });
 
-            loadingDiv.remove();
+            typingDiv.remove();
 
             if (!res.ok) {
-                const err = await res.json().catch(() => ({ detail: "Lỗi kết nối máy chủ" }));
-                appendMessage("bot", `❌ Lỗi: ${err.detail}`);
+                const err = await res.json().catch(() => ({ detail: "Lỗi kết nối máy chủ dịch vụ" }));
+                appendMessage("bot", `**Rất tiếc:** ${err.detail || "Không thể xử lý yêu cầu lúc này."}`);
             } else {
                 const data = await res.json();
-                appendMessage("bot", data.reply, data.nodes);
-                fetchConfig();
+                appendMessage("bot", data.reply, {
+                    latency_ms: data.latency_ms,
+                    citations: data.citations,
+                    sources: data.sources
+                });
             }
-        } catch (e) {
-            loadingDiv.remove();
-            appendMessage("bot", `❌ Lỗi kết nối: ${e.message}`);
+        } catch (err) {
+            typingDiv.remove();
+            appendMessage("bot", `**Lỗi kết nối:** Không thể liên lạc với máy chủ. Vui lòng kiểm tra lại dịch vụ (${err.message}).`);
         } finally {
             userInput.disabled = false;
             sendBtn.disabled = false;
             userInput.focus();
+            scrollToBottom();
         }
     }
 
+    // Bắt sự kiện submit form
     chatForm.addEventListener("submit", (e) => {
         e.preventDefault();
-        const text = userInput.value.trim();
-        submitQuery(text);
+        submitQuery(userInput.value);
     });
 
-    // Click câu hỏi mẫu
-    if (sampleQueries) {
-        sampleQueries.addEventListener("click", (e) => {
-            const chip = e.target.closest(".query-chip");
-            if (chip) {
-                const q = chip.getAttribute("data-q");
-                submitQuery(q);
-            }
-        });
-    }
-
-    // 6. Quản Lý Folder Nodes Explorer
-    async function loadNodesExplorer() {
-        nodesSidebar.innerHTML = "<div class='empty-state'>Đang quét 7 thư mục node...</div>";
-        try {
-            const res = await fetch("/api/nodes");
-            currentNodesData = await res.json();
-
-            nodesSidebar.innerHTML = "";
-            const nodeKeys = Object.keys(currentNodesData);
-
-            nodeKeys.forEach((nodeKey, idx) => {
-                const nodeInfo = currentNodesData[nodeKey];
-                const totalFiles = (nodeInfo.input_files.length) + (nodeInfo.output_files.length);
-                const btn = document.createElement("button");
-                btn.className = `node-item-btn ${idx === 0 ? "active" : ""}`;
-                btn.innerHTML = `
-                    <span>Node ${idx + 1}: ${nodeKey}</span>
-                    <span class="file-count-badge">${totalFiles} tệp</span>
-                `;
-                btn.addEventListener("click", () => {
-                    document.querySelectorAll(".node-item-btn").forEach(b => b.classList.remove("active"));
-                    btn.classList.add("active");
-                    renderNodeFolderFiles(nodeKey);
-                });
-                nodesSidebar.appendChild(btn);
-            });
-
-            if (nodeKeys.length > 0) {
-                renderNodeFolderFiles(nodeKeys[0]);
-            }
-        } catch (e) {
-            nodesSidebar.innerHTML = `<div class='empty-state' style='color:#f87171;'>Lỗi tải thư mục: ${e.message}</div>`;
-        }
-    }
-
-    function renderNodeFolderFiles(nodeKey) {
-        selectedNodeName = nodeKey;
-        const nodeInfo = currentNodesData[nodeKey];
-        if (!nodeInfo) return;
-
-        function buildFileList(files, ioType) {
-            if (!files || files.length === 0) {
-                return `<div class="empty-state">Thư mục trống (Chưa có tệp tin)</div>`;
-            }
-            return files.map(f => `
-                <div class="file-row">
-                    <div class="file-info-col">
-                        <span class="file-name-text">${f.name}</span>
-                        <span class="file-meta-text">${(f.size_bytes / 1024).toFixed(1)} KB • ${f.modified}</span>
-                    </div>
-                    <button class="btn-view-file" data-node="${nodeKey}" data-io="${ioType}" data-file="${f.name}">
-                        👁️ Xem File
-                    </button>
-                </div>
-            `).join("");
-        }
-
-        nodeFolderFiles.innerHTML = `
-            <div class="io-folder-columns">
-                <div class="io-folder-card">
-                    <h4>📥 Thư Mục Đầu Vào (input/)</h4>
-                    <div class="folder-path-sub">${nodeInfo.input_dir}</div>
-                    <div class="file-list">
-                        ${buildFileList(nodeInfo.input_files, "input")}
-                    </div>
-                </div>
-                <div class="io-folder-card">
-                    <h4>📤 Thư Mục Đầu Ra (output/)</h4>
-                    <div class="folder-path-sub">${nodeInfo.output_dir}</div>
-                    <div class="file-list">
-                        ${buildFileList(nodeInfo.output_files, "output")}
-                    </div>
-                </div>
-            </div>
-        `;
-
-        // Gắn sự kiện xem file
-        nodeFolderFiles.querySelectorAll(".btn-view-file").forEach(btn => {
-            btn.addEventListener("click", () => {
-                const node = btn.getAttribute("data-node");
-                const io = btn.getAttribute("data-io");
-                const file = btn.getAttribute("data-file");
-                viewFileContent(node, io, file);
-            });
-        });
-    }
-
-    // Xem nội dung file
-    async function viewFileContent(nodeName, ioType, fileName) {
-        viewerFileName.textContent = fileName;
-        viewerFilePath.textContent = `rag_banking/${nodeName}/${ioType}/${fileName}`;
-        viewerFileContent.textContent = "Đang tải nội dung tệp...";
-        fileViewerModal.style.display = "flex";
-
-        try {
-            const res = await fetch(`/api/nodes/${nodeName}/${ioType}/${fileName}`);
-            if (!res.ok) {
-                viewerFileContent.textContent = "Lỗi khi đọc tệp từ máy chủ.";
-                return;
-            }
-            const data = await res.json();
-            if (data.is_json) {
-                viewerFileContent.textContent = JSON.stringify(data.content, null, 2);
-            } else {
-                viewerFileContent.textContent = data.content;
-            }
-        } catch (e) {
-            viewerFileContent.textContent = `Lỗi tải tệp: ${e.message}`;
-        }
-    }
-
-    // Sự kiện mở/đóng Folder Explorer
-    openFolderModalBtn.addEventListener("click", () => {
-        folderExplorerModal.style.display = "flex";
-        loadNodesExplorer();
-    });
-
-    closeFolderExplorerBtn.addEventListener("click", () => {
-        folderExplorerModal.style.display = "none";
-    });
-
-    closeFileViewerBtn.addEventListener("click", () => {
-        fileViewerModal.style.display = "none";
-    });
-
-    // 7. Kích hoạt chạy toàn bộ Pipeline từ Folders
-    triggerPipelineBtn.addEventListener("click", async () => {
-        triggerPipelineBtn.disabled = true;
-        triggerPipelineBtn.textContent = "⏳ Đang chạy...";
-        showToast("🚀 Đang khởi động đường ống liên hoàn 7 Nodes từ các thư mục input...", 4000);
-
-        try {
-            const res = await fetch("/api/pipeline/run-folders", { method: "POST" });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ detail: "Lỗi chạy pipeline" }));
-                alert(`Lỗi thực thi: ${err.detail}`);
-            } else {
-                const summary = await res.json();
-                showToast(`🎉 Đã xử lý xong ${summary.total_chunks} chunks & ${summary.total_queries} queries qua 7 nodes!`, 4000);
-                fetchConfig();
-                if (folderExplorerModal.style.display === "flex") {
-                    loadNodesExplorer();
+    // Bắt sự kiện click gợi ý câu hỏi
+    function bindSuggestionChips() {
+        const grid = document.getElementById("suggestionGrid");
+        if (grid) {
+            grid.addEventListener("click", (e) => {
+                const chip = e.target.closest(".suggestion-chip");
+                if (chip) {
+                    const q = chip.getAttribute("data-q");
+                    submitQuery(q);
                 }
-            }
-        } catch (e) {
-            alert(`Lỗi kết nối: ${e.message}`);
-        } finally {
-            triggerPipelineBtn.disabled = false;
-            triggerPipelineBtn.textContent = "▶️ Chạy Pipeline Từ Folder";
+            });
         }
-    });
+    }
+    bindSuggestionChips();
 
-    // Đóng modal khi click ra ngoài overlay
-    window.addEventListener("click", (e) => {
-        if (e.target === nodeDetailModal) nodeDetailModal.style.display = "none";
-        if (e.target === folderExplorerModal) folderExplorerModal.style.display = "none";
-        if (e.target === fileViewerModal) fileViewerModal.style.display = "none";
-    });
+    // Nút làm mới / xóa cuộc hội thoại
+    if (clearChatBtn) {
+        clearChatBtn.addEventListener("click", () => {
+            chatMessages.innerHTML = initialWelcomeHtml;
+            bindSuggestionChips();
+            userInput.value = "";
+            userInput.focus();
+        });
+    }
+
+    // Focus vào ô nhập khi vừa mở trang
+    if (userInput) {
+        userInput.focus();
+    }
 });
