@@ -87,10 +87,32 @@ def build_7_field_chunk(
         + `updated_time`: Timestamp epoch ms của chunk.
     """
     final_content = prepend_context_header(content, breadcrumb, section_title)
-    w_count = word_count if word_count is not None else len(final_content.split())
-    raw_text = original_text if original_text is not None else content.strip()
-    tok_count = token_count if token_count is not None else int(round(w_count * 1.25))
-    up_time = updated_time if updated_time is not None else int(time.time() * 1000)
+    if word_count is not None:
+        w_count = word_count
+    else:
+        w_count = len(final_content.split())
+
+    if original_text is not None:
+        raw_text = original_text
+    else:
+        raw_text = content.strip()
+
+    if token_count is not None:
+        tok_count = token_count
+    else:
+        tok_count = int(round(w_count * 1.25))
+
+    if updated_time is not None:
+        up_time = updated_time
+    else:
+        up_time = int(time.time() * 1000)
+
+    loc = []
+    if location is not None:
+        loc = location
+    e_ids = []
+    if element_ids is not None:
+        e_ids = element_ids
 
     chunk: dict = {
         "chunk_id": chunk_id,
@@ -103,8 +125,8 @@ def build_7_field_chunk(
         "original_text": raw_text,
         "word_count": w_count,
         "token_count": tok_count,
-        "location": location if location is not None else [],
-        "element_ids": element_ids if element_ids is not None else [],
+        "location": loc,
+        "element_ids": e_ids,
         "is_active": is_active,
         "updated_time": up_time
     }
@@ -173,7 +195,10 @@ class SyllableBudgetManager:
         """
         words = text.split()
         if len(words) <= ceiling:
-            return [text.strip()] if text.strip() else []
+            stripped_text = text.strip()
+            if stripped_text:
+                return [stripped_text]
+            return []
 
         # Phân đoạn câu trực tiếp bằng mô hình wtpsplit (SaT)
         sentences = split_sentences_banking(text)

@@ -1,55 +1,71 @@
 # -*- coding: utf-8 -*-
 """
-AgentState Definition for Banking LangGraph Architecture
+AgentState Definition for Banking LangGraph Architecture v4.0
 ======================================================================
 Định nghĩa cấu trúc trạng thái luân chuyển (State) giữa các Node trong StateGraph.
-Tuân thủ:
-- Pure TypedDict (Không phụ thuộc class phức tạp của LangChain).
-- Minh bạch dữ liệu theo từng bước thực thi (Input Guard -> Route -> Tool/RAG -> Generate -> Output Guard).
-- Lưu giữ biến đếm retry_count để bảo vệ chống lặp vô tận (Infinite Loop Protection).
+Tuân thủ nghiêm ngặt:
+- 0% REGEX LAW: Tuyệt đối không dùng regex.
+- ZERO TERNARY LAW: Không dùng toán tử 3 ngôi (x if c else y).
+- NO LANGCHAIN BLOAT: Pure TypedDict của chuẩn Python typing.
+- INFINITE LOOP PROTECTION: retry_count và hallucination_retries.
+- MULTI-AGENT SUPERVISOR & SELF-AUDITING RAG v4.0.
 """
 
 from __future__ import annotations
-from typing import TypedDict, Any
+from typing import TypedDict, List, Dict, Any, Optional
 
 
 class AgentState(TypedDict, total=False):
     """
-    Trạng thái toàn trình của Banking Agentic Workflow.
+    Trạng thái toàn trình của Banking Agentic Workflow v4.0.
     """
-    # 1. Thông tin truy vấn & phiên làm việc
-    query: str                       # Câu hỏi hiện tại (có thể là câu đã được rewrite)
-    original_query: str              # Câu hỏi gốc ban đầu từ người dùng
-    session_id: str                  # Mã định danh phiên hội thoại (Thread ID)
-    chat_history: list[dict[str, Any]] # Lịch sử chat: [{"role": "user"|"assistant", "content": "..."}]
-    
-    # 2. Kiểm duyệt an toàn đầu vào (Banking Input Guardrails)
-    input_guard: dict[str, Any]      # Kết quả kiểm duyệt: is_safe, sanitized_query, refusal_message
-    
-    # 3. Phân loại ý định & Định tuyến (Routing)
-    intent: str                      # "RAG_SEARCH" | "BANKING_ACTION" | "CHIT_CHAT" | "REFUSAL"
-    target_tool: str | None          # Tên công cụ mục tiêu nếu intent là BANKING_ACTION
-    
-    # 4. Truy xuất tài liệu & Tự đánh giá (Corrective RAG)
-    parsed_query: dict[str, Any]     # Kết quả chuẩn hóa từ viết tắt và trích xuất thực thể
-    retrieved_docs: list[dict[str, Any]] # Danh sách chunks sau Hybrid Retrieval & Cross-Encoder
-    document_quality: str            # "RELEVANT" | "IRRELEVANT" (Đánh giá của Document Grader)
-    
-    # 5. Gọi công cụ nghiệp vụ ngân hàng (Banking Action Tools)
-    tool_calls: list[dict[str, Any]] # Danh sách tool calls cần thực thi
-    tool_outputs: list[dict[str, Any]] # Kết quả thực thi công cụ
-    
-    # 6. Tổng hợp câu trả lời & Kiểm duyệt đầu ra
-    draft_answer: str                # Câu trả lời dự thảo trước khi qua output guardrail
-    hallucination_grade: str         # "GROUNDED" | "NOT_GROUNDED" (Đánh giá tính trung thực)
-    output_guard: dict[str, Any]     # Kết quả kiểm duyệt đầu ra: is_safe, sanitized_answer, flags
-    final_answer: str                # Câu trả lời hoàn chỉnh cuối cùng trả về cho người dùng
-    
-    # 7. Trích dẫn pháp lý & Nguồn dữ liệu
-    citations: list[dict[str, Any]]  # Danh sách trích dẫn điều khoản [Điều X, Khoản Y]
-    sources: list[str]               # Danh sách tệp văn bản quy chế nguồn
-    
-    # 8. Kiểm soát vòng lặp & AI Observability (Arize Phoenix)
-    retry_count: int                 # Biến đếm số lần thử lại (query rewrite hoặc correction)
-    max_retries: int                 # Giới hạn số lần thử lại tối đa (từ Config.MAX_RETRIES)
-    trace_metadata: dict[str, Any]   # Lưu vết thời gian và node traces phục vụ giám sát Phoenix
+    # 1. Thông tin truy vấn và phiên làm việc
+    session_id: str
+    user_query: str
+    query: str
+    original_query: str
+    rewritten_query: str
+    messages: List[Dict[str, str]]
+    chat_history: List[Dict[str, Any]]
+
+    # 2. Bảo mật đầu vào (Node 0: input_guardrail)
+    is_safe: bool
+    guardrail_reason: str
+    input_guard: Dict[str, Any]
+
+    # 3. Điều phối Multi-Agent Supervisor & Intent (Node 1: supervisor_router)
+    intent: str
+    sub_agent_role: str
+    target_tool: Optional[str]
+
+    # 4. Truy xuất & Thẩm định tài liệu (Node 2, 3, 4: retrieve, grade_documents, rewrite_query)
+    parsed_query: Dict[str, Any]
+    retrieved_chunks: List[Dict[str, Any]]
+    retrieved_docs: List[Dict[str, Any]]
+    doc_quality: str
+    document_quality: str
+    retry_count: int
+    max_retries: int
+
+    # 5. Công cụ nghiệp vụ ngân hàng (Node 5: banking_tool)
+    tool_name: str
+    tool_output: Dict[str, Any]
+    tool_calls: List[Dict[str, Any]]
+    tool_outputs: List[Dict[str, Any]]
+
+    # 6. Sinh câu trả lời & Kiểm toán ảo giác (Node 6, 7: generate, audit_generation)
+    draft_answer: str
+    final_answer: str
+    audit_status: str
+    audit_feedback: str
+    hallucination_retries: int
+    hallucination_grade: str
+
+    # 7. Kiểm duyệt đầu ra & Trích dẫn pháp lý (Node 8: output_guardrail)
+    output_guard: Dict[str, Any]
+    citations: List[Dict[str, Any]]
+    sources: List[str]
+
+    # 8. Observability & Real-time Streaming Traces
+    execution_steps: List[str]
+    trace_metadata: Dict[str, Any]

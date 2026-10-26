@@ -126,7 +126,9 @@ class DocumentStructureChunker:
         def get_current_breadcrumb() -> str:
             sorted_lvls = sorted(active_headers.keys())
             titles = [active_headers[lvl] for lvl in sorted_lvls if active_headers[lvl]]
-            return " > ".join(titles) if titles else Path(source_name).stem
+            if titles:
+                return " > ".join(titles)
+            return Path(source_name).stem
 
         i = 0
         total_lines = len(lines)

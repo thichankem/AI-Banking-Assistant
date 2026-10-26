@@ -100,7 +100,9 @@ class BankingReranker:
             text = self._extract_text(item)
             doc_tokens = _get_tokens(text)
 
-            chunk = item.get("chunk", item) if isinstance(item, dict) else {}
+            chunk = {}
+            if isinstance(item, dict):
+                chunk = item.get("chunk", item)
             bc_str = f"{chunk.get('breadcrumb', '')} {chunk.get('section_title', '')}"
             bc_tokens = _get_tokens(bc_str)
             bc_matches = q_tokens.intersection(bc_tokens)
@@ -186,7 +188,9 @@ class BankingReranker:
                             orig_item = candidates[idx]
 
                             # Đánh giá cao hơn cho Breadcrumb: cộng bonus nhẹ khi từ khóa chính khớp Breadcrumb
-                            chunk = orig_item.get("chunk", orig_item) if isinstance(orig_item, dict) else {}
+                            chunk = {}
+                            if isinstance(orig_item, dict):
+                                chunk = orig_item.get("chunk", orig_item)
                             if isinstance(chunk, dict):
                                 bc_str = f"{chunk.get('breadcrumb', '')} {chunk.get('section_title', '')}".lower()
                                 for token in query_text.lower().split():

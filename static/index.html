@@ -3,306 +3,79 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Banking Assistant</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-        }
-
-        body {
-            background-color: #0b1120;
-            color: #f8fafc;
-            height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-
-        .chat-container {
-            width: 100%;
-            max-width: 860px;
-            height: 92vh;
-            background-color: #1e293b;
-            border: 1px solid #334155;
-            border-radius: 14px;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5);
-        }
-
-        /* Header */
-        .chat-header {
-            padding: 14px 20px;
-            background-color: #0f172a;
-            border-bottom: 1px solid #334155;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .header-left {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .header-left h2 {
-            font-size: 1.15rem;
-            font-weight: 600;
-            color: #f1f5f9;
-        }
-
-        .header-right {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .btn-reset {
-            background: #1e293b;
-            color: #cbd5e1;
-            border: 1px solid #475569;
-            padding: 6px 14px;
-            border-radius: 6px;
-            font-size: 0.85rem;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .btn-reset:hover {
-            background: #334155;
-            color: #ffffff;
-            border-color: #64748b;
-        }
-
-        /* Messages Area */
-        .chat-messages {
-            flex: 1;
-            padding: 20px;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-            scroll-behavior: smooth;
-        }
-
-        .chat-messages::-webkit-scrollbar {
-            width: 6px;
-        }
-        .chat-messages::-webkit-scrollbar-track {
-            background: transparent;
-        }
-        .chat-messages::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.15);
-            border-radius: 3px;
-        }
-        .chat-messages::-webkit-scrollbar-thumb:hover {
-            background: rgba(255, 255, 255, 0.25);
-        }
-
-        .message {
-            display: flex;
-            flex-direction: column;
-            max-width: 82%;
-        }
-
-        .user-message {
-            align-self: flex-end;
-        }
-
-        .bot-message {
-            align-self: flex-start;
-        }
-
-        .bubble {
-            padding: 12px 18px;
-            border-radius: 12px;
-            font-size: 0.95rem;
-            line-height: 1.6;
-            word-break: break-word;
-        }
-
-        .user-message .bubble {
-            background-color: #2563eb;
-            color: #ffffff;
-            border-bottom-right-radius: 2px;
-        }
-
-        .bot-message .bubble {
-            background-color: #334155;
-            color: #f1f5f9;
-            border-bottom-left-radius: 2px;
-        }
-
-        .bot-message.loading .bubble {
-            color: #94a3b8;
-            font-style: italic;
-        }
-
-        .bubble strong {
-            color: #ffffff;
-            font-weight: 600;
-        }
-
-        .bubble code {
-            background: rgba(0, 0, 0, 0.3);
-            color: #38bdf8;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-family: monospace;
-            font-size: 0.88em;
-        }
-
-        .bubble ul {
-            margin: 8px 0 8px 20px;
-        }
-
-        .bubble li {
-            margin-bottom: 4px;
-        }
-
-        /* Sources Card */
-        .sources-card {
-            margin-top: 12px;
-            padding-top: 10px;
-            border-top: 1px dashed rgba(255, 255, 255, 0.2);
-            font-size: 0.8rem;
-        }
-
-        .sources-header {
-            color: #94a3b8;
-            margin-bottom: 6px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-
-        .sources-pills {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-        }
-
-        .source-tag {
-            background: rgba(2, 132, 199, 0.2);
-            color: #38bdf8;
-            border: 1px solid rgba(56, 189, 248, 0.3);
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 0.72rem;
-            font-family: monospace;
-        }
-
-        /* Markdown Table */
-        .table-wrap {
-            overflow-x: auto;
-            margin: 10px 0;
-            border-radius: 6px;
-            border: 1px solid #475569;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.88rem;
-            text-align: left;
-        }
-
-        th, td {
-            padding: 8px 12px;
-            border-bottom: 1px solid #475569;
-        }
-
-        th {
-            background: #1e293b;
-            color: #38bdf8;
-            font-weight: 600;
-        }
-
-        tr:last-child td {
-            border-bottom: none;
-        }
-
-        /* Input Area */
-        .chat-input-area {
-            padding: 16px 20px;
-            background-color: #0f172a;
-            border-top: 1px solid #334155;
-            display: flex;
-            gap: 12px;
-        }
-
-        .chat-input-area input {
-            flex: 1;
-            padding: 12px 16px;
-            background-color: #1e293b;
-            border: 1px solid #475569;
-            border-radius: 8px;
-            color: #ffffff;
-            font-size: 0.95rem;
-            outline: none;
-            transition: border-color 0.2s;
-        }
-
-        .chat-input-area input:focus {
-            border-color: #3b82f6;
-        }
-
-        .chat-input-area button {
-            padding: 12px 24px;
-            background-color: #2563eb;
-            color: #ffffff;
-            border: none;
-            border-radius: 8px;
-            font-size: 0.95rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-
-        .chat-input-area button:hover {
-            background-color: #1d4ed8;
-        }
-
-        .chat-input-area button:disabled {
-            background-color: #475569;
-            cursor: not-allowed;
-        }
-
-        @media (max-width: 768px) {
-            .chat-container {
-                height: 100vh;
-                border-radius: 0;
-                border: none;
-            }
-        }
-    </style>
+    <title>Vietcombank AI Banking Assistant v4.5</title>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <div class="chat-container">
         <!-- HEADER -->
         <header class="chat-header">
             <div class="header-left">
-                <h2>AI Banking Assistant</h2>
+                <h2>Vietcombank AI Banking Assistant</h2>
+                <span class="sub-agent-badge badge-credit-card">v4.5 Production</span>
             </div>
             <div class="header-right">
                 <button type="button" id="clearChatBtn" class="btn-reset">
-                    Xóa hội thoại
+                    Làm mới phiên
                 </button>
             </div>
         </header>
+
+        <!-- LIVE STEPPER PROGRESS BAR (LANGGRAPH v4.5) -->
+        <div class="stepper-container" id="nodeStepper" style="display: none;">
+            <div class="stepper-header">
+                <span class="stepper-title">LangGraph Workflow:</span>
+                <span class="stepper-current-desc" id="stepperDesc">Đang khởi tạo luồng xử lý...</span>
+                <span class="sub-agent-badge badge-general-advisor" id="stepperBadge">[SUPERVISOR]</span>
+            </div>
+            <div class="stepper-steps">
+                <div class="step-item" id="step-node0" title="Node 0: Input Guardrail & State Reset">
+                    <div class="step-circle">0</div>
+                    <div class="step-label">Guardrail</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step-item" id="step-node1" title="Node 1: Multi-Agent Supervisor Router">
+                    <div class="step-circle">1</div>
+                    <div class="step-label">Router</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step-item" id="step-node2" title="Node 2/5: RAG Search / Banking Tool">
+                    <div class="step-circle">2/5</div>
+                    <div class="step-label">Action/RAG</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step-item" id="step-node3" title="Node 3/4: Document Grader / Query Rewriter">
+                    <div class="step-circle">3/4</div>
+                    <div class="step-label">Grade/Rewrite</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step-item" id="step-node6" title="Node 6: Vietcombank Persona Generator">
+                    <div class="step-circle">6</div>
+                    <div class="step-label">Generate</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step-item" id="step-node7" title="Node 7: Citation & Groundedness Audit">
+                    <div class="step-circle">7</div>
+                    <div class="step-label">Audit</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step-item" id="step-node8" title="Node 8: Output Guardrail & Verification">
+                    <div class="step-circle">8</div>
+                    <div class="step-label">Output</div>
+                </div>
+            </div>
+        </div>
 
         <!-- CHAT MESSAGES -->
         <main class="chat-messages" id="chatMessages">
             <div class="message bot-message">
                 <div class="bubble">
-                    <p>Xin chào! Tôi là Trợ lý AI Banking của Ngân hàng Mẫu (Mock Banking).</p>
-                    <p>Tôi hỗ trợ giải đáp quy trình mở tài khoản và phát hành thẻ qua eKYC theo chuẩn quy chế <strong>QT-NH-2024/01</strong>.</p>
+                    <div style="margin-bottom: 8px;">
+                        <span class="sub-agent-badge badge-general-advisor">[GENERAL_ADVISOR]</span>
+                    </div>
+                    <p>Kính chào Quý khách! Tôi là <strong>Trợ lý AI chuyên trách của Ngân hàng TMCP Ngoại thương Việt Nam (Vietcombank)</strong>.</p>
+                    <p>Hệ thống phiên bản <strong>v4.5</strong> đã được tích hợp bộ điều phối Multi-Agent Supervisor, công cụ tính khấu hao khoản vay, thẩm định sinh trắc học theo <strong>Quyết định 2345/QĐ-NHNN</strong>, tra cứu tỷ giá ngoại tệ, tính lãi suất tiết kiệm và tự động kiểm toán trích dẫn nguồn quy chế.</p>
+                    <p>Quý khách cần hỗ trợ thông tin gì hôm nay ạ?</p>
                 </div>
             </div>
         </main>
@@ -312,7 +85,7 @@
             <input 
                 type="text" 
                 id="userInput" 
-                placeholder="Hỏi về quy trình eKYC, hạn mức, điều kiện thẻ..." 
+                placeholder="Hỏi về biểu phí, mở thẻ, vay mua nhà, kiểm tra sinh trắc học QĐ 2345..." 
                 autocomplete="off" 
                 required
             >
@@ -320,273 +93,6 @@
         </form>
     </div>
 
-    <script>
-        const chatForm = document.getElementById("chatForm");
-        const userInput = document.getElementById("userInput");
-        const sendBtn = document.getElementById("sendBtn");
-        const chatMessages = document.getElementById("chatMessages");
-        const clearChatBtn = document.getElementById("clearChatBtn");
-
-        const initialWelcomeHtml = chatMessages.innerHTML;
-
-        // Escape HTML (0% REGEX)
-        function escapeHtml(str) {
-            if (!str) return "";
-            return str
-                .split("&").join("&amp;")
-                .split("<").join("&lt;")
-                .split(">").join("&gt;")
-                .split('"').join("&quot;")
-                .split("'").join("&#039;");
-        }
-
-        // Inline formatting: **bold** and `code` (0% REGEX)
-        function renderInlineFormatting(str) {
-            let safe = escapeHtml(str);
-
-            let boldParts = safe.split("**");
-            if (boldParts.length > 1) {
-                let boldOut = [];
-                for (let i = 0; i < boldParts.length; i++) {
-                    if (i % 2 === 1) {
-                        boldOut.push(`<strong>${boldParts[i]}</strong>`);
-                    } else {
-                        boldOut.push(boldParts[i]);
-                    }
-                }
-                safe = boldOut.join("");
-            }
-
-            let codeParts = safe.split("`");
-            if (codeParts.length > 1) {
-                let codeOut = [];
-                for (let i = 0; i < codeParts.length; i++) {
-                    if (i % 2 === 1) {
-                        codeOut.push(`<code>${codeParts[i]}</code>`);
-                    } else {
-                        codeOut.push(codeParts[i]);
-                    }
-                }
-                safe = codeOut.join("");
-            }
-
-            return safe;
-        }
-
-        // Parse markdown including tables (0% REGEX)
-        function parseMarkdown(text) {
-            if (!text) return "";
-            const lines = text.split("\n");
-            let html = [];
-            let inList = false;
-            let inTable = false;
-            let tableRows = [];
-
-            function flushTable() {
-                if (!inTable || tableRows.length === 0) {
-                    inTable = false;
-                    tableRows = [];
-                    return;
-                }
-                let tblHtml = ['<div class="table-wrap"><table>'];
-                let hasHeader = false;
-                let startIdx = 0;
-
-                if (tableRows.length >= 2 && tableRows[1].every(cell => cell.split("-").join("").split(":").join("").trim() === "")) {
-                    hasHeader = true;
-                    tblHtml.push('<thead><tr>');
-                    for (let c of tableRows[0]) {
-                        tblHtml.push(`<th>${renderInlineFormatting(c)}</th>`);
-                    }
-                    tblHtml.push('</tr></thead>');
-                    startIdx = 2;
-                }
-
-                tblHtml.push('<tbody>');
-                for (let r = startIdx; r < tableRows.length; r++) {
-                    tblHtml.push('<tr>');
-                    for (let c of tableRows[r]) {
-                        tblHtml.push(`<td>${renderInlineFormatting(c)}</td>`);
-                    }
-                    tblHtml.push('</tr>');
-                }
-                tblHtml.push('</tbody></table></div>');
-                html.push(tblHtml.join(""));
-                inTable = false;
-                tableRows = [];
-            }
-
-            for (let i = 0; i < lines.length; i++) {
-                let line = lines[i];
-                let trimmed = line.trim();
-
-                // Table row check
-                if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
-                    if (inList) {
-                        html.push("</ul>");
-                        inList = false;
-                    }
-                    let rawCells = trimmed.substring(1, trimmed.length - 1).split("|");
-                    let cells = rawCells.map(c => c.trim());
-                    inTable = true;
-                    tableRows.push(cells);
-                    continue;
-                } else if (inTable) {
-                    flushTable();
-                }
-
-                // Headers
-                if (trimmed.startsWith("### ")) {
-                    if (inList) { html.push("</ul>"); inList = false; }
-                    html.push(`<h4>${renderInlineFormatting(trimmed.substring(4))}</h4>`);
-                    continue;
-                }
-                if (trimmed.startsWith("## ")) {
-                    if (inList) { html.push("</ul>"); inList = false; }
-                    html.push(`<h3>${renderInlineFormatting(trimmed.substring(3))}</h3>`);
-                    continue;
-                }
-
-                // Lists
-                if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-                    if (!inList) {
-                        html.push("<ul>");
-                        inList = true;
-                    }
-                    html.push(`<li>${renderInlineFormatting(trimmed.substring(2))}</li>`);
-                    continue;
-                } else if (inList) {
-                    html.push("</ul>");
-                    inList = false;
-                }
-
-                // Empty line
-                if (trimmed === "") {
-                    continue;
-                }
-
-                // Paragraph
-                html.push(`<p>${renderInlineFormatting(trimmed)}</p>`);
-            }
-
-            if (inList) {
-                html.push("</ul>");
-            }
-            if (inTable) {
-                flushTable();
-            }
-
-            return html.join("");
-        }
-
-        function scrollToBottom() {
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-
-        function appendMessage(sender, content, meta = null) {
-            const msgDiv = document.createElement("div");
-            msgDiv.className = `message ${sender}-message`;
-
-            if (sender === "user") {
-                msgDiv.innerHTML = `
-                    <div class="bubble">
-                        <p>${escapeHtml(content)}</p>
-                    </div>
-                `;
-            } else {
-                let sourcesHtml = "";
-
-                if (meta) {
-                    const combined = [];
-                    (meta.citations || []).forEach(c => { if (c && !combined.includes(c)) combined.push(c); });
-                    (meta.sources || []).forEach(s => { if (s && !combined.includes(s)) combined.push(s); });
-
-                    if (combined.length > 0) {
-                        const tagsHtml = combined.slice(0, 4).map(src => `<span class="source-tag">${escapeHtml(src)}</span>`).join("");
-                        sourcesHtml = `
-                            <div class="sources-card">
-                                <div class="sources-header">Căn cứ quy chuẩn:</div>
-                                <div class="sources-pills">${tagsHtml}</div>
-                            </div>
-                        `;
-                    }
-                }
-
-                msgDiv.innerHTML = `
-                    <div class="bubble">
-                        ${parseMarkdown(content)}
-                        ${sourcesHtml}
-                    </div>
-                `;
-            }
-
-            chatMessages.appendChild(msgDiv);
-            scrollToBottom();
-            return msgDiv;
-        }
-
-        chatForm.addEventListener("submit", async (e) => {
-            e.preventDefault();
-            const text = userInput.value.trim();
-            if (!text) return;
-
-            appendMessage("user", text);
-            userInput.value = "";
-            userInput.disabled = true;
-            sendBtn.disabled = true;
-
-            const loadingDiv = document.createElement("div");
-            loadingDiv.className = "message bot-message loading";
-            loadingDiv.innerHTML = `
-                <div class="bubble">
-                    <p>Đang tra cứu cơ sở dữ liệu quy chuẩn...</p>
-                </div>
-            `;
-            chatMessages.appendChild(loadingDiv);
-            scrollToBottom();
-
-            try {
-                const res = await fetch("/api/chat", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ message: text })
-                });
-
-                loadingDiv.remove();
-
-                if (!res.ok) {
-                    const err = await res.json().catch(() => ({ detail: "Lỗi kết nối máy chủ dịch vụ" }));
-                    appendMessage("bot", `**Rất tiếc:** ${err.detail || "Không thể xử lý yêu cầu lúc này."}`);
-                } else {
-                    const data = await res.json();
-                    appendMessage("bot", data.reply || "Không nhận được phản hồi từ hệ thống.", {
-                        latency_ms: data.latency_ms,
-                        citations: data.citations,
-                        sources: data.sources
-                    });
-                }
-            } catch (err) {
-                loadingDiv.remove();
-                appendMessage("bot", `**Lỗi kết nối:** Không thể liên lạc với máy chủ (${err.message}).`);
-            } finally {
-                userInput.disabled = false;
-                sendBtn.disabled = false;
-                userInput.focus();
-                scrollToBottom();
-            }
-        });
-
-        if (clearChatBtn) {
-            clearChatBtn.addEventListener("click", () => {
-                chatMessages.innerHTML = initialWelcomeHtml;
-                userInput.value = "";
-                userInput.focus();
-            });
-        }
-
-        if (userInput) {
-            userInput.focus();
-        }
-    </script>
+    <script src="/static/app.js"></script>
 </body>
 </html>

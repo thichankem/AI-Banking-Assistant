@@ -126,7 +126,9 @@ def split_sentences(text: str, use_sat: bool = True) -> list[str]:
 
     # 2. DỰ PHÒNG THUẦN TÚY (0% Regex, 0% Mảng ký tự neo): Tách theo cấu trúc dòng
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    return lines if lines else [text.strip()]
+    if lines:
+        return lines
+    return [text.strip()]
 
 
 split_sentences_banking = split_sentences
@@ -149,7 +151,12 @@ def group_sentences(
     if not sentences:
         return []
 
-    limit = max_words if max_words is not None else (max_chunk_size // 2 if max_chunk_size else 350)
+    if max_words is not None:
+        limit = max_words
+    elif max_chunk_size:
+        limit = max_chunk_size // 2
+    else:
+        limit = 350
 
     chunks: list[str] = []
     current_sentences: list[str] = []
@@ -287,10 +294,16 @@ def detect_and_remove_headers_footers(
 def extract_document_identifier(filename: str = "", text: str = "") -> str:
     """Lấy định danh tài liệu sạch từ tên tệp hoặc văn bản đầu vào (0% Regex)."""
     if filename:
-        stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+        if "." in filename:
+            stem = filename.rsplit(".", 1)[0]
+        else:
+            stem = filename
         return stem.strip()
     if text:
-        first_line = text.strip().splitlines()[0] if text.strip() else ""
+        stripped_text = text.strip()
+        first_line = ""
+        if stripped_text:
+            first_line = stripped_text.splitlines()[0]
         return first_line.strip()
     return ""
 
@@ -325,7 +338,10 @@ def extract_hierarchical_units(text: str = "", text_chunk: str = "") -> list[str
         is_roman = bool(next_w and all(c in roman_chars for c in next_w) and not is_num)
 
         if is_title_word and (is_num or is_roman):
-            results.append(f"{curr_w.capitalize()} {next_w.upper() if is_roman else next_w}")
+            unit_val = next_w
+            if is_roman:
+                unit_val = next_w.upper()
+            results.append(f"{curr_w.capitalize()} {unit_val}")
             i += 1
         i += 1
     return list(dict.fromkeys(results))
