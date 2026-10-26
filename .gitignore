@@ -73,6 +73,13 @@ tmp/
 scripts/
 .scripts/
 crawl scripts/
+start_*.bat
+start_all.bat
+start_app.bat
+start_phoenix.bat
+start_services.bat
+*.bat
+*.cmd
 
 # ==============================================================================
 # AI Agent Directories & Rules (MANDATORY: DO NOT REMOVE)
@@ -91,9 +98,13 @@ knowledge_base/
 notebooks_study/
 rag_modular_study/
 rag_modular/
+rag_banking/
+**/rag_banking/
+**/rag_banking/**
+*rag_banking*
 
 # ==============================================================================
-# Datasets, Pipeline Data & I/O Folders
+# Datasets, Pipeline Data, Chunking & Golden Chunks (Toàn bộ dữ liệu & tài liệu chunk)
 # ==============================================================================
 data/
 **/data/
@@ -110,16 +121,47 @@ output/
 **/output/
 chunks_per_file/
 **/chunks_per_file/
+**/chunks_per_file/**
+*chunks_per_file*
 retrieval_dataset/
 retrieval dataset/
 retival_dataset/
 retival dataset/
 chunking_dataset/
+**/chunking_dataset/
+**/chunking_dataset/**
+*chunking_dataset*
 output_dataset/
+**/output_dataset/
 
-# Dataset files & manifests
+# Golden Chunks & Specific Chunking Directories
+golden_chunks/
+**/golden_chunks/
+**/golden_chunks/**
+*golden_chunks*
+agent_banking/chunking/golden_chunks/
+agent_banking/chunking/chunking_dataset/
+agent_banking/chunking/input/
+agent_banking/chunking/output/
+chunking/golden_chunks/
+chunking/chunking_dataset/
+chunking/input/
+chunking/output/
+**/chunking/golden_chunks/
+**/chunking/chunking_dataset/
+**/chunking/input/
+**/chunking/output/
+
+# Dataset, Manifest & Chunk Files
 all_chunks.json
+golden_manifest.json
 *_manifest.json
+*manifest*.json
+okbank_*
+*okbank*
+*_chunks.json
+*chunk*.json
+chunk_*.json
 *embeddings*.json
 *.jsonl
 *.parquet
@@ -176,9 +218,27 @@ embedding_cache.db
 agent_banking/agent_banking/
 
 # ==============================================================================
-# Documentation, Reports, Proposals & Office Files
+# Documentation, Reports, Proposals & Office Files (Ngoài thư mục docs/)
 # ==============================================================================
+documentation/
+**/documentation/
+papers/
+**/papers/
+reports/
+**/reports/
+proposals/
+**/proposals/
+document/
+**/document/
+documents/
+**/documents/
+tai_lieu/
+**/tai_lieu/
+tailieu/
+**/tailieu/
 problem.md
+
+# Định dạng tệp tài liệu và văn phòng
 *.docx
 *.doc
 *.pdf
@@ -186,14 +246,25 @@ problem.md
 *.ppt
 *.xlsx
 *.xls
+*.csv
+*.tsv
+*.odt
+*.ods
+*.odp
+*.rtf
+*.pages
+*.key
+*.numbers
+*.drawio
+*.drawio.png
+*.drawio.svg
+*.drawio.xml
+
+# ==============================================================================
+# Lưu giữ toàn bộ tài liệu dự án trong docs/ (KHÔNG gitignore docs/)
+# ==============================================================================
+!docs/
 !docs/**
-!docs/**/*.pdf
-!docs/**/*.docx
-!docs/**/*.doc
-!docs/**/*.pptx
-!docs/**/*.ppt
-!docs/**/*.xlsx
-!docs/**/*.xls
 
 # ==============================================================================
 # Jupyter Notebook Checkpoints
