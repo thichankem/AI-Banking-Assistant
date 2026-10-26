@@ -237,13 +237,19 @@ class NodePipeline:
         sample_vectors = []
         for c in embedded_chunks[:10]:
             vec = c.get("vector", c.get("embedding", []))
+            v_head = []
+            if vec:
+                v_head = vec[:5]
+            v_tail = []
+            if vec:
+                v_tail = vec[-5:]
             sample_vectors.append({
                 "chunk_id": c.get("chunk_id"),
                 "source": c.get("source"),
                 "section_title": c.get("section_title"),
                 "dimension": len(vec),
-                "vector_head_5": vec[:5] if vec else [],
-                "vector_tail_5": vec[-5:] if vec else []
+                "vector_head_5": v_head,
+                "vector_tail_5": v_tail
             })
 
         sample_file = out_path / "sample_embeddings.json"
@@ -344,7 +350,12 @@ class NodePipeline:
             with open(p, "r", encoding="utf-8") as fp:
                 data = json.load(fp)
                 if isinstance(data, list):
-                    query_list = [item if isinstance(item, str) else item.get("question", "") for item in data]
+                    query_list = []
+                    for item in data:
+                        if isinstance(item, str):
+                            query_list.append(item)
+                        else:
+                            query_list.append(item.get("question", ""))
                 elif isinstance(data, dict):
                     query_list = data.get("queries", [str(data)])
         elif isinstance(queries, str):
@@ -844,14 +855,20 @@ class NodePipeline:
             sources = serving_result.get("sources_used", [])
             if not citations:
                 for rc in reranked:
-                    c = rc.get("chunk", rc) if isinstance(rc, dict) else rc
+                    if isinstance(rc, dict):
+                        c = rc.get("chunk", rc)
+                    else:
+                        c = rc
                     if isinstance(c, dict):
                         bc = c.get("breadcrumb", "")
                         if bc and bc not in citations:
                             citations.append(bc)
             if not sources:
                 for rc in reranked:
-                    c = rc.get("chunk", rc) if isinstance(rc, dict) else rc
+                    if isinstance(rc, dict):
+                        c = rc.get("chunk", rc)
+                    else:
+                        c = rc
                     if isinstance(c, dict):
                         src = c.get("source", "")
                         if src and src not in sources:
@@ -863,6 +880,38 @@ class NodePipeline:
                 sources=sources,
                 is_blocked=False
             )
+
+        candidates_preview = []
+        for i, c in enumerate(candidates[:5]):
+            chunk_data = {}
+            if isinstance(c.get("chunk"), dict):
+                chunk_data = c.get("chunk", {})
+            candidates_preview.append({
+                "rank": c.get("candidate_rank", i + 1),
+                "chunk_id": chunk_data.get("chunk_id", ""),
+                "source": chunk_data.get("source", ""),
+                "breadcrumb": chunk_data.get("breadcrumb", ""),
+                "rrf_score": round(float(c.get("rrf_score", 0.0)), 6),
+                "dense_score": round(float(c.get("dense_score", 0.0)), 4),
+                "bm25_score": round(float(c.get("bm25_score", 0.0)), 4),
+                "preview": str(chunk_data.get("content", ""))[:200]
+            })
+
+        top_chunks_preview = []
+        for i, rc in enumerate(reranked):
+            chunk_data = {}
+            if isinstance(rc, dict) and isinstance(rc.get("chunk"), dict):
+                chunk_data = rc.get("chunk", {})
+            elif isinstance(rc, dict):
+                chunk_data = rc
+            top_chunks_preview.append({
+                "rerank_rank": rc.get("rerank_rank", i + 1),
+                "chunk_id": chunk_data.get("chunk_id", ""),
+                "source": chunk_data.get("source", ""),
+                "breadcrumb": chunk_data.get("breadcrumb", ""),
+                "relevance_score": round(float(rc.get("relevance_score", 0.0)), 4),
+                "preview": str(chunk_data.get("content", ""))[:250]
+            })
 
         return {
             "reply": final_answer,
@@ -910,19 +959,7 @@ class NodePipeline:
                     "input_folder": "agent_banking/retrieval/input/",
                     "output_folder": "agent_banking/retrieval/output/",
                     "candidates_count": len(candidates),
-                    "candidates": [
-                        {
-                            "rank": c.get("candidate_rank", i + 1),
-                            "chunk_id": (c.get("chunk", {}) if isinstance(c.get("chunk"), dict) else {}).get("chunk_id", ""),
-                            "source": (c.get("chunk", {}) if isinstance(c.get("chunk"), dict) else {}).get("source", ""),
-                            "breadcrumb": (c.get("chunk", {}) if isinstance(c.get("chunk"), dict) else {}).get("breadcrumb", ""),
-                            "rrf_score": round(float(c.get("rrf_score", 0.0)), 6),
-                            "dense_score": round(float(c.get("dense_score", 0.0)), 4),
-                            "bm25_score": round(float(c.get("bm25_score", 0.0)), 4),
-                            "preview": (c.get("chunk", {}) if isinstance(c.get("chunk"), dict) else {}).get("content", "")[:200]
-                        }
-                        for i, c in enumerate(candidates[:5])
-                    ],
+                    "candidates": candidates_preview,
                     "latency_ms": t_ret_ms
                 },
                 "06_reranking": {
@@ -930,17 +967,7 @@ class NodePipeline:
                     "input_folder": "agent_banking/reranking/input/",
                     "output_folder": "agent_banking/reranking/output/",
                     "model": self.config.RERANKER_MODEL,
-                    "top_chunks": [
-                        {
-                            "rerank_rank": rc.get("rerank_rank", i + 1),
-                            "chunk_id": (rc.get("chunk", {}) if isinstance(rc.get("chunk"), dict) else rc).get("chunk_id", ""),
-                            "source": (rc.get("chunk", {}) if isinstance(rc.get("chunk"), dict) else rc).get("source", ""),
-                            "breadcrumb": (rc.get("chunk", {}) if isinstance(rc.get("chunk"), dict) else rc).get("breadcrumb", ""),
-                            "relevance_score": round(float(rc.get("relevance_score", 0.0)), 4),
-                            "preview": (rc.get("chunk", {}) if isinstance(rc.get("chunk"), dict) else rc).get("content", "")[:250]
-                        }
-                        for i, rc in enumerate(reranked)
-                    ],
+                    "top_chunks": top_chunks_preview,
                     "latency_ms": t_rerank_ms
                 },
                 "07_generator": {

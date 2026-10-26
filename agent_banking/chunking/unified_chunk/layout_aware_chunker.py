@@ -93,8 +93,15 @@ class LayoutAwareChunker:
 
         # Fallback SyllableBudgetManager
         clean_text = text.strip()
-        sec_title = section_title if section_title else source_name.replace("_", " ").title()
-        b_crumb = breadcrumb if breadcrumb else sec_title
+        if section_title:
+            sec_title = section_title
+        else:
+            sec_title = source_name.replace("_", " ").title()
+
+        if breadcrumb:
+            b_crumb = breadcrumb
+        else:
+            b_crumb = sec_title
 
         split_groups = self.docx_chunker.syllable_manager.split_text_elastic(
             text=clean_text,

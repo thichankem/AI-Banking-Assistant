@@ -84,8 +84,21 @@ INJECTION_PHRASES = [
     "lặp lại toàn bộ nội dung ở trên"
 ]
 
-# Danh mục các hành vi gian lận ngân hàng & tội phạm tài chính (0% Regex)
-FRAUD_CATEGORIES = {
+# =====================================================================
+# DANH MỤC PHÒNG VỆ AN TOÀN DOANH NGHIỆP 7 CHUYÊN ĐỀ (ENTERPRISE BANKING GUARDRAILS)
+# =====================================================================
+ENTERPRISE_GUARDRAIL_TOPICS = {
+    # 1. System Abuse & Jailbreak
+    "SYSTEM_ABUSE": [
+        "chế độ dan",
+        "dan mode",
+        "bỏ qua kiểm duyệt",
+        "tắt bảo mật",
+        "hack bot",
+        "jailbreak",
+        "unrestricted mode"
+    ],
+    # 2. Fraud & Scam (eKYC, Biometrics, Account Trading, Cyber Attack)
     "EKYC_BIOMETRIC_FRAUD": [
         "qua mặt ekyc",
         "vượt qua ekyc",
@@ -126,9 +139,74 @@ FRAUD_CATEGORIES = {
         "trốn thuế",
         "chuyển tiền lậu",
         "chuyển tiền phi pháp",
-        "tiền đen"
+        "tiền đen",
+        "làm giả sao kê",
+        "sao kê giả"
+    ],
+    # 3. Rumors about Bank & Panic (Tin đồn, Bank Run)
+    "BANK_RUMORS_AND_CRISIS": [
+        "ngân hàng phá sản",
+        "vietcombank phá sản",
+        "ngân hàng vỡ nợ",
+        "vietcombank vỡ nợ",
+        "sắp sập tiệm",
+        "sắp giải thể",
+        "sắp đóng cửa",
+        "rút tiền hàng loạt",
+        "bank run",
+        "lộ dữ liệu khách hàng",
+        "lộ database",
+        "mất tiền gửi",
+        "quỵt tiền"
+    ],
+    # 4. Internal Data & Security Probing (Dò hỏi dữ liệu mật nội bộ)
+    "INTERNAL_SECURITY_PROBING": [
+        "lương nhân viên",
+        "bảng lương ban giám đốc",
+        "lương tổng giám đốc",
+        "mật khẩu core banking",
+        "database password",
+        "sơ đồ mạng nội bộ",
+        "tài liệu mật nội bộ",
+        "chính sách nội bộ bí mật",
+        "thông tin nhân sự mật"
+    ],
+    # 5. Politics Debate (Chính trị & Thể chế)
+    "POLITICS_DEBATE": [
+        "chính trị việt nam",
+        "lật đổ chính quyền",
+        "bầu cử tổng thống",
+        "chống phá đảng",
+        "chống phá nhà nước",
+        "tuyên truyền chống nhà nước",
+        "bất đồng chính kiến"
+    ],
+    # 6. Religion Debate (Tôn giáo & Mê tín dị đoan)
+    "RELIGION_DEBATE": [
+        "tà đạo",
+        "báng bổ tôn giáo",
+        "xúc phạm phật giáo",
+        "xúc phạm công giáo",
+        "bói toán mê tín",
+        "xem bói phong thủy tiền bạc",
+        "bùa ngải tiền bạc"
+    ],
+    # 7. Violence & Crime (Bạo lực, Vũ khí, Khủng bố)
+    "VIOLENCE_AND_CRIME": [
+        "chế tạo vũ khí",
+        "chế tạo bom",
+        "thuốc nổ",
+        "khủng bố ngân hàng",
+        "cướp ngân hàng",
+        "kế hoạch cướp",
+        "đe dọa tống tiền",
+        "giết người",
+        "tự hại",
+        "tự tử"
     ]
 }
+
+FRAUD_CATEGORIES = ENTERPRISE_GUARDRAIL_TOPICS
 
 # Các cụm từ rò rỉ system prompt cần lọc ở đầu ra
 PROMPT_LEAK_SIGNATURES = [
@@ -345,11 +423,44 @@ class BankingGuardrailManager:
                     "chiếm đoạt tài khoản ngân hàng hoặc khai thác lỗ hổng bảo mật. Mọi hoạt động của "
                     "khách hàng trên ngân hàng số đều được lưu trữ và giám sát chặt chẽ theo quy định an ninh mạng."
                 )
-            else:
+            elif fraud_category == "MONEY_LAUNDERING_RISK":
                 refusal = (
                     "Hệ thống AI xin thông báo: Ngân hàng nghiêm cấm và không hỗ trợ bất kỳ hành vi "
-                    "nào liên quan đến rửa tiền, trốn thuế hoặc luân chuyển dòng tiền phi pháp theo "
-                    "Luật Phòng, chống rửa tiền của nước CHXHCN Việt Nam."
+                    "nào liên quan đến rửa tiền, trốn thuế, làm giả sao kê hoặc luân chuyển dòng tiền "
+                    "phi pháp theo Luật Phòng, chống rửa tiền của nước CHXHCN Việt Nam."
+                )
+            elif fraud_category == "BANK_RUMORS_AND_CRISIS":
+                refusal = (
+                    "Ngân hàng xin khẳng định: Ngân hàng hoạt động minh bạch, an toàn và tuân thủ nghiêm ngặt "
+                    "các quy định an toàn thanh khoản của Ngân hàng Nhà nước Việt Nam. Mọi thông tin đồn đoán "
+                    "thất thiệt về khủng hoảng, vỡ nợ hoặc mất an toàn tiền gửi đều vi phạm pháp luật. "
+                    "Quý khách hoàn toàn an tâm khi gửi tiền và giao dịch tại Ngân hàng."
+                )
+            elif fraud_category == "INTERNAL_SECURITY_PROBING":
+                refusal = (
+                    "Hệ thống AI xin thông báo: Các thông tin về nhân sự nội bộ, tiền lương, kiến trúc hệ thống "
+                    "và cơ sở dữ liệu thuộc danh mục bí mật kinh doanh được bảo vệ theo quy định pháp luật. "
+                    "Hệ thống từ chối cung cấp các thông tin này."
+                )
+            elif fraud_category == "POLITICS_DEBATE":
+                refusal = (
+                    "Trợ lý AI là hệ thống chuyên trách hỗ trợ nghiệp vụ tài chính, dịch vụ ngân hàng và thanh toán. "
+                    "Trợ lý AI xin phép từ chối thảo luận các chủ đề liên quan đến chính trị, bầu cử hoặc quan điểm thể chế."
+                )
+            elif fraud_category == "RELIGION_DEBATE":
+                refusal = (
+                    "Trợ lý AI luôn tôn trọng quyền tự do tín ngưỡng và đức tin của Quý khách, "
+                    "và xin phép không tham gia vào các tranh luận về tôn giáo hoặc các nội dung mê tín dị đoan."
+                )
+            elif fraud_category == "VIOLENCE_AND_CRIME":
+                refusal = (
+                    "Hệ thống AI từ chối tuyệt đối việc giải đáp hoặc cung cấp thông tin liên quan đến các "
+                    "hành vi bạo lực, chế tạo vũ khí, khủng bố hoặc đe dọa an toàn tính mạng và tài sản."
+                )
+            else:
+                refusal = (
+                    "Yêu cầu của Quý khách vi phạm tiêu chuẩn bảo mật hệ thống (Jailbreak / System Abuse). "
+                    "Trợ lý AI xin phép từ chối thực hiện để bảo vệ an toàn thông tin."
                 )
 
             return InputGuardResult(

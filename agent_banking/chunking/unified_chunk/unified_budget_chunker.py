@@ -87,7 +87,9 @@ class UnifiedDOCXChunker:
         def get_current_breadcrumb() -> str:
             levels = sorted(active_headers.keys())
             headers = [active_headers[lvl] for lvl in levels if active_headers[lvl]]
-            return " > ".join([doc_title] + headers) if headers else doc_title
+            if headers:
+                return " > ".join([doc_title] + headers)
+            return doc_title
 
         def emit_text_chunk(buf: list[str]) -> dict | None:
             nonlocal chunk_idx
@@ -144,8 +146,12 @@ class UnifiedDOCXChunker:
             if not text:
                 continue
 
-            style_name = (para.style.name or "").lower() if para.style else ""
-            style_id = (getattr(para.style, "style_id", "") or "").lower() if para.style else ""
+            style_name = ""
+            if para.style and para.style.name:
+                style_name = str(para.style.name).lower()
+            style_id = ""
+            if para.style and getattr(para.style, "style_id", ""):
+                style_id = str(getattr(para.style, "style_id", "")).lower()
             is_heading = "heading" in style_name or "heading" in style_id or "title" in style_name or "title" in style_id
 
             if is_heading:
