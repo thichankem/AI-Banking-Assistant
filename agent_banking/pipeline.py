@@ -122,7 +122,7 @@ class BankingRAGPipeline:
         )
         self.synthesizer = self.generator
         self.tracer = BankingTracer(config=self.config)
-        self.guardrails = BankingGuardrailManager()
+        self.guardrails = BankingGuardrailManager(embedder=self.embedder)
 
         self.indexed_chunks = []
         print("[Hệ thống] Toàn bộ 5 phân hệ, Tracing và Banking Guardrails đã sẵn sàng!\n")
@@ -426,8 +426,59 @@ class BankingRAGPipeline:
             t3_ms = round((time.time() - t3) * 1000, 1)
             trace.record_rerank(query=sanitized_query, candidates=candidates_top5, reranked=top3_chunks, duration_ms=t3_ms)
 
+            # Giai đoạn 2: Pre-Generation Relevance Gating (Chống Halu Trước Khi Sinh)
+            relevance_threshold = 0.25
+            if hasattr(self.config, "RELEVANCE_THRESHOLD"):
+                relevance_threshold = self.config.RELEVANCE_THRESHOLD
+            is_relevant, no_info_msg, rel_details = self.guardrails.guard_rag_relevance(
+                sanitized_query,
+                top3_chunks,
+                min_score=relevance_threshold
+            )
+            if is_relevant is False:
+                print(f"🛑 [RELEVANCE GATING BLOCKED] Tài liệu RAG không chứa thông tin: {rel_details}")
+                trace.record_guardrail_block(
+                    reason="RAG_IRRELEVANT_CHUNKS",
+                    details=rel_details
+                )
+                trace.finish(
+                    answer=no_info_msg,
+                    citations=[],
+                    sources=[],
+                    is_blocked=False,
+                    guardrail_trigger="RAG_IRRELEVANT_CHUNKS"
+                )
+                return {
+                    "query": query,
+                    "sanitized_query": sanitized_query,
+                    "answer": no_info_msg,
+                    "is_blocked": False,
+                    "guardrail_trigger": "RAG_IRRELEVANT_CHUNKS",
+                    "guardrail_details": rel_details,
+                    "step1_parsed_query": parsed_query,
+                    "step2_candidates_top5": candidates_top5,
+                    "step3_top3_chunks": top3_chunks,
+                    "retrieved_chunks": candidates_top5,
+                    "step4_synthesized_context": None,
+                    "step5_serving_result": {"answer": no_info_msg, "fail_fast": True},
+                    "legal_citations": [],
+                    "sources_used": [],
+                    "latency": {
+                        "step1_query_parser_ms": t1_ms,
+                        "step2_hybrid_retrieval_ms": t2_ms,
+                        "step3_reranking_ms": t3_ms,
+                        "total_pipeline_ms": round((time.time() - t_start) * 1000, 1)
+                    }
+                }
+
             # Bước 4: Context Synthesizer
             t4 = time.time()
+            # Tầng 3: Rà soát Indirect Prompt Injection trên các chunks trước khi đưa vào Context
+            safe_chunks, blocked_cnt, threats = self.guardrails.guard_retrieved_chunks(top3_chunks)
+            if blocked_cnt > 0:
+                print(f"⚠️ [Indirect Injection Guardrail] Đã loại bỏ {blocked_cnt} chunk độc hại khỏi Context.")
+            top3_chunks = safe_chunks
+
             synthesized_context = self.step4_context_synthesizer(
                 top3_chunks,
                 max_tokens=self.config.MAX_CONTEXT_TOKENS
@@ -450,7 +501,7 @@ class BankingRAGPipeline:
             )
 
             # -------------------------------------------------------------
-            # TẦNG 2: OUTPUT GUARDRAIL (Prompt Leakage, PII Leak, Thinking tags)
+            # GIAI ĐOẠN 3: OUTPUT GUARDRAIL & FAITHFULNESS GROUNDING
             # -------------------------------------------------------------
             raw_answer = serving_result.get("answer", "")
             output_guard = self.guardrails.guard_output(raw_answer)
@@ -462,6 +513,16 @@ class BankingRAGPipeline:
                     layer="output_guardrail",
                     is_safe=True,
                     details=output_guard.flags
+                )
+
+            # Đối soát Grounding & Faithfulness với các chunks RAG thực tế
+            is_faithful, faith_flags = self.guardrails.guard_rag_faithfulness(answer, top3_chunks)
+            if is_faithful is False:
+                serving_result["faithfulness_flags"] = faith_flags
+                trace.record_guardrail_check(
+                    layer="rag_faithfulness",
+                    is_safe=False,
+                    details=faith_flags
                 )
 
             total_latency_ms = round((time.time() - t_start) * 1000, 1)
