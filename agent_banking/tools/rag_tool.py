@@ -4,7 +4,7 @@ Banking RAG Tool for LangGraph / Agentic Workflows
 ======================================================================
 Đóng gói toàn bộ luồng RAG chuyên sâu (Query Parser -> Hybrid Retrieval -> Cross-Encoder Reranker)
 thành một Công cụ chuẩn (Standard Tool) cho AI Agent:
-- Tái sử dụng 100% các class và logic hiện có trong pipeline.py và node_pipeline.py.
+- Tái sử dụng 100% các class và logic hiện có trong pipeline.py.
 - Không phụ thuộc vào LangChain Runnable hay BaseRetriever.
 - Trả về cấu trúc Payload chuẩn hóa phục vụ Context Grounding và Citation.
 """

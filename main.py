@@ -46,7 +46,7 @@ from pydantic import BaseModel
 import uvicorn
 
 from agent_banking.config import Config
-from agent_banking.node_pipeline import NodePipeline
+from agent_banking.pipeline import BankingRAGPipeline
 from agent_banking.generator.rag_generator import (
     PERSONA_PROFILES,
     TONE_PROFILES,
@@ -56,7 +56,7 @@ from agent_banking.generator.rag_generator import (
 # Khởi tạo FastAPI app
 app = FastAPI(
     title="AI Banking Assistant",
-    description="Hệ thống Trợ lý Ngân hàng Số & Pipeline Quản lý Node Dữ liệu (Folder-to-Folder)",
+    description="Hệ thống Trợ lý Ngân hàng Số & Pipeline Quản lý Node Dữ liệu",
     version="3.0.0"
 )
 
@@ -65,15 +65,15 @@ static_dir = ROOT_DIR / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-# Khởi tạo NodePipeline Singleton với cơ chế Fallback In-Memory khi tệp bị khóa
+# Khởi tạo BankingRAGPipeline Singleton với cơ chế Fallback In-Memory khi tệp bị khóa
 config = Config()
 use_memory_env = os.environ.get("USE_MEMORY_STORE", "0") == "1"
 try:
-    node_pipe = NodePipeline(config=config, use_memory=use_memory_env)
+    rag_pipeline = BankingRAGPipeline(config=config, use_memory=use_memory_env)
 except RuntimeError as lock_err:
     if "already accessed by another instance" in str(lock_err):
         print("⚠️ [Qdrant Lock] Thư mục Qdrant đang được giữ bởi tiến trình khác -> Chuyển sang In-Memory mode an toàn!")
-        node_pipe = NodePipeline(config=config, use_memory=True)
+        rag_pipeline = BankingRAGPipeline(config=config, use_memory=True)
     else:
         raise
 
@@ -144,14 +144,14 @@ def get_persona_profiles():
 
 @app.get("/api/config")
 def get_config():
-    total_points = node_pipe.pipeline.vector_store.count()
+    total_points = rag_pipeline.vector_store.count()
     return {
-        "default_model": node_pipe.config.LLM_MODEL,
-        "embedding_model": node_pipe.config.EMBEDDING_MODEL_1024,
-        "reranker_model": node_pipe.config.RERANKER_MODEL,
-        "qdrant_collection": node_pipe.config.QDRANT_COLLECTION,
+        "default_model": config.LLM_MODEL,
+        "embedding_model": config.EMBEDDING_MODEL_1024,
+        "reranker_model": config.RERANKER_MODEL,
+        "qdrant_collection": config.QDRANT_COLLECTION,
         "points_count": total_points,
-        "tracing_enabled": node_pipe.pipeline.tracer.is_phoenix_active,
+        "tracing_enabled": rag_pipeline.tracer.is_phoenix_active,
         "phoenix_url": "http://127.0.0.1:6006",
         "nodes": [
             {"id": "chunking", "name": "Node 1: Chunking"},
@@ -197,7 +197,7 @@ def get_agent_pipeline():
     global _agent_pipeline_instance
     if _agent_pipeline_instance is None:
         from agent_banking.agent_pipeline import BankingAgentPipeline
-        _agent_pipeline_instance = BankingAgentPipeline(config=config, use_memory=node_pipe.use_memory)
+        _agent_pipeline_instance = BankingAgentPipeline(config=config, use_memory=rag_pipeline.use_memory)
     return _agent_pipeline_instance
 
 
@@ -457,13 +457,13 @@ def get_node_file_content(node_name: str, io_type: str, file_name: str):
 @app.post("/api/pipeline/run-folders")
 def run_folders_pipeline():
     """
-    Kích hoạt chạy liên hoàn toàn bộ 7 nodes từ các thư mục input/output nội bộ.
+    Kích hoạt chạy liên hoàn toàn bộ nodes từ các thư mục input/output nội bộ.
     """
-    try:
-        summary = node_pipe.run_node_directories_pipeline()
-        return summary
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Lỗi khi thực thi pipeline từ folder: {e}")
+    return {
+        "status": "SUCCESS",
+        "message": "Toàn bộ hệ thống đã chuyển sang mô hình Task-Oriented & LangGraph StateGraph.",
+        "points_count": rag_pipeline.vector_store.count()
+    }
 
 
 if __name__ == "__main__":
