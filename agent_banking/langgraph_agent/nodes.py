@@ -78,7 +78,11 @@ class BankingAgentNodes:
             self.config = Config()
 
         # 1. Khởi tạo Guardrail Manager
-        self.guardrail_manager = BankingGuardrailManager()
+        embedder_inst = None
+        if pipeline_instance is not None:
+            if hasattr(pipeline_instance, "embedder"):
+                embedder_inst = pipeline_instance.embedder
+        self.guardrail_manager = BankingGuardrailManager(embedder=embedder_inst)
 
         # 2. Khởi tạo Tracing Manager
         self.tracer = BankingTracer(config=self.config)
@@ -399,6 +403,12 @@ class BankingAgentNodes:
         sources = res.get("sources", [])
         citations = res.get("citations", [])
 
+        # Tầng 3: Rà soát Indirect Prompt Injection trên các chunks trích xuất
+        safe_docs, blocked_count, threats = self.guardrail_manager.guard_retrieved_chunks(docs)
+        if blocked_count > 0:
+            steps.append(f"Node 2: Indirect Injection Guardrail blocked {blocked_count} poisoned chunk(s)")
+        docs = safe_docs
+
         normalized_q = res.get("normalized_query", query)
 
         return {
@@ -537,27 +547,43 @@ class BankingAgentNodes:
             if rate_percent <= 0.0:
                 rate_percent = 7.5
 
-            res = calculate_loan_amortization(
-                principal_vnd=principal,
-                annual_rate_percent=rate_percent,
-                term_months=term_months
-            )
+            tool_input = {
+                "principal_vnd": principal,
+                "annual_rate_percent": rate_percent,
+                "term_months": term_months
+            }
+            guard_check = self.guardrail_manager.guard_tool_call("calculate_loan_amortization", tool_input)
+            if guard_check["is_safe"] is False:
+                res = {"status": "ERROR", "message": guard_check["error_message"]}
+            else:
+                p_safe = guard_check["sanitized_params"]
+                res = calculate_loan_amortization(
+                    principal_vnd=p_safe["principal_vnd"],
+                    annual_rate_percent=p_safe["annual_rate_percent"],
+                    term_months=p_safe["term_months"]
+                )
             tool_outputs.append({"tool": "calculate_loan_amortization", "result": res})
 
         # 2. Thẩm định Sinh trắc học QĐ 2345 / TT 50 (Compliance Audit Agent)
         elif target == "check_biometric_compliance_qd2345" or sub_agent == "COMPLIANCE_AUDIT_AGENT" or "2345" in query or "sinh trắc học" in query or "quét khuôn mặt" in query or "khuôn mặt" in query:
             executed_tool_name = "check_biometric_compliance_qd2345"
-            single_amount = params["single_tx_amount_vnd"]
-            daily_amount = params["daily_cumulative_amount_vnd"]
-            is_new_device = params["is_first_time_new_device"]
-            has_chip_cccd = params["has_verified_chip_cccd"]
-
-            res = check_biometric_compliance_qd2345(
-                single_tx_amount_vnd=single_amount,
-                daily_cumulative_amount_vnd=daily_amount,
-                is_first_time_new_device=is_new_device,
-                has_verified_chip_cccd=has_chip_cccd
-            )
+            tool_input = {
+                "single_tx_amount_vnd": params["single_tx_amount_vnd"],
+                "daily_cumulative_amount_vnd": params["daily_cumulative_amount_vnd"],
+                "is_first_time_new_device": params["is_first_time_new_device"],
+                "has_verified_chip_cccd": params["has_verified_chip_cccd"]
+            }
+            guard_check = self.guardrail_manager.guard_tool_call("check_biometric_compliance_qd2345", tool_input)
+            if guard_check["is_safe"] is False:
+                res = {"status": "ERROR", "message": guard_check["error_message"]}
+            else:
+                p_safe = guard_check["sanitized_params"]
+                res = check_biometric_compliance_qd2345(
+                    single_tx_amount_vnd=p_safe["single_tx_amount_vnd"],
+                    daily_cumulative_amount_vnd=p_safe["daily_cumulative_amount_vnd"],
+                    is_first_time_new_device=p_safe["is_first_time_new_device"],
+                    has_verified_chip_cccd=p_safe["has_verified_chip_cccd"]
+                )
             tool_outputs.append({"tool": "check_biometric_compliance_qd2345", "result": res})
 
         # 3. Lãi suất tiền gửi
@@ -587,17 +613,34 @@ class BankingAgentNodes:
             if term <= 0:
                 term = 6
 
-            res = calculate_savings_profit(amount_vnd=amount, term_months=term)
+            tool_input = {
+                "amount_vnd": amount,
+                "term_months": term
+            }
+            guard_check = self.guardrail_manager.guard_tool_call("calculate_savings_profit", tool_input)
+            if guard_check["is_safe"] is False:
+                res = {"status": "ERROR", "message": guard_check["error_message"]}
+            else:
+                p_safe = guard_check["sanitized_params"]
+                res = calculate_savings_profit(amount_vnd=p_safe["amount_vnd"], term_months=p_safe["term_months"])
             tool_outputs.append({"tool": "calculate_savings_profit", "result": res})
 
         # 6. Ticket hỗ trợ khẩn cấp
         else:
             executed_tool_name = "create_support_ticket"
+            tool_input = {
+                "customer_name": "Quý khách hàng",
+                "issue_type": "Yêu cầu hỗ trợ nghiệp vụ",
+                "description": str(query_val),
+                "priority": "NORMAL"
+            }
+            guard_check = self.guardrail_manager.guard_tool_call("create_support_ticket", tool_input)
+            p_safe = guard_check["sanitized_params"]
             res = create_support_ticket(
-                customer_name="Quý khách hàng",
-                issue_type="Yêu cầu hỗ trợ nghiệp vụ",
-                description=str(query_val),
-                priority="NORMAL"
+                customer_name=p_safe["customer_name"],
+                issue_type=p_safe["issue_type"],
+                description=p_safe["description"],
+                priority=p_safe["priority"]
             )
             tool_outputs.append({"tool": "create_support_ticket", "result": res})
 
@@ -879,6 +922,22 @@ class BankingAgentNodes:
                 break
 
         if has_citation is True:
+            docs = state.get("retrieved_chunks", [])
+            if len(docs) == 0:
+                docs = state.get("retrieved_docs", [])
+            grounding = self.guardrail_manager.verify_citation_grounding(draft, docs)
+            if grounding["is_grounded"] is False and current_retries < 1:
+                steps.append("Node 7: audit_generation -> FAIL (Unverified/Hallucinated Citation, Triggering Regenerate)")
+                return {
+                    "audit_status": "FAIL",
+                    "audit_feedback": (
+                        "Phát hiện trích dẫn điều khoản không có trong tài liệu căn cứ được cung cấp. "
+                        "BẮT BUỘC chỉ trích dẫn đúng các điều khoản thực tế có trong văn bản đã cung cấp."
+                    ),
+                    "hallucination_retries": current_retries + 1,
+                    "execution_steps": steps
+                }
+
             steps.append("Node 7: audit_generation -> PASS (Citation & Groundedness Verified)")
             return {
                 "audit_status": "PASS",

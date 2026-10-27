@@ -172,9 +172,14 @@ chunk_*.json
 # Test Results, Benchmark & Tuning JSON Outputs
 # ==============================================================================
 benchmark/
-!agent_banking/benchmark/
+**/benchmark/
+**/benchmark/**
+*benchmark*/
+*benchmark*
 benchmarks/
 **/benchmarks/
+**/benchmarks/**
+*benchmarks*
 experiment/
 **/experiment/
 experiments/
