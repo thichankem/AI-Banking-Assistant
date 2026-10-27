@@ -17,7 +17,6 @@ NGUYÊN TẮC:
 from __future__ import annotations
 import sys
 import time
-from typing import Any, Dict
 from pathlib import Path
 
 # Đảm bảo UTF-8 an toàn trên Windows console
@@ -34,7 +33,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent_banking.config import Config
 from agent_banking.pipeline import BankingRAGPipeline
-from agent_banking.agents.graph import build_banking_agent_graph
+from agent_banking.langgraph_agent.graph import build_banking_agent_graph
 from agent_banking.tracing.tracer import BankingTracer
 from agent_banking.regression_test.eval_benchmark import BankingRAGEvaluator
 
@@ -48,14 +47,17 @@ class BankingAgentPipeline:
         self,
         config: Config | None = None,
         use_memory: bool = False,
-        sqlite_db_path: str = "agent_banking/tracing/agent_memory.db"
+        sqlite_db_path: str | None = None
     ):
         if config is not None:
             self.config = config
         else:
             self.config = Config()
         self.use_memory = use_memory
-        self.sqlite_db_path = sqlite_db_path
+        if sqlite_db_path is not None:
+            self.sqlite_db_path = sqlite_db_path
+        else:
+            self.sqlite_db_path = str(Path(__file__).resolve().parent / "tracing" / "agent_memory.db")
 
         print("=" * 70)
         print("  🚀 KHỞI TẠO LANGGRAPH AI BANKING AGENT (VIETCOMBANK PRODUCTION)")
@@ -83,7 +85,7 @@ class BankingAgentPipeline:
         persona: str = "standard",
         tone: str = "professional",
         format_type: str = "standard"
-    ) -> Dict[str, Any]:
+    ) -> dict:
         """
         Thực thi phiên hội thoại với LangGraph Agent kèm Session Memory (Thread ID).
         """
@@ -308,11 +310,21 @@ class BankingAgentPipeline:
             "nodes": nodes_detail
         }
 
-    def query(self, query: str) -> Dict[str, Any]:
+    def query(self, query: str) -> dict:
         """
         Hàm giao tiếp tương thích ngược 100% với pipeline.py cũ.
         """
         return self.chat(query=query)
+
+    def execute_task(self, query: str, context: dict | None = None) -> dict:
+        """
+        Thực thi câu hỏi theo kiến trúc Task-Oriented DAG (tasks/ và skills/).
+        Node đầu tiên phân loại intent dựa trên skills, kích hoạt task con kế thừa toàn bộ nodes.
+        """
+        if not hasattr(self, "_task_manager") or self._task_manager is None:
+            from agent_banking.tasks.task_manager import BankingTaskManager
+            self._task_manager = BankingTaskManager(pipeline_instance=self.rag_pipeline, config=self.config)
+        return self._task_manager.process_query(query, context=context)
 
     async def astream_chat(
         self,
