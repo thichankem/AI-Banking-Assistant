@@ -9,21 +9,25 @@ Cung cấp các công cụ tương tác trực tiếp cho AI Agent:
 4. calculate_loan_amortization: Tính lịch trả nợ vay theo dư nợ giảm dần.
 5. check_biometric_compliance_qd2345: Thẩm định sinh trắc học theo QĐ 2345 & TT 50.
 6. create_support_ticket: Tạo ticket hỗ trợ sự cố khẩn cấp (nuốt thẻ, khiếu nại).
+7. parse_vietnamese_financial_params: Bóc tách số liệu tài chính tiếng Việt.
+8. check_complain_count: Đếm phàn nàn & chuyển giao tư vấn viên.
+9. transfer_to_agent: Chuyển giao Live Agent theo khung giờ làm việc.
+10. rate_agent_csat: Đánh giá độ hài lòng CSAT 1-5 sao.
+11. deflect_competitor_comparison: Điều hướng so sánh ngân hàng đối thủ.
 
 NGUYÊN TẮC:
 - 0% REGEX LAW: Tuyệt đối không dùng thư viện re hoặc regex.
-- ZERO TERNARY: Ưu tiên if/else tường minh (không dùng toán tử 3 ngôi).
+- ZERO TERNARY LAW: Ưu tiên if/else tường minh từng dòng.
+- NO TYPING LIBRARY: Native Python types.
 """
 
 from __future__ import annotations
 import time
-from typing import Any, Dict, List, Optional
+import datetime
 
 
-def get_interest_rates(deposit_type: str = "vnd") -> Dict[str, Any]:
-    """
-    Tra cứu bảng lãi suất tiền gửi tiết kiệm niêm yết của Vietcombank.
-    """
+def get_interest_rates(deposit_type: str = "vnd") -> dict:
+    """Tra cứu bảng lãi suất tiền gửi tiết kiệm niêm yết của Vietcombank."""
     dep_type = deposit_type.strip().lower()
     if dep_type == "vnd" or dep_type == "dong":
         rates = [
@@ -57,10 +61,8 @@ def get_interest_rates(deposit_type: str = "vnd") -> Dict[str, Any]:
         }
 
 
-def get_foreign_exchange_rates(currency: str = "USD") -> Dict[str, Any]:
-    """
-    Tra cứu bảng tỷ giá ngoại tệ hiện hành tại Vietcombank.
-    """
+def get_foreign_exchange_rates(currency: str = "USD") -> dict:
+    """Tra cứu bảng tỷ giá ngoại tệ hiện hành tại Vietcombank."""
     curr = currency.strip().upper()
 
     rate_table = {
@@ -88,7 +90,7 @@ def get_foreign_exchange_rates(currency: str = "USD") -> Dict[str, Any]:
     }
 
 
-def calculate_savings_profit(amount_vnd: float, term_months: int) -> Dict[str, Any]:
+def calculate_savings_profit(amount_vnd: float, term_months: int) -> dict:
     """
     Tính số tiền lãi tiết kiệm thực nhận và tổng số tiền khi đáo hạn tại Vietcombank.
     Công thức: Tiền lãi = Số tiền gửi * Lãi suất (%/năm) * (Kỳ hạn tháng / 12)
@@ -134,10 +136,9 @@ def calculate_loan_amortization(
     principal_vnd: float,
     annual_rate_percent: float,
     term_months: int
-) -> Dict[str, Any]:
+) -> dict:
     """
     Tính toán lịch trả nợ vay theo phương pháp Dư nợ giảm dần chuẩn Vietcombank.
-    Tuyệt đối không dùng toán tử 3 ngôi hoặc Regex.
     """
     if principal_vnd <= 0:
         return {
@@ -156,7 +157,7 @@ def calculate_loan_amortization(
 
     remaining_balance = principal_vnd
     total_interest = 0.0
-    schedule_preview: List[Dict[str, Any]] = []
+    schedule_preview = []
 
     for month_idx in range(1, term_months + 1):
         interest_for_month = remaining_balance * monthly_rate
@@ -203,34 +204,27 @@ def check_biometric_compliance_qd2345(
     daily_cumulative_amount_vnd: float,
     is_first_time_new_device: bool,
     has_verified_chip_cccd: bool
-) -> Dict[str, Any]:
+) -> dict:
     """
     Thẩm định yêu cầu xác thực sinh trắc học theo QĐ 2345/QĐ-NHNN & TT 50/2024/TT-NHNN.
-    Ngưỡng bắt buộc:
     - Giao dịch đơn lẻ > 10.000.000 VNĐ
     - Tổng giao dịch cộng dồn trong ngày > 20.000.000 VNĐ
     - Kích hoạt VCB Digibank lần đầu hoặc đổi thiết bị mới.
     """
     requires_biometric = False
-    reasons: List[str] = []
+    reasons = []
 
     if is_first_time_new_device is True:
         requires_biometric = True
-        reasons.append(
-            "Kích hoạt ứng dụng VCB Digibank lần đầu hoặc đăng nhập trên thiết bị di động mới."
-        )
+        reasons.append("Kích hoạt ứng dụng VCB Digibank lần đầu hoặc đăng nhập trên thiết bị di động mới.")
 
     if single_tx_amount_vnd > 10000000.0:
         requires_biometric = True
-        reasons.append(
-            "Giá trị giao dịch chuyển tiền đơn lẻ vượt ngưỡng 10.000.000 VNĐ/lần (Quyết định 2345/QĐ-NHNN)."
-        )
+        reasons.append("Giá trị giao dịch chuyển tiền đơn lẻ vượt ngưỡng 10.000.000 VNĐ/lần (Quyết định 2345/QĐ-NHNN).")
 
     if daily_cumulative_amount_vnd > 20000000.0:
         requires_biometric = True
-        reasons.append(
-            "Tổng giá trị giao dịch chuyển tiền cộng dồn trong ngày vượt ngưỡng 20.000.000 VNĐ/ngày (Quyết định 2345/QĐ-NHNN)."
-        )
+        reasons.append("Tổng giá trị giao dịch chuyển tiền cộng dồn trong ngày vượt ngưỡng 20.000.000 VNĐ/ngày (Quyết định 2345/QĐ-NHNN).")
 
     can_proceed_immediately = True
     action_required = "Giao dịch có thể thực hiện ngay bằng mã xác thực Smart OTP / SMS OTP thông thường."
@@ -238,14 +232,10 @@ def check_biometric_compliance_qd2345(
     if requires_biometric is True:
         if has_verified_chip_cccd is True:
             can_proceed_immediately = True
-            action_required = (
-                "BẮT BUỘC quét khuôn mặt sinh trắc học (Facepay) kết hợp Smart OTP để hoàn tất giao dịch."
-            )
+            action_required = "BẮT BUỘC quét khuôn mặt sinh trắc học (Facepay) kết hợp Smart OTP để hoàn tất giao dịch."
         else:
             can_proceed_immediately = False
-            action_required = (
-                "CHẶN GIAO DỊCH TẠM THỜI: Khách hàng bắt buộc phải cập nhật Căn cước công dân gắn chip (qua NFC trên VCB Digibank, kết nối VNeID hoặc tại quầy giao dịch Vietcombank) trước khi thực hiện giao dịch này."
-            )
+            action_required = "CHẶN GIAO DỊCH TẠM THỜI: Khách hàng bắt buộc phải cập nhật Căn cước công dân gắn chip trước khi thực hiện giao dịch này."
 
     return {
         "status": "SUCCESS",
@@ -265,10 +255,8 @@ def create_support_ticket(
     issue_type: str,
     description: str,
     priority: str = "NORMAL"
-) -> Dict[str, Any]:
-    """
-    Tạo ticket yêu cầu trợ giúp và điều phối sang nhân viên nghiệp vụ ngân hàng.
-    """
+) -> dict:
+    """Tạo ticket yêu cầu trợ giúp và điều phối sang nhân viên nghiệp vụ ngân hàng."""
     ts = int(time.time())
     ticket_id = f"VCB-TK-{ts}"
 
@@ -301,7 +289,7 @@ def _clean_token_number_str(token: str) -> str:
     return cleaned
 
 
-def _parse_float_or_int(tok: str) -> Optional[float]:
+def _parse_float_or_int(tok: str) -> float | None:
     t = tok.strip()
     if t == "":
         return None
@@ -312,9 +300,8 @@ def _parse_float_or_int(tok: str) -> Optional[float]:
         comma_parts = t.split(",")
         if len(comma_parts) == 2:
             if len(comma_parts[1]) <= 2:
-                if comma_parts[0].isdigit():
-                    if comma_parts[1].isdigit():
-                        return float(comma_parts[0] + "." + comma_parts[1])
+                if comma_parts[0].isdigit() and comma_parts[1].isdigit():
+                    return float(comma_parts[0] + "." + comma_parts[1])
         pure_digits = t.replace(",", "")
         if pure_digits.isdigit():
             return float(pure_digits)
@@ -327,12 +314,10 @@ def _parse_float_or_int(tok: str) -> Optional[float]:
                 return float(pure_digits)
         elif len(dot_parts) == 2:
             if len(dot_parts[1]) == 3:
-                if dot_parts[0].isdigit():
-                    if dot_parts[1].isdigit():
-                        return float(t.replace(".", ""))
-            if dot_parts[0].isdigit():
-                if dot_parts[1].isdigit():
-                    return float(t)
+                if dot_parts[0].isdigit() and dot_parts[1].isdigit():
+                    return float(t.replace(".", ""))
+            if dot_parts[0].isdigit() and dot_parts[1].isdigit():
+                return float(t)
 
     if t.isdigit():
         return float(t)
@@ -340,14 +325,10 @@ def _parse_float_or_int(tok: str) -> Optional[float]:
     return None
 
 
-def parse_vietnamese_financial_params(query: str) -> Dict[str, Any]:
+def parse_vietnamese_financial_params(query: str) -> dict:
     """
     Bóc tách số liệu tài chính tiếng Việt chuẩn Vietcombank (0% Regex Law, Zero Ternary).
-    Trích xuất:
-    - Số tiền (amount_vnd, single_tx_amount_vnd, daily_cumulative_amount_vnd)
-    - Kỳ hạn (term_months)
-    - Lãi suất phần trăm (annual_rate_percent)
-    - Trạng thái sinh trắc học, CCCD gắn chip, thiết bị mới.
+    Trích xuất số tiền, kỳ hạn, lãi suất phần trăm, trạng thái thiết bị và CCCD gắn chip.
     """
     cleaned_q = query.lower().replace("/", " ")
     words = cleaned_q.split()
@@ -358,7 +339,7 @@ def parse_vietnamese_financial_params(query: str) -> Dict[str, Any]:
     term_months = 0
     annual_rate_percent = 0.0
 
-    amounts_found: List[tuple[float, str]] = []
+    amounts_found = []
 
     for i in range(len(words)):
         raw_tok = words[i]
@@ -476,15 +457,8 @@ def parse_vietnamese_financial_params(query: str) -> Dict[str, Any]:
     }
 
 
-# =====================================================================
-# CÔNG CỤ QUẢN TRỊ DOANH NGHIỆP CHUYÊN SÂU (ENTERPRISE BANKING TOOLS)
-# =====================================================================
-
-def check_complain_count(complain_count: int = 0) -> Dict[str, Any]:
-    """
-    Theo dõi và đếm số lần khách hàng thể hiện thái độ tiêu cực hoặc phàn nàn.
-    Nếu complain_count >= 2: Tự động đề xuất chuyển giao phiên cho Tư vấn viên (Live Agent).
-    """
+def check_complain_count(complain_count: int = 0) -> dict:
+    """Theo dõi số lần khách hàng phàn nàn và đề xuất chuyển giao Tư vấn viên nếu >= 2."""
     updated_count = int(complain_count) + 1
     escalate_to_human = False
     if updated_count >= 2:
@@ -497,9 +471,7 @@ def check_complain_count(complain_count: int = 0) -> Dict[str, Any]:
             "hệ thống đề xuất kết nối trực tiếp với Tư vấn viên chuyên trách."
         )
     else:
-        message = (
-            "Hệ thống rất tiếc vì sự bất tiện của Quý khách và đang nỗ lực hỗ trợ tốt nhất."
-        )
+        message = "Hệ thống rất tiếc vì sự bất tiện của Quý khách và đang nỗ lực hỗ trợ tốt nhất."
 
     return {
         "status": "success",
@@ -513,21 +485,14 @@ def check_complain_count(complain_count: int = 0) -> Dict[str, Any]:
 def transfer_to_agent(
     business_process: str = "request_human_agent",
     customer_segment: str = "individual"
-) -> Dict[str, Any]:
-    """
-    Chuyển giao phiên hội thoại cho Tư vấn viên (Live Agent Handoff).
-    Tích hợp kiểm tra thời gian làm việc thực tế (Working Hours):
-    - Khung giờ trực tuyến (7h00 - 23h00): Điều phối vào hàng đợi Live Agent.
-    - Ngoài giờ trực (23h00 - 7h00 hôm sau): Hướng dẫn liên hệ Hotline 24/7.
-    """
-    import datetime
+) -> dict:
+    """Chuyển giao phiên hội thoại cho Tư vấn viên (Live Agent Handoff) theo giờ làm việc."""
     now_vn = datetime.datetime.now()
     current_hour = now_vn.hour
 
     is_working_hour = False
-    if current_hour >= 7:
-        if current_hour < 23:
-            is_working_hour = True
+    if current_hour >= 7 and current_hour < 23:
+        is_working_hour = True
 
     queue_name = "LIVE_AGENT_INDIVIDUAL_QUEUE"
     if customer_segment.lower() in ["corporate", "doanh_nghiep", "doanh nghiệp"]:
@@ -564,11 +529,8 @@ def rate_agent_csat(
     rating_score: int,
     user_message: str = "",
     channel: str = "web"
-) -> Dict[str, Any]:
-    """
-    Ghi nhận đánh giá độ hài lòng của khách hàng (CSAT 1-5 sao).
-    Tự động phản hồi thông điệp cảm ơn hoặc xin lỗi phù hợp với mức điểm.
-    """
+) -> dict:
+    """Ghi nhận đánh giá độ hài lòng CSAT 1-5 sao."""
     score = int(rating_score)
     if score < 1:
         score = 1
@@ -597,13 +559,8 @@ def rate_agent_csat(
 def deflect_competitor_comparison(
     competitor_name: str = "",
     query: str = ""
-) -> Dict[str, Any]:
-    """
-    Chiến lược điều hướng câu hỏi so sánh với ngân hàng đối thủ (Competitor Deflection):
-    - Không bao giờ chê bai hoặc đánh giá tiêu cực đối thủ.
-    - Không xác nhận số liệu của ngân hàng khác.
-    - Tập trung nêu bật ưu thế công nghệ, hệ thống mạng lưới và chính sách chính thức của Vietcombank.
-    """
+) -> dict:
+    """Chiến lược điều hướng câu hỏi so sánh với ngân hàng đối thủ (Competitor Deflection)."""
     return {
         "status": "success",
         "strategy": "deflection",

@@ -1,4 +1,3 @@
-import unicodedata
 """
 Module RAG Generator & LLM Serving (Bước 5: LLM Serving với System Guardrails Ngân hàng)
 ======================================================================
@@ -15,6 +14,7 @@ NGUYÊN TẮC THIẾT KẾ:
 """
 
 import os
+import unicodedata
 from openai import OpenAI
 
 class ContextBundle:

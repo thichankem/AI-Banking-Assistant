@@ -11,7 +11,6 @@ thành một Công cụ chuẩn (Standard Tool) cho AI Agent:
 
 from __future__ import annotations
 import time
-from typing import Any
 from pathlib import Path
 
 
@@ -37,7 +36,7 @@ class BankingRAGTool:
                 from rag_banking.pipeline import BankingRAGPipeline
                 self.pipeline = BankingRAGPipeline(config=config, use_memory=use_memory)
 
-    def execute(self, query: str, top_k: int = 3) -> dict[str, Any]:
+    def execute(self, query: str, top_k: int = 3) -> dict:
         """
         Thực thi tra cứu tri thức ngân hàng thông qua Hybrid Retrieval & Reranker.
         """
