@@ -13,7 +13,6 @@ Xây dựng và biên dịch đồ thị luân chuyển trạng thái (StateGrap
 from __future__ import annotations
 import os
 import sqlite3
-from typing import Any, Optional
 
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
@@ -58,8 +57,8 @@ def create_persistent_checkpointer(db_path: str = DEFAULT_SQLITE_DB):
 
 def build_banking_agent_graph(
     pipeline_instance=None,
-    config: Optional[Config] = None,
-    checkpointer: Optional[Any] = None,
+    config=None,
+    checkpointer=None,
     sqlite_db_path: str = DEFAULT_SQLITE_DB
 ):
     """
