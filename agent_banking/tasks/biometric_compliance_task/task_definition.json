@@ -1,0 +1,33 @@
+{
+  "task_id": "TASK_BIOMETRIC_COMPLIANCE",
+  "task_name": "Thẩm định Sinh trắc học & Pháp chế QĐ 2345",
+  "description": "Thẩm định quy định bắt buộc xác thực khuôn mặt sinh trắc học khớp CCCD gắn chip qua NFC khi giao dịch trực tuyến.",
+  "category": "COMPLIANCE",
+  "priority": 2,
+  "intent_keywords": [
+    "sinh trắc học",
+    "khuôn mặt",
+    "facepay",
+    "2345",
+    "thông tư 50",
+    "trên 10 triệu",
+    "trên 10tr",
+    "trên 20 triệu",
+    "trên 20tr",
+    "cccd gắn chip",
+    "nfc",
+    "thiết bị mới"
+  ],
+  "required_skills": [
+    "compliance_qd2345_audit",
+    "rag_knowledge_retrieval"
+  ],
+  "pipeline_nodes": [
+    "node_input_guard",
+    "node_parameter_extractor",
+    "node_banking_tool",
+    "node_knowledge_retrieval",
+    "node_llm_generate",
+    "node_format_output"
+  ]
+}

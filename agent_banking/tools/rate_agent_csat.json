@@ -1,0 +1,35 @@
+{
+  "name": "rate_agent_csat",
+  "display_name": "Đánh Giá Mức Độ Hài Lòng CSAT",
+  "category": "OPERATIONAL",
+  "description": "Ghi nhận điểm đánh giá độ hài lòng CSAT từ 1 đến 5 sao của khách hàng sau cuộc hội thoại.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "rating": {
+        "type": "integer",
+        "description": "Điểm đánh giá từ 1 đến 5",
+        "minimum": 1,
+        "maximum": 5
+      },
+      "feedback": {
+        "type": "string",
+        "default": "",
+        "description": "Ý kiến đóng góp thêm của khách hàng"
+      }
+    },
+    "required": ["rating"]
+  },
+  "returns": {
+    "type": "object",
+    "properties": {
+      "status": {"type": "string"},
+      "rating": {"type": "integer"},
+      "message": {"type": "string"}
+    }
+  },
+  "handler": {
+    "module": "agent_banking.tools.banking_api_tools",
+    "function": "rate_agent_csat"
+  }
+}

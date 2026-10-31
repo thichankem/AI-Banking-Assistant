@@ -1,0 +1,26 @@
+{
+  "task_id": "TASK_REACT_AGENT",
+  "task_name": "AI Agent Suy Luận & Hành Động Đa Bước (ReAct)",
+  "description": "Vòng lặp ReAct (Thought -> Action -> Observation) tự động giải quyết các yêu cầu phức tạp phối hợp đồng thời nhiều kỹ năng ngân hàng.",
+  "category": "REASONING",
+  "priority": 0,
+  "intent_keywords": [
+    "react",
+    "suy luận đa bước",
+    "vừa vay vừa",
+    "vừa tính lãi vừa",
+    "vừa chuyển tiền vừa",
+    "kết hợp nhiều",
+    "đa bước"
+  ],
+  "required_skills": [
+    "financial_calculator",
+    "compliance_qd2345_audit",
+    "rag_knowledge_retrieval"
+  ],
+  "pipeline_nodes": [
+    "node_input_guard",
+    "node_react_engine",
+    "node_format_output"
+  ]
+}

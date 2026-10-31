@@ -1,0 +1,84 @@
+{
+  "skill_id": "incident_support_ticket",
+  "display_name": "Xử lý Sự cố Khẩn cấp & Cấp Phiếu Tra Soát",
+  "version": "2.0.0",
+  "category": "INCIDENT",
+  "description": "Tiếp nhận tình huống khẩn cấp: nuốt thẻ, mất ví/thẻ, nghi ngờ gian lận, hướng dẫn khóa thẻ và cấp mã phiếu tra soát.",
+  "capabilities": [
+    "emergency_card_lock_guidance",
+    "atm_swallowed_card_triage",
+    "support_ticket_creation"
+  ],
+  "intent_triggers": [
+    "nuốt thẻ",
+    "bị nuốt thẻ",
+    "mất thẻ",
+    "mất ví",
+    "khóa thẻ khẩn cấp",
+    "lừa đảo",
+    "gian lận",
+    "tra soát"
+  ],
+  "parameters_schema": {
+    "type": "object",
+    "properties": {
+      "issue_type": {
+        "type": "string",
+        "enum": [
+          "nuot_the_atm",
+          "mat_the_khoa_the",
+          "tra_soat_giao_dich",
+          "gian_lan_lua_dao"
+        ],
+        "default": "tra_soat_giao_dich",
+        "description": "Phân loại sự cố ngân hàng"
+      },
+      "user_contact": {
+        "type": "string",
+        "default": "KHACH_HANG_HOTLINE",
+        "description": "Số điện thoại hoặc thông tin liên hệ của khách hàng"
+      },
+      "card_number": {
+        "type": "string",
+        "default": "",
+        "description": "Số thẻ hoặc số tài khoản bị sự cố"
+      },
+      "details": {
+        "type": "string",
+        "default": "Tiếp nhận từ trợ lý AI.",
+        "description": "Mô tả chi tiết sự việc, địa điểm, thời gian"
+      },
+      "urgency": {
+        "type": "string",
+        "enum": [
+          "NORMAL",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "default": "HIGH",
+        "description": "Mức độ khẩn cấp của sự cố"
+      }
+    }
+  },
+  "react_schema_example": "{\"issue_type\": \"nuot_the_atm\"|\"mat_the_khoa_the\", \"user_contact\": \"<sdt>\", \"details\": \"<chi tiết>\"}",
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "ticket_info": {
+        "type": "object"
+      },
+      "immediate_action_guide": {
+        "type": "string"
+      },
+      "hotline_support": {
+        "type": "string"
+      }
+    }
+  },
+  "execution": {
+    "type": "incident_dispatcher",
+    "module": "agent_banking.tools.banking_api_tools",
+    "function": "create_support_ticket",
+    "hotline": "1900 54 54 13 (24/7)"
+  }
+}

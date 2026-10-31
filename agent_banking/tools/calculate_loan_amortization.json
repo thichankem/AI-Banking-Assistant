@@ -1,0 +1,42 @@
+{
+  "name": "calculate_loan_amortization",
+  "display_name": "Tính Lịch Trả Nợ Vay Dư Nợ Giảm Dần",
+  "category": "CALCULATION",
+  "description": "Tính toán chi tiết lịch trả nợ vay ngân hàng Vietcombank theo phương pháp dư nợ giảm dần từng tháng, bao gồm số tiền trả tháng đầu, tiền gốc, tiền lãi và tổng số tiền phải trả.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "principal_vnd": {
+        "type": "number",
+        "description": "Số tiền vay gốc bằng VNĐ (Ví dụ: 500000000 là 500 triệu VNĐ)"
+      },
+      "annual_rate_percent": {
+        "type": "number",
+        "description": "Lãi suất vay tính theo năm tính bằng phần trăm (Ví dụ: 7.5 là 7.5%/năm)"
+      },
+      "term_months": {
+        "type": "integer",
+        "description": "Kỳ hạn vay tính bằng tháng (Ví dụ: 12, 24, 60 tháng)"
+      }
+    },
+    "required": ["principal_vnd", "annual_rate_percent", "term_months"]
+  },
+  "returns": {
+    "type": "object",
+    "properties": {
+      "status": {"type": "string"},
+      "calculation_method": {"type": "string"},
+      "principal_vnd": {"type": "number"},
+      "annual_rate_percent": {"type": "number"},
+      "term_months": {"type": "integer"},
+      "first_month_payment_vnd": {"type": "number"},
+      "total_interest_vnd": {"type": "number"},
+      "total_payable_vnd": {"type": "number"},
+      "schedule_sample": {"type": "array"}
+    }
+  },
+  "handler": {
+    "module": "agent_banking.tools.banking_api_tools",
+    "function": "calculate_loan_amortization"
+  }
+}

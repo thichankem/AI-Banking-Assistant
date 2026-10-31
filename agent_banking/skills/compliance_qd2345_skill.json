@@ -1,0 +1,87 @@
+{
+  "skill_id": "compliance_qd2345_audit",
+  "display_name": "Thẩm định Sinh trắc học QĐ 2345 & TT 50",
+  "version": "2.0.0",
+  "category": "COMPLIANCE",
+  "description": "Kiểm tra ngưỡng giao dịch (>10tr hoặc >20tr/ngày), thiết bị mới để xác định nghĩa vụ quét khuôn mặt CCCD gắn chip qua NFC theo quy chuẩn NHNN.",
+  "capabilities": [
+    "biometric_threshold_validation",
+    "new_device_security_audit",
+    "chip_id_nfc_status_check"
+  ],
+  "intent_triggers": [
+    "sinh trắc học",
+    "khuôn mặt",
+    "facepay",
+    "2345",
+    "thông tư 50",
+    "trên 10 triệu",
+    "trên 10tr",
+    "trên 20 triệu",
+    "trên 20tr",
+    "cccd gắn chip",
+    "nfc",
+    "thiết bị mới"
+  ],
+  "parameters_schema": {
+    "type": "object",
+    "properties": {
+      "transaction_amount": {
+        "type": "number",
+        "description": "Số tiền giao dịch đơn lẻ (VND)",
+        "default": 0.0
+      },
+      "daily_accumulated_amount": {
+        "type": "number",
+        "description": "Tổng số tiền đã giao dịch tích lũy trong ngày (VND)",
+        "default": 0.0
+      },
+      "is_new_device": {
+        "type": "boolean",
+        "description": "Giao dịch lần đầu tiên trên thiết bị mới",
+        "default": false
+      },
+      "has_cccd_chip_nfc": {
+        "type": "boolean",
+        "description": "Khách hàng đã xác thực CCCD gắn chip qua NFC",
+        "default": true
+      }
+    },
+    "required": ["transaction_amount"]
+  },
+  "react_schema_example": "{\"transaction_amount\": <số tiền>, \"daily_accumulated_amount\": <tổng ngày>, \"is_new_device\": false/true}",
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "compliance_status": {
+        "type": "string"
+      },
+      "requires_biometric": {
+        "type": "boolean"
+      },
+      "action_required": {
+        "type": "string"
+      },
+      "regulatory_rules_triggered": {
+        "type": "array"
+      },
+      "legal_basis": {
+        "type": "string"
+      },
+      "full_audit_details": {
+        "type": "object"
+      }
+    }
+  },
+  "execution": {
+    "type": "tool_call",
+    "module": "agent_banking.tools.banking_api_tools",
+    "function": "check_biometric_compliance_qd2345",
+    "arg_mapping": {
+      "single_tx_amount_vnd": "transaction_amount",
+      "daily_cumulative_amount_vnd": "daily_accumulated_amount",
+      "is_first_time_new_device": "is_new_device",
+      "has_verified_chip_cccd": "has_cccd_chip_nfc"
+    }
+  }
+}

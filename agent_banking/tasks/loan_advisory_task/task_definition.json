@@ -1,0 +1,37 @@
+{
+  "task_id": "TASK_LOAN_ADVISORY",
+  "task_name": "Tư vấn Gói Vay & Lịch Trả Nợ Dư Nợ Giảm Dần",
+  "description": "Tư vấn các gói vay mua nhà, mua ô tô, tiêu dùng, tự động bóc tách số tiền và tính toán chi tiết lịch trả nợ theo phương pháp dư nợ giảm dần.",
+  "category": "LOAN",
+  "priority": 3,
+  "intent_keywords": [
+    "vay vốn",
+    "muốn vay",
+    "cần vay",
+    "gói vay",
+    "lãi suất vay",
+    "vay tiền",
+    "vay mua nhà",
+    "vay mua xe",
+    "vay ô tô",
+    "vay tiêu dùng",
+    "dư nợ giảm dần",
+    "lịch trả nợ",
+    "mỗi tháng trả bao nhiêu",
+    "khấu hao khoản vay",
+    "khoản vay",
+    "vay "
+  ],
+  "required_skills": [
+    "financial_calculator",
+    "rag_knowledge_retrieval"
+  ],
+  "pipeline_nodes": [
+    "node_input_guard",
+    "node_parameter_extractor",
+    "node_banking_tool",
+    "node_knowledge_retrieval",
+    "node_llm_generate",
+    "node_format_output"
+  ]
+}

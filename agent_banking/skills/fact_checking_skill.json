@@ -1,0 +1,64 @@
+{
+  "skill_id": "fact_checking_audit",
+  "display_name": "Kiểm soát Ảo giác & Thẩm định Tài liệu",
+  "version": "2.0.0",
+  "category": "AUDIT",
+  "description": "Đánh giá tài liệu có chứa câu trả lời không và đối soát câu trả lời có bịa đặt so với nguồn trích xuất không.",
+  "capabilities": [
+    "document_relevance_grading",
+    "hallucination_detection"
+  ],
+  "intent_triggers": [
+    "đối soát",
+    "kiểm tra",
+    "thẩm định",
+    "ảo giác"
+  ],
+  "parameters_schema": {
+    "type": "object",
+    "properties": {
+      "check_type": {
+        "type": "string",
+        "enum": [
+          "grade_documents",
+          "audit_answer"
+        ],
+        "default": "audit_answer",
+        "description": "Chế độ kiểm tra: thẩm định tài liệu hoặc đối soát câu trả lời"
+      },
+      "query": {
+        "type": "string",
+        "description": "Câu hỏi cần đối chiếu"
+      },
+      "documents": {
+        "type": "array",
+        "description": "Danh sách các chunks tài liệu trích xuất làm căn cứ"
+      },
+      "draft_answer": {
+        "type": "string",
+        "description": "Câu trả lời dự thảo cần kiểm tra ảo giác"
+      }
+    }
+  },
+  "react_schema_example": "{\"check_type\": \"grade_documents\"|\"audit_answer\", \"query\": \"<câu hỏi>\"}",
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "check_type": {
+        "type": "string"
+      },
+      "is_relevant": {
+        "type": "boolean"
+      },
+      "is_faithful": {
+        "type": "boolean"
+      },
+      "has_citation": {
+        "type": "boolean"
+      }
+    }
+  },
+  "execution": {
+    "type": "fact_checker_engine"
+  }
+}

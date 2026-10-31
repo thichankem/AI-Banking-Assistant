@@ -1,0 +1,120 @@
+{
+  "skill_id": "financial_calculator",
+  "display_name": "Tính toán Tài chính & Lịch Trả Nợ Vay",
+  "version": "2.0.0",
+  "category": "CALCULATION",
+  "description": "Tính khấu hao dư nợ vay giảm dần từng tháng, tính lãi tiết kiệm, tra cứu bảng lãi suất và tỷ giá ngoại tệ.",
+  "capabilities": [
+    "declining_balance_loan_amortization",
+    "savings_profit_calculation",
+    "interest_rates_lookup",
+    "foreign_exchange_rates_lookup"
+  ],
+  "intent_triggers": [
+    "lãi suất",
+    "tỷ giá",
+    "tính lãi",
+    "gửi tiết kiệm",
+    "vay vốn",
+    "trả nợ",
+    "dư nợ giảm dần",
+    "lịch trả nợ",
+    "mỗi tháng trả bao nhiêu",
+    "usd",
+    "ngoại tệ"
+  ],
+  "parameters_schema": {
+    "type": "object",
+    "properties": {
+      "operation": {
+        "type": "string",
+        "enum": [
+          "auto",
+          "loan_amortization",
+          "savings_profit",
+          "fx_rates",
+          "interest_rates"
+        ],
+        "default": "auto",
+        "description": "Loại nghiệp vụ tính toán hoặc tra cứu"
+      },
+      "raw_text": {
+        "type": "string",
+        "description": "Câu hỏi nguyên bản để tự động trích xuất tham số tài chính"
+      },
+      "principal": {
+        "type": "number",
+        "description": "Số tiền gốc (VND) cho vay hoặc gửi tiết kiệm",
+        "default": 100000000.0
+      },
+      "annual_rate_percent": {
+        "type": "number",
+        "description": "Lãi suất năm (%/năm)",
+        "default": 7.5
+      },
+      "term_months": {
+        "type": "integer",
+        "description": "Kỳ hạn vay hoặc gửi tiết kiệm (tháng)",
+        "default": 12
+      },
+      "currency": {
+        "type": "string",
+        "description": "Mã ngoại tệ tra cứu tỷ giá (USD, EUR, JPY...)",
+        "default": "USD"
+      },
+      "deposit_type": {
+        "type": "string",
+        "description": "Loại tiền gửi tra cứu lãi suất ('vnd' hoặc 'usd')",
+        "default": "vnd"
+      }
+    }
+  },
+  "react_schema_example": "{\"operation\": \"loan_amortization\"|\"savings_profit\"|\"fx_rates\", \"principal\": <số tiền>, \"term_months\": <tháng>, \"annual_rate_percent\": <lãi>}",
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "operation": {
+        "type": "string"
+      },
+      "calculation_data": {
+        "type": "object"
+      },
+      "rates_data": {
+        "type": "object"
+      }
+    }
+  },
+  "execution": {
+    "type": "financial_dispatcher",
+    "module": "agent_banking.tools.banking_api_tools",
+    "operations": {
+      "loan_amortization": {
+        "function": "calculate_loan_amortization",
+        "arg_mapping": {
+          "principal_vnd": "principal",
+          "annual_rate_percent": "annual_rate_percent",
+          "term_months": "term_months"
+        }
+      },
+      "savings_profit": {
+        "function": "calculate_savings_profit",
+        "arg_mapping": {
+          "amount_vnd": "principal",
+          "term_months": "term_months"
+        }
+      },
+      "fx_rates": {
+        "function": "get_foreign_exchange_rates",
+        "arg_mapping": {
+          "currency": "currency"
+        }
+      },
+      "interest_rates": {
+        "function": "get_interest_rates",
+        "arg_mapping": {
+          "deposit_type": "deposit_type"
+        }
+      }
+    }
+  }
+}

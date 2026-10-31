@@ -1,0 +1,32 @@
+{
+  "name": "deflect_competitor_comparison",
+  "display_name": "Điều Hướng So Sánh Đối Thủ Cạnh Tranh",
+  "category": "GUARDRAIL",
+  "description": "Điều hướng câu hỏi so sánh trực tiếp với ngân hàng đối thủ (Techcombank, MB, VPBank...) về lợi thế và chính sách vượt trội của Vietcombank.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "competitor_name": {
+        "type": "string",
+        "description": "Tên ngân hàng đối thủ khách hàng nhắc đến"
+      },
+      "product_type": {
+        "type": "string",
+        "default": "the_va_tai_khoan",
+        "description": "Loại sản phẩm cần đối sánh"
+      }
+    },
+    "required": ["competitor_name"]
+  },
+  "returns": {
+    "type": "object",
+    "properties": {
+      "status": {"type": "string"},
+      "deflection_message": {"type": "string"}
+    }
+  },
+  "handler": {
+    "module": "agent_banking.tools.banking_api_tools",
+    "function": "deflect_competitor_comparison"
+  }
+}
