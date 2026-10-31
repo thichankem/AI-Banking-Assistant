@@ -187,7 +187,7 @@ group_sentences_banking = group_sentences
 def is_valid_readable_text(text: str) -> bool:
     """
     Kiểm tra văn bản hợp lệ theo đặc tính chuẩn Unicode (0% Regex).
-    1. Phát hiện và loại bỏ rác mã hóa PDF, Mojibake và ký tự điều khiển hỏng bảng mã.
+    1. Phát hiện và loại bỏ rác mã hóa, Mojibake và ký tự điều khiển hỏng bảng mã.
     2. Đảm bảo văn bản chứa các ký tự có nghĩa (chữ cái Category L* hoặc ký số N*).
     3. Không xóa bỏ ngôn ngữ ngoại lai (coi như các chuỗi ký tự đặc biệt).
     """

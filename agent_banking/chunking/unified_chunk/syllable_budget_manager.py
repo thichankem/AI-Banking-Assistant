@@ -81,7 +81,7 @@ def build_7_field_chunk(
         + `parent_id`: Phục vụ kiến trúc Small-to-Big / Hierarchical Retrieval.
         + `original_text`: Văn bản thô ban đầu trước khi prepend tiền tố ngữ cảnh.
         + `token_count`: Ước tính/tính toán số subword token cho LLM prompt budget.
-        + `location`: Tọa độ trực quan [{"page": int, "bbox": [x0, y0, x1, y1]}] cho PDF Viewer highlight.
+        + `location`: Tọa độ trực quan [{"page": int, "bbox": [x0, y0, x1, y1]}] cho Document Viewer highlight.
         + `element_ids`: Danh sách ID atomic elements trong Document Layout Analysis (DLA).
         + `is_active`: Cờ quản lý vòng đời văn bản (soft delete khi cập nhật biểu phí/chính sách mới).
         + `updated_time`: Timestamp epoch ms của chunk.

@@ -1,6 +1,6 @@
 """
 Kịch bản chạy phân đoạn chuẩn xác cho toàn bộ Dataset 1 (AI Banking Assistant)
-Ưu tiên xử lý toàn bộ 50 tệp DOCX trước, sau đó xử lý 6 tệp PDF.
+Xử lý toàn bộ các tệp Word DOCX nghiệp vụ số ngân hàng.
 Xuất kết quả từng tệp ra từng file JSON độc lập trong thư mục chunks_per_file.
 """
 from __future__ import annotations
@@ -37,8 +37,7 @@ def run_dataset_1_pipeline():
     start_total = time.time()
 
     print("=" * 80)
-    print("      CHẠY PHÂN ĐOẠN DATASET 1 - TOÀN BỘ 56 TỆP THUẦN VĂN BẢN")
-    print("      (ƯU TIÊN 50 TỆP DOCX TRƯỚC -> TIẾP THEO 6 TỆP PDF)")
+    print("      CHẠY PHÂN ĐOẠN DATASET 1 - TOÀN BỘ TỆP WORD DOCX NGHIỆP VỤ")
     print("=" * 80)
 
     # Khởi tạo bộ phân đoạn LayoutAwareChunker
@@ -49,24 +48,17 @@ def run_dataset_1_pipeline():
     )
 
     docx_dir = DATASET_1_DIR / "docx"
-    pdf_dir = DATASET_1_DIR / "pdf"
-
     docx_files = sorted(list(docx_dir.glob("*.docx")))
-    pdf_files = sorted(list(pdf_dir.glob("*.pdf")))
 
     print(f"[*] Thư mục DOCX: {docx_dir} ({len(docx_files)} tệp)")
-    print(f"[*] Thư mục PDF : {pdf_dir} ({len(pdf_files)} tệp)")
     print(f"[*] Thư mục xuất JSON: {OUT_DIR_1}")
     print(f"[*] Thư mục đồng bộ  : {OUT_DIR_2}\n")
 
     all_chunks: list[dict] = []
     file_reports: list[dict] = []
 
-    # =========================================================================
-    # PHA 1: ƯU TIÊN XỬ LÝ TOÀN BỘ TỆP DOCX TRƯỚC (50 TỆP)
-    # =========================================================================
     print("-" * 80)
-    print(f"PHA 1: BẮT ĐẦU PHÂN ĐOẠN {len(docx_files)} TỆP DOCX (ƯU TIÊN SỐ 1)")
+    print(f"BẮT ĐẦU PHÂN ĐOẠN {len(docx_files)} TỆP DOCX NGHIỆP VỤ NGÂN HÀNG")
     print("-" * 80)
 
     docx_start = time.time()
@@ -116,67 +108,9 @@ def run_dataset_1_pipeline():
             })
 
     docx_duration = time.time() - docx_start
-    print(f"\n>> ĐÃ HOÀN TẤT PHA 1 (50 DOCX) TRONG {docx_duration:.2f} GIÂY!\n")
+    print(f"\n>> ĐÃ HOÀN TẤT PHÂN ĐOẠN {len(docx_files)} TỆP DOCX TRONG {docx_duration:.2f} GIÂY!\n")
 
-    # =========================================================================
-    # PHA 2: XỬ LÝ TOÀN BỘ TỆP PDF TIẾP THEO (6 TỆP)
-    # =========================================================================
-    print("-" * 80)
-    print(f"PHA 2: BẮT ĐẦU PHÂN ĐOẠN {len(pdf_files)} TỆP PDF PHÁP LÝ SỐ")
-    print("-" * 80)
-
-    pdf_start = time.time()
-    for idx, pdf_path in enumerate(pdf_files, 1):
-        t0 = time.time()
-        fn = pdf_path.name
-        stem = pdf_path.stem
-
-        try:
-            chunks = chunker.chunk_pdf(pdf_path, max_pages=None)
-            dt = time.time() - t0
-
-            # Ghi ra từng file JSON độc lập
-            json_name = f"{stem}.json"
-            p1 = OUT_DIR_1 / json_name
-            p2 = OUT_DIR_2 / json_name
-
-            with open(p1, "w", encoding="utf-8") as f:
-                json.dump(chunks, f, ensure_ascii=False, indent=2)
-            with open(p2, "w", encoding="utf-8") as f:
-                json.dump(chunks, f, ensure_ascii=False, indent=2)
-
-            all_chunks.extend(chunks)
-
-            total_words = sum(c.get("word_count", len(c.get("content", "").split())) for c in chunks)
-            report = {
-                "file": fn,
-                "format": "pdf",
-                "chunks": len(chunks),
-                "words": total_words,
-                "duration_sec": round(dt, 2),
-                "status": "SUCCESS"
-            }
-            file_reports.append(report)
-
-            print(f"  [{idx:02d}/{len(pdf_files)}] PDF : {fn[:55]:<55} -> {len(chunks):>3} chunks ({total_words:>5} từ, {dt:>5.2f}s)")
-
-        except Exception as e:
-            print(f"  [{idx:02d}/{len(pdf_files)}] PDF : {fn} -> LỖI: {e}")
-            file_reports.append({
-                "file": fn,
-                "format": "pdf",
-                "chunks": 0,
-                "words": 0,
-                "duration_sec": round(time.time() - t0, 2),
-                "status": f"FAILED: {e}"
-            })
-
-    pdf_duration = time.time() - pdf_start
-    print(f"\n>> ĐÃ HOÀN TẤT PHA 2 (6 PDF) TRONG {pdf_duration:.2f} GIÂY!\n")
-
-    # =========================================================================
-    # LƯU FILE TỔNG HỢP all_chunks.json VÀ BÁO CÁO THỐNG KÊ
-    # =========================================================================
+    # Lưu file tổng hợp all_chunks.json và báo cáo thống kê
     total_elapsed = time.time() - start_total
     all_chunks_p1 = DATASET_1_DIR / "all_chunks.json"
     all_chunks_p2 = CHUNK_DATASET_1_DIR / "all_chunks.json"
@@ -186,8 +120,6 @@ def run_dataset_1_pipeline():
     with open(all_chunks_p2, "w", encoding="utf-8") as f:
         json.dump(all_chunks, f, ensure_ascii=False, indent=2)
 
-    docx_chunks_count = sum(r["chunks"] for r in file_reports if r["format"] == "docx")
-    pdf_chunks_count = sum(r["chunks"] for r in file_reports if r["format"] == "pdf")
     total_words_count = sum(r["words"] for r in file_reports)
 
     summary_meta = {
@@ -195,14 +127,10 @@ def run_dataset_1_pipeline():
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "total_files": len(file_reports),
         "total_docx": len(docx_files),
-        "total_pdf": len(pdf_files),
         "total_chunks": len(all_chunks),
-        "docx_chunks": docx_chunks_count,
-        "pdf_chunks": pdf_chunks_count,
         "total_words": total_words_count,
         "average_words_per_chunk": round(total_words_count / max(len(all_chunks), 1), 1),
         "docx_elapsed_sec": round(docx_duration, 2),
-        "pdf_elapsed_sec": round(pdf_duration, 2),
         "total_elapsed_sec": round(total_elapsed, 2),
         "output_chunks_per_file_dir": str(OUT_DIR_1),
         "file_reports": file_reports
@@ -215,9 +143,7 @@ def run_dataset_1_pipeline():
     print("=" * 80)
     print("                     TỔNG KẾT TOÀN DIỆN DATASET 1")
     print("=" * 80)
-    print(f" Tổng số tệp đã phân đoạn : {len(file_reports)} / 56 tệp")
-    print(f"   - Tệp Word DOCX         : {len(docx_files)} tệp -> {docx_chunks_count} chunks ({docx_duration:.2f}s)")
-    print(f"   - Tệp PDF Pháp lý số   : {len(pdf_files)} tệp -> {pdf_chunks_count} chunks ({pdf_duration:.2f}s)")
+    print(f" Tổng số tệp đã phân đoạn : {len(file_reports)} / {len(docx_files)} tệp DOCX")
     print(f" Tổng số Chunks tạo ra     : {len(all_chunks)} chunks")
     print(f" Tổng số từ trích xuất     : {total_words_count:,} từ")
     print(f" Trung bình từ / chunk     : {summary_meta['average_words_per_chunk']} từ/chunk")

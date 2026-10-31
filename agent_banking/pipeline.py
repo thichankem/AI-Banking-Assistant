@@ -63,7 +63,7 @@ class BankingRAGPipeline:
         print("  KHỞI TẠO HỆ THỐNG AI BANKING RAG ASSISTANT (VIETCOMBANK DUAL-INDEX)")
         print("=" * 70)
 
-        # 1. Khởi tạo DLA Chunker (Hỗ trợ DOCX & PDF)
+        # 1. Khởi tạo DLA Chunker (Hỗ trợ DOCX chuẩn hóa)
         print("[1/6] Khởi tạo Canonical DOCX Chunker (Chuẩn hóa Hợp đồng dữ liệu DOCX 100%)...")
         self.dla_chunker = DLAChunker(
             max_chunk_size=self.config.CHUNK_MAX_SIZE
@@ -188,8 +188,7 @@ class BankingRAGPipeline:
         max_files=None,
         extensions=None,
         use_dla=True,
-        filenames=None,
-        max_pdf_pages=None
+        filenames=None
     ):
         """
         Pha Ingestion & Dual-Indexing từ tài liệu chuẩn hóa (.docx):
@@ -223,15 +222,14 @@ class BankingRAGPipeline:
                     fpaths = list(target_dir.rglob(fname))
                 if fpaths:
                     fpath = fpaths[0]
-                    c_list = self.dla_chunker.chunk_file(fpath, max_pdf_pages=max_pdf_pages)
+                    c_list = self.dla_chunker.chunk_file(fpath)
                     chunks.extend(c_list)
         else:
-            print(" -> [Ingestion] Đang phân đoạn theo DLA Layout-Aware (DOCX & PDF)...")
+            print(" -> [Ingestion] Đang phân đoạn theo DLA Layout-Aware (DOCX)...")
             chunks = self.dla_chunker.chunk_directory(
                 target_dir,
                 extensions=target_exts,
-                max_files=max_files,
-                max_pdf_pages=max_pdf_pages
+                max_files=max_files
             )
 
         print(f"    + Đã trích xuất: {len(chunks)} chunks ({round((time.time() - t0)*1000, 1)}ms)")
