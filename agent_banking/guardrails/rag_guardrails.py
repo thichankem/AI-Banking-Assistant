@@ -170,6 +170,7 @@ FRAUD_CATEGORIES = {
     ],
     "CYBER_ATTACK_FRAUD": [
         "hack tài khoản", "tấn công tài khoản", "chiếm đoạt tài khoản", "đánh cắp tài khoản",
+        "rút trộm tiền", "không cần otp", "không cần mã otp", "đánh cắp tiền",
         "không cần mã otp lậu", "không cần mật khẩu trái phép", "phishing ngân hàng",
         "khai thác lỗ hổng", "tấn công ddos", "ddos", "thiết bị skimming", "trộm dữ liệu thẻ",
         "sim swap", "chiếm quyền điều khiển sim", "bẻ khóa kết nối api", "thẻ tín dụng chùa",
@@ -238,6 +239,15 @@ REFUSAL_MESSAGES = {
     "CYBER_ATTACK_CREDENTIALS": (
         "Hệ thống AI xin từ chối giải đáp các yêu cầu liên quan đến việc can thiệp trái phép tài khoản."
     ),
+    "AUTH_LEAK_PASSWORD": (
+        "Hệ thống AI xin thông báo: Vì an toàn bảo mật, Quý khách tuyệt đối không chia sẻ Mật khẩu đăng nhập cho bất kỳ ai, kể cả nhân viên ngân hàng."
+    ),
+    "AUTH_LEAK_OTP": (
+        "Hệ thống AI xin thông báo: Vì an toàn bảo mật, Quý khách tuyệt đối không cung cấp mã OTP cho bất kỳ ai để tránh bị lừa đảo chiếm đoạt tài sản."
+    ),
+    "AUTH_LEAK_PIN": (
+        "Hệ thống AI xin thông báo: Vì an toàn bảo mật, Quý khách tuyệt đối không chia sẻ mã PIN thẻ cho bất kỳ ai."
+    ),
     "MONEY_LAUNDERING_RISK": (
         "Hệ thống AI xin thông báo: Ngân hàng nghiêm cấm và không hỗ trợ bất kỳ hành vi nào liên quan "
         "đến rửa tiền, trốn thuế hoặc luân chuyển dòng tiền phi pháp theo Luật Phòng chống rửa tiền."
@@ -305,12 +315,117 @@ class BankingGuardrailManager:
             return REFUSAL_MESSAGES[category]
         return "Yêu cầu của Quý khách không phù hợp với quy chuẩn an toàn của ngân hàng."
 
+    def _normalize_leetspeak(self, text):
+        """Khử ký tự ngụy trang Leetspeak và chuẩn hóa khoảng trắng (0% Regex)"""
+        char_map = {
+            "1": "i", "!": "i", "|": "i",
+            "0": "o",
+            "3": "e",
+            "4": "a", "@": "a",
+            "5": "s", "$": "s",
+            "7": "t", "+": "t",
+            "8": "b"
+        }
+        chars = []
+        for ch in text.lower():
+            if ch in char_map:
+                chars.append(char_map[ch])
+            else:
+                chars.append(ch)
+        normalized = " ".join("".join(chars).split())
+        return normalized
+
     def _check_prompt_injection(self, text_lower):
-        """Quét Prompt Injection / Jailbreak (0% Regex)"""
+        """Quét Prompt Injection / Jailbreak và Leetspeak (0% Regex)"""
         for phrase in INJECTION_PHRASES:
             if phrase in text_lower:
                 return phrase
+
+        leet_norm = self._normalize_leetspeak(text_lower)
+        for phrase in INJECTION_PHRASES:
+            if phrase in leet_norm:
+                return phrase
         return None
+
+    def _check_auth_leak(self, text_lower):
+        """Kiểm tra nguy cơ rò rỉ thông tin đăng nhập nhạy cảm (Mật khẩu, OTP, PIN)"""
+        leak_markers = ["của tôi là", "của toi la", "cua toi la", "là", "la", ":"]
+        has_leak_marker = False
+        for m in leak_markers:
+            if m in text_lower:
+                has_leak_marker = True
+                break
+
+        if not has_leak_marker:
+            return False, None, None
+
+        # 1. Rò rỉ Mật khẩu
+        for pw in ["mật khẩu", "mat khau", "password"]:
+            if pw in text_lower:
+                msg = self._get_refusal_for_category("AUTH_LEAK_PASSWORD")
+                return True, "AUTH_LEAK_PASSWORD", msg
+
+        # 2. Rò rỉ mã OTP
+        for ok in ["mã otp", "ma otp", "otp"]:
+            if ok in text_lower:
+                clean_t = text_lower.replace(":", " ").replace(",", " ")
+                words = clean_t.split()
+                for w in words:
+                    cw = w.strip(".,;:?!")
+                    if len(cw) == 6 and cw.isdigit():
+                        msg = self._get_refusal_for_category("AUTH_LEAK_OTP")
+                        return True, "AUTH_LEAK_OTP", msg
+
+        # 3. Rò rỉ mã PIN
+        for pk in ["mã pin", "ma pin", "pin"]:
+            if pk in text_lower:
+                clean_t = text_lower.replace(":", " ").replace(",", " ")
+                words = clean_t.split()
+                for w in words:
+                    cw = w.strip(".,;:?!")
+                    if (len(cw) == 4 or len(cw) == 6) and cw.isdigit():
+                        msg = self._get_refusal_for_category("AUTH_LEAK_PIN")
+                        return True, "AUTH_LEAK_PIN", msg
+
+        return False, None, None
+
+    def _mask_pii(self, text):
+        """Che dấu thông tin định danh cá nhân PII (Số thẻ, CCCD, Số tài khoản) 0% Regex"""
+        sanitized = text
+
+        # 1. Che số thẻ tín dụng phân cách bằng khoảng trắng (4 nhóm 4 chữ số)
+        words = sanitized.split(" ")
+        idx = 0
+        while idx <= len(words) - 4:
+            w0 = words[idx].strip(".,;?!:()[]\"'")
+            w1 = words[idx+1].strip(".,;?!:()[]\"'")
+            w2 = words[idx+2].strip(".,;?!:()[]\"'")
+            w3 = words[idx+3].strip(".,;?!:()[]\"'")
+            if len(w0) == 4 and w0.isdigit() and len(w1) == 4 and w1.isdigit() and len(w2) == 4 and w2.isdigit() and len(w3) == 4 and w3.isdigit():
+                target_str = words[idx] + " " + words[idx+1] + " " + words[idx+2] + " " + words[idx+3]
+                sanitized = sanitized.replace(target_str, "[CARD_NUMBER_REDACTED]")
+                words = sanitized.split(" ")
+                idx = 0
+            else:
+                idx += 1
+
+        # 2. Che các số liền nhau (Thẻ 16 số, CCCD 12 số, Tài khoản 10-14 số)
+        tokens = sanitized.split(" ")
+        out_tokens = []
+        for token in tokens:
+            clean_tok = token.strip(".,;?!:()[]\"'")
+            if clean_tok.isdigit():
+                if len(clean_tok) == 16:
+                    out_tokens.append(token.replace(clean_tok, "[CARD_NUMBER_REDACTED]"))
+                elif len(clean_tok) == 12 and clean_tok.startswith("0"):
+                    out_tokens.append(token.replace(clean_tok, "[CITIZEN_ID_REDACTED]"))
+                elif len(clean_tok) >= 10 and len(clean_tok) <= 14:
+                    out_tokens.append(token.replace(clean_tok, "[ACCOUNT_NUMBER_REDACTED]"))
+                else:
+                    out_tokens.append(token)
+            else:
+                out_tokens.append(token)
+        return " ".join(out_tokens)
 
     def _check_fraud_and_crime(self, text_lower):
         """Quét Gian lận tài chính & Tội phạm mạng (0% Regex)"""
@@ -381,13 +496,27 @@ class BankingGuardrailManager:
         raw_query = query.strip()
         query_lower = raw_query.lower()
 
+        # 0. Quét nguy cơ rò rỉ thông tin đăng nhập (Mật khẩu, OTP, PIN)
+        is_leak, leak_reason, leak_msg = self._check_auth_leak(query_lower)
+        if is_leak:
+            return InputGuardResult(
+                is_safe=False,
+                sanitized_query=raw_query,
+                trigger_reason=leak_reason,
+                refusal_message=leak_msg,
+                details={"leak_type": leak_reason}
+            )
+
+        # Che giấu PII trước khi chuyển giao xử lý
+        sanitized_query = self._mask_pii(raw_query)
+
         # 1. Quét Prompt Injection / Jailbreak
         matched_inject = self._check_prompt_injection(query_lower)
         if matched_inject:
             refusal = self._get_refusal_for_category("PROMPT_INJECTION_DETECTED")
             return InputGuardResult(
                 is_safe=False,
-                sanitized_query=raw_query,
+                sanitized_query=sanitized_query,
                 trigger_reason="PROMPT_INJECTION_DETECTED",
                 refusal_message=refusal,
                 details={"matched_phrase": matched_inject}
@@ -399,7 +528,7 @@ class BankingGuardrailManager:
             refusal = self._get_refusal_for_category(fraud_category)
             return InputGuardResult(
                 is_safe=False,
-                sanitized_query=raw_query,
+                sanitized_query=sanitized_query,
                 trigger_reason=fraud_category,
                 refusal_message=refusal,
                 details={"matched_phrase": matched_phrase}
@@ -411,7 +540,7 @@ class BankingGuardrailManager:
             refusal = self._get_refusal_for_category("OUT_OF_DOMAIN_OFF_TOPIC")
             return InputGuardResult(
                 is_safe=False,
-                sanitized_query=raw_query,
+                sanitized_query=sanitized_query,
                 trigger_reason="OUT_OF_DOMAIN_OFF_TOPIC",
                 refusal_message=refusal,
                 details={"matched_phrase": off_topic_phrase}
@@ -427,7 +556,7 @@ class BankingGuardrailManager:
                 refusal = self._get_refusal_for_category(cat)
                 return InputGuardResult(
                     is_safe=False,
-                    sanitized_query=raw_query,
+                    sanitized_query=sanitized_query,
                     trigger_reason=f"SEMANTIC_{cat}",
                     refusal_message=refusal,
                     details={
@@ -437,7 +566,7 @@ class BankingGuardrailManager:
                     }
                 )
 
-        return InputGuardResult(is_safe=True, sanitized_query=raw_query)
+        return InputGuardResult(is_safe=True, sanitized_query=sanitized_query)
 
     # -----------------------------------------------------------------
     # GIAI ĐOẠN 2: PRE-GENERATION RAG RELEVANCE GATING (CHỐNG HALU)

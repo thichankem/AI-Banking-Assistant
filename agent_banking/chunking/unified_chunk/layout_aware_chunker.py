@@ -65,68 +65,6 @@ class LayoutAwareChunker:
         """Phân đoạn tệp Word DOCX chuẩn mực (Canonical Golden Document)."""
         return self.docx_chunker.chunk_docx(file_path)
 
-    def chunk_text(
-        self,
-        text: str,
-        source_name: str = "text_input",
-        breadcrumb: str = "",
-        section_title: str = ""
-    ) -> list[dict]:
-        """
-        Phân đoạn văn bản thuần túy (Markdown / Text) thành các chunk chuẩn 7 trường.
-        """
-        if not text or not text.strip():
-            return []
-
-        try:
-            from .structure_chunker import DocumentStructureChunker
-            struct_chunker = DocumentStructureChunker(
-                max_chunk_size=self.max_chunk_size,
-                min_section_size=self.min_section_size
-            )
-            sections = struct_chunker.parse_structure(text)
-            chunks = struct_chunker.chunk_strategy_1_structure_based(sections, source_name=source_name)
-            if chunks:
-                return chunks
-        except Exception as e:
-            logger.warning(f"[LayoutAwareChunker] Lỗi phân đoạn structure chunker: {e}")
-
-        # Fallback SyllableBudgetManager
-        clean_text = text.strip()
-        if section_title:
-            sec_title = section_title
-        else:
-            sec_title = source_name.replace("_", " ").title()
-
-        if breadcrumb:
-            b_crumb = breadcrumb
-        else:
-            b_crumb = sec_title
-
-        split_groups = self.docx_chunker.syllable_manager.split_text_elastic(
-            text=clean_text,
-            window_start=200,
-            window_end=380,
-            ceiling=420
-        )
-        if not split_groups:
-            split_groups = [clean_text]
-
-        chunks = []
-        for idx, grp in enumerate(split_groups):
-            c_obj = build_7_field_chunk(
-                chunk_id=f"{Path(source_name).stem}_c{idx}",
-                source=source_name,
-                chunk_type="docx_text",
-                breadcrumb=b_crumb,
-                section_title=sec_title,
-                content=grp,
-                original_text=grp,
-                parent_id=f"{Path(source_name).stem}_sec_0"
-            )
-            chunks.append(c_obj)
-        return chunks
-
     def chunk_pdf(self, file_path: str | Path, max_pages: int | None = None, **kwargs) -> list[dict]:
         """Phân đoạn tệp PDF (Module thử nghiệm R&D lưu tại experiments/pdf_chunker)."""
         if self.pdf_chunker is not None:
