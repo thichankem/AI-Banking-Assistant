@@ -1,0 +1,28 @@
+{
+  "name": "parse_vietnamese_financial_params",
+  "display_name": "Bóc Tách Tham Số Tài Chính Tiếng Việt",
+  "category": "HELPER",
+  "description": "Bóc tách số tiền (triệu, tỷ, k, củ), kỳ hạn vay/gửi (tháng, năm), lãi suất từ câu hỏi văn bản tự nhiên tiếng Việt thuần túy 0% regex.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Câu hỏi của khách hàng chứa thông tin tài chính"
+      }
+    },
+    "required": ["query"]
+  },
+  "returns": {
+    "type": "object",
+    "properties": {
+      "principal": {"type": "number"},
+      "term_months": {"type": "integer"},
+      "annual_rate_percent": {"type": "number"}
+    }
+  },
+  "handler": {
+    "module": "agent_banking.tools.banking_api_tools",
+    "function": "parse_vietnamese_financial_params"
+  }
+}

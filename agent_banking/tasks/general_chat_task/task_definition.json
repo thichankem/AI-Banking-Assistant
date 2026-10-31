@@ -1,0 +1,25 @@
+{
+  "task_id": "TASK_GENERAL_CHAT",
+  "task_name": "Tư vấn Tổng quan & Chăm sóc Khách hàng",
+  "description": "Giao tiếp chào hỏi xã giao, cảm ơn, tạm biệt và giới thiệu phạm vi năng lực hỗ trợ của Trợ lý AI Vietcombank.",
+  "category": "CHAT",
+  "priority": 5,
+  "intent_keywords": [
+    "xin chào",
+    "chào bạn",
+    "chào em",
+    "chào anh",
+    "chào chị",
+    "hello",
+    "hi",
+    "cảm ơn",
+    "tạm biệt"
+  ],
+  "required_skills": [],
+  "pipeline_nodes": [
+    "node_input_guard",
+    "node_format_history",
+    "node_llm_generate",
+    "node_format_output"
+  ]
+}

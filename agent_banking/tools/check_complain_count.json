@@ -1,0 +1,28 @@
+{
+  "name": "check_complain_count",
+  "display_name": "Kiểm Soát Tần Suất Phàn Nàn",
+  "category": "OPERATIONAL",
+  "description": "Theo dõi số lần phàn nàn của khách hàng để tự động chuyển tiếp tới nhân viên CSKH khi vượt ngưỡng.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "complain_count": {
+        "type": "integer",
+        "default": 0,
+        "description": "Số lượt phàn nàn trong phiên"
+      }
+    }
+  },
+  "returns": {
+    "type": "object",
+    "properties": {
+      "status": {"type": "string"},
+      "escalate": {"type": "boolean"},
+      "message": {"type": "string"}
+    }
+  },
+  "handler": {
+    "module": "agent_banking.tools.banking_api_tools",
+    "function": "check_complain_count"
+  }
+}

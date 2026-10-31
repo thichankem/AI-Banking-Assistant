@@ -1,0 +1,31 @@
+{
+  "task_id": "TASK_POLICY_INQUIRY",
+  "task_name": "Tra cứu Quy chế & Biểu phí Dịch vụ Ngân hàng",
+  "description": "Tra cứu văn bản pháp lý, quy chế mở tài khoản eKYC, hạn mức giao dịch chuyển tiền, biểu phí thường niên dịch vụ ngân hàng số.",
+  "category": "POLICY_RAG",
+  "priority": 6,
+  "intent_keywords": [
+    "quy chế",
+    "biểu phí",
+    "hạn mức",
+    "mở tài khoản",
+    "ekyc",
+    "vcb digibank",
+    "phí duy trì",
+    "điều khoản sử dụng",
+    "thủ tục phát hành"
+  ],
+  "required_skills": [
+    "rag_knowledge_retrieval",
+    "fact_checking_audit"
+  ],
+  "pipeline_nodes": [
+    "node_input_guard",
+    "node_knowledge_retrieval",
+    "node_grade_documents",
+    "node_reference_filter",
+    "node_llm_generate",
+    "node_audit_answer",
+    "node_format_output"
+  ]
+}

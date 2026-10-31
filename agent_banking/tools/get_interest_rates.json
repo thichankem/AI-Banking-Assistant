@@ -1,0 +1,32 @@
+{
+  "name": "get_interest_rates",
+  "display_name": "Tra Cứu Bảng Lãi Suất Tiền Gửi Niêm Yết",
+  "category": "CALCULATION",
+  "description": "Tra cứu toàn bộ biểu lãi suất tiền gửi tiết kiệm có kỳ hạn và không kỳ hạn niêm yết chính thức của Vietcombank cho cá nhân.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "deposit_type": {
+        "type": "string",
+        "enum": ["vnd", "usd"],
+        "default": "vnd",
+        "description": "Loại đồng tiền gửi tiết kiệm: 'vnd' (đồng Việt Nam) hoặc 'usd' (đô la Mỹ)"
+      }
+    }
+  },
+  "returns": {
+    "type": "object",
+    "properties": {
+      "status": {"type": "string"},
+      "currency": {"type": "string"},
+      "effective_date": {"type": "string"},
+      "bank": {"type": "string"},
+      "interest_rates": {"type": "array"},
+      "disclaimer": {"type": "string"}
+    }
+  },
+  "handler": {
+    "module": "agent_banking.tools.banking_api_tools",
+    "function": "get_interest_rates"
+  }
+}

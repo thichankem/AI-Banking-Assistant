@@ -44,11 +44,17 @@ def main():
 
     # Đọc 10 chunks thật từ file ngân hàng
     cand_files = [
+        ROOT / "agent_banking/chunking/output/chunks_per_file/okbank_001__nhom1_chuyen_tien__chuyen_tien_noi_bo_va_napas247.json",
         ROOT / "agent_banking/chunking/output/chunks_per_file/01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.json",
-        Path("chunking/output/chunks_per_file/01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.json"),
-        ROOT / "agent_banking/chunking/chunking_dataset/dataset_1/chunks_per_file/vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.json"
+        Path("chunking/output/chunks_per_file/01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.json")
     ]
     chunk_file = next((p for p in cand_files if p.exists()), None)
+    if chunk_file is None:
+        chunk_dir = ROOT / "agent_banking" / "chunking" / "output" / "chunks_per_file"
+        if chunk_dir.exists():
+            matched = list(chunk_dir.glob("*.json"))
+            if len(matched) > 0:
+                chunk_file = matched[0]
     if chunk_file is None:
         raise FileNotFoundError("Không tìm thấy tệp chunk JSON mẫu để kiểm thử.")
     with open(chunk_file, "r", encoding="utf-8") as f:

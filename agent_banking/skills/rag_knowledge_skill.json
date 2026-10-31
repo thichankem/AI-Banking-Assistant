@@ -1,0 +1,69 @@
+{
+  "skill_id": "rag_knowledge_retrieval",
+  "display_name": "Truy xuất Tri thức Quy chế Ngân hàng (Agentic RAG)",
+  "version": "2.0.0",
+  "category": "RAG",
+  "description": "Tìm kiếm văn bản pháp lý, quy chế mở tài khoản, hạn mức giao dịch, biểu phí bằng chỉ mục kép Hybrid và Cross-Encoder.",
+  "capabilities": [
+    "hybrid_vector_bm25_search",
+    "rrf_rank_fusion_k60",
+    "cross_encoder_rerank",
+    "legal_citation_tagging"
+  ],
+  "intent_triggers": [
+    "quy chế",
+    "hạn mức",
+    "biểu phí",
+    "phí thường niên",
+    "điều khoản",
+    "ekyc",
+    "mở tài khoản",
+    "vcb digibank",
+    "thủ tục phát hành",
+    "chính sách thẻ"
+  ],
+  "parameters_schema": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Câu hỏi hoặc từ khóa cần tra cứu tri thức ngân hàng"
+      },
+      "top_k": {
+        "type": "integer",
+        "default": 3,
+        "description": "Số lượng đoạn văn bản chính xác nhất sau Rerank"
+      },
+      "candidate_k": {
+        "type": "integer",
+        "default": 5,
+        "description": "Số ứng viên ban đầu thu thập từ Hybrid Retrieval"
+      }
+    },
+    "required": ["query"]
+  },
+  "react_schema_example": "{\"query\": \"từ khóa tra cứu\", \"top_k\": 3}",
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "chunks": {
+        "type": "array"
+      },
+      "formatted_context": {
+        "type": "string"
+      },
+      "citations": {
+        "type": "array"
+      },
+      "sources": {
+        "type": "array"
+      },
+      "query_used": {
+        "type": "string"
+      }
+    }
+  },
+  "execution": {
+    "type": "rag_pipeline"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "name": "create_support_ticket",
+  "display_name": "Tạo Phiếu Hỗ Trợ & Tra Soát Sự Cố",
+  "category": "INCIDENT",
+  "description": "Tạo mã hồ sơ tra soát (Ticket ID) tiếp nhận sự cố khẩn cấp: nuốt thẻ ATM, thẻ bị khóa, nghi ngờ gian lận lừa đảo hoặc khiếu nại chuyển tiền.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "customer_name": {
+        "type": "string",
+        "description": "Tên khách hàng hoặc số điện thoại liên hệ"
+      },
+      "issue_type": {
+        "type": "string",
+        "enum": ["nuot_the_atm", "mat_the_khoa_the", "tra_soat_giao_dich", "gian_lan_lua_dao", "khac"],
+        "description": "Loại sự cố phát sinh"
+      },
+      "description": {
+        "type": "string",
+        "description": "Nội dung chi tiết sự cố, cây ATM, số tiền hoặc thời gian xảy ra"
+      },
+      "priority": {
+        "type": "string",
+        "enum": ["LOW", "NORMAL", "HIGH", "URGENT"],
+        "default": "NORMAL",
+        "description": "Mức độ ưu tiên xử lý của ngân hàng"
+      }
+    },
+    "required": ["customer_name", "issue_type", "description"]
+  },
+  "returns": {
+    "type": "object",
+    "properties": {
+      "status": {"type": "string"},
+      "ticket_id": {"type": "string"},
+      "customer_name": {"type": "string"},
+      "issue_type": {"type": "string"},
+      "priority": {"type": "string"},
+      "sla_resolution_hours": {"type": "integer"},
+      "created_at": {"type": "string"}
+    }
+  },
+  "handler": {
+    "module": "agent_banking.tools.banking_api_tools",
+    "function": "create_support_ticket"
+  }
+}

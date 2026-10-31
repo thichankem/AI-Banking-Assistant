@@ -1,0 +1,36 @@
+{
+  "name": "search_banking_knowledge",
+  "display_name": "Tra Cứu Tri Thức Quy Chế & Biểu Phí Vietcombank (Agentic RAG)",
+  "category": "KNOWLEDGE",
+  "description": "Tra cứu tài liệu quy chế, quy trình mở tài khoản eKYC, hạn mức giao dịch, biểu phí dịch vụ và điều khoản sử dụng thẻ Vietcombank bằng công nghệ Hybrid Vector + BM25 và Cross-Encoder Reranker.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Nội dung câu hỏi hoặc từ khóa cần tra cứu trong kho tài liệu Vietcombank"
+      },
+      "top_k": {
+        "type": "integer",
+        "default": 3,
+        "description": "Số lượng tài liệu tinh lọc sau Rerank"
+      }
+    },
+    "required": ["query"]
+  },
+  "returns": {
+    "type": "object",
+    "properties": {
+      "status": {"type": "string"},
+      "documents": {"type": "array"},
+      "sources": {"type": "array"},
+      "citations": {"type": "array"},
+      "latency_ms": {"type": "number"}
+    }
+  },
+  "handler": {
+    "module": "agent_banking.tools.rag_tool",
+    "class": "BankingRAGTool",
+    "method": "execute"
+  }
+}

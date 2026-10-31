@@ -14,6 +14,8 @@ NGUYÊN TẮC THIẾT KẾ:
 """
 
 import os
+import json
+from pathlib import Path
 import unicodedata
 from openai import OpenAI
 
@@ -50,49 +52,26 @@ QUY TẮC BẮT BUỘC (100% TUÂN THỦ):
 4. Tuyệt đối không yêu cầu mật khẩu, mã PIN, mã OTP của khách hàng.
 5. Ngôn phong lịch thiệp, trang trọng (xưng "Ngân hàng" hoặc "Trợ lý AI", gọi "Quý khách"). Trả lời súc tích, rõ ràng."""
 
-# CẤU HÌNH DANH MỤC PERSONA, TÔNG GIỌNG & ĐỊNH DẠNG TRẢ LỜI (0% REGEX & ZERO TERNARY)
-PERSONA_PROFILES = {
-    "advisor": {
-        "name": "Chuyên viên Tư vấn Tài chính Cao cấp",
-        "description": "Chuyên nghiệp, phân tích logic, am hiểu sâu nghiệp vụ ngân hàng và điều khoản giao dịch.",
-        "prompt": "Bạn là Chuyên viên Tư vấn Tài chính Cao cấp của Ngân hàng. Phong thái điềm đạm, am tường nghiệp vụ ngân hàng, đưa ra các chỉ dẫn và giải pháp tài chính chuẩn mực, minh bạch và có chiều sâu."
-    },
-    "teller": {
-        "name": "Giao dịch viên Thân thiện & Tận tâm",
-        "description": "Niềm nở, ân cần, giải thích bình dân dễ hiểu, phù hợp cho khách hàng đại chúng.",
-        "prompt": "Bạn là Giao dịch viên Thân thiện tại quầy Ngân hàng. Luôn nở nụ cười, lắng nghe và giải thích các thủ tục, điều kiện tài chính bằng từ ngữ mộc mạc, gần gũi, ân cần và kiên nhẫn hướng dẫn từng bước."
-    },
-    "compliance": {
-        "name": "Cố vấn Pháp chế & Kiểm soát Rủi ro",
-        "description": "Chuẩn mực pháp lý cao độ, dẫn chiếu số hiệu điều khoản chính xác, cảnh báo rủi ro minh bạch.",
-        "prompt": "Bạn là Cố vấn Pháp chế & Kiểm soát Rủi ro Ngân hàng. Luôn bám sát nguyên văn các quy chế, hiệp định và quy chuẩn. Mọi câu trả lời đều phải viện dẫn chính xác căn cứ điều khoản pháp lý và nêu rõ cảnh báo rủi ro cho khách hàng."
-    },
-    "quick": {
-        "name": "Trợ lý Hỗ trợ Nhanh (Súc tích)",
-        "description": "Trực diện, nhanh chóng, đi thẳng vào đáp án và số liệu cốt lõi bằng các gạch đầu dòng.",
-        "prompt": "Bạn là Trợ lý AI Hỗ trợ Nhanh. Ưu tiên cao nhất là tính chính xác và súc tích: Đi thẳng vào câu trả lời, nêu rõ số liệu/hạn mức/lãi suất cốt lõi mà không viết dài dòng, lan man."
-    },
-    "custom": {
-        "name": "Tùy chỉnh (Custom Persona)",
-        "description": "Tự do định nghĩa vai trò, phong cách theo nhu cầu cụ thể của người dùng.",
-        "prompt": ""
-    }
-}
+# CẤU HÌNH DANH MỤC PERSONA, TÔNG GIỌNG & ĐỊNH DẠNG TRẢ LỜI ĐƯỢC NẠP TỪ JSON (0% REGEX & ZERO TERNARY)
+def _load_prompt_profiles_from_json():
+    p = Path(__file__).resolve().parent / "prompt_profiles.json"
+    if p.exists():
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return (
+                data.get("persona_profiles", {}),
+                data.get("tone_profiles", {}),
+                data.get("format_profiles", {})
+            )
+        except Exception:
+            pass
+    return {}, {}, {}
 
-TONE_PROFILES = {
-    "formal": "Trang trọng & Lịch thiệp (Xưng 'Ngân hàng' hoặc 'Trợ lý AI', kính cẩn gọi 'Quý khách', lời văn nhã nhặn, tôn trọng).",
-    "warm": "Ấm áp & Thân thiện (Ngôn từ gần gũi, đồng cảm, tạo cảm giác an tâm và đồng hành cùng Quý khách).",
-    "direct": "Trực diện & Dứt khoát (Đi thẳng vào trọng tâm câu hỏi, câu văn gãy gọn, không mở bài hay kết bài rườm rà).",
-    "detailed": "Giảng giải Chi tiết & Từng bước (Phân tích cặn kẽ, giải thích các thuật ngữ chuyên môn để khách hàng dễ áp dụng)."
-}
-
-FORMAT_PROFILES = {
-    "standard": "Định dạng Tiêu chuẩn: Đoạn văn mạch lạc, phân đoạn rõ ràng giữa lời giải đáp, căn cứ và kết luận.",
-    "bullet_points": "Định dạng Gạch đầu dòng: Sử dụng các bullet points ngắn gọn (- hoặc *) để liệt kê điều kiện, thủ tục, mức phí và quyền lợi.",
-    "table_comparison": "Định dạng Bảng biểu & So sánh: Khi có thông tin kỳ hạn, lãi suất, hạn mức hoặc nhiều phương án, BẮT BUỘC trình bày dưới dạng bảng Markdown trực quan.",
-    "legal_strict": "Định dạng Căn cứ Pháp lý: Bắt buộc gắn thẻ tham chiếu [Điều X, Khoản Y] ngay sau từng ý phát biểu.",
-    "with_disclaimer": "Định dạng Kèm Lưu ý Rủi ro: Bắt buộc bổ sung phần '⚠️ Lưu ý an toàn & Bảo mật' ở cuối câu trả lời để nhắc nhở khách hàng."
-}
+_loaded_personas, _loaded_tones, _loaded_formats = _load_prompt_profiles_from_json()
+PERSONA_PROFILES = _loaded_personas
+TONE_PROFILES = _loaded_tones
+FORMAT_PROFILES = _loaded_formats
 
 
 def build_banking_system_prompt(persona_key="advisor", tone_key="formal", format_key="standard", custom_persona=""):

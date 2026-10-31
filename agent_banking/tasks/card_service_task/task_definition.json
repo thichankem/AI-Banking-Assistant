@@ -1,0 +1,28 @@
+{
+  "task_id": "TASK_CARD_SERVICE",
+  "task_name": "Tư vấn & Hỗ trợ Dịch vụ Thẻ Vietcombank",
+  "description": "Tư vấn mở thẻ tín dụng quốc tế, thẻ ghi nợ, hạn mức thẻ, biểu phí thường niên và các chính sách ưu đãi tích điểm hoàn tiền.",
+  "category": "CARD_SERVICE",
+  "priority": 4,
+  "intent_keywords": [
+    "thẻ tín dụng",
+    "thẻ visa",
+    "thẻ mastercard",
+    "thẻ jcb",
+    "thẻ ghi nợ",
+    "mở thẻ",
+    "hạn mức thẻ",
+    "phí thường niên thẻ"
+  ],
+  "required_skills": [
+    "rag_knowledge_retrieval"
+  ],
+  "pipeline_nodes": [
+    "node_input_guard",
+    "node_knowledge_retrieval",
+    "node_grade_documents",
+    "node_llm_generate",
+    "node_audit_answer",
+    "node_format_output"
+  ]
+}

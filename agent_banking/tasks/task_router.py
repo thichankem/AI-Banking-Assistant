@@ -1,8 +1,9 @@
 """
-Bộ định tuyến Tác vụ (Task Router - Node Đầu Tiên).
+Bộ định tuyến Tác vụ (Task Router - Node Đầu Tiên - Kiến trúc JSON-Driven).
 Thiết kế tối giản, trực quan, dễ hiểu theo chuẩn Chunking:
-- Nhận diện Ý định (Intent) của người dùng dựa trên danh mục Kỹ năng (Skills).
-- Chọn Task nghiệp vụ chính xác để kích hoạt luồng xử lý tương ứng.
+- Tự động nạp quy tắc định tuyến ý định từ tệp JSON cấu hình (tasks_manifest.json).
+- Nhận diện Ý định (Intent) của người dùng dựa trên danh mục Kỹ năng (Skills) và Task.
+- Hỗ trợ Fallback phân loại sâu bằng LLM khi gặp câu hỏi tự do.
 
 NGUYÊN TẮC BẮT BUỘC:
 1. KHÔNG DÙNG __INIT__.PY: Import trực tiếp file module.
@@ -13,6 +14,8 @@ NGUYÊN TẮC BẮT BUỘC:
 """
 
 from __future__ import annotations
+import json
+from pathlib import Path
 from dataclasses import dataclass
 from openai import OpenAI
 
@@ -31,15 +34,23 @@ class RoutingDecision:
 
 
 class TaskRouter:
-    """Node đầu tiên: Phân loại ý định và chỉ định Task dựa trên bộ Skills."""
+    """Node đầu tiên: Phân loại ý định và chỉ định Task dựa trên bộ cấu hình JSON."""
 
-    def __init__(self, skill_registry: SkillRegistry, config: Config | None = None):
+    def __init__(self, skill_registry: SkillRegistry, config: Config | None = None, manifest_path: str | Path | None = None):
         self.registry = skill_registry
 
         if config is not None:
             self.config = config
         else:
             self.config = Config()
+
+        if manifest_path is not None:
+            self.manifest_path = Path(manifest_path)
+        else:
+            self.manifest_path = Path(__file__).resolve().parent / "tasks_manifest.json"
+
+        self.routing_rules: list[dict] = []
+        self._load_routing_manifest()
 
         self.client = None
         if self.config.LLM_API_KEY and self.config.LLM_BASE_URL:
@@ -51,91 +62,55 @@ class TaskRouter:
             except Exception:
                 self.client = None
 
+    def _load_routing_manifest(self) -> None:
+        """Nạp các quy tắc điều hướng từ JSON manifest."""
+        if not self.manifest_path.exists():
+            return
+
+        try:
+            with open(self.manifest_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            rules = data.get("routing_rules", [])
+            # Sắp xếp theo priority tăng dần (0 là ưu tiên cao nhất)
+            self.routing_rules = sorted(rules, key=lambda x: x.get("priority", 99))
+        except Exception as e:
+            print(f"⚠️ Không thể đọc tasks_manifest.json: {e}")
+            self.routing_rules = []
+
     def route(self, user_query: str) -> RoutingDecision:
-        """Phân tích câu hỏi và chọn Task dựa trên Skills."""
+        """Phân tích câu hỏi và chọn Task dựa trên bộ quy tắc JSON."""
         q = user_query.strip().lower()
 
-        # 0. Yêu cầu Suy luận đa bước ReAct
-        react_kw = ["react", "suy luận đa bước", "vừa vay vừa", "vừa tính lãi vừa", "vừa chuyển tiền vừa", "kết hợp nhiều", "đa bước"]
-        for kw in react_kw:
-            if kw in q:
-                return RoutingDecision(
-                    task_id="TASK_REACT_AGENT",
-                    task_name="AI Agent Suy Luận & Hành Động Đa Bước (ReAct)",
-                    target_skills=["financial_calculator", "compliance_qd2345_audit", "rag_knowledge_retrieval"],
-                    confidence=0.98,
-                    reason=f"Phát hiện yêu cầu suy luận đa bước ReAct: '{kw}'"
-                )
+        # 1. Duyệt qua từng quy tắc được định nghĩa trong JSON
+        for rule in self.routing_rules:
+            keywords = rule.get("keywords", [])
+            task_id = rule.get("task_id", "")
+            task_name = rule.get("task_name", "")
+            target_skills = rule.get("target_skills", [])
+            confidence = float(rule.get("confidence", 0.95))
 
-        # 1. Sự cố khẩn cấp (Ưu tiên số 1)
-        incident_kw = ["nuốt thẻ", "bị nuốt thẻ", "mất thẻ", "mất ví", "khóa thẻ khẩn cấp", "lừa đảo", "gian lận", "tra soát"]
-        for kw in incident_kw:
-            if kw in q:
-                return RoutingDecision(
-                    task_id="TASK_INCIDENT_SUPPORT",
-                    task_name="Xử lý Sự cố Khẩn cấp & Cấp Phiếu Tra Soát",
-                    target_skills=["incident_support_ticket"],
-                    confidence=0.99,
-                    reason=f"Phát hiện sự cố khẩn cấp: '{kw}'"
-                )
+            if task_id == "TASK_GENERAL_CHAT":
+                for kw in keywords:
+                    if q.startswith(kw) or q == kw:
+                        return RoutingDecision(
+                            task_id=task_id,
+                            task_name=task_name,
+                            target_skills=target_skills,
+                            confidence=confidence,
+                            reason=f"Hội thoại chào hỏi xã giao khớp từ khóa: '{kw}'"
+                        )
+            else:
+                for kw in keywords:
+                    if kw in q:
+                        return RoutingDecision(
+                            task_id=task_id,
+                            task_name=task_name,
+                            target_skills=target_skills,
+                            confidence=confidence,
+                            reason=f"Khớp từ khóa nghiệp vụ JSON: '{kw}'"
+                        )
 
-        # 2. Sinh trắc học & Pháp chế QĐ 2345
-        compliance_kw = [
-            "sinh trắc học", "khuôn mặt", "facepay", "2345", "thông tư 50",
-            "trên 10 triệu", "trên 10tr", "trên 20 triệu", "trên 20tr",
-            "cccd gắn chip", "nfc", "thiết bị mới"
-        ]
-        for kw in compliance_kw:
-            if kw in q:
-                return RoutingDecision(
-                    task_id="TASK_BIOMETRIC_COMPLIANCE",
-                    task_name="Thẩm định Sinh trắc học & Pháp chế QĐ 2345",
-                    target_skills=["compliance_qd2345_audit", "rag_knowledge_retrieval"],
-                    confidence=0.95,
-                    reason=f"Kích hoạt thẩm định QĐ 2345: '{kw}'"
-                )
-
-        # 3. Tư vấn vay vốn & Tính dư nợ giảm dần
-        loan_kw = [
-            "vay vốn", "muốn vay", "cần vay", "gói vay", "lãi suất vay", "vay tiền",
-            "vay mua nhà", "vay mua xe", "vay ô tô", "vay tiêu dùng", "dư nợ giảm dần",
-            "lịch trả nợ", "mỗi tháng trả bao nhiêu", "khấu hao khoản vay", "khoản vay", "vay "
-        ]
-        for kw in loan_kw:
-            if kw in q:
-                return RoutingDecision(
-                    task_id="TASK_LOAN_ADVISORY",
-                    task_name="Tư vấn Gói Vay & Lịch Trả Nợ Dư Nợ Giảm Dần",
-                    target_skills=["financial_calculator", "rag_knowledge_retrieval"],
-                    confidence=0.95,
-                    reason=f"Kích hoạt tính toán vay vốn: '{kw}'"
-                )
-
-        # 4. Tư vấn Dịch vụ Thẻ
-        card_kw = ["thẻ tín dụng", "thẻ visa", "thẻ mastercard", "thẻ jcb", "thẻ ghi nợ", "mở thẻ", "hạn mức thẻ", "phí thường niên thẻ"]
-        for kw in card_kw:
-            if kw in q:
-                return RoutingDecision(
-                    task_id="TASK_CARD_SERVICE",
-                    task_name="Tư vấn & Hỗ trợ Dịch vụ Thẻ Vietcombank",
-                    target_skills=["rag_knowledge_retrieval"],
-                    confidence=0.92,
-                    reason=f"Kích hoạt tư vấn thẻ: '{kw}'"
-                )
-
-        # 5. Chào hỏi xã giao
-        chat_kw = ["xin chào", "chào bạn", "chào em", "chào anh", "chào chị", "hello", "hi", "cảm ơn", "tạm biệt"]
-        for kw in chat_kw:
-            if q.startswith(kw) or q == kw:
-                return RoutingDecision(
-                    task_id="TASK_GENERAL_CHAT",
-                    task_name="Tư vấn Tổng quan & Chăm sóc Khách hàng",
-                    target_skills=[],
-                    confidence=0.98,
-                    reason="Hội thoại chào hỏi xã giao"
-                )
-
-        # 6. Fallback LLM dựa trên Skill Catalog
+        # 2. Fallback LLM dựa trên Skill Catalog nếu không khớp từ khóa
         return self._route_with_llm(user_query)
 
     def _route_with_llm(self, query: str) -> RoutingDecision:
@@ -174,7 +149,9 @@ class TaskRouter:
                 temperature=0.1,
                 max_tokens=30
             )
-            raw = resp.choices[0].message.content or ""
+            raw = resp.choices[0].message.content
+            if not raw:
+                raw = ""
             code = raw.strip().upper()
 
             if "REACT" in code:

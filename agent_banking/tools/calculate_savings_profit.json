@@ -1,0 +1,36 @@
+{
+  "name": "calculate_savings_profit",
+  "display_name": "Tính Lãi Tiền Gửi Tiết Kiệm",
+  "category": "CALCULATION",
+  "description": "Tính toán số tiền lãi tiết kiệm thực nhận và tổng số tiền nhận được khi đáo hạn theo biểu lãi suất niêm yết của Vietcombank.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "amount_vnd": {
+        "type": "number",
+        "description": "Số tiền gửi tiết kiệm bằng VNĐ (Ví dụ: 100000000 là 100 triệu VNĐ)"
+      },
+      "term_months": {
+        "type": "integer",
+        "description": "Kỳ hạn gửi tiết kiệm tính theo tháng (Ví dụ: 1, 3, 6, 12, 24 tháng)"
+      }
+    },
+    "required": ["amount_vnd", "term_months"]
+  },
+  "returns": {
+    "type": "object",
+    "properties": {
+      "status": {"type": "string"},
+      "principal_amount_vnd": {"type": "number"},
+      "term_months": {"type": "integer"},
+      "applicable_rate_percent": {"type": "number"},
+      "interest_earned_vnd": {"type": "number"},
+      "total_at_maturity_vnd": {"type": "number"},
+      "formatted_summary": {"type": "string"}
+    }
+  },
+  "handler": {
+    "module": "agent_banking.tools.banking_api_tools",
+    "function": "calculate_savings_profit"
+  }
+}

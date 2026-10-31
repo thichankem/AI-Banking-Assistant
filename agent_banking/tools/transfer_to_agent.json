@@ -1,0 +1,34 @@
+{
+  "name": "transfer_to_agent",
+  "display_name": "Chuyển Giao Tư Vấn Viên Trực Tuyến",
+  "category": "OPERATIONAL",
+  "description": "Điều phối chuyển giao phiên hội thoại cho Live Agent theo khung giờ làm việc và chuyên môn.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "department": {
+        "type": "string",
+        "default": "CSKH_CHUNG",
+        "description": "Bộ phận tiếp nhận yêu cầu"
+      },
+      "reason": {
+        "type": "string",
+        "default": "Khách hàng yêu cầu hỗ trợ trực tiếp",
+        "description": "Lý do chuyển tiếp nhân viên"
+      }
+    }
+  },
+  "returns": {
+    "type": "object",
+    "properties": {
+      "status": {"type": "string"},
+      "department": {"type": "string"},
+      "agent_status": {"type": "string"},
+      "instructions": {"type": "string"}
+    }
+  },
+  "handler": {
+    "module": "agent_banking.tools.banking_api_tools",
+    "function": "transfer_to_agent"
+  }
+}

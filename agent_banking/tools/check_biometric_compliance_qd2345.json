@@ -1,0 +1,47 @@
+{
+  "name": "check_biometric_compliance_qd2345",
+  "display_name": "Thẩm Định Pháp Chế Sinh Trắc Học QĐ 2345 & TT 50",
+  "category": "COMPLIANCE",
+  "description": "Thẩm định bắt buộc xác thực khuôn mặt sinh trắc học (Facepay) khớp CCCD gắn chip qua NFC theo Quyết định 2345/QĐ-NHNN và Thông tư 50/2024/TT-NHNN khi giao dịch vượt 10 triệu/lần hoặc tổng ngày vượt 20 triệu.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "single_tx_amount_vnd": {
+        "type": "number",
+        "default": 0.0,
+        "description": "Số tiền của giao dịch hiện tại đang chuẩn bị thực hiện (VND)"
+      },
+      "daily_cumulative_amount_vnd": {
+        "type": "number",
+        "default": 0.0,
+        "description": "Tổng số tiền đã giao dịch tích lũy thành công trong ngày hôm nay (VND)"
+      },
+      "is_first_time_new_device": {
+        "type": "boolean",
+        "default": false,
+        "description": "Có phải là giao dịch lần đầu tiên trên thiết bị mới chưa từng đăng ký"
+      },
+      "has_verified_chip_cccd": {
+        "type": "boolean",
+        "default": true,
+        "description": "Khách hàng đã hoàn thành đối soát CCCD gắn chip qua NFC trên VCB Digibank hay chưa"
+      }
+    },
+    "required": ["single_tx_amount_vnd"]
+  },
+  "returns": {
+    "type": "object",
+    "properties": {
+      "status": {"type": "string"},
+      "requires_biometric": {"type": "boolean"},
+      "mandatory_action": {"type": "string"},
+      "trigger_reasons": {"type": "array"},
+      "regulation_reference": {"type": "string"},
+      "audit_timestamp": {"type": "string"}
+    }
+  },
+  "handler": {
+    "module": "agent_banking.tools.banking_api_tools",
+    "function": "check_biometric_compliance_qd2345"
+  }
+}

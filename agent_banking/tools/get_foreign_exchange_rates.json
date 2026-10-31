@@ -1,0 +1,30 @@
+{
+  "name": "get_foreign_exchange_rates",
+  "display_name": "Tra Cứu Bảng Tỷ Giá Ngoại Tệ",
+  "category": "CALCULATION",
+  "description": "Tra cứu tỷ giá mua tiền mặt, mua chuyển khoản và bán của các ngoại tệ phổ biến (USD, EUR, JPY, GBP, SGD, AUD, CAD, CNY) tại Vietcombank.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "currency": {
+        "type": "string",
+        "default": "USD",
+        "description": "Mã ngoại tệ 3 ký tự chuẩn ISO (USD, EUR, JPY, GBP, SGD, AUD, CAD, CNY). Bỏ trống để lấy toàn bộ bảng tỷ giá."
+      }
+    }
+  },
+  "returns": {
+    "type": "object",
+    "properties": {
+      "status": {"type": "string"},
+      "effective_date": {"type": "string"},
+      "bank": {"type": "string"},
+      "rates": {"type": "object"},
+      "note": {"type": "string"}
+    }
+  },
+  "handler": {
+    "module": "agent_banking.tools.banking_api_tools",
+    "function": "get_foreign_exchange_rates"
+  }
+}

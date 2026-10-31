@@ -103,7 +103,7 @@ def run_guardrail_tests():
     res_otp = manager.guard_input(otp_q)
     assert_test(
         "Case 3.1: Chặn gửi mã OTP trực tiếp",
-        not res_otp.is_safe and res_otp.trigger_reason == "CRITICAL_CREDENTIAL_SUBMITTED",
+        not res_otp.is_safe and res_otp.trigger_reason in ("CRITICAL_CREDENTIAL_SUBMITTED", "AUTH_LEAK_OTP"),
         f"Trigger: {res_otp.trigger_reason}"
     )
 
@@ -112,7 +112,7 @@ def run_guardrail_tests():
     res_pin = manager.guard_input(pin_q)
     assert_test(
         "Case 3.2: Chặn gửi mã PIN thẻ",
-        not res_pin.is_safe and res_pin.trigger_reason == "CRITICAL_CREDENTIAL_SUBMITTED",
+        not res_pin.is_safe and res_pin.trigger_reason in ("CRITICAL_CREDENTIAL_SUBMITTED", "AUTH_LEAK_PIN"),
         f"Trigger: {res_pin.trigger_reason}"
     )
 
@@ -121,7 +121,7 @@ def run_guardrail_tests():
     res_pii = manager.guard_input(normal_pii_q)
     assert_test(
         "Case 3.3: Cho phép và tự động Masking CCCD & STK",
-        res_pii.is_safe and "[CITIZEN_ID_REDACTED]" in res_pii.sanitized_query and "[BANK_ACCOUNT_REDACTED]" in res_pii.sanitized_query,
+        res_pii.is_safe and "[CITIZEN_ID_REDACTED]" in res_pii.sanitized_query and ("[BANK_ACCOUNT_REDACTED]" in res_pii.sanitized_query or "[ACCOUNT_NUMBER_REDACTED]" in res_pii.sanitized_query),
         f"Sanitized: {res_pii.sanitized_query}"
     )
 

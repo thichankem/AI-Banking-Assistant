@@ -1,0 +1,27 @@
+{
+  "task_id": "TASK_INCIDENT_SUPPORT",
+  "task_name": "Xử lý Sự cố Khẩn cấp & Cấp Phiếu Tra Soát",
+  "description": "Tiếp nhận và xử lý ưu tiên số 1 các trường hợp nuốt thẻ tại cây ATM, mất ví/thẻ, nghi ngờ gian lận lừa đảo và cấp mã hồ sơ tra soát (Ticket ID).",
+  "category": "INCIDENT",
+  "priority": 1,
+  "intent_keywords": [
+    "nuốt thẻ",
+    "bị nuốt thẻ",
+    "mất thẻ",
+    "mất ví",
+    "khóa thẻ khẩn cấp",
+    "lừa đảo",
+    "gian lận",
+    "tra soát"
+  ],
+  "required_skills": [
+    "incident_support_ticket"
+  ],
+  "pipeline_nodes": [
+    "node_input_guard",
+    "node_parameter_extractor",
+    "node_banking_tool",
+    "node_llm_generate",
+    "node_format_output"
+  ]
+}
