@@ -278,14 +278,31 @@ problem.md
 */.ipynb_checkpoints/*
 
 # ==============================================================================
-# Unit Tests & Regression Test Cache/Logs
+# Unit Tests, Unittest & Test Folders (MANDATORY: IGNORED ON GIT & GITHUB)
 # ==============================================================================
 unit_test/
 **/unit_test/
+**/unit_test/**
+*unit_test*
+unittest/
+**/unittest/
+**/unittest/**
+*unittest*
 unit_tests/
 **/unit_tests/
+**/unit_tests/**
+*unit_tests*
+unittests/
+**/unittests/
+**/unittests/**
+*unittests*
+tests/
+**/tests/
+**/tests/**
 regression_test/
 **/regression_test/
+**/regression_test/**
+*regression_test*
 
 # ==============================================================================
 # Agent Banking Audit, Orchestrator Chat & Task Development Guide
