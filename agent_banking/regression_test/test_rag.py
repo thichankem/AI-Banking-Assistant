@@ -1,6 +1,6 @@
 """
 Script Kiểm thử Toàn trình Hệ thống RAG Banking
-Sử dụng dữ liệu thực tế từ: dataset/retrieval/retrieval_dataset hoặc dataset/chunking_dataset
+Sử dụng dữ liệu thực tế DOCX từ: dataset/chunking_dataset (Chuẩn hóa Canonical Ingestion)
 Kiểm tra:
 1. Document Layout-Aware Chunking (Table / Header Extraction)
 2. Weaviate Vector Database
@@ -32,44 +32,23 @@ def run_test():
     pipeline = BankingRAGPipeline()
 
     from agent_banking.config import Config
-    chunking_dir = Config.CHUNKING_DATASET_DIR
-    retrieval_dir = Config.RETRIEVAL_DATASET_DIR
-    if chunking_dir.exists():
-        dataset_dir = chunking_dir
-    else:
-        dataset_dir = retrieval_dir
-    print(f"[*] Đang nạp dữ liệu kiểm thử từ: {dataset_dir}")
-    
-    if dataset_dir == chunking_dir:
-        # Kiểm thử định dạng DOCX chuẩn hóa của hệ thống:
-        target_docs = [
-            "vcb_md_15__tien_ich__bieu_lai_suat_tien_gui_va_ty_gia_20_ngoai_te.docx",
-            "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.docx"
-        ]
-        pipeline.ingest_documents(dataset_dir=dataset_dir, filenames=target_docs)
+    dataset_dir = Config.CHUNKING_DATASET_DIR
+    print(f"[*] Đang nạp dữ liệu kiểm thử DOCX chuẩn hóa từ: {dataset_dir}")
 
-        test_queries = [
-            # Test Case 1: Tra cứu Biểu lãi suất và tỷ giá (DOCX Layout-Aware)
-            "Lãi suất tiền gửi tiết kiệm VND tại quầy kỳ hạn 12 tháng là bao nhiêu %/năm và tỷ giá USD mua chuyển khoản là bao nhiêu?",
+    # Kiểm thử định dạng DOCX chuẩn hóa của hệ thống:
+    target_docs = [
+        "vcb_md_15__tien_ich__bieu_lai_suat_tien_gui_va_ty_gia_20_ngoai_te.docx",
+        "vcb_md_01__faq__the_tin_dung_va_the_ghi_no_ngan_hang.docx"
+    ]
+    pipeline.ingest_documents(dataset_dir=dataset_dir, filenames=target_docs)
 
-            # Test Case 2: Tra cứu DOCX FAQ & Điều khoản thẻ (DOCX Layout-Aware)
-            "Khi bị mất thẻ tín dụng hoặc phát hiện giao dịch thẻ lạ, khách hàng cần thực hiện những bước khẩn cấp nào?"
-        ]
-    else:
-        target_docs = [
-            "tien_ich__bieu_lai_suat_tien_gui_va_ty_gia_20_ngoai_te.md",
-            "the_tin_dung__vcb_vibe_platinum_dac_quyen_va_bieu_phi.md",
-            "quy_trinh__mo_tai_khoan_thanh_toan_ekyc_va_xac_thuc_nfc.md",
-            "bao_mat__nguyen_tac_an_toan_va_canh_bao_5_hinh_thuc_lua_dao.md"
-        ]
-        pipeline.ingest_documents(dataset_dir=dataset_dir, filenames=target_docs)
+    test_queries = [
+        # Test Case 1: Tra cứu Biểu lãi suất và tỷ giá (DOCX Layout-Aware)
+        "Lãi suất tiền gửi tiết kiệm VND tại quầy kỳ hạn 12 tháng là bao nhiêu %/năm và tỷ giá USD mua chuyển khoản là bao nhiêu?",
 
-        test_queries = [
-            "Lãi suất tiền gửi tiết kiệm tại quầy cho kỳ hạn 12 tháng là bao nhiêu %/năm?",
-            "Tỷ giá mua chuyển khoản và giá bán ra của đồng USD là bao nhiêu VNĐ?",
-            "Mức trách nhiệm bồi thường bảo hiểm du lịch toàn cầu tối đa của thẻ Vibe Platinum là bao nhiêu?",
-            "Quy trình chụp ảnh CCCD gắn chip và quét chip NFC khi mở tài khoản eKYC trên VCB Digibank được thực hiện như thế nào?"
-        ]
+        # Test Case 2: Tra cứu DOCX FAQ & Điều khoản thẻ (DOCX Layout-Aware)
+        "Khi bị mất thẻ tín dụng hoặc phát hiện giao dịch thẻ lạ, khách hàng cần thực hiện những bước khẩn cấp nào?"
+    ]
 
     print("\n" + "=" * 70)
     print("      BẮT ĐẦU CHẠY CÁC TEST CASES TRUY VẤN VÀ SINH CÂU TRẢ LỜI")

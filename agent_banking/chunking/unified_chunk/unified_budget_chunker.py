@@ -5,9 +5,8 @@ Giải quyết triệt để vấn đề: Chuẩn hóa toàn bộ điều kiện
 và .pdf về một chuẩn đo độ dài duy nhất là `len(text.split())` (0% Regex).
 
 Cung cấp:
-1. `UnifiedDOCXChunker`: Khắc phục sự lệch đơn vị (800 ký tự vs 120 từ), chuyển sang (min_syllables, max_syllables).
-2. `UnifiedStructureChunker`: Hỗ trợ cả 3 chiến lược cấu trúc kèm Parent-Child Roll-up.
-3. `UnifiedBudgetOrchestrator`: Bộ điều phối trung tâm phân đoạn tài liệu theo ngân sách chuẩn.
+1. `UnifiedDOCXChunker`: Khắc phục sự lệch đơn vị, chuyển sang (min_syllables, max_syllables).
+2. `UnifiedBudgetOrchestrator`: Bộ điều phối trung tâm phân đoạn tài liệu theo ngân sách chuẩn.
 
 TUÂN THỦ 100% SCHEMA CONTRACT:
 - `chunk_id`, `source`, `chunk_type`, `breadcrumb`, `section_title`, `content`, `word_count`.
@@ -22,18 +21,8 @@ from pathlib import Path
 import docx
 
 try:
-    from agent_banking.chunking.unified_chunk.structure_chunker import (
-        DocumentElement,
-        SubSection,
-        DocumentStructureChunker
-    )
     from agent_banking.chunking.unified_chunk.canonical_resolver import split_sentences_banking
 except (ImportError, ValueError):
-    from .structure_chunker import (
-        DocumentElement,
-        SubSection,
-        DocumentStructureChunker
-    )
     from .canonical_resolver import split_sentences_banking
 
 from .syllable_budget_manager import (
@@ -187,97 +176,6 @@ class UnifiedDOCXChunker:
         return chunks
 
 
-class UnifiedStructureChunker:
-    """
-    Bộ phân đoạn cấu trúc tài liệu áp dụng ngân sách âm tiết chuẩn cố định (Section-Length-Aware).
-    """
-
-    def __init__(
-        self,
-        min_syllables: int = MIN_SYLLABLES,
-        max_syllables: int = MAX_SYLLABLES,
-        ceiling_syllables: int = CEILING_SYLLABLES,
-        **kwargs
-    ):
-        self.min_syllables = min_syllables
-        self.max_syllables = max_syllables
-        self.ceiling_syllables = ceiling_syllables
-        self.budget_manager = SyllableBudgetManager(
-            min_syllables=min_syllables,
-            max_syllables=max_syllables,
-            ceiling_syllables=ceiling_syllables
-        )
-        self.base_chunker = DocumentStructureChunker(
-            chunk_size=max_syllables,
-            min_section_size=min_syllables
-        )
-
-    def chunk_structure(self, text: str, source_name: str) -> list[dict]:
-        """
-        Phân đoạn văn bản cấu trúc phân cấp theo ngân sách âm tiết chuẩn hóa (Section-Length-Aware).
-        """
-        sub_sections = self.base_chunker.parse_structure(text, source_name=source_name)
-        return self._chunk_section_length_aware(sub_sections, source_name)
-
-    def _chunk_section_length_aware(self, sub_sections: list[SubSection], source_name: str) -> list[dict]:
-        """Gộp các mục con quá ngắn < min_syllables để chống phân mảnh."""
-        merged_sections: list[SubSection] = []
-        buf_sec: SubSection | None = None
-
-        for sec in sub_sections:
-            if buf_sec is None:
-                buf_sec = sec
-                continue
-
-            can_merge = (
-                (buf_sec.total_syllables() < self.min_syllables or sec.total_syllables() < self.min_syllables)
-                and (buf_sec.total_syllables() + sec.total_syllables() <= self.max_syllables)
-            )
-
-            if can_merge:
-                buf_sec.elements.extend(sec.elements)
-                if sec.title not in buf_sec.breadcrumb:
-                    buf_sec.breadcrumb = f"{buf_sec.breadcrumb} & {sec.title}"
-            else:
-                merged_sections.append(buf_sec)
-                buf_sec = sec
-
-        if buf_sec:
-            merged_sections.append(buf_sec)
-
-        # Sinh chunk chuẩn hóa
-        chunks: list[dict] = []
-        chunk_idx = 0
-
-        for sec in merged_sections:
-            text_parts = [e.content for e in sec.elements if e.content]
-            if not text_parts:
-                continue
-
-            full_text = "\n".join(text_parts).strip()
-            sentences = split_sentences_banking(full_text)
-            grouped_texts = self.budget_manager.split_sentences_by_syllable_budget(
-                sentences=sentences,
-                max_syllables=self.max_syllables
-            )
-
-            for g_txt in grouped_texts:
-                content_str = prepend_context_header(g_txt, sec.breadcrumb, sec.title)
-                chunks.append({
-                    "chunk_id": f"{Path(source_name).stem}_s_{chunk_idx}",
-                    "source": source_name,
-                    "chunk_type": "structure_section",
-                    "breadcrumb": sec.breadcrumb,
-                    "section_title": sec.title,
-                    "content": content_str,
-                    "word_count": len(content_str.split()),
-                    "syllable_count": len(content_str.split())
-                })
-                chunk_idx += 1
-
-        return chunks
-
-
 class UnifiedBudgetOrchestrator:
     """
     Bộ phân đoạn hợp nhất hỗ trợ DOCX và PDF theo ngân sách âm tiết chuẩn.
@@ -307,3 +205,9 @@ class UnifiedBudgetOrchestrator:
                 return []
         logger.warning(f"[UnifiedBudgetOrchestrator] Bỏ qua định dạng chưa hỗ trợ: {suffix} ({p.name})")
         return []
+
+
+__all__ = [
+    "UnifiedDOCXChunker",
+    "UnifiedBudgetOrchestrator"
+]

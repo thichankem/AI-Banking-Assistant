@@ -114,6 +114,22 @@ def get_persona_profiles():
     """
     Trả về danh mục cấu hình Persona, Tông giọng và Định dạng phản hồi cho giao diện Frontend.
     """
+    tone_list = []
+    for k, v in TONE_PROFILES.items():
+        if " (" in v:
+            t_name = v.split(" (")[0]
+        else:
+            t_name = v
+        tone_list.append({"id": k, "name": t_name, "description": v})
+
+    format_list = []
+    for k, v in FORMAT_PROFILES.items():
+        if ":" in v:
+            f_name = v.split(":")[0].replace("Định dạng ", "")
+        else:
+            f_name = v
+        format_list.append({"id": k, "name": f_name, "description": v})
+
     return {
         "personas": [
             {
@@ -123,22 +139,8 @@ def get_persona_profiles():
             }
             for k, v in PERSONA_PROFILES.items()
         ],
-        "tones": [
-            {
-                "id": k,
-                "name": v.split(" (")[0] if " (" in v else v,
-                "description": v
-            }
-            for k, v in TONE_PROFILES.items()
-        ],
-        "formats": [
-            {
-                "id": k,
-                "name": v.split(":")[0].replace("Định dạng ", "") if ":" in v else v,
-                "description": v
-            }
-            for k, v in FORMAT_PROFILES.items()
-        ]
+        "tones": tone_list,
+        "formats": format_list
     }
 
 
