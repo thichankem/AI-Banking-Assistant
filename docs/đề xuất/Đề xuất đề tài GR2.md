@@ -113,7 +113,7 @@ Kết quả → Verification → LLM Response → Citation / Escalation → User
 | AI | LLM có hỗ trợ tool calling; embedding và reranking |
 | RAG | Hybrid retrieval |
 | Database | PostgreSQL |
-| Document Processing | PyMuPDF/Docling và các thư viện OCR |
+| Document Processing | python-docx / OpenXML AST và wtpsplit (SaT) |
 | Mock Banking | REST API + dữ liệu ngân hàng mô phỏng |
 
 ### 3.7. Phạm vi đồ án

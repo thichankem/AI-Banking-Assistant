@@ -1,12 +1,12 @@
 """
-Module Unified Budget Chunker (Bộ Phân đoạn Đa Định dạng Đồng nhất Ngân sách Âm tiết)
-====================================================================================
-Giải quyết triệt để vấn đề: Chuẩn hóa toàn bộ điều kiện ngắt chunk trên cả .docx
-và .pdf về một chuẩn đo độ dài duy nhất là `len(text.split())` (0% Regex).
+Module Unified Budget Chunker (Bộ Phân đoạn Đồng nhất Ngân sách Âm tiết)
+========================================================================
+Chuẩn hóa toàn bộ điều kiện ngắt chunk trên tài liệu .docx về một chuẩn đo độ dài
+duy nhất là `len(text.split())` (0% Regex).
 
 Cung cấp:
-1. `UnifiedDOCXChunker`: Khắc phục sự lệch đơn vị, chuyển sang (min_syllables, max_syllables).
-2. `UnifiedBudgetOrchestrator`: Bộ điều phối trung tâm phân đoạn tài liệu theo ngân sách chuẩn.
+1. `UnifiedDOCXChunker`: Phân đoạn tài liệu Word theo (min_syllables, max_syllables).
+2. `UnifiedBudgetOrchestrator`: Bộ điều phối phân đoạn tài liệu theo ngân sách chuẩn.
 
 TUÂN THỦ 100% SCHEMA CONTRACT:
 - `chunk_id`, `source`, `chunk_type`, `breadcrumb`, `section_title`, `content`, `word_count`.
@@ -59,7 +59,7 @@ class UnifiedDOCXChunker:
 
     def chunk_docx(self, docx_path: str | Path) -> list[dict]:
         """
-        Đọc và phân đoạn tài liệu DOCX theo ngân sách âm tiết của profile.
+        Đọc và phân đoạn tài liệu DOCX theo ngân sách âm tiết chuẩn hóa.
         """
         docx_path = Path(docx_path)
         if not docx_path.is_file():
@@ -170,41 +170,30 @@ class UnifiedDOCXChunker:
                 emit_text_chunk(text_buffer)
                 text_buffer = []
 
-        if text_buffer:
-            emit_text_chunk(text_buffer)
+            if text_buffer:
+                emit_text_chunk(text_buffer)
 
         return chunks
 
 
 class UnifiedBudgetOrchestrator:
     """
-    Bộ phân đoạn hợp nhất hỗ trợ DOCX và PDF theo ngân sách âm tiết chuẩn.
+    Bộ phân đoạn hợp nhất tài liệu DOCX theo ngân sách âm tiết chuẩn.
     """
 
     def __init__(self, **kwargs):
         self.docx_chunker = UnifiedDOCXChunker(**kwargs)
-        try:
-            from experiments.pdf_chunker.pdf_chunker import PDFChunker
-            self.pdf_chunker = PDFChunker(**kwargs)
-        except Exception as e:
-            logger.warning(f"[UnifiedBudgetOrchestrator] Không thể khởi tạo PDFChunker: {e}")
-            self.pdf_chunker = None
 
     def chunk_file(self, file_path: str | Path, **kwargs) -> list[dict]:
-        """Phân đoạn tệp (.docx hoặc .pdf) theo ngân sách âm tiết chuẩn hóa."""
+        """Phân đoạn tệp (.docx) theo ngân sách âm tiết chuẩn hóa."""
         p = Path(file_path)
         suffix = p.suffix.lower()
 
         if suffix == ".docx":
             return self.docx_chunker.chunk_docx(p)
-        elif suffix == ".pdf":
-            if self.pdf_chunker is not None:
-                return self.pdf_chunker.chunk_pdf(p, **kwargs)
-            else:
-                logger.warning(f"[UnifiedBudgetOrchestrator] PDFChunker chưa sẵn sàng cho tệp {p.name}")
-                return []
-        logger.warning(f"[UnifiedBudgetOrchestrator] Bỏ qua định dạng chưa hỗ trợ: {suffix} ({p.name})")
-        return []
+        else:
+            logger.warning(f"[UnifiedBudgetOrchestrator] Bỏ qua định dạng chưa hỗ trợ: {suffix} ({p.name})")
+            return []
 
 
 __all__ = [

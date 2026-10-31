@@ -1,7 +1,7 @@
 """
-Bộ điều phối phân đoạn tài liệu đa định dạng (LayoutAwareChunker / DLAChunker).
-Thiết kế tối giản, trực quan, dễ hiểu:
-Tự động nhận diện phần mở rộng tệp (.docx, .pdf) và định tuyến tới bộ phân đoạn chuyên trách.
+Bộ điều phối phân đoạn tài liệu nhận thức bố cục (LayoutAwareChunker / DLAChunker).
+Thiết kế tối giản, trực quan, chuyên sâu:
+Chuẩn hóa 100% dữ liệu tài liệu Microsoft Word (.docx) ngân hàng qua OpenXML AST.
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ logger = logging.getLogger("layout_aware_chunker")
 
 class LayoutAwareChunker:
     """
-    Bộ điều phối phân đoạn nhận thức bố cục (DLA) cho toàn bộ hệ thống RAG Banking.
-    Chuyên trách phân đoạn 2 định dạng cốt lõi: .docx và .pdf.
+    Bộ điều phối phân đoạn nhận thức bố cục OpenXML (DLA) cho hệ thống AI Banking Assistant.
+    Chuyên trách phân đoạn tài liệu văn bản chuẩn mực: .docx.
     """
 
     def __init__(
@@ -38,77 +38,39 @@ class LayoutAwareChunker:
         self.min_section_size = min_section_size
         self.config = config
 
-        # 1. Khởi tạo DOCX Chunker chuẩn hóa (Canonical Chunker)
+        # Khởi tạo DOCX Chunker chuẩn hóa (Canonical Chunker)
         self.docx_chunker = DOCXChunker(
             max_chunk_size=max_chunk_size,
             min_section_size=min_section_size,
             **kwargs
         )
 
-        # 2. Khởi tạo PDF Chunker thử nghiệm (độc lập tại experiments/pdf_chunker)
-        self.pdf_chunker = None
-        self.ocr_extractor = None
-        try:
-            from experiments.pdf_chunker.pdf_chunker import PDFChunker
-            self.pdf_chunker = PDFChunker(
-                max_chunk_size=max_chunk_size,
-                min_section_size=min_section_size,
-                table_rows_per_chunk=table_rows_per_chunk,
-                config=config,
-                **kwargs
-            )
-            self.ocr_extractor = getattr(self.pdf_chunker, "ocr_extractor", None)
-        except Exception:
-            pass
-
     def chunk_docx(self, file_path: str | Path) -> list[dict]:
         """Phân đoạn tệp Word DOCX chuẩn mực (Canonical Golden Document)."""
         return self.docx_chunker.chunk_docx(file_path)
 
-    def chunk_pdf(self, file_path: str | Path, max_pages: int | None = None, **kwargs) -> list[dict]:
-        """Phân đoạn tệp PDF (Module thử nghiệm R&D lưu tại experiments/pdf_chunker)."""
-        if self.pdf_chunker is not None:
-            return self.pdf_chunker.chunk_pdf(file_path, max_pages=max_pages, **kwargs)
-        logger.info(
-            f"[Canonical Ingestion Contract] Bỏ qua {Path(file_path).name}: "
-            "Phân hệ PDF thử nghiệm được lưu tại experiments/pdf_chunker/. "
-            "Lõi RAG Banking chuẩn hóa 100% đầu vào qua định dạng DOCX để bảo đảm độ chính xác tối đa."
-        )
-        return []
-
-    def chunk_file(self, file_path: str | Path, max_pdf_pages: int | None = None, **kwargs) -> list[dict]:
+    def chunk_file(self, file_path: str | Path, **kwargs) -> list[dict]:
         """
         Tự động phân đoạn tệp tài liệu:
-        Mặc định chuẩn hóa 100% theo định dạng .docx (Canonical Contract).
+        Chuẩn hóa 100% đầu vào qua định dạng .docx (Canonical Contract).
         """
         path = Path(file_path)
         ext = path.suffix.lower()
 
         if ext == ".docx":
             return self.chunk_docx(path)
-        elif ext == ".pdf":
-            # Chỉ kích hoạt PDF nếu người dùng chỉ định cờ thử nghiệm force_experimental_pdf=True
-            if kwargs.get("force_experimental_pdf", False) and self.pdf_chunker is not None:
-                return self.pdf_chunker.chunk_pdf(path, max_pages=max_pdf_pages, **kwargs)
-            logger.info(
-                f"[Canonical Ingestion Contract] Bỏ qua {path.name}: "
-                "Lõi RAG Banking chuẩn hóa đầu vào duy nhất qua định dạng DOCX. "
-                "Luồng PDF thử nghiệm đã được lưu trữ tại experiments/pdf_chunker/."
-            )
-            return []
         else:
-            logger.warning(f"[LayoutAwareChunker] Bỏ qua định dạng chưa hỗ trợ: {ext}")
+            logger.warning(f"[LayoutAwareChunker] Bỏ qua định dạng chưa hỗ trợ: {ext} ({path.name})")
             return []
 
     def chunk_directory(
         self,
         dir_path: str | Path,
         extensions: list[str] | None = None,
-        max_files: int | None = None,
-        max_pdf_pages: int | None = None
+        max_files: int | None = None
     ) -> list[dict]:
         """
-        Duyệt và phân đoạn toàn bộ tệp trong thư mục (mặc định chuẩn hóa 100% tệp .docx).
+        Duyệt và phân đoạn toàn bộ tệp trong thư mục (chuẩn hóa 100% tệp .docx).
         """
         target_dir = Path(dir_path)
         if not target_dir.exists():
@@ -124,7 +86,7 @@ class LayoutAwareChunker:
         all_chunks: list[dict] = []
         for f in files:
             try:
-                chunks = self.chunk_file(f, max_pdf_pages=max_pdf_pages)
+                chunks = self.chunk_file(f)
                 all_chunks.extend(chunks)
             except Exception as e:
                 logger.error(f"[LayoutAwareChunker] Lỗi xử lý tệp {f.name}: {e}")
@@ -134,15 +96,14 @@ class LayoutAwareChunker:
     def chunk_dataset(
         self,
         dataset_dir: str | Path,
-        output_dir: str | Path | None = None,
-        max_pdf_pages: int | None = 3
+        output_dir: str | Path | None = None
     ) -> tuple[list[dict], dict]:
         """
         Phân đoạn trọn gói dataset ngân hàng, lưu kết quả và trả về thống kê.
         """
         start_t = time.time()
         dataset_path = Path(dataset_dir)
-        all_chunks = self.chunk_directory(dataset_path, max_pdf_pages=max_pdf_pages)
+        all_chunks = self.chunk_directory(dataset_path)
         elapsed = round(time.time() - start_t, 2)
 
         stats = {
@@ -164,4 +125,3 @@ class LayoutAwareChunker:
 DLAChunker = LayoutAwareChunker
 
 __all__ = ["LayoutAwareChunker", "DLAChunker"]
-

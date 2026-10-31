@@ -87,7 +87,7 @@ Theo chuẩn đo lường từ **FinanceBench** và khung **RAGAS**, bài toán 
 ## V. KIẾN TRÚC RAG KHUYẾN NGHỊ TRIỂN KHAI CHO AI BANKING ASSISTANT (GR2)
 
 ```
-[Văn Bản Ngân Hàng: PDF / Biểu Phí / Quy Định]
+[Văn Bản Ngân Hàng: DOCX / Biểu Phí / Quy Định]
                        │
                        ▼
          [Tầng 1: Parser Chuyên Dụng (Docling)]

@@ -38,51 +38,44 @@
 <pre class="mermaid">
 flowchart TD
     %% TẦNG 1: TIẾP NHẬN
-    subgraph S1["1. Tiếp nhận & Phân loại Tài liệu"]
-        Input["Tài liệu Ngân hàng"] --> Router{"Phân loại Định dạng"}
+    subgraph S1["1. Tiếp nhận Tài liệu Chuẩn hóa"]
+        Input["Tài liệu Ngân hàng (.docx)"] --> LayoutRouter["LayoutAwareChunker<br/>Bộ điều phối Nhận thức Bố cục DOCX"]
     end
 
-    %% TẦNG 2: PHÂN TÍCH BỐ CỤC
-    subgraph S2["2. Phân tích Bố cục & Trích xuất Cấu trúc"]
-        Router -->|"Tệp Word"| WordParser["Nhánh Tài liệu Word<br/>Trích xuất cấu trúc phân cấp và cây tiêu đề"]
-        Router -->|"Tệp PDF"| PDFParser["Nhánh Tài liệu PDF<br/>Lọc lề trang và kiểm soát bộ đệm nối trang"]
+    %% TẦNG 2: PHÂN TÍCH BỐ CỤC OPENXML AST
+    subgraph S2["2. Phân tích Cấu trúc & Bố cục OpenXML AST"]
+        LayoutRouter --> WordParser["DOCXChunker<br/>Trích xuất OpenXML Tree Không cần Font Histogram"]
+        WordParser --> WordSplit{"Phân loại Thẻ AST"}
         
-        WordParser --> WordSplit{"Phân loại Khối"}
-        PDFParser --> PDFSplit{"Phân loại Dữ liệu"}
+        WordSplit -->|"w:p (Heading 1-6)"| HeadingTree["get_docx_heading_level<br/>Xác định Cây Tiêu đề Level 1-6<br/>Lọc bỏ địa chỉ hành chính & tiền tệ"]
+        WordSplit -->|"w:p (Văn bản thường/List)"| TextFormat["extract_paragraph_formatted_text<br/>Bảo toàn định dạng: **in đậm**, *nghiêng*, <u>gạch chân</u><br/>Tự động gộp Runs cùng kiểu"]
+        WordSplit -->|"w:tbl (Bảng biểu)"| TableEngine["Duyệt Bảng Nâng cao & Khử Ô gộp<br/>seen_tcs qua id(c._tc) & Cơ chế Sticky Header lặp tiêu đề"]
+        WordSplit -->|"a:blip & wp:extent"| ImageEngine["is_image_caption<br/>Lọc bỏ triệt để icon/logo trang trí qua wp:extent<br/>Chỉ lưu ảnh có chú thích bên dưới"]
+        WordSplit -->|"w:txbxContent"| CalloutEngine["Trích xuất Textbox / Khối Cảnh báo nổi"]
     end
 
-    %% TẦNG 3: XỬ LÝ CHUYÊN SÂU BẢNG BIỂU & SCAN
-    subgraph S3["3. Xử lý Chuyên sâu Bảng biểu & Tài liệu Scan"]
-        WordSplit -->|"Bảng phức tạp"| VisionTable["Mô hình Vision AI<br/>Đọc hiểu bảng có ô gộp và đa tầng tiêu đề"]
-        WordSplit -->|"Bảng tiêu chuẩn"| SimpleTable["Trích xuất Ma trận Bảng"]
-        
-        PDFSplit -->|"Bảng biểu"| AutoFootnote["Mở rộng Vùng Bảng Động<br/>Tự động bao trọn vùng chú thích chân bảng"]
-        AutoFootnote --> VisionTable
-        AutoFootnote --> SimpleTable
+    %% TẦNG 3: CHUẨN HÓA NLP & PHÂN TÁCH NGỮ NGHĨA
+    subgraph S3["3. Chuẩn hóa NLP & Phân đoạn Ranh giới Câu"]
+        TextFormat --> TextStream["Dòng Dữ liệu Văn bản Thô"]
+        HeadingTree --> TextStream
+        TableEngine --> TextStream
+        ImageEngine --> TextStream
+        CalloutEngine --> TextStream
 
-        PDFSplit -->|"Trang ảnh quét"| OCREngine["Bộ xử lý OCR Tesseract & OpenCV<br/>Lọc dấu mộc đỏ bằng dải màu HSV và cân thẳng góc nghiêng"]
-        
-        VisionTable --> TableMerge["Nhúng Chú thích Nội dòng<br/>Hàn gắn trực tiếp ghi chú vào đúng ô dữ liệu mang ký hiệu neo"]
-        SimpleTable --> TableMerge
+        TextStream --> Dehyphen["canonical_resolver.py<br/>clean_and_dehyphenate_text<br/>Hàn gắn từ ngắt dòng gạch nối & Khử Header/Footer/Số trang"]
+        Dehyphen --> WTPSplit["wtpsplit (SaT: sat-3l-sm)<br/>Mô hình Học sâu Phân tách Ranh giới Câu Tự nhiên<br/>Bảo toàn 100% số tiền, % lãi suất, số TT-NHNN"]
     end
 
-    %% TẦNG 4: CHUẨN HÓA & PHÂN TÁCH NGỮ NGHĨA
-    subgraph S4["4. Chuẩn hóa & Phân tách Ngữ nghĩa"]
-        WordSplit -->|"Đoạn văn"| TextStream["Dòng Văn bản Thô"]
-        PDFSplit -->|"Văn bản số"| TextStream
-        OCREngine --> TextStream
-        
-        TextStream --> Dehyphen["Hàn gắn Từ ngắt dòng & Khử nhiễu định dạng"]
-        Dehyphen --> WTPSplit["Phân tách Câu Ngữ nghĩa<br/>Mô hình wtpsplit nhận diện ranh giới câu tự nhiên theo ngữ cảnh"]
-        WTPSplit --> BudgetSplit["Cân đối Độ dài Phân đoạn<br/>Tối ưu 150 đến 400 âm tiết theo dấu câu và triệt tiêu chồng lấn"]
+    %% TẦNG 4: CÂN ĐỐI NGÂN SÁCH ÂM TIẾT
+    subgraph S4["4. Điều phối Ngân sách Âm tiết Đàn hồi"]
+        WTPSplit --> BudgetSplit["syllable_budget_manager.py<br/>split_text_elastic<br/>Cân đối Ngân sách: 100 đến 400 âm tiết (Trần 500)<br/>Triệt tiêu hoàn toàn rách câu giữa chừng"]
+        BudgetSplit --> CleanMicro["Dọn dẹp Chunk Đuôi Vi mô (<35 từ)<br/>Nuốt mục con & Triệt tiêu chunk rỗng tiêu đề"]
     end
 
     %% TẦNG 5: ĐÓNG GÓI CHUẨN HÓA
-    subgraph S5["5. Đóng gói Dữ liệu Đầu ra Chuẩn hóa"]
-        TableMerge --> AddContext["Gắn Tiền tố Ngữ cảnh Phân cấp Tiêu đề"]
-        BudgetSplit --> AddContext
-        
-        AddContext --> OutputContract[/"Bộ Dữ liệu Đoạn Chuẩn hóa 7 Trường<br/>Sẵn sàng trực tiếp cho tầng nhúng Vector và Tìm kiếm kết hợp"/]
+    subgraph S5["5. Gắn Tiền tố Ngữ cảnh & Đóng gói Hợp đồng"]
+        CleanMicro --> AddContext["prepend_context_header<br/>Chèn [Ngữ cảnh: {breadcrumb} > {section_title}]<br/>Neo giữ thực thể cho Dense Embedding & BM25"]
+        AddContext --> OutputContract[/"build_7_field_chunk<br/>Bộ Dữ liệu Chuẩn hóa 7 Trường Chuẩn Enterprise<br/>Sẵn sàng cho Vector DB Qdrant & Okapi BM25"/]
     end
 
     %% STYLING
@@ -90,13 +83,11 @@ flowchart TD
     classDef primary fill:#EFF6FF,stroke:#3B82F6,stroke-width:2px,color:#1D4ED8;
     classDef decision fill:#FEF3C7,stroke:#D97706,stroke-width:2px,color:#92400E;
     classDef process fill:#F0FDF4,stroke:#10B981,stroke-width:1.5px,color:#065F46;
-    classDef ocr fill:#FDF2F8,stroke:#DB2777,stroke-width:1.5px,color:#9D174D;
     classDef finalNode fill:#EEF2FF,stroke:#6366F1,stroke-width:2px,color:#3730A3;
 
     class Input primary;
-    class Router,WordSplit,PDFSplit decision;
-    class VisionTable,SimpleTable,TableMerge,WTPSplit,BudgetSplit,Dehyphen,TextStream,WordParser,PDFParser,AutoFootnote process;
-    class OCREngine ocr;
+    class WordSplit decision;
+    class LayoutRouter,WordParser,HeadingTree,TextFormat,TableEngine,ImageEngine,CalloutEngine,TextStream,Dehyphen,WTPSplit,BudgetSplit,CleanMicro process;
     class AddContext,OutputContract finalNode;
 </pre>
 </div>
