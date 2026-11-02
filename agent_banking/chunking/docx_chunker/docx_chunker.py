@@ -760,7 +760,8 @@ class DOCXChunker:
         if target_images_dir is None:
             target_images_dir = self.images_output_dir
         if target_images_dir is None:
-            target_images_dir = Path("chunking/output/extracted_images") / path.stem
+            chunking_base = Path(__file__).resolve().parent.parent
+            target_images_dir = chunking_base / "output" / "extracted_images" / path.stem
         else:
             target_images_dir = Path(target_images_dir)
 
