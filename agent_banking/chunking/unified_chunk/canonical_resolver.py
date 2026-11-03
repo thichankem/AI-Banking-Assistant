@@ -1,19 +1,6 @@
-"""
-Module Canonical Resolver (Universal NLP & Text Normalization Engine)
-======================================================================
-Bộ tiện ích chuẩn hóa văn bản, phân đoạn câu và xử lý hình thái tự nhiên
-cho hệ thống RAG Banking (chuyên trách tiền xử lý Tiếng Việt và Tiếng Anh;
-mọi ký tự và ngôn ngữ khác được bảo toàn nguyên vẹn như chuỗi ký tự đặc biệt).
-
-NGUYÊN TẮC THIẾT KẾ:
-1. 0% REGEX LAW: Tuyệt đối không sử dụng `import re` hay regex methods.
-2. BẢO TOÀN NGUYÊN VẸN NỘI DUNG: Không tự tiện xóa bỏ ký tự ngoại ngữ;
-   coi các ngôn ngữ khác như các chuỗi ký tự đặc biệt cần được giữ nguyên bản.
-3. UNICODE STANDARD INVARIANTS: Dựa trên chuẩn Unicode (UAX #29, Unicode Categories L*, N*, P*, Z*, C*)
-   và nguyên lý chữ hoa/chữ thường (Bicameral Capitalization) để nhận diện ranh giới câu.
-"""
-
-from __future__ import annotations
+# unified_chunk/canonical_resolver.py
+# Universal NLP & Text Normalization Engine (100% Domain-Agnostic)
+# Complies with GEMINI.md: 0% regex, no typing library, zero ternary, zero __init__.py
 
 import logging
 import unicodedata
@@ -22,41 +9,71 @@ logger = logging.getLogger("canonical_resolver")
 
 
 # -----------------------------------------------------------------------------
-# 1. LÀM SẠCH VĂN BẢN & HÀN GẮN NGẮT DÒNG GẠCH NỐI (DEHYPHENATION)
+# 1. TEXT CLEANING & DEHYPHENATION (UNIVERSAL)
 # -----------------------------------------------------------------------------
-def clean_and_dehyphenate_text(text: str) -> str:
+def clean_and_dehyphenate_text(text):
     """
-    Làm sạch văn bản tự nhiên (bảo toàn nguyên vẹn mọi ký tự, không xóa ngôn ngữ khác):
-    1. Hàn gắn các từ bị ngắt dòng có dấu gạch nối (vd: ngân-\\nhàng -> ngân hàng).
-    2. Chuẩn hóa khoảng trắng và loại bỏ dòng trống dư thừa.
-    Thuần túy xử lý chuỗi cơ sở (0% Regex).
+    Cleans natural text without discarding characters or favoring specific domains:
+    1. Removes UTF-8 BOM (\ufeff) and zero-width spaces (\u200b).
+    2. Stitches line breaks split by hyphens (- or \xad):
+       - Vietnamese syllables: joined with a space.
+       - Foreign words: stitched without space.
+    3. Normalizes whitespace and removes redundant empty lines.
+    Strictly complies with 0% Regex Law and Zero Ternary Law.
     """
     if not text:
         return ""
 
+    text = text.replace("\ufeff", "").replace("\u200b", "").replace("\u200c", "").replace("\u200d", "")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+
     lines_raw = text.split("\n")
-    stitched_lines: list[str] = []
+    stitched_lines = []
     idx = 0
     total_raw = len(lines_raw)
 
     while idx < total_raw:
         line = lines_raw[idx]
         stripped = line.rstrip()
-        # Nếu dòng kết thúc bằng dấu '-' nối với từ dòng kế tiếp
-        if stripped.endswith("-") and len(stripped) > 1 and stripped[-2].isalnum() and idx + 1 < total_raw:
+
+        is_hyphenated = False
+        if stripped.endswith("-") or stripped.endswith("\xad"):
+            if len(stripped) > 1 and stripped[-2].isalnum() and idx + 1 < total_raw:
+                is_hyphenated = True
+
+        if is_hyphenated:
             next_line = lines_raw[idx + 1].lstrip()
             if next_line and next_line[0].isalnum():
-                stitched_lines.append(stripped[:-1] + next_line)
+                prefix_part = stripped[:-1]
+                w1_tokens = prefix_part.split()
+                w1 = ""
+                if w1_tokens:
+                    w1 = w1_tokens[-1]
+                w2_tokens = next_line.split()
+                w2 = ""
+                if w2_tokens:
+                    w2 = w2_tokens[0]
+
+                is_vn = False
+                if w1 and strip_vietnamese_accents(w1) != w1:
+                    is_vn = True
+                else:
+                    if w2 and strip_vietnamese_accents(w2) != w2:
+                        is_vn = True
+
+                if is_vn:
+                    stitched_lines.append(prefix_part + " " + next_line)
+                else:
+                    stitched_lines.append(prefix_part + next_line)
                 idx += 2
                 continue
+
         stitched_lines.append(line)
         idx += 1
 
-    # Chuẩn hóa khoảng trắng dư thừa trong từng dòng
-    lines = [" ".join(line.split()) for line in stitched_lines]
+    lines = [" ".join(line.replace("\xad", "").split()) for line in stitched_lines]
 
-    # Bỏ các dòng trống liên tiếp (chỉ giữ tối đa 1 dòng trống phân cách đoạn)
-    cleaned_lines: list[str] = []
+    cleaned_lines = []
     prev_empty = False
     for line in lines:
         if not line:
@@ -71,16 +88,16 @@ def clean_and_dehyphenate_text(text: str) -> str:
 
 
 # -----------------------------------------------------------------------------
-# 2. PHÂN ĐOẠN CÂU PHỔ QUÁT (UNIVERSAL SENTENCE BOUNDARY SEGMENTATION)
+# 2. UNIVERSAL SENTENCE BOUNDARY SEGMENTATION (0% REGEX, DOMAIN-AGNOSTIC)
 # -----------------------------------------------------------------------------
 _SAT_MODEL = None
 _SAT_INITIALIZED = False
 
 
-def get_sat_segmenter(model_name: str = "sat-3l-sm") -> object | None:
+def get_sat_segmenter(model_name="sat-3l-sm"):
     """
-    Khởi tạo hoặc trả về instance singleton của mô hình wtpsplit (SaT).
-    Ưu tiên số 1 cho bài toán phân đoạn câu thông minh (Segment Any Text).
+    Initializes and caches the wtpsplit (SaT) model instance.
+    Falls back to Unicode rule-based splitting if model is unavailable.
     """
     global _SAT_MODEL, _SAT_INITIALIZED
     if _SAT_INITIALIZED:
@@ -89,12 +106,9 @@ def get_sat_segmenter(model_name: str = "sat-3l-sm") -> object | None:
     try:
         from wtpsplit import SaT
         _SAT_MODEL = SaT(model_name)
-        logger.info(f"[CanonicalResolver] Khởi tạo thành công mô hình wtpsplit (SaT: {model_name}).")
+        logger.info("[CanonicalResolver] Loaded wtpsplit (SaT: " + model_name + ")")
     except Exception as e:
-        logger.warning(
-            f"[CanonicalResolver] Không thể khởi tạo wtpsplit (SaT): {e}. "
-            "Hệ thống sẽ chuyển sang cơ chế dự phòng Unicode Invariant rule-based."
-        )
+        logger.warning("[CanonicalResolver] wtpsplit unavailable: " + str(e) + ". Using rule-based fallback.")
         _SAT_MODEL = None
     finally:
         _SAT_INITIALIZED = True
@@ -102,17 +116,102 @@ def get_sat_segmenter(model_name: str = "sat-3l-sm") -> object | None:
     return _SAT_MODEL
 
 
-def split_sentences(text: str, use_sat: bool = True) -> list[str]:
-    """
-    Phân đoạn câu song ngữ Tiếng Việt - Tiếng Anh tối ưu hóa cho RAG Banking.
+# Universal abbreviations across academic, technical, business, and general text
+# Zero hardcoded banking/currency units (no đ/tháng, đ/năm, tr., tỷ., đ.)
+UNIVERSAL_KNOWN_ABBREVIATIONS = {
+    "tp.", "tp.hcm", "hcm.", "hn.", "v.v.", "ths.", "ts.", "bs.", "mr.", "mrs.", "ms.",
+    "dr.", "prof.", "assoc.", "stt.", "no.", "inc.", "corp.", "ltd.", "co.", "approx.",
+    "dept.", "est.", "fig.", "vs.", "etc.", "e.g.", "i.e.", "vol.", "pp.", "ed."
+}
 
-    100% sử dụng mô hình học sâu `wtpsplit (SaT)` (Segment Any Text).
-    Tuyệt đối KHÔNG sử dụng regex hoặc các mảng ký tự neo / dấu câu thủ công.
+
+def split_universal_sentences(text):
+    """
+    Universal domain-agnostic sentence boundary splitter.
+    Preserves decimals (10.5), thousand separators (10,000 / 10.000), percentages (12.5%),
+    universal abbreviations, and structural markers.
+    Strictly 0% Regex Law, Zero Ternary Law, No Typing Library.
     """
     if not text:
         return []
 
-    # 1. ƯU TIÊN DUY NHẤT: wtpsplit (SaT)
+    raw_lines = [l.strip() for l in text.splitlines() if l.strip()]
+    all_sentences = []
+    structural_delims = ("-", "*", "•", "\"", "'", "“", "”", "(", "[")
+
+    for line in raw_lines:
+        n = len(line)
+        start_idx = 0
+        i = 0
+        while i < n:
+            ch = line[i]
+            is_boundary = False
+
+            if ch in (".", "!", "?"):
+                # 1. Ellipsis check: "..."
+                if i + 1 < n and line[i + 1] == ".":
+                    i += 1
+                    continue
+                if i > 0 and line[i - 1] == ".":
+                    i += 1
+                    continue
+
+                # 2. Decimal / number check: "10.5" or "10.000" or "1.5%"
+                if i > 0 and line[i - 1].isdigit() and i + 1 < n and line[i + 1].isdigit():
+                    i += 1
+                    continue
+
+                # 3. Universal abbreviation check
+                word_start = i
+                while word_start > 0 and not line[word_start - 1].isspace():
+                    word_start -= 1
+                curr_word = line[word_start : i + 1].lower()
+                if curr_word in UNIVERSAL_KNOWN_ABBREVIATIONS:
+                    i += 1
+                    continue
+
+                # 4. End of line or boundary confirmation
+                if i == n - 1:
+                    is_boundary = True
+                else:
+                    if line[i + 1].isspace():
+                        next_char_idx = i + 1
+                        while next_char_idx < n and line[next_char_idx].isspace():
+                            next_char_idx += 1
+                        if next_char_idx < n:
+                            next_ch = line[next_char_idx]
+                            if next_ch.isupper() or next_ch.isdigit() or next_ch in structural_delims:
+                                is_boundary = True
+                        else:
+                            is_boundary = True
+
+            if is_boundary:
+                sent = line[start_idx : i + 1].strip()
+                if sent:
+                    all_sentences.append(sent)
+                start_idx = i + 1
+                while start_idx < n and line[start_idx].isspace():
+                    start_idx += 1
+                i = start_idx
+            else:
+                i += 1
+
+        if start_idx < n:
+            remaining = line[start_idx:].strip()
+            if remaining:
+                all_sentences.append(remaining)
+
+    return all_sentences
+
+
+def split_sentences(text, use_sat=True):
+    """
+    Universal sentence segmentation facade.
+    Uses wtpsplit (SaT) if available, falling back to split_universal_sentences.
+    """
+    if not text:
+        return []
+
     if use_sat:
         sat = get_sat_segmenter()
         if sat is not None:
@@ -122,44 +221,37 @@ def split_sentences(text: str, use_sat: bool = True) -> list[str]:
                 if clean_segments:
                     return clean_segments
             except Exception as e:
-                logger.warning(f"[CanonicalResolver] SaT.split() gặp lỗi: {e}")
+                logger.warning("[CanonicalResolver] SaT.split error: " + str(e))
 
-    # 2. DỰ PHÒNG THUẦN TÚY (0% Regex, 0% Mảng ký tự neo): Tách theo cấu trúc dòng
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    if lines:
-        return lines
-    return [text.strip()]
+    return split_universal_sentences(text)
 
 
-split_sentences_banking = split_sentences
+# Backwards compatibility aliases (0% breaking change for existing callers)
+split_banking_sentences = split_universal_sentences
+split_sentences_banking = split_universal_sentences
 split_sentences_generalized = split_sentences
 
 
 # -----------------------------------------------------------------------------
-# 3. GOM NHÓM CÂU THEO NGÂN SÁCH (SENTENCE GROUPING)
+# 3. SENTENCE GROUPING (BUDGET BASED)
 # -----------------------------------------------------------------------------
-def group_sentences(
-    sentences: list[str],
-    max_words: int = 350,
-    max_chunk_size: int | None = None,
-    **kwargs
-) -> list[str]:
+def group_sentences(sentences, max_words=350, max_chunk_size=None, **kwargs):
     """
-    Gom các câu thành từng nhóm (chunk) với kích thước từ tối đa.
-    Phân đoạn câu tuần tự, độc lập và trọn vẹn, không cắt vụn giữa chừng một câu văn.
+    Groups sentences into paragraph chunks without breaking sentence boundaries.
     """
     if not sentences:
         return []
 
     if max_words is not None:
         limit = max_words
-    elif max_chunk_size:
-        limit = max_chunk_size // 2
     else:
-        limit = 350
+        if max_chunk_size:
+            limit = max_chunk_size // 2
+        else:
+            limit = 350
 
-    chunks: list[str] = []
-    current_sentences: list[str] = []
+    chunks = []
+    current_sentences = []
     current_word_count = 0
 
     for s in sentences:
@@ -182,74 +274,65 @@ group_sentences_banking = group_sentences
 
 
 # -----------------------------------------------------------------------------
-# 4. ĐÁNH GIÁ TÍNH HỢP LỆ VĂN BẢN (0% REGEX)
+# 4. TEXT VALIDITY CHECKS (UNICODE INVARIANTS, 0% REGEX)
 # -----------------------------------------------------------------------------
-def is_valid_readable_text(text: str) -> bool:
+def is_valid_readable_text(text):
     """
-    Kiểm tra văn bản hợp lệ theo đặc tính chuẩn Unicode (0% Regex).
-    1. Phát hiện và loại bỏ rác mã hóa, Mojibake và ký tự điều khiển hỏng bảng mã.
-    2. Đảm bảo văn bản chứa các ký tự có nghĩa (chữ cái Category L* hoặc ký số N*).
-    3. Không xóa bỏ ngôn ngữ ngoại lai (coi như các chuỗi ký tự đặc biệt).
+    Validates text readability via Unicode categories (0% Regex).
+    Detects mojibake, control character corruption, and verifies meaningful content.
     """
     if not text:
         return False
-    s = text.strip()
+    s = text.replace("\ufeff", "").strip()
     if len(s) < 5:
         return False
 
     total_chars = len(s)
-    # 1. Ký tự điều khiển bất thường hoặc ký tự thay thế hỏng bảng mã (\ufffd, \x00-\x1f)
-    bad_chars = sum(
-        1 for c in s
-        if c in ("\ufffd", "\x00", "\ufeff") or
-        (unicodedata.category(c).startswith("C") and c not in ("\n", "\r", "\t"))
-    )
-    if bad_chars / total_chars > 0.03:
+    bad_chars = 0
+    for c in s:
+        if c in ("\ufffd", "\x00", "\ufeff"):
+            bad_chars += 1
+        else:
+            cat = unicodedata.category(c)
+            if cat == "Cc" or (cat.startswith("C") and c not in ("\n", "\r", "\t", "\u200c", "\u200d", "\u200e", "\u200f")):
+                bad_chars += 1
+
+    if (bad_chars / total_chars) > 0.03:
         return False
 
-    # 2. Phải có ít nhất ký tự chữ cái (Unicode category L*) hoặc ký hiệu số (N*)
-    has_meaningful_content = any(
-        unicodedata.category(c)[0] in ("L", "N") for c in s
-    )
-    if not has_meaningful_content:
-        return False
+    has_meaningful_content = False
+    for c in s:
+        cat = unicodedata.category(c)
+        if cat[0] in ("L", "N"):
+            has_meaningful_content = True
+            break
 
-    return True
+    return has_meaningful_content
 
 
 is_valid_natural_text = is_valid_readable_text
-
-
-def is_valid_vietnamese_text(text: str) -> bool:
-    """
-    Kiểm tra tính hợp lệ văn bản đọc được (tương thích ngược, hoàn toàn không hardcode bảng chữ).
-    """
-    return is_valid_readable_text(text)
+is_valid_vietnamese_text = is_valid_readable_text
 
 
 # -----------------------------------------------------------------------------
-# 5. LỌC HEADER / FOOTER & MẪU BIỂU TỰ NHIÊN (STRUCTURAL PATTERNS)
+# 5. REMOVE HEADER / FOOTER STRUCTURAL PATTERNS (DOMAIN-AGNOSTIC)
 # -----------------------------------------------------------------------------
-def detect_and_remove_headers_footers(
-    text: str,
-    custom_ignore_phrases: list[str] | None = None,
-    config: object | None = None
-) -> str:
+def detect_and_remove_headers_footers(text, custom_ignore_phrases=None, config=None):
     """
-    Loại bỏ các dòng header/footer, số trang và mã biểu mẫu theo cấu trúc cú pháp phổ quát.
-    Tuân thủ 0% Regex Law và nguyên tắc Zero Domain Hardcoding qua config.
+    Removes header/footer noise, page numbers, and form codes in a domain-agnostic manner.
     """
     if not text:
         return ""
 
-    ignore_phrases: list[str] = []
+    ignore_phrases = []
     if custom_ignore_phrases is not None:
         ignore_phrases.extend(custom_ignore_phrases)
-    elif config is not None and getattr(config, "custom_ignore_phrases", None):
-        ignore_phrases.extend(config.custom_ignore_phrases)
+    else:
+        if config is not None and getattr(config, "custom_ignore_phrases", None):
+            ignore_phrases.extend(config.custom_ignore_phrases)
 
     lines = text.splitlines()
-    filtered: list[str] = []
+    filtered = []
 
     for line in lines:
         s = line.strip()
@@ -258,30 +341,38 @@ def detect_and_remove_headers_footers(
         s_lower = s.lower()
         words = s.split()
 
-        # 1. Số trang độc lập hoặc có nhãn ngắn (vd: "1", "1/5", "Page 2", "Trang 3")
+        # Page numbers: "1", "1/5", "Page 2", "Trang 3"
         if len(words) == 1:
             w0 = words[0]
             if w0.isdigit() or (all(c.isdigit() or c in "/-" for c in w0) and any(c.isdigit() for c in w0)):
                 continue
-        elif len(words) in (2, 3) and words[0].isalpha() and len(words[0]) <= 6:
-            remainder = "".join(words[1:])
-            if all(c.isdigit() or c in "/-" for c in remainder) and any(c.isdigit() for c in remainder):
-                continue
+        else:
+            if len(words) in (2, 3) and words[0].isalpha() and len(words[0]) <= 6:
+                remainder = "".join(words[1:])
+                if all(c.isdigit() or c in "/-" for c in remainder) and any(c.isdigit() for c in remainder):
+                    continue
 
-        # 2. Tiêu đề mẫu biểu có mã định danh và dấu hai chấm (vd: "01/TNDN:", "202-B:", "#12:", "A-04:")
+        # Form codes with colons: "01/TNDN:", "FORM-A1:"
         if ":" in s and len(words) <= 10:
             prefix = s.split(":", 1)[0].strip()
             prefix_words = prefix.split()
             if prefix_words:
                 code_token = prefix_words[-1]
                 has_digit = any(c.isdigit() for c in code_token)
-                has_code_delim = any(c in "/-#_" for c in code_token) or (len(code_token) <= 5 and any(c.isdigit() for c in code_token) and any(c.isalpha() for c in code_token))
+                has_code_delim = any(c in "/-#_" for c in code_token) or (
+                    len(code_token) <= 5 and any(c.isdigit() for c in code_token) and any(c.isalpha() for c in code_token)
+                )
                 if has_digit and has_code_delim:
                     continue
 
-        # 3. Cụm từ người dùng cấu hình loại trừ (Slogan, banner, metadata)
-        if ignore_phrases and any(p.lower() in s_lower for p in ignore_phrases if p.strip()):
-            continue
+        if ignore_phrases:
+            should_skip = False
+            for p in ignore_phrases:
+                if p.strip() and p.lower() in s_lower:
+                    should_skip = True
+                    break
+            if should_skip:
+                continue
 
         filtered.append(line)
 
@@ -289,10 +380,10 @@ def detect_and_remove_headers_footers(
 
 
 # -----------------------------------------------------------------------------
-# 6. TIỆN ÍCH TRÍCH XUẤT ĐỊNH DANH & PHÂN CẤP TỔNG QUÁT
+# 6. UNIVERSAL DOCUMENT IDENTIFIER & STRUCTURAL UNITS
 # -----------------------------------------------------------------------------
-def extract_document_identifier(filename: str = "", text: str = "") -> str:
-    """Lấy định danh tài liệu sạch từ tên tệp hoặc văn bản đầu vào (0% Regex)."""
+def extract_document_identifier(filename="", text=""):
+    """Extracts clean document stem from filename or input text."""
     if filename:
         if "." in filename:
             stem = filename.rsplit(".", 1)[0]
@@ -301,32 +392,27 @@ def extract_document_identifier(filename: str = "", text: str = "") -> str:
         return stem.strip()
     if text:
         stripped_text = text.strip()
-        first_line = ""
         if stripped_text:
-            first_line = stripped_text.splitlines()[0]
-        return first_line.strip()
+            return stripped_text.splitlines()[0].strip()
     return ""
 
 
-def extract_hierarchical_units(text: str = "", text_chunk: str = "") -> list[str]:
+def extract_hierarchical_units(text="", text_chunk=""):
     """
-    Trích xuất các điều khoản, phân đoạn phân cấp song ngữ Việt - Anh (0% Regex):
-    Cú pháp tổng quát: [Từ định danh viết hoa] [Chỉ số: Số / Số La Mã].
-    Ví dụ tiếng Việt: Điều 1, Khoản 2, Mục III, Chương 4, Phần I...
-    Ví dụ tiếng Anh: Section 1, Article 2, Chapter III, Part 4, Clause 5...
+    Extracts structural section units (e.g. Chapter 1, Section 2, Article III, Điều 1, Khoản 2).
+    Purely pattern-driven: [Latin Title Word] [Number / Roman Numeral].
     """
     content = text or text_chunk
     if not content:
         return []
     words = content.split()
-    results: list[str] = []
+    results = []
     i = 0
     roman_chars = set("ivxlcdmIVXLCDM")
     while i < len(words) - 1:
         curr_w = words[i].strip(",.;:()")
         next_w = words[i + 1].strip(",.;:()")
 
-        # Đảm bảo từ viết hoa thuộc bảng chữ cái Latin (Tiếng Việt / Tiếng Anh)
         is_title_word = bool(
             curr_w
             and curr_w[0].isupper()
@@ -341,16 +427,42 @@ def extract_hierarchical_units(text: str = "", text_chunk: str = "") -> list[str
             unit_val = next_w
             if is_roman:
                 unit_val = next_w.upper()
-            results.append(f"{curr_w.capitalize()} {unit_val}")
+            results.append(curr_w.capitalize() + " " + unit_val)
             i += 1
         i += 1
-    return list(dict.fromkeys(results))
+
+    unique_results = []
+    seen = set()
+    for item in results:
+        if item not in seen:
+            seen.add(item)
+            unique_results.append(item)
+    return unique_results
+
+
+def strip_vietnamese_accents(text):
+    """
+    Normalizes and strips Vietnamese accents without regex.
+    Replaces 'đ'/'Đ' with 'd'/'D' and decomposes via Unicode NFD.
+    """
+    if not text:
+        return ""
+
+    clean_text = text.replace("đ", "d").replace("Đ", "D")
+    nfd_chars = unicodedata.normalize("NFD", clean_text)
+    filtered_chars = []
+    for c in nfd_chars:
+        if unicodedata.category(c) != "Mn":
+            filtered_chars.append(c)
+    return unicodedata.normalize("NFC", "".join(filtered_chars))
 
 
 __all__ = [
     "clean_and_dehyphenate_text",
     "get_sat_segmenter",
     "split_sentences",
+    "split_universal_sentences",
+    "split_banking_sentences",
     "split_sentences_banking",
     "split_sentences_generalized",
     "group_sentences",
@@ -361,4 +473,5 @@ __all__ = [
     "detect_and_remove_headers_footers",
     "extract_document_identifier",
     "extract_hierarchical_units",
+    "strip_vietnamese_accents",
 ]

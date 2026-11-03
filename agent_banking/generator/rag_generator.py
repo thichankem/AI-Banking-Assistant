@@ -152,7 +152,9 @@ class RAGGenerator:
 
             source = chunk.get("source", "Tài liệu ngân hàng")
             breadcrumb = chunk.get("breadcrumb", "")
-            content = chunk.get("content", "")
+            content = chunk.get("parent_content")
+            if not content:
+                content = chunk.get("content", "")
 
             if source and source not in sources:
                 sources.append(source)

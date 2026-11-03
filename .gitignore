@@ -310,3 +310,7 @@ regression_test/
 agent_banking/CHUNKING_AUDIT_REPORT.md
 agent_banking/GEMINI_ORCHESTRATOR_CHAT.md
 agent_banking/tasks/GUIDE_TASK_DEVELOPMENT.md
+
+docx_chunker/
+**/docx_chunker/
+agent_banking/chunking/docx_chunker/
