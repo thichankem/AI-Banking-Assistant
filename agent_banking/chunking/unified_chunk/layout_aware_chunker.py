@@ -32,22 +32,20 @@ class LayoutAwareChunker:
         config: object | None = None,
         **kwargs
     ):
-        from ..docx_chunker.docx_chunker import DOCXChunker
+        try:
+            from ..universal.universal_chunker import UniversalDocxChunker
+            self.docx_chunker = UniversalDocxChunker()
+        except (ImportError, ValueError):
+            from agent_banking.chunking.universal.universal_chunker import UniversalDocxChunker
+            self.docx_chunker = UniversalDocxChunker()
 
         self.max_chunk_size = max_chunk_size
         self.min_section_size = min_section_size
         self.config = config
 
-        # Khởi tạo DOCX Chunker chuẩn hóa (Canonical Chunker)
-        self.docx_chunker = DOCXChunker(
-            max_chunk_size=max_chunk_size,
-            min_section_size=min_section_size,
-            **kwargs
-        )
-
     def chunk_docx(self, file_path: str | Path) -> list[dict]:
-        """Phân đoạn tệp Word DOCX chuẩn mực (Canonical Golden Document)."""
-        return self.docx_chunker.chunk_docx(file_path)
+        """Phân đoạn tệp Word DOCX qua Universal Multimodal Vision Chunker."""
+        return self.docx_chunker.chunk_document(docx_path=file_path)
 
     def chunk_file(self, file_path: str | Path, **kwargs) -> list[dict]:
         """
