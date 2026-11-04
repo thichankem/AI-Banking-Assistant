@@ -2,7 +2,6 @@
 Runner truc tiep cho Module 6: Reranking.
 Chay doc lap tu input/ sang output/ voi co che chong trung lap.
 """
-from __future__ import annotations
 import sys
 import argparse
 from pathlib import Path
