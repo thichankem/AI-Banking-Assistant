@@ -17,10 +17,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from dataclasses import dataclass
-from openai import OpenAI
+from agent_banking.config.chat import FallbackChatClient
+from agent_banking.config.fallback import ModelFallbackError
 
 from agent_banking.skills.skill_registry import SkillRegistry
-from agent_banking.config import Config
+from agent_banking.config.settings import Config
+from agent_banking.decision.decision_client import DecisionClient
 
 
 @dataclass
@@ -52,15 +54,14 @@ class TaskRouter:
         self.routing_rules: list[dict] = []
         self._load_routing_manifest()
 
-        self.client = None
-        if self.config.LLM_API_KEY and self.config.LLM_BASE_URL:
-            try:
-                self.client = OpenAI(
-                    api_key=self.config.LLM_API_KEY,
-                    base_url=self.config.LLM_BASE_URL
-                )
-            except Exception:
-                self.client = None
+        self.decision_client = DecisionClient(config=self.config)
+
+        self.client = FallbackChatClient("tasks", {
+            "model": getattr(self.config, "TASKS_LLM_MODEL", self.config.LLM_MODEL),
+            "url": getattr(self.config, "TASKS_LLM_BASE_URL", self.config.LLM_BASE_URL),
+            "api_key": getattr(self.config, "TASKS_LLM_API_KEY", self.config.LLM_API_KEY),
+        })
+
 
     def _load_routing_manifest(self) -> None:
         """Nạp các quy tắc điều hướng từ JSON manifest."""
@@ -114,7 +115,30 @@ class TaskRouter:
         return self._route_with_llm(user_query)
 
     def _route_with_llm(self, query: str) -> RoutingDecision:
-        """Fallback LLM phân tích sâu khi câu hỏi tự do."""
+        """Phân tích sâu khi câu hỏi tự do: ưu tiên TypeSafe Jev System One, dự phòng LLM."""
+        # 1. Thử nghiệm phân loại siêu tốc bằng TypeSafe Jev System One
+        if self.decision_client.is_available():
+            jev_task = self.decision_client.route_task(query)
+            if jev_task is not None:
+                t_conf = float(jev_task.get("confidence", 0.0))
+                if t_conf >= 0.70:
+                    t_id = jev_task.get("task_id", "")
+                    if t_id == "TASK_REACT_AGENT":
+                        return RoutingDecision("TASK_REACT_AGENT", "AI Agent Suy Luận & Hành Động Đa Bước (ReAct)", ["rag_knowledge_retrieval", "financial_calculator", "compliance_qd2345_audit"], t_conf, "TypeSafe Jev System One: ReAct đa bước")
+                    if t_id == "TASK_LOAN_ADVISORY":
+                        return RoutingDecision("TASK_LOAN_ADVISORY", "Tư vấn Gói Vay & Lịch Trả Nợ", ["financial_calculator", "rag_knowledge_retrieval"], t_conf, "TypeSafe Jev System One: Vay vốn")
+                    if t_id == "TASK_BIOMETRIC_COMPLIANCE":
+                        return RoutingDecision("TASK_BIOMETRIC_COMPLIANCE", "Thẩm định Sinh trắc học QĐ 2345", ["compliance_qd2345_audit"], t_conf, "TypeSafe Jev System One: QĐ 2345")
+                    if t_id == "TASK_CARD_SERVICE":
+                        return RoutingDecision("TASK_CARD_SERVICE", "Tư vấn Dịch vụ Thẻ", ["rag_knowledge_retrieval"], t_conf, "TypeSafe Jev System One: Dịch vụ thẻ")
+                    if t_id == "TASK_INCIDENT_SUPPORT":
+                        return RoutingDecision("TASK_INCIDENT_SUPPORT", "Xử lý Sự cố Khẩn cấp", ["incident_support_ticket"], t_conf, "TypeSafe Jev System One: Sự cố khẩn cấp")
+                    if t_id == "TASK_GENERAL_CHAT":
+                        return RoutingDecision("TASK_GENERAL_CHAT", "Tư vấn Tổng quan", [], t_conf, "TypeSafe Jev System One: Giao tiếp xã giao")
+                    if t_id == "TASK_POLICY_INQUIRY":
+                        return RoutingDecision("TASK_POLICY_INQUIRY", "Tra cứu Quy chế & Biểu phí Dịch vụ Ngân hàng", ["rag_knowledge_retrieval", "fact_checking_audit"], t_conf, "TypeSafe Jev System One: Quy chế RAG")
+
+
         if not self.client:
             return RoutingDecision(
                 task_id="TASK_POLICY_INQUIRY",
@@ -123,6 +147,7 @@ class TaskRouter:
                 confidence=0.85,
                 reason="Định tuyến mặc định: Quy chế RAG"
             )
+
 
         skills_desc = self.registry.get_skills_prompt_description()
         system_prompt = (
@@ -168,5 +193,7 @@ class TaskRouter:
                 return RoutingDecision("TASK_GENERAL_CHAT", "Tư vấn Tổng quan", [], 0.90, "LLM phân loại giao tiếp")
 
             return RoutingDecision("TASK_POLICY_INQUIRY", "Tra cứu Quy chế & Biểu phí", ["rag_knowledge_retrieval"], 0.85, "LLM phân loại quy chế RAG")
+        except ModelFallbackError:
+            raise
         except Exception:
             return RoutingDecision("TASK_POLICY_INQUIRY", "Tra cứu Quy chế & Biểu phí", ["rag_knowledge_retrieval"], 0.80, "Dự phòng: Quy chế RAG")

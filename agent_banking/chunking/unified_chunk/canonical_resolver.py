@@ -105,8 +105,15 @@ def get_sat_segmenter(model_name="sat-3l-sm"):
 
     try:
         from wtpsplit import SaT
+        import torch
         _SAT_MODEL = SaT(model_name)
-        logger.info("[CanonicalResolver] Loaded wtpsplit (SaT: " + model_name + ")")
+        device = "cpu"
+        if torch.cuda.is_available():
+            device = "cuda"
+            _SAT_MODEL.half().to(device)
+        else:
+            _SAT_MODEL.to(device)
+        logger.info("[CanonicalResolver] Loaded wtpsplit (SaT: " + model_name + ") on " + device)
     except Exception as e:
         logger.warning("[CanonicalResolver] wtpsplit unavailable: " + str(e) + ". Using rule-based fallback.")
         _SAT_MODEL = None

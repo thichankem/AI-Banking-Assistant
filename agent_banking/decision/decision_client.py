@@ -17,12 +17,12 @@ NGUYÊN TẮC THIẾT KẾ:
 4. NO __INIT__.PY: Import trực tiếp file module.
 """
 
-import os
 import json
 import urllib.request
-import urllib.error
 
-from agent_banking.config import Config
+from agent_banking.config.settings import Config
+from agent_banking.config.models import get_model_chain
+from agent_banking.config.fallback import run_fallback
 
 
 class DecisionClient:
@@ -40,8 +40,6 @@ class DecisionClient:
             self.api_key = getattr(self.config, "DECISION_API_KEY", "")
             if not self.api_key:
                 self.api_key = getattr(self.config, "DECISION_API_KEY", "")
-            if not self.api_key:
-                self.api_key = os.getenv("DECISION_API_KEY", os.getenv("DECISION_API_KEY", ""))
 
         if base_url is not None:
             self.base_url = base_url.rstrip("/")
@@ -71,9 +69,8 @@ class DecisionClient:
         """Kiểm tra xem mô hình Jev đã sẵn sàng phục vụ hay chưa."""
         if not self.enabled:
             return False
-        if not self.api_key:
-            return False
-        return True
+        chain = get_model_chain("decision", {"model": self.model, "url": self.base_url, "api_key": self.api_key})
+        return any(item.api_key and item.url and item.model for item in chain)
 
     def ping(self, timeout: float = 4.0) -> dict:
         """Kiểm tra kết nối thực tế tới endpoint TypeSafe AI Jev (System One)."""
@@ -115,52 +112,39 @@ class DecisionClient:
         Thực hiện truy vấn quyết định System One tới TypeSafe AI Jev.
         Trả về payload JSON dạng dict chứa 'answers', 'model', 'usage'.
         """
-        if not self.is_available():
+        if not self.enabled:
             return {}
 
         req_timeout = self.timeout
         if timeout > 0.0:
             req_timeout = timeout
 
-        endpoint_url = self.base_url
-        if not endpoint_url.endswith("/systemone"):
-            endpoint_url = f"{endpoint_url}/systemone"
+        chain = get_model_chain("decision", {
+            "model": self.model, "url": self.base_url, "api_key": self.api_key, "timeout": req_timeout,
+        })
 
-        payload = {
-            "model": self.model,
-            "state": state,
-            "questions": questions
-        }
-
-        try:
-            req_data = json.dumps(payload).encode("utf-8")
-            req = urllib.request.Request(
-                endpoint_url,
-                data=req_data,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                    "User-Agent": "AI-Banking-Assistant-JevClient/1.0"
-                }
+        def call(candidate):
+            endpoint = candidate.url.rstrip("/")
+            if not endpoint.endswith("/systemone"):
+                endpoint += "/systemone"
+            payload = {"model": candidate.model, "state": state, "questions": questions}
+            request = urllib.request.Request(
+                endpoint, data=json.dumps(payload).encode("utf-8"),
+                headers={"Authorization": "Bearer " + candidate.api_key, "Content-Type": "application/json"},
             )
-            with urllib.request.urlopen(req, timeout=req_timeout) as resp:
-                resp_bytes = resp.read()
-                resp_text = resp_bytes.decode("utf-8", errors="replace")
-                res_json = json.loads(resp_text)
-                if not isinstance(res_json, dict):
-                    return {}
-                return res_json
-        except urllib.error.HTTPError as http_err:
-            err_body = ""
-            try:
-                err_body = http_err.read().decode("utf-8", errors="replace")
-            except Exception:
-                pass
-            print(f"⚠️ [Jev Client] HTTP Error {http_err.code}: {http_err.reason} | {err_body}")
-            return {}
-        except Exception as e:
-            print(f"⚠️ [Jev Client] Request Error: {e}")
-            return {}
+            with urllib.request.urlopen(request, timeout=candidate.timeout) as response:
+                result = json.loads(response.read().decode("utf-8"))
+            if not isinstance(result, dict) or not isinstance(result.get("answers"), dict):
+                raise ValueError("Invalid decision response")
+            for name, question in questions.items():
+                answer = result["answers"].get(name)
+                if not isinstance(answer, dict):
+                    raise ValueError("Missing decision answer")
+                if question.get("type") == "choice" and answer.get("choice") not in question.get("criteria", {}):
+                    raise ValueError("Invalid decision choice")
+            return result
+
+        return run_fallback("decision", chain, call)
 
     def route_supervisor(self, user_query: str, timeout: float = 0.0):
         """

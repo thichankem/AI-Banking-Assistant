@@ -5,7 +5,7 @@ Chuyên trách:
 1. Nhận danh sách Top-K ứng viên từ Hybrid Search (Dense + BM25).
 2. Gọi Cross-Encoder API trên Cloud Provider (model: reranker-model) để chấm điểm tương quan ngữ nghĩa sâu giữa Query và Context.
 3. Tinh lọc danh sách từ Top-5/10 xuống Top-3 chunks chính xác nhất cho LLM.
-4. Tự động chuyển sang Local Token Fallback nếu mất mạng hoặc API lỗi, đảm bảo pipeline không bao giờ bị crash.
+4. Thử lần lượt model Cloud theo cấu hình; báo lỗi khi toàn bộ danh sách thất bại.
 
 NGUYÊN TẮC THIẾT KẾ (GEMINI.md & AGENTS.md):
 1. 0% REGEX LAW: Tuyệt đối không dùng regex methods.
@@ -17,6 +17,9 @@ NGUYÊN TẮC THIẾT KẾ (GEMINI.md & AGENTS.md):
 import os
 import json
 import urllib.request
+import math
+from agent_banking.config.models import get_model_chain, model_primary
+from agent_banking.config.fallback import run_fallback
 
 
 class BankingReranker:
@@ -31,59 +34,16 @@ class BankingReranker:
         rerank_url=None,
         base_url=None
     ):
-        # Tự động nạp biến môi trường từ file .env nếu chưa có trong os.environ
-        if not os.getenv("API_KEY") or not (os.getenv("BASE_URL") or os.getenv("RERANK_URL")):
-            try:
-                from agent_banking.config import Config
-            except Exception:
-                pass
-
-        if not os.getenv("API_KEY") or not (os.getenv("BASE_URL") or os.getenv("RERANK_URL")):
-            from pathlib import Path
-            env_paths = [
-                Path(".env"),
-                Path(__file__).resolve().parent.parent.parent / ".env",
-                Path(__file__).resolve().parent.parent / ".env",
-                Path(__file__).resolve().parent / ".env"
-            ]
-            for p in env_paths:
-                if p.is_file():
-                    try:
-                        with open(p, "r", encoding="utf-8") as f:
-                            for line in f:
-                                line = line.strip()
-                                if line and not line.startswith("#") and "=" in line:
-                                    k, v = line.split("=", 1)
-                                    os.environ.setdefault(k.strip(), v.strip().strip("'\""))
-                        break
-                    except Exception:
-                        pass
-
-        if model_name:
-            self.model_name = model_name
-        else:
-            self.model_name = os.getenv("RERANKER_MODEL", "reranker-model")
-
-        if api_key:
+        primary = model_primary("reranking")
+        self.model_name = model_name or primary.model
+        self.api_key = primary.api_key
+        if api_key is not None:
             self.api_key = api_key
-        else:
-            self.api_key = os.getenv("API_KEY", "")
-
-        # Xác định URL endpoint chuẩn của Cloud Provider Rerank
+        self.rerank_url = primary.url
         if rerank_url:
             self.rerank_url = rerank_url
         elif base_url:
-            self.rerank_url = f"{base_url.rstrip('/')}/rerank"
-        else:
-            env_rerank = os.getenv("RERANK_URL", "")
-            if env_rerank:
-                self.rerank_url = env_rerank
-            else:
-                env_base = os.getenv("BASE_URL", "")
-                if env_base:
-                    self.rerank_url = f"{env_base.rstrip('/')}/rerank"
-                else:
-                    self.rerank_url = "https://api.example.com/v1/rerank"
+            self.rerank_url = base_url.rstrip("/") + "/rerank"
 
     @staticmethod
     def _normalize_query(query):
@@ -260,80 +220,90 @@ class BankingReranker:
         # Trích xuất danh sách văn bản tương ứng (giới hạn 2500 ký tự)
         docs = [self._extract_text(c)[:2500] for c in candidates]
 
-        # 2. Gọi Cloud Provider Rerank API (reranker-model)
-        if self.api_key and self.rerank_url:
-            try:
-                headers = {
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json"
-                }
-                payload = {
-                    "model": self.model_name,
-                    "query": query_text,
-                    "documents": docs,
-                    "top_n": min(len(candidates), max(top_k, 5))
-                }
+        chain = get_model_chain("reranking", {
+            "model": self.model_name, "url": self.rerank_url, "api_key": self.api_key,
+        })
 
-                data = json.dumps(payload).encode("utf-8")
-                req = urllib.request.Request(self.rerank_url, data=data, headers=headers)
-                with urllib.request.urlopen(req, timeout=20.0) as resp:
-                    if resp.status == 200:
-                        resp_data = json.loads(resp.read().decode("utf-8"))
-                        api_results = resp_data.get("results", [])
+        def call(candidate):
+            headers = {
+                "Authorization": f"Bearer {candidate.api_key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": candidate.model,
+                "query": query_text,
+                "documents": docs,
+                "top_n": min(len(candidates), max(top_k, 5))
+            }
 
-                        # Sắp xếp và gắn điểm vào candidates (kèm Breadcrumb Entity Alignment)
-                        reranked = []
-                        for res in api_results:
-                            idx = res.get("index", 0)
-                            score = float(res.get("relevance_score", 0.0))
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(candidate.url, data=data, headers=headers)
+            with urllib.request.urlopen(req, timeout=candidate.timeout) as resp:
+                if resp.status == 200:
+                    resp_data = json.loads(resp.read().decode("utf-8"))
+                    api_results = resp_data.get("results", [])
+                    if not isinstance(api_results, list) or not api_results:
+                        raise ValueError("Empty reranker response")
+                    seen = set()
+                    for result in api_results:
+                        index = result.get("index")
+                        score = result.get("relevance_score")
+                        if not isinstance(index, int) or index in seen or not 0 <= index < len(candidates):
+                            raise ValueError("Invalid reranker index")
+                        if not isinstance(score, (int, float)) or not math.isfinite(score):
+                            raise ValueError("Invalid reranker score")
+                        seen.add(index)
 
-                            # Bảo vệ chỉ mục hợp lệ từ phản hồi API
-                            if 0 <= idx < len(candidates):
-                                orig_item = candidates[idx]
+                    # Sắp xếp và gắn điểm vào candidates (kèm Breadcrumb Entity Alignment)
+                    reranked = []
+                    for res in api_results:
+                        idx = res.get("index", 0)
+                        score = float(res.get("relevance_score", 0.0))
 
-                                # Breadcrumb Entity Alignment: cộng bonus nhẹ (0.02) khi từ khóa chính khớp Breadcrumb
-                                chunk = {}
-                                if isinstance(orig_item, dict):
-                                    chunk = orig_item.get("chunk", orig_item)
-                                if isinstance(chunk, dict):
-                                    bc_val = chunk.get("breadcrumb", "")
-                                    if not isinstance(bc_val, str):
-                                        bc_val = str(bc_val)
-                                    title_val = chunk.get("section_title", "")
-                                    if not isinstance(title_val, str):
-                                        title_val = str(title_val)
-                                    bc_str = f"{bc_val} {title_val}".lower()
-                                    for token in query_text.lower().split():
-                                        if len(token) >= 3 and token in bc_str:
-                                            score = min(1.0, score + 0.02)
-                                            break
+                        # Bảo vệ chỉ mục hợp lệ từ phản hồi API
+                        if 0 <= idx < len(candidates):
+                            orig_item = candidates[idx]
 
-                                if isinstance(orig_item, dict):
-                                    item_copy = dict(orig_item)
-                                    item_copy["relevance_score"] = round(score, 4)
-                                    item_copy["rerank_score"] = round(score, 4)
-                                    reranked.append(item_copy)
-                                else:
-                                    reranked.append({
-                                        "document": orig_item,
-                                        "relevance_score": round(score, 4),
-                                        "rerank_score": round(score, 4)
-                                    })
+                            # Breadcrumb Entity Alignment: cộng bonus nhẹ (0.02) khi từ khóa chính khớp Breadcrumb
+                            chunk = {}
+                            if isinstance(orig_item, dict):
+                                chunk = orig_item.get("chunk", orig_item)
+                            if isinstance(chunk, dict):
+                                bc_val = chunk.get("breadcrumb", "")
+                                if not isinstance(bc_val, str):
+                                    bc_val = str(bc_val)
+                                title_val = chunk.get("section_title", "")
+                                if not isinstance(title_val, str):
+                                    title_val = str(title_val)
+                                bc_str = f"{bc_val} {title_val}".lower()
+                                for token in query_text.lower().split():
+                                    if len(token) >= 3 and token in bc_str:
+                                        score = min(1.0, score + 0.02)
+                                        break
 
-                        if reranked:
-                            # Sắp xếp giảm dần theo điểm và gán thứ hạng rerank_rank từ 1 đến top_k
-                            reranked.sort(key=lambda x: x["relevance_score"], reverse=True)
-                            final_results = []
-                            for rank, item in enumerate(reranked[:top_k], start=1):
-                                item["rerank_rank"] = rank
-                                final_results.append(item)
-                            return final_results
-            except Exception as e:
-                print(f"⚠️ [Reranker] Lỗi gọi Cloud Provider API: {e}. Đang chuyển sang Local Fallback...")
+                            if isinstance(orig_item, dict):
+                                item_copy = dict(orig_item)
+                                item_copy["relevance_score"] = round(score, 4)
+                                item_copy["rerank_score"] = round(score, 4)
+                                reranked.append(item_copy)
+                            else:
+                                reranked.append({
+                                    "document": orig_item,
+                                    "relevance_score": round(score, 4),
+                                    "rerank_score": round(score, 4)
+                                })
 
-        # 3. Local Fallback an toàn nếu API không khả dụng hoặc trả về kết quả rỗng/lỗi
-        print("⚡ [Reranker] Sử dụng Local Fallback Token Overlap")
-        return self._fallback_local_rerank(query_text, candidates, top_k=top_k)
+                    if reranked:
+                        # Sắp xếp giảm dần theo điểm và gán thứ hạng rerank_rank từ 1 đến top_k
+                        reranked.sort(key=lambda x: x["relevance_score"], reverse=True)
+                        final_results = []
+                        for rank, item in enumerate(reranked[:top_k], start=1):
+                            item["rerank_rank"] = rank
+                            final_results.append(item)
+                        return final_results
+            raise ValueError("No valid reranker results")
+
+        return run_fallback("reranking", chain, call)
 
 
 # Alias tương thích ngược

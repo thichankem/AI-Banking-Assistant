@@ -10,8 +10,6 @@ import logging
 import time
 from pathlib import Path
 
-from .syllable_budget_manager import build_7_field_chunk
-
 logger = logging.getLogger("layout_aware_chunker")
 
 
@@ -23,7 +21,7 @@ class LayoutAwareChunker:
 
     def __init__(
         self,
-        max_chunk_size: int = 800,
+        max_chunk_size: int | None = None,
         min_section_size: int = 120,
         table_rows_per_chunk: int = 4,
         target_chunk_tokens: int = 400,
@@ -34,18 +32,41 @@ class LayoutAwareChunker:
     ):
         try:
             from ..universal.universal_chunker import UniversalDocxChunker
-            self.docx_chunker = UniversalDocxChunker()
         except (ImportError, ValueError):
             from agent_banking.chunking.universal.universal_chunker import UniversalDocxChunker
-            self.docx_chunker = UniversalDocxChunker()
+        self.docx_chunker = UniversalDocxChunker(
+            max_chunk_words=max_chunk_words,
+            target_chunk_tokens=target_chunk_tokens,
+            table_rows_per_chunk=table_rows_per_chunk,
+            max_chunk_chars=max_chunk_size,
+            min_chunk_words=min_chunk_words,
+            min_section_chars=min_section_size,
+            **kwargs,
+        )
 
         self.max_chunk_size = max_chunk_size
         self.min_section_size = min_section_size
         self.config = config
 
-    def chunk_docx(self, file_path: str | Path) -> list[dict]:
-        """Phân đoạn tệp Word DOCX qua Universal Multimodal Vision Chunker."""
-        return self.docx_chunker.chunk_document(docx_path=file_path)
+    def chunk_docx(self, file_path: str | Path, **kwargs) -> list[dict]:
+        """Phân đoạn DOCX bằng OpenXML và LLM text theo chính sách ảnh hiện hành."""
+        return self.docx_chunker.chunk_document(docx_path=file_path, **kwargs)
+
+    @property
+    def last_artifact(self):
+        return self.docx_chunker.last_artifact
+
+    def fingerprint(self):
+        return self.docx_chunker.fingerprint()
+
+    def close(self):
+        self.docx_chunker.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
 
     def chunk_file(self, file_path: str | Path, **kwargs) -> list[dict]:
         """
@@ -56,10 +77,10 @@ class LayoutAwareChunker:
         ext = path.suffix.lower()
 
         if ext == ".docx":
-            return self.chunk_docx(path)
+            return self.chunk_docx(path, **kwargs)
         else:
             logger.warning(f"[LayoutAwareChunker] Bỏ qua định dạng chưa hỗ trợ: {ext} ({path.name})")
-            return []
+            raise ValueError("Unsupported document format: " + ext)
 
     def chunk_directory(
         self,
@@ -74,20 +95,19 @@ class LayoutAwareChunker:
         if not target_dir.exists():
             return []
 
-        allowed_exts = set(extensions or [".docx"])
-        files = [p for p in target_dir.rglob("*") if p.is_file() and p.suffix.lower() in allowed_exts]
+        allowed_exts = {extension.lower() for extension in (extensions or [".docx"])}
+        files = [p for p in target_dir.rglob("*") if p.is_file() and p.suffix.lower() in allowed_exts and not p.name.startswith("~$")]
         files.sort()
 
-        if max_files:
+        if max_files is not None:
+            if max_files < 0:
+                raise ValueError("max_files cannot be negative")
             files = files[:max_files]
 
         all_chunks: list[dict] = []
         for f in files:
-            try:
-                chunks = self.chunk_file(f)
-                all_chunks.extend(chunks)
-            except Exception as e:
-                logger.error(f"[LayoutAwareChunker] Lỗi xử lý tệp {f.name}: {e}")
+            chunks = self.chunk_file(f, source_name=f.relative_to(target_dir).as_posix())
+            all_chunks.extend(chunks)
 
         return all_chunks
 

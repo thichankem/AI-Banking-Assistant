@@ -45,7 +45,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 
-from agent_banking.config import Config
+from agent_banking.config.settings import Config
 from agent_banking.pipeline import BankingRAGPipeline
 from agent_banking.generator.rag_generator import (
     PERSONA_PROFILES,
@@ -147,10 +147,16 @@ def get_persona_profiles():
 @app.get("/api/config")
 def get_config():
     total_points = rag_pipeline.vector_store.count()
+    jev_active = False
+    if getattr(config, "ENABLE_JEV_DECISION", False):
+        if getattr(config, "DECISION_API_KEY", "") or getattr(config, "DECISION_API_KEY", ""):
+            jev_active = True
     return {
         "default_model": config.LLM_MODEL,
         "embedding_model": config.EMBEDDING_MODEL_1024,
         "reranker_model": config.RERANKER_MODEL,
+        "decision_model": getattr(config, "DECISION_MODEL", "decision-model"),
+        "decision_model_enabled": jev_active,
         "qdrant_collection": config.QDRANT_COLLECTION,
         "points_count": total_points,
         "tracing_enabled": rag_pipeline.tracer.is_phoenix_active,
@@ -165,6 +171,31 @@ def get_config():
             {"id": "generator", "name": "Node 7: Generator & Guardrails"}
         ]
     }
+
+
+@app.get("/api/decision/status")
+def get_decision_status(ping: bool = False):
+    """Kiểm tra trạng thái kết nối mô hình TypeSafe AI Jev (System One)."""
+    from agent_banking.decision.decision_client import DecisionClient
+    client = DecisionClient(config=config)
+    status_str = "unavailable"
+    if client.is_available():
+        status_str = "ready"
+    res = {
+        "status": status_str,
+        "model": client.model,
+        "base_url": client.base_url,
+        "enabled": client.enabled,
+        "has_api_key": bool(client.api_key),
+        "timeout": client.timeout
+    }
+    if ping:
+        ping_res = client.ping()
+        res["ping"] = ping_res
+        if not ping_res.get("ok", False):
+            res["status"] = "unreachable"
+    return res
+
 
 
 # -----------------------------------------------------------------------------

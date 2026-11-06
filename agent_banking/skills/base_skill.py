@@ -18,9 +18,10 @@ import json
 import time
 from pathlib import Path
 from dataclasses import dataclass, field
-from openai import OpenAI
+from agent_banking.config.chat import FallbackChatClient
+from agent_banking.config.fallback import ModelFallbackError
 
-from agent_banking.config import Config
+from agent_banking.config.settings import Config
 
 
 def _clean_think_tags(text: str) -> str:
@@ -70,17 +71,11 @@ class BaseSkill:
             self.config = Config()
 
         self.pipeline = pipeline_instance
-        self.llm_client = None
-
-        # Khởi tạo LLM client nếu cần cho các tác vụ Audit/Grader
-        if self.config.LLM_API_KEY and self.config.LLM_BASE_URL:
-            try:
-                self.llm_client = OpenAI(
-                    api_key=self.config.LLM_API_KEY,
-                    base_url=self.config.LLM_BASE_URL
-                )
-            except Exception:
-                self.llm_client = None
+        self.llm_client = FallbackChatClient("skills", {
+            "model": getattr(self.config, "SKILLS_LLM_MODEL", self.config.LLM_MODEL),
+            "url": getattr(self.config, "SKILLS_LLM_BASE_URL", self.config.LLM_BASE_URL),
+            "api_key": getattr(self.config, "SKILLS_LLM_API_KEY", self.config.LLM_API_KEY),
+        })
 
     @classmethod
     def from_json_file(cls, json_path: str, config: Config | None = None, pipeline_instance=None):
@@ -389,5 +384,7 @@ class BaseSkill:
             if not raw:
                 return "yes"
             return _clean_think_tags(raw).lower()
+        except ModelFallbackError:
+            raise
         except Exception:
             return "yes"

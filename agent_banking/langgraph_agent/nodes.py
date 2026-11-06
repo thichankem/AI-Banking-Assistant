@@ -21,9 +21,10 @@ NGUYÊN TẮC:
 """
 
 from __future__ import annotations
-from openai import OpenAI
+from agent_banking.config.chat import FallbackChatClient
+from agent_banking.config.fallback import ModelFallbackError
 
-from agent_banking.config import Config
+from agent_banking.config.settings import Config
 from agent_banking.langgraph_agent.state import AgentState
 from agent_banking.langgraph_agent.prompts import (
     ROUTER_SYSTEM_PROMPT,
@@ -44,6 +45,8 @@ from agent_banking.tools.banking_api_tools import (
     create_support_ticket,
     parse_vietnamese_financial_params
 )
+from agent_banking.decision.decision_client import DecisionClient
+
 
 
 def _clean_think_tags(text: str) -> str:
@@ -85,15 +88,17 @@ class BankingAgentNodes:
         self.rag_tool = BankingRAGTool(pipeline_instance=pipeline_instance, config=self.config)
 
         # 4. Khởi tạo LLM Client (Cloud Provider / Language-Model API)
-        self.client = None
-        if self.config.LLM_API_KEY and self.config.LLM_BASE_URL:
-            try:
-                self.client = OpenAI(
-                    api_key=self.config.LLM_API_KEY,
-                    base_url=self.config.LLM_BASE_URL
-                )
-            except Exception as e:
-                print(f"[Agent Nodes] Cảnh báo khởi tạo LLM Client: {e}")
+        self.client = FallbackChatClient("langgraph_agent")
+        if config is not None:
+            self.client = FallbackChatClient("langgraph_agent", {
+                "model": getattr(self.config, "AGENT_LLM_MODEL", self.config.LLM_MODEL),
+                "url": getattr(self.config, "AGENT_LLM_BASE_URL", self.config.LLM_BASE_URL),
+                "api_key": getattr(self.config, "AGENT_LLM_API_KEY", self.config.LLM_API_KEY),
+            })
+
+        # 5. Khởi tạo TypeSafe AI Jev Decision Model Client (System One)
+        self.decision_client = DecisionClient(config=self.config)
+
 
     def _check_tool_guard(self, tool_name: str, params: dict):
         res = self.guardrail_manager.guard_tool_call(tool_name, params)
@@ -127,8 +132,10 @@ class BankingAgentNodes:
             if raw_content is None:
                 return ""
             return _clean_think_tags(raw_content).strip()
+        except ModelFallbackError:
+            raise
         except Exception as e:
-            print(f"[Agent Nodes] LLM Quick Call Error: {e}")
+            print(f"[Agent Nodes] LLM Quick Call Error: {type(e).__name__}")
             return ""
 
     # =========================================================================
@@ -147,13 +154,31 @@ class BankingAgentNodes:
         reason_text = str(getattr(guard_result, "trigger_reason", "") or "")
         sanitized_query = str(getattr(guard_result, "sanitized_query", user_query) or user_query)
 
+        # Kiểm tra tăng cường bằng TypeSafe Jev System One (Adversarial & Injection Audit)
+        blocked_by_jev = False
+        if is_safe:
+            if self.decision_client.is_available():
+                adv_check = self.decision_client.audit_adversarial_input(user_query)
+                if adv_check is not None:
+                    if adv_check.get("is_attack", False):
+                        if adv_check.get("confidence", 0.0) >= 0.85:
+                            is_safe = False
+                            blocked_by_jev = True
+                            reason_text = "Phát hiện Prompt Injection / Tấn công hệ thống (TypeSafe Jev System One)"
+
         max_retries_cfg = 2
+
         if hasattr(self.config, "MAX_RETRIES"):
             max_retries_cfg = int(self.config.MAX_RETRIES)
 
         # Trường hợp vi phạm quy chuẩn an toàn
         if not is_safe:
-            refusal = str(getattr(guard_result, "refusal_message", "") or "Yêu cầu của Quý khách không thể thực hiện do vi phạm quy chuẩn an toàn bảo mật của Ngân hàng Vietcombank.")
+            refusal = str(getattr(guard_result, "refusal_message", "") or "")
+            if not refusal:
+                refusal = "Yêu cầu của Quý khách không thể thực hiện do vi phạm quy chuẩn an toàn bảo mật của Ngân hàng Vietcombank."
+            step_msg = "Node 0: input_guardrail (Blocked by Security Guardrail)"
+            if blocked_by_jev:
+                step_msg = "Node 0: input_guardrail [TypeSafe Jev System One] (Blocked: Prompt Injection)"
             return {
                 "user_query": user_query,
                 "query": user_query,
@@ -187,7 +212,7 @@ class BankingAgentNodes:
                 "audit_feedback": "",
                 "citations": [],
                 "sources": [],
-                "execution_steps": ["Node 0: input_guardrail (Blocked by Security Guardrail)"]
+                "execution_steps": [step_msg]
             }
 
         # Trường hợp an toàn: reset toàn bộ state cho lượt mới
@@ -238,7 +263,31 @@ class BankingAgentNodes:
         query_lower = str(raw_query).lower().strip()
         steps = list(state.get("execution_steps", []))
 
+        # 0. Định tuyến tăng cường bằng TypeSafe AI Jev Decision Model (System One)
+        if self.decision_client.is_available():
+            jev_res = self.decision_client.route_supervisor(str(raw_query))
+            if jev_res is not None:
+                j_conf = float(jev_res.get("confidence", 0.0))
+                if j_conf >= 0.70:
+                    detected_intent = jev_res.get("intent", "RAG_SEARCH")
+                    sub_agent = jev_res.get("sub_agent_role", "GENERAL_ADVISOR")
+                    target_tool = jev_res.get("target_tool", "search_banking_knowledge")
+                    if detected_intent == "CHIT_CHAT":
+                        target_tool = None
+                    elif detected_intent == "RAG_SEARCH":
+                        target_tool = "search_banking_knowledge"
+                    steps.append(f"Node 1: supervisor_router [TypeSafe Jev System One] -> Intent={detected_intent} | Role={sub_agent} | Tool={target_tool} (conf={j_conf:.2f})")
+                    res = dict(state)
+                    res.update({
+                        "intent": detected_intent,
+                        "sub_agent_role": sub_agent,
+                        "target_tool": target_tool,
+                        "execution_steps": steps
+                    })
+                    return res
+
         # 1. Kiểm tra nhóm chào hỏi xã giao (CHIT_CHAT)
+
         chit_chat_keywords = [
             "xin chào", "chào bạn", "hello", "hi vcb", "cảm ơn",
             "cam on", "bạn tên gì", "bạn là ai", "tạm biệt", "chúc bạn"
@@ -385,7 +434,27 @@ class BankingAgentNodes:
         context_parts = [str(d.get("content", ""))[:300] for d in docs]
         context_str = "\n---\n".join(context_parts)
 
+        # 1. Thẩm định siêu tốc bằng TypeSafe Jev System One (Corrective RAG)
+        if self.decision_client.is_available():
+            jev_grade = self.decision_client.grade_document_relevance(query, context_str)
+            if jev_grade is not None:
+                conf = float(jev_grade.get("confidence", 0.0))
+                if conf >= 0.70:
+                    quality = jev_grade.get("quality", "IRRELEVANT")
+                    steps.append(f"Node 3: grade_documents [TypeSafe Jev System One] -> {quality} (conf={conf:.2f})")
+                    res_state = dict(state)
+                    res_state.update({
+                        "doc_quality": quality,
+                        "document_quality": quality,
+                        "execution_steps": steps
+                    })
+                    return res_state
+                else:
+                    steps.append(f"Node 3: grade_documents [TypeSafe Jev System One] -> Low confidence ({conf:.2f} < 0.70), fallback LLM")
+
+        # 2. Fallback LLM truyền thống
         grader_prompt = DOCUMENT_GRADER_PROMPT.format(query=query, documents=context_str)
+
         verdict = self._call_llm_quick("Bạn là trợ lý thẩm định tài liệu ngân hàng.", grader_prompt, max_tokens=10).lower()
 
         quality = "IRRELEVANT"

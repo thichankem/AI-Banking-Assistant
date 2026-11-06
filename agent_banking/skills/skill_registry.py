@@ -18,7 +18,7 @@ import json
 from pathlib import Path
 
 from .base_skill import BaseSkill, SkillMetadata
-from agent_banking.config import Config
+from agent_banking.config.settings import Config
 
 
 class SkillRegistry:

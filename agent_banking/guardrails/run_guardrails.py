@@ -19,6 +19,7 @@ from __future__ import annotations
 import sys
 import json
 import time
+import concurrent.futures
 from pathlib import Path
 
 if sys.platform == "win32":
@@ -32,19 +33,27 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent_banking.config import Config
+from agent_banking.config.settings import Config
 from agent_banking.guardrails.rag_guardrails import BankingGuardrailManager
 from agent_banking.state_tracker import StateTracker
 
 
 def run_auto_guardrails(
-    input_file: str | Path | None = None,
-    output_dir: str | Path | None = None,
-    force: bool = False
-) -> list[dict]:
+    input_file=None,
+    output_dir=None,
+    force=False,
+    max_workers=8,
+    use_threading=True,
+    use_concurrency=None,
+    use_decision_model=True
+):
     """
-    Tu dong kiem dinh an toan guardrails tu input sang output kem co che chong trung lap.
+    Tu dong kiem dinh an toan guardrails tu input sang output kem co che chong trung lap
+    va ho tro xu ly da luong bang ThreadPoolExecutor.
     """
+    if use_concurrency is not None:
+        use_threading = use_concurrency
+
     cfg = Config()
     in_dir = PROJECT_ROOT / "agent_banking" / "guardrails" / "input"
     in_dir.mkdir(parents=True, exist_ok=True)
@@ -61,9 +70,13 @@ def run_auto_guardrails(
         tracker.clear()
 
     # 1. Tim nguon queries
+    raw_items = None
     target_in_file = None
     if input_file is not None:
-        target_in_file = Path(input_file)
+        if isinstance(input_file, list):
+            raw_items = input_file
+        else:
+            target_in_file = Path(input_file)
     else:
         candidates = [
             in_dir / "sample_queries.json",
@@ -74,20 +87,28 @@ def run_auto_guardrails(
                 target_in_file = c
                 break
 
-    if target_in_file is None or not target_in_file.exists():
-        print(f"⚠️ Khong tim thay tap tin input queries trong: {in_dir}")
-        return []
+    if raw_items is None:
+        if target_in_file is None or not target_in_file.exists():
+            print(f"⚠️ Khong tim thay tap tin input queries trong: {in_dir}")
+            return []
 
-    print(f"\n{'='*75}")
-    print(f"▶ [MODULE 8: GUARDRAILS] Input: {target_in_file.name} -> Output: {out_path}")
-    print(f"{'='*75}")
-
-    with open(target_in_file, "r", encoding="utf-8") as fp:
-        raw_items = json.load(fp)
+        with open(target_in_file, "r", encoding="utf-8") as fp:
+            raw_items = json.load(fp)
 
     if not raw_items:
         print("⚠️ Danh sach queries rong.")
         return []
+
+    input_desc = ""
+    if target_in_file is not None:
+        input_desc = target_in_file.name
+    else:
+        input_desc = f"<in-memory list: {len(raw_items)} items>"
+
+    print(f"\n{'='*75}")
+    print(f"▶ [MODULE 8: GUARDRAILS] Input: {input_desc} -> Output: {out_path}")
+    print(f"{'='*75}")
+
 
     # 2. Doc ket qua cu de tai su dung
     prev_results = {}
@@ -115,20 +136,27 @@ def run_auto_guardrails(
         except Exception:
             prev_results = {}
 
-    manager = BankingGuardrailManager()
-    guardrail_outputs: list[dict] = []
+    manager = BankingGuardrailManager(use_decision_model=use_decision_model)
+    # Khởi tạo trước guardrail manager trên luồng chính để nạp mẫu vào RAM cache
+    if hasattr(manager, "semantic_guardrail"):
+        if hasattr(manager.semantic_guardrail, "_ensure_initialized"):
+            manager.semantic_guardrail._ensure_initialized()
+
+    guardrail_outputs = [None] * len(raw_items)
     skipped_count = 0
     new_count = 0
     start_t = time.time()
 
-    for item in raw_items:
+    # 3. Phân loại câu hỏi thành nhóm tái sử dụng (SKIP) và nhóm cần chạy mới (NEW)
+    items_to_process = []
+    for idx, item in enumerate(raw_items):
         if isinstance(item, str):
             q_text = item
-            q_id = "q_" + str(len(guardrail_outputs) + 1)
+            q_id = "q_" + str(idx + 1)
             desc = ""
         else:
             q_text = item.get("query", "")
-            q_id = item.get("id", "q_" + str(len(guardrail_outputs) + 1))
+            q_id = item.get("id", "q_" + str(idx + 1))
             desc = item.get("description", "")
 
         q_hash = tracker.compute_text_hash(q_text)
@@ -137,36 +165,85 @@ def run_auto_guardrails(
         if is_done and q_text in prev_results:
             cached_res = dict(prev_results[q_text])
             cached_res["id"] = q_id
-            guardrail_outputs.append(cached_res)
+            guardrail_outputs[idx] = cached_res
             skipped_count += 1
             print(f"  [{q_id}] [SKIP] '{q_text[:35]}...' (Da kiem dinh)")
         else:
-            t0 = time.time()
-            guard_res = manager.guard_input(q_text)
-            dt_ms = round((time.time() - t0) * 1000, 2)
+            items_to_process.append((idx, q_id, q_text, q_hash, desc))
 
-            res = {
-                "id": q_id,
-                "query": q_text,
-                "is_safe": guard_res.is_safe,
-                "trigger_reason": guard_res.trigger_reason,
-                "refusal_message": guard_res.refusal_message,
-                "sanitized_query": guard_res.sanitized_query,
-                "latency_ms": dt_ms,
-                "description": desc
-            }
-            guardrail_outputs.append(res)
-            tracker.record_processed(q_text, q_hash, {"is_safe": guard_res.is_safe})
-            new_count += 1
-            status_label = "SAFE"
-            if not guard_res.is_safe:
-                status_label = f"BLOCKED: {guard_res.trigger_reason}"
-            print(f"  [{q_id}] [NEW]  '{q_text[:35]}...' -> {status_label} ({dt_ms}ms)")
+    # 4. Thực thi kiểm định cho các câu hỏi mới
+    if items_to_process:
+        should_use_pool = False
+        if use_threading:
+            if max_workers > 1:
+                if len(items_to_process) > 1:
+                    should_use_pool = True
+
+        if should_use_pool:
+            workers = min(max_workers, len(items_to_process))
+
+            def _evaluate_item(item_tuple):
+                it_idx, it_qid, it_qtext, it_qhash, it_desc = item_tuple
+                t0 = time.time()
+                guard_res = manager.guard_input(it_qtext, use_decision_model=use_decision_model)
+                dt_ms = round((time.time() - t0) * 1000, 2)
+                item_res = {
+                    "id": it_qid,
+                    "query": it_qtext,
+                    "is_safe": guard_res.is_safe,
+                    "trigger_reason": guard_res.trigger_reason,
+                    "refusal_message": guard_res.refusal_message,
+                    "sanitized_query": guard_res.sanitized_query,
+                    "latency_ms": dt_ms,
+                    "description": it_desc
+                }
+                return (it_idx, it_qid, it_qtext, it_qhash, guard_res, item_res, dt_ms)
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+                future_to_item = {}
+                for it in items_to_process:
+                    f = executor.submit(_evaluate_item, it)
+                    future_to_item[f] = it
+
+                for future in concurrent.futures.as_completed(future_to_item):
+                    it_idx, it_qid, it_qtext, it_qhash, guard_res, item_res, dt_ms = future.result()
+                    guardrail_outputs[it_idx] = item_res
+                    tracker.record_processed(it_qtext, it_qhash, {"is_safe": guard_res.is_safe})
+                    new_count += 1
+                    if not guard_res.is_safe:
+                        status_label = f"BLOCKED: {guard_res.trigger_reason}"
+                    else:
+                        status_label = "SAFE"
+                    print(f"  [{it_qid}] [NEW-PARALLEL] '{it_qtext[:35]}...' -> {status_label} ({dt_ms}ms)")
+        else:
+            for it in items_to_process:
+                it_idx, it_qid, it_qtext, it_qhash, it_desc = it
+                t0 = time.time()
+                guard_res = manager.guard_input(it_qtext, use_decision_model=use_decision_model)
+                dt_ms = round((time.time() - t0) * 1000, 2)
+                item_res = {
+                    "id": it_qid,
+                    "query": it_qtext,
+                    "is_safe": guard_res.is_safe,
+                    "trigger_reason": guard_res.trigger_reason,
+                    "refusal_message": guard_res.refusal_message,
+                    "sanitized_query": guard_res.sanitized_query,
+                    "latency_ms": dt_ms,
+                    "description": it_desc
+                }
+                guardrail_outputs[it_idx] = item_res
+                tracker.record_processed(it_qtext, it_qhash, {"is_safe": guard_res.is_safe})
+                new_count += 1
+                if not guard_res.is_safe:
+                    status_label = f"BLOCKED: {guard_res.trigger_reason}"
+                else:
+                    status_label = "SAFE"
+                print(f"  [{it_qid}] [NEW-SERIAL] '{it_qtext[:35]}...' -> {status_label} ({dt_ms}ms)")
 
     tracker.save()
     total_elapsed = round(time.time() - start_t, 2)
 
-    # 3. Xuat ket qua
+    # 5. Xuat ket qua
     out_file = out_path / "sample_guardrail_outputs.json"
     with open(out_file, "w", encoding="utf-8") as fp:
         json.dump(guardrail_outputs, fp, ensure_ascii=False, indent=2)
