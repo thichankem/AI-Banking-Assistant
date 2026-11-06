@@ -244,7 +244,8 @@ def generate_chunk_id(source, index, content=None, prefix=None):
     if prefix is not None:
         base_prefix = str(prefix).strip()
     else:
-        base_prefix = safe_stem
+        source_hash = hashlib.sha256(clean_source.encode("utf-8")).hexdigest()[:12]
+        base_prefix = safe_stem + "_" + source_hash
 
     try:
         idx_int = int(index)
@@ -539,6 +540,13 @@ def validate_chunk_sequence(chunks):
     total = len(chunks)
     if total == 0:
         return True, []
+
+    if any(not isinstance(chunk, dict) for chunk in chunks):
+        return False, ["Every chunk must be a dictionary"]
+    identifiers = [chunk.get("chunk_id") for chunk in chunks]
+    string_ids = [identifier for identifier in identifiers if isinstance(identifier, str)]
+    if len(string_ids) != len(set(string_ids)):
+        issues.append("Duplicate chunk IDs in sequence")
 
     for i in range(total):
         c = chunks[i]

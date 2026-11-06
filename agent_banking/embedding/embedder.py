@@ -5,7 +5,7 @@ Chức năng cốt lõi duy nhất:
 1. Nhận danh sách chunks từ Chunker (chuẩn 13 trường Universal Schema).
 2. Định dạng Type-Aware Virtual Passage (multilingual-e5-large) cho text, table, multimodal.
 3. Kiểm tra bộ nhớ đệm (SQLite WAL Cache) trên chính Virtual Passage đã format.
-4. Gửi batch lên FPT Cloud API (Vietnamese_Embedding / multilingual-e5-large) hoặc Local fallback.
+4. Gửi batch lên FPT Cloud API (multilingual-e5-large); lỗi API được báo rõ.
 5. Chuẩn hóa L2-norm và gắn trực tiếp vector 1024 chiều vào từng chunk.
 
 NGUYÊN TẮC THIẾT KẾ (GEMINI.md & AGENTS.md):
@@ -15,15 +15,12 @@ NGUYÊN TẮC THIẾT KẾ (GEMINI.md & AGENTS.md):
 4. NO __INIT__.PY: Import trực tiếp file module.
 """
 
-import os
-import json
 import math
-import random
 import struct
 import sqlite3
 import hashlib
-import urllib.request
 from pathlib import Path
+from agent_banking.config.models import model_primary
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -36,35 +33,20 @@ class BankingEmbedder:
     def __init__(
         self,
         model_name=None,
-        dimension=1024,
+        dimension=None,
         api_key=None,
         embedding_url=None,
         cache_db_path="agent_banking/vector_db/embedding_cache.db"
     ):
-        if model_name:
-            self.model_name = model_name
-        else:
-            env_model = os.getenv("EMBEDDING_MODEL", "")
-            if env_model:
-                self.model_name = env_model
-            else:
-                self.model_name = "multilingual-e5-large"
-
-        self.dimension = dimension
-
-        if api_key:
+        primary = model_primary("embedding")
+        self.model_name = model_name or primary.model
+        self.dimension = primary.dimension
+        if dimension is not None:
+            self.dimension = dimension
+        self.api_key = primary.api_key
+        if api_key is not None:
             self.api_key = api_key
-        else:
-            env_key = os.getenv("API_KEY", "")
-            if env_key:
-                self.api_key = env_key
-            else:
-                self.api_key = os.getenv("LLM_API_KEY", "")
-
-        if embedding_url:
-            self.embedding_url = embedding_url
-        else:
-            self.embedding_url = os.getenv("EMBEDDING_URL", "")
+        self.embedding_url = embedding_url or primary.url
 
         # Giải quyết đường dẫn cache SQLite tuyệt đối chuẩn xác theo project root
         if cache_db_path:
@@ -109,7 +91,7 @@ class BankingEmbedder:
             clean_text = str(virtual_passage).strip()
         else:
             clean_text = ""
-        key_material = f"{self.model_name}:{self.dimension}:{clean_text}"
+        key_material = f"cloud_verified_v2:{self.embedding_url}:{self.model_name}:{self.dimension}:{clean_text}"
         return hashlib.sha256(key_material.encode("utf-8")).hexdigest()
 
     def _get_cached_vector(self, virtual_passage):
@@ -226,6 +208,13 @@ class BankingEmbedder:
         """
         if not isinstance(chunk, dict):
             return ""
+
+        metadata = chunk.get("business_metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+        if metadata.get("schema_version") == "2.0":
+            from agent_banking.chunking.universal.passage import format_passage
+            return format_passage(chunk)
 
         # Lấy nội dung thô từ content hoặc original_text
         raw_content = chunk.get("content")
@@ -468,40 +457,39 @@ class BankingEmbedder:
     # 4. GỌI API EMBEDDING (FPT Cloud -> Local Fallback)
     # -------------------------------------------------------------------------
     def _call_api(self, texts, input_type="passage"):
-        # 1. Gọi FPT Cloud API
-        if self.api_key and self.embedding_url:
-            try:
-                headers = {
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json"
-                }
-                payload = {
-                    "model": self.model_name,
-                    "input": texts,
-                    "dimensions": self.dimension,
-                    "encoding_format": "float",
-                    "input_text_truncate": "none",
-                    "input_type": input_type
-                }
-                data = json.dumps(payload).encode("utf-8")
-                req = urllib.request.Request(self.embedding_url, data=data, headers=headers)
-                with urllib.request.urlopen(req, timeout=35.0) as resp:
-                    if resp.status == 200:
-                        body = json.loads(resp.read().decode("utf-8"))
-                        items = sorted(body.get("data", []), key=lambda x: x.get("index", 0))
-                        return [self._l2_normalize(it["embedding"][:self.dimension]) for it in items]
-            except Exception as e:
-                print(f"⚠️ [Embedder] FPT Cloud API lỗi: {e}. Chuyển sang fallback...")
+        if not texts:
+            return []
+        self._validate_passages(texts)
+        from agent_banking.chunking.universal.model_enrichment import cloud_json
 
-        # 2. Fallback Local xác định 1024-d (seed từ SHA-256 nội dung, không phụ thuộc phiên Python)
-        print("⚡ [Embedder] Đang dùng Local Fallback 1024-d Engine")
-        results = []
-        for text in texts:
-            seed = int.from_bytes(hashlib.sha256(str(text).encode("utf-8")).digest()[:8], "big")
-            rng = random.Random(seed)
-            vec = [rng.gauss(0, 1) for _ in range(self.dimension)]
-            results.append(self._l2_normalize(vec))
-        return results
+        def validate(body):
+            items = sorted(body.get("data", []), key=lambda item: item.get("index", -1))
+            if [item.get("index") for item in items] != list(range(len(texts))):
+                raise ValueError("Incomplete or misindexed embedding response")
+            results = []
+            for item in items:
+                vector = item.get("embedding", [])
+                if len(vector) != self.dimension or not all(isinstance(value, (int, float)) and math.isfinite(value) for value in vector):
+                    raise ValueError("Embedding response has invalid dimension or nonfinite values")
+                squared_norm = sum(value * value for value in vector)
+                if not math.isfinite(squared_norm) or squared_norm <= 1e-12:
+                    raise ValueError("Embedding API returned an invalid or zero vector norm")
+                results.append(self._l2_normalize(vector))
+            return results
+
+        body = cloud_json(self.embedding_url, self.api_key,
+                          {"model": self.model_name, "input": texts, "dimensions": self.dimension,
+                           "encoding_format": "float", "input_text_truncate": "none", "input_type": input_type},
+                          model_module="embedding", validate=validate, dimension=self.dimension)
+        return validate(body)
+
+    def _validate_passages(self, texts):
+        if "e5" in self.model_name.lower():
+            from agent_banking.chunking.universal.token_budget import get_tokenizer
+            tokenizer = get_tokenizer()
+            counts = [len(tokenizer.encode(str(text)).ids) for text in texts]
+            if any(count > 512 for count in counts):
+                raise ValueError("E5 passage exceeds 512 tokens; rechunk before embedding (max=" + str(max(counts)) + ")")
 
     # -------------------------------------------------------------------------
     # 5. GIAO DIỆN CHÍNH CHO ỨNG DỤNG
@@ -525,6 +513,7 @@ class BankingEmbedder:
             chunk_mock = {"content": text, "chunk_type": "text"}
             virtual_passage = self.format_virtual_passage(chunk_mock)
 
+        self._validate_passages([virtual_passage])
         cached = self._get_cached_vector(virtual_passage)
         if cached:
             return cached
@@ -534,7 +523,7 @@ class BankingEmbedder:
             h = self._get_hash(virtual_passage)
             self._save_cache_batch([(h, vectors[0])])
             return vectors[0]
-        return [0.0] * self.dimension
+        raise RuntimeError("Embedding API returned no vector")
 
     def embed_query(self, query):
         """Tạo vector cho câu hỏi tìm kiếm."""
@@ -555,9 +544,16 @@ class BankingEmbedder:
         passages = []
         hashes = []
         for c in chunks:
+            metadata = c.get("business_metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+            if metadata.get("quality", {}).get("index_ready") is False:
+                raise ValueError("Chunk has unresolved source/image-context assessment; embedding refused")
             vp = self.format_virtual_passage(c)
             passages.append(vp)
             hashes.append(self._get_hash(vp))
+
+        self._validate_passages(passages)
 
         # Bước 2: Truy vấn batch từ SQLite cache
         cached_map = self._get_cached_vectors_batch(hashes)

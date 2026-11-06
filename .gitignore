@@ -223,7 +223,7 @@ embedding_cache.db
 agent_banking/agent_banking/
 
 # ==============================================================================
-# Documentation, Reports, Proposals & Office Files (Ngoài thư mục docs/)
+# Documentation, Reports, Proposals & Office Files (local only)
 # ==============================================================================
 documentation/
 **/documentation/
@@ -266,10 +266,18 @@ problem.md
 *.drawio.xml
 
 # ==============================================================================
-# Lưu giữ toàn bộ tài liệu dự án trong docs/ (KHÔNG gitignore docs/)
+# Documentation and notebooks are kept locally, excluded from GitHub
 # ==============================================================================
-!docs/
-!docs/**
+docs/
+doc/
+*.md
+*.markdown
+*.rst
+*.adoc
+*.txt
+!requirements*.txt
+notebooks/
+*.ipynb
 
 # ==============================================================================
 # Jupyter Notebook Checkpoints
@@ -303,6 +311,25 @@ regression_test/
 **/regression_test/
 **/regression_test/**
 *regression_test*
+
+# Test suites outside standard tests/ folders and standalone test utilities
+tests_*/
+test_*/
+test*.py
+*_test.py
+*_tests.py
+run_*tests.py
+audit_*.py
+*_audit.py
+verify_upgrade.py
+pytest.ini
+tox.ini
+.coveragerc
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+cache/
 
 # ==============================================================================
 # Agent Banking Audit, Orchestrator Chat & Task Development Guide

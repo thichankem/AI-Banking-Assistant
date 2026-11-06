@@ -1248,20 +1248,11 @@ class BankingQueryParser:
         Sử dụng FPT Cloud API / OpenAI API cấu hình trong .env (nếu có).
         Hoàn toàn an toàn, tự động bắt ngoại lệ và trả về None nếu offline hoặc chưa cấu hình.
         """
-        api_key = os.getenv("API_KEY")
-        if not api_key:
-            api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            return None, None, None
-
-        base_url = os.getenv("BASE_URL")
-        model = os.getenv("MODEL")
-        if not model:
-            model = "DeepSeek-V4-Flash"
+        from agent_banking.config.chat import FallbackChatClient
+        from agent_banking.config.fallback import ModelFallbackError
 
         try:
-            from openai import OpenAI
-            client = OpenAI(api_key=api_key, base_url=base_url)
+            client = FallbackChatClient("query_parser")
             system_msg = (
                 "Bạn là bộ phân loại ý định ngân hàng. Hãy phân tích câu hỏi người dùng và trả về JSON: "
                 "{\"intent\": \"...\", \"sub_intent\": \"...\", \"domain\": \"...\"}. "
@@ -1269,22 +1260,30 @@ class BankingQueryParser:
                 "tra_cuu_sao_ke, chuyen_tien_thanh_toan, vay_von_tin_dung, tiet_kiem_tien_gui, "
                 "the_ngan_hang, ngan_hang_so, phap_ly_tuan_thu, tra_cuu_bieu_phi, ho_tro_khach_hang."
             )
+
+            def parse_response(response):
+                content = response.choices[0].message.content.strip()
+                start_brace = content.find("{")
+                end_brace = content.rfind("}")
+                if start_brace < 0 or end_brace <= start_brace:
+                    raise ValueError("Missing query classification JSON")
+                data = json.loads(content[start_brace:end_brace + 1])
+                if not isinstance(data, dict) or not all(isinstance(data.get(key), str) and data[key] for key in ("intent", "sub_intent", "domain")):
+                    raise ValueError("Invalid query classification schema")
+                return data["intent"], data["sub_intent"], data["domain"]
+
             resp = client.chat.completions.create(
-                model=model,
                 messages=[
                     {"role": "system", "content": system_msg},
                     {"role": "user", "content": query}
                 ],
                 temperature=0.1,
-                max_tokens=150
+                max_tokens=150,
+                validate=parse_response,
             )
-            content = resp.choices[0].message.content.strip()
-            start_brace = content.find("{")
-            end_brace = content.rfind("}")
-            if start_brace != -1 and end_brace > start_brace:
-                json_str = content[start_brace:end_brace + 1]
-                data = json.loads(json_str)
-                return data.get("intent"), data.get("sub_intent"), data.get("domain")
+            return parse_response(resp)
+        except ModelFallbackError:
+            raise
         except Exception:
             pass
         return None, None, None

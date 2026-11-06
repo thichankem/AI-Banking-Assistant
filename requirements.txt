@@ -5,3 +5,8 @@ openai>=1.40.0
 qdrant-client>=1.19.0
 arize-phoenix>=20.0.0
 openinference-semantic-conventions>=0.1.0
+
+# DOCX ingestion and exact E5 tokenization (no local inference weights)
+python-docx>=1.2.0
+tokenizers>=0.23.0
+# Optional historical renderer/test tooling: PyMuPDF>=2.0.0, Pillow>=11.0.0

@@ -33,7 +33,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent_banking.config import Config
+from agent_banking.config.settings import Config
 from agent_banking.embedding.embedder import BankingEmbedder
 from agent_banking.state_tracker import StateTracker
 from agent_banking.chunking.universal.schema_assembler import (
@@ -109,7 +109,11 @@ def normalize_universal_chunk(chunk, vector=None):
         parent_content = str(parent_content)
 
     b_meta = chunk.get("business_metadata")
-    if isinstance(b_meta, dict) and "domain" in b_meta:
+    if isinstance(b_meta, dict) and b_meta.get("schema_version") == "2.0":
+        # Provenance, readiness and the measured passage contract are required
+        # indexing data. Legacy domain cleanup must never discard them.
+        business_metadata = dict(b_meta)
+    elif isinstance(b_meta, dict) and "domain" in b_meta:
         has_prohibited = False
         for k, v in b_meta.items():
             k_lower = str(k).lower()
@@ -192,11 +196,16 @@ def run_auto_embedding(
 
     # 1. Tìm nguồn chunks đầu vào (Ưu tiên all_chunks.json chuẩn Universal Schema)
     target_in_file = None
+    published_input = False
     if input_file is not None:
         target_in_file = Path(input_file)
     else:
         chunking_out = PROJECT_ROOT / "agent_banking" / "chunking" / "output" / "all_chunks.json"
-        if chunking_out.exists():
+        publication = chunking_out.parent / "chunking_manifest.json"
+        if publication.exists():
+            target_in_file = publication
+            published_input = True
+        elif chunking_out.exists():
             target_in_file = chunking_out
         else:
             default_in = in_dir / "chunks.json"
@@ -216,8 +225,14 @@ def run_auto_embedding(
     print(f"▶ [MODULE 2: EMBEDDING] Input: {target_in_file.name} -> Output: {out_path}")
     print(f"{'='*75}")
 
-    with open(target_in_file, "r", encoding="utf-8") as fp:
-        raw_chunks = json.load(fp)
+    if target_in_file.name == "all_chunks.json" and (target_in_file.parent / "chunking_manifest.json").exists():
+        published_input = True
+    if published_input:
+        from agent_banking.chunking.run_chunking import load_published_chunks
+        raw_chunks = load_published_chunks(target_in_file.parent)
+    else:
+        with open(target_in_file, "r", encoding="utf-8") as fp:
+            raw_chunks = json.load(fp)
 
     if not raw_chunks:
         print("⚠️ Danh sách chunks rỗng.")

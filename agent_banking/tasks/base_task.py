@@ -25,9 +25,10 @@ NGUYÊN TẮC BẮT BUỘC:
 from __future__ import annotations
 import time
 from dataclasses import dataclass, field
-from openai import OpenAI
+from agent_banking.config.chat import FallbackChatClient
+from agent_banking.config.fallback import ModelFallbackError
 
-from agent_banking.config import Config
+from agent_banking.config.settings import Config
 from agent_banking.skills.skill_registry import SkillRegistry
 
 
@@ -148,15 +149,11 @@ class BaseBankingTask:
             self.registry = SkillRegistry(config=self.config)
 
         # Khởi tạo kết nối LLM dùng chung cho các Node tạo sinh & thẩm định
-        self.client = None
-        if self.config.LLM_API_KEY and self.config.LLM_BASE_URL:
-            try:
-                self.client = OpenAI(
-                    api_key=self.config.LLM_API_KEY,
-                    base_url=self.config.LLM_BASE_URL
-                )
-            except Exception:
-                self.client = None
+        self.client = FallbackChatClient("tasks", {
+            "model": getattr(self.config, "TASKS_LLM_MODEL", self.config.LLM_MODEL),
+            "url": getattr(self.config, "TASKS_LLM_BASE_URL", self.config.LLM_BASE_URL),
+            "api_key": getattr(self.config, "TASKS_LLM_API_KEY", self.config.LLM_API_KEY),
+        })
 
     # =========================================================================
     # KHO CÁC NODE TÁI SỬ DỤNG DÙNG CHUNG CHO MỌI TASK (REUSABLE NODE LIBRARY)
@@ -363,6 +360,8 @@ class BaseBankingTask:
                 else:
                     raw = ""
             return _clean_think(raw)
+        except ModelFallbackError:
+            raise
         except Exception as e:
             return f"Lỗi sinh câu trả lời: {e}"
 

@@ -17,7 +17,7 @@ from __future__ import annotations
 import time
 
 from agent_banking.skills.skill_registry import SkillRegistry
-from agent_banking.config import Config
+from agent_banking.config.settings import Config
 from .base_task import BaseBankingTask
 from .task_router import TaskRouter
 from .policy_inquiry_task.task import PolicyInquiryTask

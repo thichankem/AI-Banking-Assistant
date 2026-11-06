@@ -35,7 +35,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from .config import Config
+from .config.settings import Config
 from .chunking.unified_chunk.layout_aware_chunker import DLAChunker
 from .embedding.embedder import BankingEmbedder
 from .vector_db.qdrant_store import QdrantBankingStore, QdrantVectorStore

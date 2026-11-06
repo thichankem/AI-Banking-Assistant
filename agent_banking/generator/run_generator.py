@@ -32,9 +32,49 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent_banking.config import Config
-from agent_banking.pipeline import BankingRAGPipeline
+from agent_banking.config.settings import Config
+from agent_banking.generator.rag_generator import RAGGenerator
 from agent_banking.state_tracker import StateTracker
+
+
+def _compute_chunk_signature(chunk):
+    """
+    Trích xuất định danh hoặc chữ ký nội dung đại diện cho một chunk (0% Regex, Zero Ternary).
+    Khi chunk thiếu chunk_id hoặc id, dự phòng lấy 100 ký tự đầu của content, document, parent_content hoặc text.
+    """
+    if isinstance(chunk, dict):
+        if "chunk" in chunk and isinstance(chunk["chunk"], dict):
+            c_target = chunk["chunk"]
+        else:
+            c_target = chunk
+
+        cid = c_target.get("chunk_id")
+        if not cid:
+            cid = c_target.get("id")
+        if cid:
+            return str(cid)
+
+        for key in ["content", "document", "parent_content", "text"]:
+            val = c_target.get(key)
+            if val:
+                val_str = str(val).strip()
+                if val_str:
+                    return val_str[:100]
+    elif isinstance(chunk, str):
+        return chunk.strip()[:100]
+    return ""
+
+
+def _compute_query_chunks_hash(tracker, query, top_chunks):
+    """
+    Tính hash SHA-256 nhất quán cho truy vấn kèm danh sách chunks.
+    """
+    signatures = []
+    for c in top_chunks:
+        sig = _compute_chunk_signature(c)
+        signatures.append(sig)
+    c_str = ",".join(signatures)
+    return tracker.compute_text_hash(f"{query}:{c_str}")
 
 
 def run_auto_generator(
@@ -93,15 +133,6 @@ def run_auto_generator(
         print("⚠️ Danh sach top_chunks rong.")
         return []
 
-    # Dong bo file vao in_dir
-    in_copy = in_dir / "top_chunks.json"
-    if target_in_file != in_copy:
-        try:
-            with open(in_copy, "w", encoding="utf-8") as fp:
-                json.dump(raw_reranked, fp, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-
     # 2. Doc cau tra loi cu de tai su dung
     prev_answers = {}
     prev_file = out_path / "answers.json"
@@ -112,15 +143,21 @@ def run_auto_generator(
                 for item in prev_list:
                     q = item.get("query", "")
                     if q:
+                        cits = item.get("legal_citations", [])
+                        if not cits:
+                            cits = item.get("citations", [])
+                        item["legal_citations"] = cits
+                        srcs = item.get("sources_used", [])
+                        if not srcs:
+                            srcs = item.get("sources", [])
+                        item["sources_used"] = srcs
                         prev_answers[q] = item
             if len(prev_answers) >= len(raw_reranked) and len(raw_reranked) > 0:
                 q_hash_map = {}
                 for item in raw_reranked:
                     q = item.get("query", "")
                     top_chunks = item.get("top_chunks", [])
-                    chunk_ids = [c.get("chunk_id", "") for c in top_chunks]
-                    c_str = ",".join(chunk_ids)
-                    q_hash_map[q] = tracker.compute_text_hash(f"{q}:{c_str}")
+                    q_hash_map[q] = _compute_query_chunks_hash(tracker, q, top_chunks)
                 if tracker.are_all_items_processed(q_hash_map):
                     print(f"  ⏭️ [SKIP ALL] Tat ca {len(raw_reranked)} queries da duoc sinh cau tra loi truoc do. Bo qua toan bo trong 0.0s!")
                     print(f"✅ [Generator Hoan Tat] Da xuat {len(prev_list)} cau tra loi vao: {prev_file} trong 0.0s")
@@ -128,7 +165,16 @@ def run_auto_generator(
         except Exception:
             prev_answers = {}
 
-    pipeline = BankingRAGPipeline(config=cfg, use_memory=True)
+    try:
+        generator = RAGGenerator(config=cfg)
+    except TypeError:
+        generator = RAGGenerator(
+            api_key=getattr(cfg, "LLM_API_KEY", None),
+            base_url=getattr(cfg, "LLM_BASE_URL", None),
+            model=getattr(cfg, "LLM_MODEL", None),
+            temperature=getattr(cfg, "LLM_TEMPERATURE", 0.2),
+            max_tokens=getattr(cfg, "LLM_MAX_TOKENS", 2500)
+        )
     final_answers: list[dict] = []
     markdown_reports: list[str] = [
         "# 📋 BÁO CÁO KẾT QUẢ SINH CÂU TRẢ LỜI (MODULE 7 - LLM SERVING)\n",
@@ -144,35 +190,49 @@ def run_auto_generator(
         q_id = item.get("query_id", 1)
         top_chunks = item.get("top_chunks", [])
 
-        # Tinh hash dua tren query va danh sach chunk_id
-        chunk_ids = [c.get("chunk_id", "") for c in top_chunks]
-        c_str = ",".join(chunk_ids)
-        q_hash = tracker.compute_text_hash(f"{q}:{c_str}")
+        # Tinh hash nhat quan dua tren query va chu ky chunk
+        q_hash = _compute_query_chunks_hash(tracker, q, top_chunks)
 
         is_done = tracker.is_processed(q, q_hash)
 
         if is_done and q in prev_answers:
             cached_ans = dict(prev_answers[q])
             cached_ans["query_id"] = q_id
+
+            cits = cached_ans.get("legal_citations", [])
+            if not cits:
+                cits = cached_ans.get("citations", [])
+            cached_ans["legal_citations"] = cits
+
+            srcs = cached_ans.get("sources_used", [])
+            if not srcs:
+                srcs = cached_ans.get("sources", [])
+            cached_ans["sources_used"] = srcs
+
             final_answers.append(cached_ans)
             skipped_count += 1
 
             markdown_reports.append(f"## ❓ Câu hỏi {q_id}: {q} (Tái sử dụng)")
             markdown_reports.append(f"**💡 Câu trả lời:**\n{cached_ans.get('answer', '')}\n")
-            cits = cached_ans.get("legal_citations", [])
             if cits:
-                markdown_reports.append(f"* **Tham chiếu:** {', '.join(cits)}")
+                markdown_reports.append(f"* **Tham chiếu pháp lý:** {', '.join(cits)}")
+            if srcs:
+                markdown_reports.append(f"* **Tài liệu nguồn:** {', '.join(srcs)}")
             markdown_reports.append("---\n")
             print(f"  [{q_id:02d}] [SKIP] '{q[:40]}...' (Da sinh cau tra loi)")
         else:
             t0 = time.time()
-            synthesized_context = pipeline.step4_context_synthesizer(top_chunks)
-            serving_result = pipeline.step5_llm_serving(q, synthesized_context)
+            synthesized_context = generator.format_chunks(top_chunks)
+            serving_result = generator.generate_answer(q, synthesized_context)
             dt_ms = round((time.time() - t0) * 1000, 1)
 
             ans_text = serving_result.get("answer", "")
-            citations = serving_result.get("citations", [])
-            sources = serving_result.get("sources", [])
+            citations = serving_result.get("legal_citations", [])
+            if not citations:
+                citations = serving_result.get("citations", [])
+            sources = serving_result.get("sources_used", [])
+            if not sources:
+                sources = serving_result.get("sources", [])
 
             record = {
                 "query_id": q_id,
