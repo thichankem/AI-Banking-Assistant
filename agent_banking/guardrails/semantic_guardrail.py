@@ -130,11 +130,7 @@ class SemanticBankingGuardrail:
         if decision_client is not None:
             self.decision_client = decision_client
         else:
-            try:
-                from agent_banking.decision.decision_client import DecisionClient
-                self.decision_client = DecisionClient()
-            except Exception:
-                self.decision_client = None
+            self.decision_client = None
         self.attack_bank_vectors = []
         self.benign_bank_vectors = []
         self._attack_matrix = None

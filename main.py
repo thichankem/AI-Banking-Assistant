@@ -184,36 +184,15 @@ def get_config():
 @app.get("/api/decision/status")
 def get_decision_status(ping: bool = False):
     """Check decision model connection status."""
-    try:
-        from agent_banking.decision.decision_client import DecisionClient
-        client = DecisionClient(config=config)
-        status_str = "unavailable"
-        if client.is_available():
-            status_str = "ready"
-        res = {
-            "status": status_str,
-            "model": client.model,
-            "base_url": client.base_url,
-            "enabled": client.enabled,
-            "has_api_key": bool(client.api_key),
-            "timeout": client.timeout
-        }
-        if ping:
-            ping_res = client.ping()
-            res["ping"] = ping_res
-            if not ping_res.get("ok", False):
-                res["status"] = "unreachable"
-        return res
-    except Exception as e:
-        return {
-            "status": "unavailable",
-            "model": getattr(config, "DECISION_MODEL", "decision-model"),
-            "base_url": getattr(config, "DECISION_BASE_URL", ""),
-            "enabled": False,
-            "has_api_key": False,
-            "timeout": 30.0,
-            "error": str(e)
-        }
+    return {
+        "status": "disabled",
+        "model": getattr(config, "DECISION_MODEL", "decision-model"),
+        "base_url": getattr(config, "DECISION_BASE_URL", ""),
+        "enabled": False,
+        "has_api_key": False,
+        "timeout": 8.0,
+        "note": "Decision module is optional and currently disabled"
+    }
 
 
 # -----------------------------------------------------------------------------

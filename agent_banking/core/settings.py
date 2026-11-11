@@ -40,7 +40,14 @@ from agent_banking.reranking.config.settings import RerankingConfig
 from agent_banking.generator.config.settings import ContextConfig, GeneratorConfig
 from agent_banking.tracing.config.settings import TracingConfig
 from agent_banking.guardrails.config.settings import GuardrailsConfig
-from agent_banking.decision.config.settings import DecisionConfig
+class DecisionConfig:
+    """Fallback defaults for optional decision settings."""
+    ENABLE_DECISION = False
+    DECISION_MODEL = "default-decision-model"
+    DECISION_BASE_URL = ""
+    DECISION_API_KEY = ""
+    DECISION_TIMEOUT = 8.0
+    DECISION_CONFIDENCE_THRESHOLD = 0.70
 from agent_banking.langgraph_agent.config.settings import AgentConfig
 from agent_banking.skills.config.settings import SkillsConfig
 from agent_banking.tasks.config.settings import TasksConfig

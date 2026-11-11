@@ -99,6 +99,8 @@ from agent_banking.generator.config.prompts import (
     build_banking_system_prompt
 )
 
+_load_prompt_profiles_from_json = load_prompt_profiles
+
 
 def _extract_legal_citations_from_text(text, citations_list=None):
     """

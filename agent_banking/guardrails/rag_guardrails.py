@@ -340,11 +340,7 @@ class BankingGuardrailManager:
         if decision_client is not None:
             self.decision_client = decision_client
         else:
-            try:
-                from agent_banking.decision.decision_client import DecisionClient
-                self.decision_client = DecisionClient()
-            except Exception:
-                self.decision_client = None
+            self.decision_client = None
 
         from agent_banking.guardrails.semantic_guardrail import SemanticBankingGuardrail
         from agent_banking.guardrails.indirect_injection_guardrail import IndirectInjectionGuardrail

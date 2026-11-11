@@ -22,7 +22,6 @@ from agent_banking.core.fallback import ModelFallbackError
 
 from agent_banking.skills.skill_registry import SkillRegistry
 from agent_banking.core.settings import Config
-from agent_banking.decision.decision_client import DecisionClient
 from agent_banking.tasks.config.prompts import TASK_ROUTER_SYSTEM_PROMPT_TEMPLATE
 
 
@@ -55,7 +54,7 @@ class TaskRouter:
         self.routing_rules: list[dict] = []
         self._load_routing_manifest()
 
-        self.decision_client = DecisionClient(config=self.config)
+        self.decision_client = None
 
         self.client = FallbackChatClient("tasks", {
             "model": getattr(self.config, "TASKS_LLM_MODEL", self.config.LLM_MODEL),
@@ -116,8 +115,8 @@ class TaskRouter:
 
     def _route_with_llm(self, query: str) -> RoutingDecision:
         """Deep classification for open-ended queries: decision engine first, then LLM."""
-        # 1. Fast classification via Decision Model
-        if self.decision_client.is_available():
+        # 1. Fast classification via Decision Model (if available)
+        if self.decision_client is not None and getattr(self.decision_client, "is_available", lambda: False)():
             decision_task = self.decision_client.route_task(query)
             if decision_task is not None:
                 t_conf = float(decision_task.get("confidence", 0.0))

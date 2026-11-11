@@ -315,7 +315,10 @@ class BankingReranker:
                         return final_results
             raise ValueError("No valid reranker results")
 
-        return run_fallback("reranking", chain, call)
+        try:
+            return run_fallback("reranking", chain, call)
+        except Exception:
+            return self._fallback_local_rerank(query, candidates, top_k=top_k)
 
 
 # Backward compatibility aliases

@@ -50,7 +50,6 @@ from agent_banking.tools.banking_api_tools import (
     create_support_ticket,
     parse_vietnamese_financial_params
 )
-from agent_banking.decision.decision_client import DecisionClient
 
 
 def _clean_think_tags(text: str) -> str:
@@ -100,8 +99,8 @@ class BankingAgentNodes:
                 "api_key": getattr(self.config, "AGENT_LLM_API_KEY", self.config.LLM_API_KEY),
             })
 
-        # 5. Initialize Decision Model Client
-        self.decision_client = DecisionClient(config=self.config)
+        # 5. Initialize Decision Model Client (disabled / optional)
+        self.decision_client = None
 
     def _check_tool_guard(self, tool_name: str, params: dict):
         res = self.guardrail_manager.guard_tool_call(tool_name, params)
@@ -158,7 +157,7 @@ class BankingAgentNodes:
         # Enhanced check with Decision Model (Adversarial & Injection Audit)
         blocked_by_decision = False
         if is_safe:
-            if self.decision_client.is_available():
+            if self.decision_client is not None and getattr(self.decision_client, "is_available", lambda: False)():
                 adv_check = self.decision_client.audit_adversarial_input(user_query)
                 if adv_check is not None:
                     if adv_check.get("is_attack", False):
@@ -265,7 +264,7 @@ class BankingAgentNodes:
         steps = list(state.get("execution_steps", []))
 
         # 0. Enhanced routing via Decision Model
-        if self.decision_client.is_available():
+        if self.decision_client is not None and getattr(self.decision_client, "is_available", lambda: False)():
             decision_res = self.decision_client.route_supervisor(str(raw_query))
             if decision_res is not None:
                 j_conf = float(decision_res.get("confidence", 0.0))
@@ -435,7 +434,7 @@ class BankingAgentNodes:
         context_str = "\n---\n".join(context_parts)
 
         # 1. Fast relevance grading via Decision Model
-        if self.decision_client.is_available():
+        if self.decision_client is not None and getattr(self.decision_client, "is_available", lambda: False)():
             decision_grade = self.decision_client.grade_document_relevance(query, context_str)
             if decision_grade is not None:
                 conf = float(decision_grade.get("confidence", 0.0))
