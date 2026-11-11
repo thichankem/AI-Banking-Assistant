@@ -36,6 +36,10 @@ gateway_config.*
 # ==============================================================================
 agent_banking/*/config/prompts.py
 agent_banking/config/*/prompts.py
+agent_banking/*/config/prompts/
+agent_banking/*/config/prompts/**
+agent_banking/config/*/prompts/
+agent_banking/config/*/prompts/**
 agent_banking/*/config/prompt_profiles.json
 agent_banking/config/*/prompt_profiles.json
 agent_banking/generator/prompt_profiles.json
