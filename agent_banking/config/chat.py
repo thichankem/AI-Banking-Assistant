@@ -1,4 +1,4 @@
-"""OpenAI-compatible chat adapter with ordered fallback and bounded retries."""
+"""Chat adapter with ordered fallback and bounded retries."""
 from agent_banking.config.fallback import run_fallback
 from agent_banking.config.models import get_model_chain, chain_fingerprint
 

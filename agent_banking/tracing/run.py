@@ -1,6 +1,6 @@
 """
-Runner truc tiep cho Module 9: Tracing.
-Chay doc lap tu input/ sang output/ voi co che chong trung lap.
+Direct runner for Tracing Module.
+Executes input-to-output tracing pipeline with deduplication.
 """
 from __future__ import annotations
 import sys
@@ -15,7 +15,7 @@ from agent_banking.tracing.run_tracing import run_auto_tracing
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Tracing Node (Input -> Output)")
-    parser.add_argument("--force", action="store_true", help="Chay lai toan bo tu dau")
+    parser.add_argument("--force", action="store_true", help="Force re-run from scratch")
     args = parser.parse_args()
 
     module_dir = Path(__file__).resolve().parent

@@ -50,7 +50,7 @@ CEILING_SYLLABLES = 500
 
 def prepend_context_header(content, breadcrumb, section_title):
     """
-    Prepends contextual header: [Ngữ cảnh: {breadcrumb} > {section_title}]
+    Prepends contextual header: [Context: {breadcrumb} > {section_title}]
     to the first line of chunk content (0% Regex Law, Zero Ternary Law).
     """
     clean_bc = breadcrumb.strip()

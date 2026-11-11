@@ -1,20 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-TypeSafe AI Jev Decision Model Client (System One Decision Engine)
-======================================================================
-Module tích hợp mô hình quyết định chuyên trách TypeSafe AI Jev (decision-model):
-- Cung cấp cơ chế ra quyết định trực tiếp (System One) qua các nguyên thủy:
-  * choice: Phân loại ý định, Sub-Agent chuyên trách, công cụ nghiệp vụ, tác vụ.
-  * noul: Thẩm định nhị phân có độ chuẩn xác cao (xác suất 0..1).
-  * score: Đánh giá phân bậc, mức độ liên quan và độ tin cậy.
-- Tối ưu hóa cho LangGraph Supervisor Router, Document Grader, và Task Router.
-- Tự động fallback an toàn về bộ quy tắc heuristic/LLM nếu mất kết nối.
+Decision Model Client (System One Decision Engine)
+==================================================
+Integrated decision model client (System One):
+- Provides direct decision primitives:
+  * choice: Intent classification, specialized sub-agent, business tool, task.
+  * noul: High-precision binary verification (probability 0..1).
+  * score: Multi-level scoring, relevance, and confidence evaluation.
+- Optimized for LangGraph Supervisor Router, Document Grader, and Task Router.
+- Automatic safe fallback to heuristic rules/LLM if connection is lost.
 
-NGUYÊN TẮC THIẾT KẾ:
-1. 0% REGEX LAW: Tuyệt đối không dùng regex hoặc import re.
-2. ZERO TERNARY LAW: Tuyệt đối không dùng toán tử 3 ngôi (x if c else y).
-3. NO TYPING LIBRARY: Không import thư viện typing.
-4. NO __INIT__.PY: Import trực tiếp file module.
+DESIGN INVARIANTS:
+1. 0% REGEX LAW: No regex or import re.
+2. ZERO TERNARY LAW: No ternary operators (explicit if/else only).
+3. NO TYPING LIBRARY: No typing library imports.
+4. NO __INIT__.PY: Direct module imports.
 """
 
 import json
@@ -26,7 +26,7 @@ from agent_banking.config.fallback import run_fallback
 
 
 class DecisionClient:
-    """Client gọi API TypeSafe AI Jev System One phục vụ điều hướng và thẩm định."""
+    """Client invoking decision API for routing and evaluation."""
 
     def __init__(self, config=None, api_key=None, base_url=None, model=None, timeout=None):
         if config is not None:
@@ -39,24 +39,28 @@ class DecisionClient:
         else:
             self.api_key = getattr(self.config, "DECISION_API_KEY", "")
             if not self.api_key:
-                self.api_key = getattr(self.config, "DECISION_API_KEY", "")
+                self.api_key = getattr(self.config, "API_KEY", "")
 
         if base_url is not None:
             self.base_url = base_url.rstrip("/")
         else:
-            self.base_url = getattr(self.config, "DECISION_BASE_URL", "https://api.example.com/v1").rstrip("/")
+            self.base_url = getattr(self.config, "DECISION_BASE_URL", "").rstrip("/")
+            if not self.base_url:
+                self.base_url = getattr(self.config, "BASE_URL", "").rstrip("/")
 
         if model is not None:
             self.model = model
         else:
-            self.model = getattr(self.config, "DECISION_MODEL", "decision-model")
+            self.model = getattr(self.config, "DECISION_MODEL", "")
+            if not self.model:
+                self.model = getattr(self.config, "MODEL", "")
 
         if timeout is not None:
             self.timeout = float(timeout)
         else:
-            self.timeout = float(getattr(self.config, "JEV_TIMEOUT", 8.0))
+            self.timeout = float(getattr(self.config, "DECISION_TIMEOUT", 8.0))
 
-        enabled_flag = getattr(self.config, "ENABLE_JEV_DECISION", True)
+        enabled_flag = getattr(self.config, "ENABLE_DECISION", True)
         if isinstance(enabled_flag, str):
             if enabled_flag.lower() == "false":
                 self.enabled = False
@@ -65,17 +69,20 @@ class DecisionClient:
         else:
             self.enabled = bool(enabled_flag)
 
-    def is_available(self) -> bool:
-        """Kiểm tra xem mô hình Jev đã sẵn sàng phục vụ hay chưa."""
+    def is_available(self):
+        """Check if decision model client is ready for requests."""
         if not self.enabled:
             return False
         chain = get_model_chain("decision", {"model": self.model, "url": self.base_url, "api_key": self.api_key})
-        return any(item.api_key and item.url and item.model for item in chain)
+        for item in chain:
+            if item.api_key and item.url and item.model:
+                return True
+        return False
 
-    def ping(self, timeout: float = 4.0) -> dict:
-        """Kiểm tra kết nối thực tế tới endpoint TypeSafe AI Jev (System One)."""
+    def ping(self, timeout=4.0):
+        """Check live connection to decision model endpoint."""
         if not self.is_available():
-            return {"ok": False, "status": "unavailable", "reason": "Jev client disabled or missing API key"}
+            return {"ok": False, "status": "unavailable", "reason": "Decision client disabled or missing API key"}
 
         import time
         t0 = time.perf_counter()
@@ -107,10 +114,10 @@ class DecisionClient:
             "model": self.model
         }
 
-    def decide(self, state, questions: dict, timeout: float = 0.0) -> dict:
+    def decide(self, state, questions, timeout=0.0):
         """
-        Thực hiện truy vấn quyết định System One tới TypeSafe AI Jev.
-        Trả về payload JSON dạng dict chứa 'answers', 'model', 'usage'.
+        Execute System One decision request.
+        Returns JSON dictionary payload containing 'answers', 'model', 'usage'.
         """
         if not self.enabled:
             return {}
@@ -146,12 +153,12 @@ class DecisionClient:
 
         return run_fallback("decision", chain, call)
 
-    def route_supervisor(self, user_query: str, timeout: float = 0.0):
+    def route_supervisor(self, user_query, timeout=0.0):
         """
-        Định tuyến siêu tốc cho LangGraph Supervisor Router:
+        Fast routing for LangGraph Supervisor Router:
         - intent: BANKING_ACTION, RAG_SEARCH, CHIT_CHAT
         - sub_agent_role: CREDIT_CARD_AGENT, LOAN_MORTGAGE_AGENT, COMPLIANCE_AUDIT_AGENT, GENERAL_ADVISOR
-        - target_tool: công cụ nghiệp vụ cụ thể hoặc tìm kiếm tri thức
+        - target_tool: specific business tool or knowledge search
         """
         clean_q = user_query.strip()
         if not clean_q:
@@ -181,13 +188,13 @@ class DecisionClient:
                 "type": "choice",
                 "instructions": "Select the primary banking tool or action to execute.",
                 "criteria": {
-                    "get_interest_rates": "Look up current deposit interest rates (lãi suất)",
-                    "get_foreign_exchange_rates": "Look up foreign currency exchange rates (tỷ giá, USD, EUR)",
+                    "get_interest_rates": "Look up current deposit interest rates",
+                    "get_foreign_exchange_rates": "Look up foreign currency exchange rates (USD, EUR)",
                     "calculate_loan_amortization": "Calculate loan repayment schedule, monthly amortization or installment for loans",
-                    "check_biometric_compliance_qd2345": "Check biometric facial scan compliance, transfer limit requirements under Decision 2345",
+                    "check_biometric_compliance_qd2345": "Check biometric facial scan compliance, transfer limit requirements under regulations",
                     "calculate_savings_profit": "Calculate expected interest earnings for savings deposit",
                     "create_support_ticket": "Create support ticket for emergency issues like swallowed card, lost card, or fraud",
-                    "search_banking_knowledge": "Search Vietcombank knowledge base and legal documents"
+                    "search_banking_knowledge": "Search banking knowledge base and legal documents"
                 }
             }
         }
@@ -231,10 +238,10 @@ class DecisionClient:
             "raw_answers": answers
         }
 
-    def grade_document_relevance(self, query: str, document_text: str, timeout: float = 0.0):
+    def grade_document_relevance(self, query, document_text, timeout=0.0):
         """
-        Thẩm định tính liên quan của tài liệu trích xuất (Corrective RAG).
-        Thay thế hoàn toàn việc gọi LLM chậm bằng mô hình System One cực nhanh.
+        Evaluate relevance of retrieved document (Corrective RAG).
+        Fast System One decision evaluation.
         """
         clean_q = query.strip()
         clean_doc = document_text.strip()
@@ -277,9 +284,9 @@ class DecisionClient:
             "model": res.get("model", self.model)
         }
 
-    def audit_adversarial_input(self, user_query: str, timeout: float = 0.0):
+    def audit_adversarial_input(self, user_query, timeout=0.0):
         """
-        Kiểm tra rủi ro Prompt Injection / Jailbreak / Tấn công hệ thống.
+        Check risk of Prompt Injection / Jailbreak / System attacks.
         """
         clean_q = user_query.strip()
         if not clean_q:
@@ -316,9 +323,9 @@ class DecisionClient:
             "model": res.get("model", self.model)
         }
 
-    def route_task(self, user_query: str, timeout: float = 0.0):
+    def route_task(self, user_query, timeout=0.0):
         """
-        Phân loại tác vụ ngân hàng cho TaskRouter (Kiến trúc JSON-Driven):
+        Classify banking task for TaskRouter:
         - TASK_POLICY_INQUIRY
         - TASK_LOAN_ADVISORY
         - TASK_BIOMETRIC_COMPLIANCE

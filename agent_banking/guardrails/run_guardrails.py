@@ -1,17 +1,17 @@
 """
-Module Tu Dong Phong Ve Banking Guardrails (Auto Guardrails Node with Deduplication).
-=====================================================================================
-Dac diem:
-1. Doc cau hoi tu guardrails/input/sample_queries.json (hoac queries.json).
-2. Tinh toan SHA-256 hash cua tung cau hoi.
-3. Kiem tra StateTracker: Cau hoi nao da kiem dinh thi tai su dung (SKIP).
-4. Chi thuc hien kiem tra Input Safety Guardrail cho queries moi.
-5. Xuat ket qua: sample_guardrail_outputs.json.
+Automated Banking Guardrails Runner (Auto Guardrails Node with Deduplication).
+==============================================================================
+Features:
+1. Reads queries from guardrails/input/sample_queries.json (or queries.json).
+2. Computes SHA-256 hash of each query.
+3. Checks StateTracker: Reuses previously audited queries (SKIP).
+4. Executes Input Safety Guardrail for new queries only.
+5. Emits results to: sample_guardrail_outputs.json.
 
-NGUYEN TAC BAT BUOC:
-1. KHONG DUNG __INIT__.PY.
-2. KHONG DUNG THU VIEN TYPING.
-3. ZERO TERNARY: if/else tuong minh.
+MANDATORY INVARIANTS:
+1. NO __INIT__.PY.
+2. NO TYPING LIBRARY.
+3. ZERO TERNARY: Explicit if/else statements.
 4. 0% REGEX LAW.
 """
 
@@ -137,7 +137,7 @@ def run_auto_guardrails(
             prev_results = {}
 
     manager = BankingGuardrailManager(use_decision_model=use_decision_model)
-    # Khởi tạo trước guardrail manager trên luồng chính để nạp mẫu vào RAM cache
+    # Initialize guardrail manager on main thread to preload patterns into RAM cache
     if hasattr(manager, "semantic_guardrail"):
         if hasattr(manager.semantic_guardrail, "_ensure_initialized"):
             manager.semantic_guardrail._ensure_initialized()
@@ -147,7 +147,7 @@ def run_auto_guardrails(
     new_count = 0
     start_t = time.time()
 
-    # 3. Phân loại câu hỏi thành nhóm tái sử dụng (SKIP) và nhóm cần chạy mới (NEW)
+    # 3. Phn loi cu hi thnh nhm ti s dng (SKIP) v nhm cn chy mi (NEW)
     items_to_process = []
     for idx, item in enumerate(raw_items):
         if isinstance(item, str):
@@ -171,7 +171,7 @@ def run_auto_guardrails(
         else:
             items_to_process.append((idx, q_id, q_text, q_hash, desc))
 
-    # 4. Thực thi kiểm định cho các câu hỏi mới
+    # 4. Thc thi kim nh cho cc cu hi mi
     if items_to_process:
         should_use_pool = False
         if use_threading:

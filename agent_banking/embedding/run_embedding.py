@@ -1,19 +1,19 @@
 """
-Module Tự Động Tạo Vector Nhúng (Auto Embedding Node with Deduplication).
+Auto Embedding Node with Deduplication.
 ==========================================================================
-Đặc điểm:
-1. Đọc chunks ưu tiên từ agent_banking/chunking/output/all_chunks.json.
-2. Chuẩn hóa 100% chunks về Target Universal Chunking Schema (13 trường chuẩn).
-3. Loại bỏ toàn bộ các trường legacy (stats, location, element_ids, doc_name...).
-4. Định dạng Type-Aware Virtual Passage cho embedding-model.
-5. Khử trùng lặp qua StateTracker và SQLite WAL Cache trên chính Virtual Passage.
-6. Xuất kết quả: embedded_chunks.json (13 trường + 'vector' 1024-d).
+Features:
+1. Reads chunks from agent_banking/chunking/output/all_chunks.json.
+2. Normalizes 100% of chunks to Target Universal Chunking Schema (13 standard fields).
+3. Strips all legacy fields (stats, location, element_ids, doc_name...).
+4. Formats Type-Aware Virtual Passages for dense retrieval.
+5. Deduplicates via StateTracker and SQLite WAL Cache on Virtual Passages.
+6. Exports results: embedded_chunks.json (13 fields + 'vector' 1024-d).
 
-NGUYÊN TẮC BẮT BUỘC (GEMINI.md & AGENTS.md):
-1. KHÔNG DÙNG __INIT__.PY.
-2. KHÔNG DÙNG THƯ VIỆN TYPING.
-3. ZERO TERNARY: if/else tường minh từng dòng, không dùng ?: hoặc toán tử 3 ngôi.
-4. 0% REGEX LAW: Tuyệt đối không dùng regex hay import re.
+MANDATORY RULES (GEMINI.md & AGENTS.md):
+1. NO __INIT__.PY: Direct module imports.
+2. NO TYPING LIBRARY: Native Python types only.
+3. ZERO TERNARY: Explicit if/else statements only.
+4. 0% REGEX LAW: String methods only.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ from agent_banking.chunking.universal.schema_assembler import (
 
 def normalize_universal_chunk(chunk, vector=None):
     """
-    Chuẩn hóa chunk về đúng 13 trường của Target Universal Schema (R3) + trường 'vector' (nếu có).
+    Normalize chunk to the exact 13 fields of the Target Universal Schema (R3) + trường 'vector' (nếu có).
     Loại bỏ hoàn toàn các trường legacy (stats, location, element_ids, word_count, token_count, doc_name...).
     Bảo toàn 100% nội dung gốc của chunk['content'].
     """
@@ -194,7 +194,7 @@ def run_auto_embedding(
     if force:
         tracker.clear()
 
-    # 1. Tìm nguồn chunks đầu vào (Ưu tiên all_chunks.json chuẩn Universal Schema)
+    # 1. Locate input chunks file (prioritizing all_chunks.json with Universal Schema)
     target_in_file = None
     published_input = False
     if input_file is not None:
@@ -217,12 +217,12 @@ def run_auto_embedding(
                     target_in_file = rag_chunking_out
 
     if target_in_file is None or not target_in_file.exists():
-        print(f"⚠️ Không tìm thấy tập tin chunks đầu vào: {target_in_file}")
-        print("Vui lòng bỏ file 'all_chunks.json' hoặc 'chunks.json' vào hệ thống.")
+        print(f"[Warning] Input chunks file not found: {target_in_file}")
+        print("Please provide 'all_chunks.json' or 'chunks.json' to the system.")
         return []
 
     print(f"\n{'='*75}")
-    print(f"▶ [MODULE 2: EMBEDDING] Input: {target_in_file.name} -> Output: {out_path}")
+    print(f"[MODULE 2: EMBEDDING] Input: {target_in_file.name} -> Output: {out_path}")
     print(f"{'='*75}")
 
     if target_in_file.name == "all_chunks.json" and (target_in_file.parent / "chunking_manifest.json").exists():
@@ -235,10 +235,10 @@ def run_auto_embedding(
             raw_chunks = json.load(fp)
 
     if not raw_chunks:
-        print("⚠️ Danh sách chunks rỗng.")
+        print("[Warning] Chunk list is empty.")
         return []
 
-    # Đồng bộ file vào in_dir nếu chưa có
+    # Sync file to in_dir if not present
     in_copy = in_dir / "chunks.json"
     if target_in_file != in_copy:
         try:
@@ -255,7 +255,7 @@ def run_auto_embedding(
         cache_db_path=str(cfg.STORAGE_DIR / "embedding_cache.db")
     )
 
-    # Chuẩn hóa toàn bộ raw_chunks về chuẩn 13 trường Universal Schema và liên kết chuỗi
+    # Normalize all raw_chunks to 13 Universal Schema fields and link sequence
     normalized_chunks = []
     for idx, raw_c in enumerate(raw_chunks):
         norm_c = normalize_universal_chunk(raw_c)
@@ -265,7 +265,7 @@ def run_auto_embedding(
 
     link_chunk_sequence(normalized_chunks)
 
-    # 2. Đọc file output cũ nếu có để tái sử dụng vector
+    # 2. Read existing output file if available for vector reuse
     existing_vectors = {}
     prev_out_file = out_path / "embedded_chunks.json"
     if prev_out_file.exists():
@@ -283,7 +283,7 @@ def run_auto_embedding(
                                 if len(v) == embedder.dimension:
                                     existing_vectors[cid] = v
 
-                # Kiểm tra nhanh nếu tất cả chunks đã có vector trong output và StateTracker
+                # Fast-path check if all chunks already have vectors in output and StateTracker
                 if len(existing_vectors) >= len(normalized_chunks):
                     if len(normalized_chunks) > 0:
                         chunk_hash_map = {}
@@ -292,8 +292,8 @@ def run_auto_embedding(
                             vp = embedder.format_virtual_passage(c)
                             chunk_hash_map[cid] = embedder._get_hash(vp)
                         if tracker.are_all_items_processed(chunk_hash_map):
-                            print(f"  ⏭️ [SKIP ALL] Tất cả {len(normalized_chunks)} chunks đã được tạo vector trước đó. Bỏ qua toàn bộ trong 0.0s!")
-                            # Đảm bảo 100% chunks trả về đúng chuẩn 13 trường + vector
+                            print(f"  [SKIP ALL] All {len(normalized_chunks)} chunks already embedded. Skipping in 0.0s.")
+                            # Ensure 100% of returned chunks conform to 13 fields + vector
                             clean_prev_list = []
                             for p_chunk in prev_list:
                                 p_vec = p_chunk.get("vector")
@@ -303,7 +303,7 @@ def run_auto_embedding(
                             link_chunk_sequence(clean_prev_list)
                             with open(prev_out_file, "w", encoding="utf-8") as fp:
                                 json.dump(clean_prev_list, fp, ensure_ascii=False, indent=2)
-                            print(f"✅ [Embedding Hoàn Tất] {len(clean_prev_list)} vector đã sẵn sàng trong: {prev_out_file} (Bỏ qua: {len(normalized_chunks)}, Mới: 0) trong 0.0s")
+                            print(f"[Embedding Complete] {len(clean_prev_list)} vectors ready in: {prev_out_file} (Skipped: {len(normalized_chunks)}, New: 0) in 0.0s")
                             return clean_prev_list
             except Exception:
                 existing_vectors = {}
@@ -337,17 +337,17 @@ def run_auto_embedding(
         else:
             chunks_to_embed.append(c)
 
-    print(f"[*] Tổng số chunks: {len(normalized_chunks)} | Đã có sẵn trong cache/output: {skipped_count} chunks")
-    print(f"[*] Số chunks cần gọi nhúng mới: {len(chunks_to_embed)} chunks")
+    print(f"[*] Total chunks: {len(normalized_chunks)} | Available in cache/output: {skipped_count} chunks")
+    print(f"[*] Chunks requiring new embedding: {len(chunks_to_embed)} chunks")
 
-    # 3. Nhúng vector cho các chunks mới
+    # 3. Embed new chunks
     new_embedded_count = 0
     if chunks_to_embed:
         t0 = time.time()
         newly_done = embedder.embed_chunks(chunks_to_embed, batch_size=batch_size)
         dt_embed = round(time.time() - t0, 2)
         new_embedded_count = len(newly_done)
-        print(f"[*] Đã nhúng thành công {new_embedded_count} chunks mới trong {dt_embed}s.")
+        print(f"[*] Successfully embedded {new_embedded_count} new chunks in {dt_embed}s.")
 
         for c in newly_done:
             cid = c.get("chunk_id")
@@ -356,10 +356,10 @@ def run_auto_embedding(
             vec = c.get("vector")
             if not vec:
                 vec = c.get("embedding", [])
-            tracker.record_processed(cid, vp_hash, {"dimension": len(vec), "source": "fpt_api"})
+            tracker.record_processed(cid, vp_hash, {"dimension": len(vec), "source": "cloud_api"})
             chunks_result_map[cid] = normalize_universal_chunk(c, vec)
 
-    # 4. Sắp xếp lại đúng thứ tự ban đầu
+    # 4. Restore original chunk order
     final_embedded_chunks = []
     for c in normalized_chunks:
         cid = c.get("chunk_id")
@@ -371,12 +371,12 @@ def run_auto_embedding(
     tracker.save()
     total_elapsed = round(time.time() - start_t, 2)
 
-    # 5. Xuất kết quả
+    # 5. Export results
     out_file = out_path / "embedded_chunks.json"
     with open(out_file, "w", encoding="utf-8") as fp:
         json.dump(final_embedded_chunks, fp, ensure_ascii=False, indent=2)
 
-    # Mẫu 10 vector để kiểm tra trực quan
+    # 10 sample vectors for inspection
     sample_vectors = []
     for c in final_embedded_chunks[:10]:
         vec = c.get("vector", [])
@@ -414,7 +414,7 @@ def run_auto_embedding(
     with open(manifest_file, "w", encoding="utf-8") as fp:
         json.dump(manifest_data, fp, ensure_ascii=False, indent=2)
 
-    print(f"✅ [Embedding Hoàn Tất] {len(final_embedded_chunks)} vector đã lưu vào: {out_file} (Mới: {new_embedded_count}, Bỏ qua: {skipped_count}) trong {total_elapsed}s")
+    print(f"[Embedding Complete] {len(final_embedded_chunks)} vectors saved to: {out_file} (New: {new_embedded_count}, Skipped: {skipped_count}) in {total_elapsed}s")
     return final_embedded_chunks
 
 

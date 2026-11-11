@@ -1,19 +1,19 @@
 """
-Runner truc tiep cho Module 5: Hybrid Retrieval.
-Ho tro ca Single Query tu CLI (--query) va Batch Execution (--force).
+Direct runner for Hybrid Retrieval Module.
+Supports single query CLI execution (--query) and batch execution (--force).
 
-Quy chuan:
-1. 0% REGEX LAW: Khong import re.
-2. ZERO TERNARY: if/else tuong minh.
-3. NO TYPING LIBRARY: Khong import typing hay from __future__ import annotations.
-4. NO __INIT__.PY: Import truc tiep module.
+INVARIANTS:
+1. 0% REGEX LAW: No import re.
+2. ZERO TERNARY: Explicit if/else statements.
+3. NO TYPING LIBRARY: No typing library imports.
+4. NO __INIT__.PY: Direct module imports.
 """
 
 import sys
 import argparse
 from pathlib import Path
 
-# Dam bao UTF-8 an toan tren Windows console
+# Safe UTF-8 console setup for Windows
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -30,68 +30,58 @@ from agent_banking.retrieval.run_retrieval import run_retrieval
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Module 5: Hybrid Retrieval (Dual-Index Dense 1024-dim + BM25 + RRF k=60)"
+        description="Hybrid Retrieval (Dual-Index Dense + BM25 + RRF k=60)"
     )
     parser.add_argument(
         "--query",
         "-q",
         type=str,
         default=None,
-        help="Chay kiem thu nhanh mot cau hoi don le tu terminal"
+        help="Quick test query from command line"
     )
     parser.add_argument(
         "--top-k",
         "-k",
         type=int,
         default=5,
-        help="So luong tai lieu trich xuat Top-K (default: 5)"
+        help="Number of Top-K retrieved documents (default: 5)"
     )
     parser.add_argument(
         "--force",
-        "-f",
         action="store_true",
-        help="Chay lai toan bo bo qua cache StateTracker"
-    )
-    parser.add_argument(
-        "--use-memory",
-        action="store_true",
-        help="Dung RAM storage cho Qdrant (in-memory mode)"
+        help="Force re-retrieval from scratch, ignoring cached state"
     )
     parser.add_argument(
         "--input",
         "-i",
         type=str,
         default=None,
-        help="Duong dan tuy chinh toi parsed_queries.json"
+        help="Custom path to parsed queries JSON"
     )
     parser.add_argument(
         "--output",
         "-o",
         type=str,
         default=None,
-        help="Thu muc dau ra tuy chinh (default: retrieval/output)"
+        help="Custom path to output directory"
     )
+
     args = parser.parse_args()
 
-    module_dir = Path(__file__).resolve().parent
+    custom_input = None
+    if args.input:
+        custom_input = Path(args.input)
 
-    if args.input is not None:
-        in_file = Path(args.input)
-    else:
-        in_file = module_dir / "input" / "parsed_queries.json"
-
-    if args.output is not None:
-        out_dir = Path(args.output)
-    else:
-        out_dir = module_dir / "output"
+    custom_output = None
+    if args.output:
+        custom_output = Path(args.output)
 
     run_retrieval(
-        query=args.query,
-        input_file=in_file,
-        output_dir=out_dir,
-        top_k=args.top_k,
+        input_path=custom_input,
+        output_dir=custom_output,
         force=args.force,
-        use_memory=args.use_memory
+        top_k=args.top_k,
+        single_query=args.query
     )
 
 

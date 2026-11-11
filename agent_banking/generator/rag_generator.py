@@ -1,16 +1,17 @@
 """
-Module RAG Generator & LLM Serving (Bước 5: LLM Serving với System Guardrails Ngân hàng)
+RAG Generator & LLM Serving Module with Banking Guardrails.
 ======================================================================
-Nhiệm vụ:
-1. Tiếp nhận ngữ cảnh Markdown đã tổng hợp (gắn thẻ [Điều X, Khoản Y]) và câu hỏi người dùng.
-2. Áp dụng Hệ thống Banking System Guardrails nghiêm ngặt chống bịa đặt số liệu tài chính.
-3. Phục vụ suy luận qua Language-Model (Cloud Provider / OpenAI API) hoặc Google Gemini.
-4. Trả về câu trả lời chuẩn mực ngân hàng, dẫn chứng số liệu minh bạch và bảo mật.
+Core Responsibilities:
+1. Receives synthesized Markdown context with legal citations and user queries.
+2. Applies strict Banking System Guardrails preventing financial hallucination.
+3. Serves inference via configured LLM endpoints.
+4. Returns standardized banking answers with transparent citations and confidentiality.
 
-NGUYÊN TẮC THIẾT KẾ:
-1. 0% REGEX LAW: Tuyệt đối không sử dụng `import re` hay regex methods.
-2. ZERO TERNARY: Ưu tiên if/else tường minh, dễ đọc.
-3. NO __INIT__.PY: Import trực tiếp file module.
+DESIGN PRINCIPLES:
+1. 0% REGEX LAW: No regex imports or functions; string methods only.
+2. ZERO TERNARY: Explicit if/else statements only.
+3. NO TYPING LIBRARY: Native Python types only.
+4. NO __INIT__.PY: Direct module imports.
 """
 
 import sys
@@ -48,10 +49,10 @@ class ContextBundle:
         return self.sources_used
 
 
-# Tương thích ngược với các hàm gọi cũ
+# Backward compatibility alias
 SynthesizedContext = ContextBundle
 
-# HỆ THỐNG SYSTEM GUARDRAILS NGÂN HÀNG (BANKING GRADE GUARDRAILS)
+# Banking System Guardrails
 BANKING_SYSTEM_GUARDRAILS = """Bạn là Trợ lý AI Banking chuyên viên tư vấn của Ngân hàng.
 Nhiệm vụ: Giải đáp câu hỏi của Quý khách hàng dựa trên tài liệu ngân hàng được cung cấp.
 
@@ -64,7 +65,7 @@ QUY TẮC BẮT BUỘC (100% TUÂN THỦ):
 
 class ProfileBundle(tuple):
     """
-    Tuple đa năng hỗ trợ unpack linh hoạt cả 3 phần tử (legacy) và 5 phần tử (v2.1.0).
+    Multi-purpose tuple supporting flexible unpacking of 3 elements (legacy) and 5 elements (v2.1.0).
     0% Regex & Zero Ternary.
     """
     def __iter__(self):
@@ -87,7 +88,7 @@ class ProfileBundle(tuple):
         return super().__iter__()
 
 
-# CẤU HÌNH DANH MỤC PERSONA, TÔNG GIỌNG & ĐỊNH DẠNG TRẢ LỜI ĐƯỢC NẠP TỪ JSON (0% REGEX & ZERO TERNARY)
+# Persona, tone, and response format profiles loaded from JSON (0% Regex & Zero Ternary)
 def _load_prompt_profiles_from_json(filepath=None):
     if filepath is not None:
         p = Path(filepath)
@@ -120,8 +121,8 @@ PROMPT_LEAK_SIGNATURES = _profiles_data[4]
 
 def build_banking_system_prompt(persona_key="advisor", tone_key="formal", format_key="standard", custom_persona=""):
     """
-    Xây dựng Dynamic System Prompt kết hợp giữa Core Banking Guardrails, Persona, Tone, Format và Few-shot.
-    Tuân thủ 100% Zero Regex & Zero Ternary.
+    Construct Dynamic System Prompt combining Core Banking Guardrails, Persona, Tone, and Format.
+    100% compliant with 0% Regex and Zero Ternary.
     """
     if persona_key == "custom" and custom_persona and custom_persona.strip():
         persona_text = custom_persona.strip()
@@ -204,9 +205,8 @@ def build_banking_system_prompt(persona_key="advisor", tone_key="formal", format
 
 def _extract_legal_citations_from_text(text, citations_list=None):
     """
-    Trích xuất các nhãn tham chiếu pháp lý [Điều X, Khoản Y] từ văn bản.
-    Loại bỏ các nhãn phi pháp lý ([Bảng 1], [Ảnh 2], [1]).
-    0% Regex Law: Thuần túy sử dụng string search.
+    Extract legal citation tags [Article X, Clause Y] from text.
+    Excludes non-legal structural tags such as [Table data], [Diagram/Image], [Context].
     """
     if citations_list is None:
         target_list = []
@@ -290,7 +290,7 @@ def _extract_legal_citations_from_text(text, citations_list=None):
 
 def _extract_citations_from_header(header_text, citations_list=None):
     """
-    Trích xuất điều khoản từ section_title hoặc breadcrumb nếu chưa được đóng ngoặc vuông.
+    Extract article citations from section_title or breadcrumb when not bracketed.
     """
     if citations_list is None:
         target_list = []
@@ -344,21 +344,32 @@ class RAGGenerator:
         max_retries=None,
         retry_delays=None
     ):
-        primary = model_primary("generator")
+        try:
+            primary = model_primary("generator")
+            cfg_model = primary.model
+            cfg_key = primary.api_key
+            cfg_url = primary.url
+            cfg_attempts = primary.attempts
+        except Exception:
+            cfg_model = os.getenv("MODEL", "")
+            cfg_key = os.getenv("API_KEY", "")
+            cfg_url = os.getenv("BASE_URL", "")
+            cfg_attempts = 1
+
         if api_key is not None:
             self.api_key = api_key
         else:
-            self.api_key = primary.api_key
+            self.api_key = cfg_key
 
         if base_url is not None and base_url != "":
             self.base_url = base_url
         else:
-            self.base_url = primary.url
+            self.base_url = cfg_url
 
         if model is not None and model != "":
             self.model = model
         else:
-            self.model = primary.model
+            self.model = cfg_model
 
         self.temperature = GeneratorConfig.LLM_TEMPERATURE
         if temperature is not None:
@@ -367,14 +378,18 @@ class RAGGenerator:
         if max_tokens is not None:
             self.max_tokens = max_tokens
         self.enable_cache = enable_cache
-        self.max_retries = primary.attempts
-        if max_retries is not None:
-            self.max_retries = max_retries
 
         if retry_delays is not None:
             self.retry_delays = retry_delays
         else:
             self.retry_delays = [1.0, 2.0, 4.0]
+
+        if max_retries is not None:
+            self.max_retries = max_retries
+        elif retry_delays is not None:
+            self.max_retries = max(len(retry_delays), cfg_attempts)
+        else:
+            self.max_retries = max(cfg_attempts, getattr(GeneratorConfig, "MAX_RETRIES", 3), 3)
 
         if cache_db_path is not None:
             self.cache_db_path = Path(cache_db_path)
@@ -387,10 +402,12 @@ class RAGGenerator:
         self.client = None
         # An explicitly empty key preserves the intentional offline mode.
         if api_key != "":
-            self.client = FallbackChatClient("generator", {
+            primary_spec = {
                 "model": self.model, "url": self.base_url, "api_key": self.api_key,
-                "attempts": self.max_retries,
-            }, self.retry_delays)
+            }
+            if max_retries is not None:
+                primary_spec["attempts"] = self.max_retries
+            self.client = FallbackChatClient("generator", primary_spec, self.retry_delays)
 
     def _init_cache_db(self):
         try:
@@ -496,9 +513,7 @@ class RAGGenerator:
     @staticmethod
     def format_chunks(chunks):
         """
-        Đóng gói danh sách chunks thành văn bản Markdown rõ ràng kèm nguồn và trích dẫn pháp lý.
-        Đa hình content keys: parent_content, content, document, text, page_content.
-        Hoàn toàn không regex, không phụ thuộc thư viện ngoài.
+        Assemble chunk list into clear Markdown text with sources and legal citations.
         """
         if not chunks:
             return ContextBundle()
@@ -544,7 +559,7 @@ class RAGGenerator:
             if source and source not in sources:
                 sources.append(source)
 
-            # Trích xuất căn cứ pháp lý thông minh từ content, section_title, breadcrumb
+            # Extract legal citations from content, section_title, and breadcrumb
             _extract_legal_citations_from_text(content, citations)
             if section_title:
                 _extract_citations_from_header(section_title, citations)
@@ -572,10 +587,10 @@ class RAGGenerator:
 
     def generate_answer(self, query, synthesized_context, persona_config=None):
         """
-        Thực thi LLM Serving: Truyền ngữ cảnh kèm Dynamic Persona & System Guardrails vào LLM để sinh câu trả lời.
-        Tích hợp SQLite Cache, Exponential Backoff Retry (3 lần), Safe Banking Fallback, và Dual-Key aliases.
+        Execute LLM Serving: Inject context with Dynamic Persona and System Guardrails into model.
+        Automatically retries with exponential backoff on transient network/API errors.
         """
-        # Trích xuất nội dung ngữ cảnh và danh sách trích dẫn
+        # Extract context content and citations list
         if isinstance(synthesized_context, ContextBundle):
             context_text = synthesized_context.markdown_context
             legal_citations = synthesized_context.legal_citations
@@ -600,7 +615,7 @@ class RAGGenerator:
             sources_used = []
             tokens_used = len(context_text) // 4
 
-        # Xây dựng System Prompt động theo cấu hình Persona
+        # Construct dynamic System Prompt based on Persona profile
         if isinstance(persona_config, dict) and persona_config:
             p_key = persona_config.get("persona", "advisor")
             t_key = persona_config.get("tone", "formal")
@@ -618,28 +633,28 @@ class RAGGenerator:
             used_tone = "formal"
             used_format = "standard"
 
-        # Tính cache key
+        # Compute deterministic cache key
         cache_str = f"{query}:{context_text}:{used_persona}:{used_tone}:{used_format}"
         if isinstance(self.client, FallbackChatClient):
             cache_str += ":" + self.client.fingerprint + ":" + system_instruction
         cache_str += ":" + str(self.temperature) + ":" + str(self.max_tokens)
         cache_key = hashlib.sha256(cache_str.encode("utf-8")).hexdigest()
 
-        # Kiểm tra client có phải fake/mock không để tránh bỏ qua lời gọi trong test
+        # Check whether client is mock/fake to avoid bypassing calls in tests
         is_mock_client = False
         if self.client is not None:
             c_name = type(self.client).__name__.lower()
             if "fake" in c_name or "mock" in c_name:
                 is_mock_client = True
 
-        # Kiểm tra SQLite Cache (khi không dùng fake/mock client)
+        # Check SQLite Cache (when not using mock/fake client)
         if not is_mock_client:
             cached_result = self._get_cached_response(cache_key)
             if cached_result is not None:
                 cached_result["context_tokens"] = tokens_used
                 return cached_result
 
-        # Xây dựng User Prompt
+        # Construct User Prompt
         user_prompt = (
             f"TÀI LIỆU CĂN CỨ:\n\n"
             f"{context_text}\n\n"
@@ -737,16 +752,16 @@ class RAGGenerator:
                 f"**[Chế độ Trả lời Xác thực Cục bộ - Sẵn sàng nạp API Key]**\n\n"
                 f"Hệ thống đã truy xuất và tổng hợp thành công ngữ cảnh pháp lý:\n\n"
                 f"{context_text}\n\n"
-                f"Để nhận câu trả lời đầy đủ từ LLM Language-Model/Gemini, vui lòng cấu hình API_KEY."
+                f"Để nhận câu trả lời đầy đủ từ LLM, vui lòng cấu hình API_KEY."
             )
             completion_tokens_est = len(answer_text) // 4
 
-        # Làm sạch và loại bỏ hoàn toàn các đoạn suy nghĩ nháp/thinking nếu có
+        # Clean and strip any internal reasoning/thinking tokens
         answer_text = self._clean_bot_response(answer_text)
 
         total_tokens = prompt_tokens_est + completion_tokens_est
 
-        # Lưu cache nếu thành công và không phải mock client
+        # Persist cache entry on success when not a mock client
         if status_result == "success" and not is_mock_client:
             self._save_cached_response(
                 cache_key=cache_key,
@@ -793,15 +808,17 @@ class RAGGenerator:
     @staticmethod
     def _clean_bot_response(text):
         """
-        Loại bỏ hoàn toàn tư duy nội bộ (thinking / scratchpad / self-critique) khỏi câu trả lời của bot (0% Regex Law).
+        Strip internal reasoning/scratchpad/self-critique tokens from model output.
+        0% Regex Law: Pure str methods only (find, rfind, split, replace, startswith, in).
+        Zero Ternary: Explicit if/else statements only.
         """
         if not text:
             return ""
 
-        # Chuẩn hóa Unicode NFC để đảm bảo khớp dấu tiếng Việt
+        # Normalize to Unicode NFC for robust Vietnamese diacritic matching
         text = unicodedata.normalize("NFC", text).strip()
 
-        # 1. Bỏ các thẻ suy nghĩ XML/HTML: think, thought, thinking, scratchpad, reasoning
+        # 1. Strip XML/HTML thinking tags: think, thought, thinking, scratchpad, reasoning
         thinking_tags = ["think", "thought", "thinking", "scratchpad", "reasoning"]
         official_greetings = [
             "Kính thưa Quý khách",
@@ -826,7 +843,7 @@ class RAGGenerator:
                 if end_idx != -1:
                     text = text[:start_idx] + text[end_idx + len(close_tag):]
                 else:
-                    # Unclosed tag: tìm neo lời chào chính thức sau thẻ mở
+                    # Unclosed tag: locate official greeting anchor following opening tag
                     post_open = text[start_idx + len(open_tag):]
                     earliest_idx = -1
                     for g in official_greetings:
@@ -844,7 +861,7 @@ class RAGGenerator:
 
         text = text.strip()
 
-        # 2. Bỏ khối mã suy nghĩ Markdown: ```thought ... ```, ```thinking ... ```
+        # 2. Strip Markdown thought code blocks: ```thought ... ```, ```thinking ... ```
         md_blocks = ["```thought", "```thinking", "```scratchpad", "```reasoning"]
         for mb in md_blocks:
             while mb in text:
@@ -857,7 +874,7 @@ class RAGGenerator:
                     break
         text = text.strip()
 
-        # 3. Bắt cụm từ chốt đáp án sau đoạn độc thoại
+        # 3. Capture conclusive response phrase following internal monologue
         final_anchors = [
             "Vậy câu trả lời cuối cùng:",
             "Câu trả lời cuối cùng:",
@@ -885,12 +902,12 @@ class RAGGenerator:
                     text = candidate
                     break
 
-        # Nếu đoạn phản hồi bị bọc trong dấu ngoặc kép
+        # Strip enclosing double quotes if present
         if text.startswith('"') or text.startswith("'"):
             text = text[1:].strip()
 
-        # 4. Cắt bỏ đoạn độc thoại tự kiểm duyệt guardrail nếu có
-        # Lưu ý: Đã loại bỏ hoàn toàn anchor nguy hiểm 'Tuy nhiên, câu hỏi'
+        # 4. Strip guardrail self-censorship monologue if present
+        # Note: Removed risky anchor phrasing
         critique_anchors = [
             '" Kiểm tra:',
             'Kiểm tra:',
@@ -916,7 +933,7 @@ class RAGGenerator:
         if text.endswith('"') or text.endswith("'"):
             text = text[:-1].strip()
 
-        # 5. Loại bỏ độc thoại mở đầu tiếng Anh & tiếng Việt
+        # 5. Remove opening monologue prefixes in English and Vietnamese
         prefixes = (
             "Let's think step by step",
             "Thinking Process:",
@@ -947,7 +964,7 @@ class RAGGenerator:
             if earliest_idx != -1:
                 text = text[earliest_idx:].strip()
 
-        # 6. Loại bỏ chữ ký rò rỉ prompt (Prompt Leak Signatures)
+        # 6. Remove prompt leakage signatures
         for sig in PROMPT_LEAK_SIGNATURES:
             if sig in text:
                 text = text.replace(sig + ":", "").replace(sig, "")

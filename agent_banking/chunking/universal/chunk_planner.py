@@ -1,10 +1,68 @@
 """Structure-first, exact-token child chunks with a separate parent store."""
+from bisect import bisect_left, bisect_right
+from collections import defaultdict
 from copy import deepcopy
+from functools import lru_cache
 import hashlib
+import os
 
 from .schema_assembler import build_universal_chunk, infer_business_metadata, link_chunk_sequence
 from .token_budget import TokenBudget, TOKENIZER_SHA256
 from .image_context import IMAGE_POLICY, excluded_image
+from .passage import format_passage_fields
+from .semantic_boundaries import atoms_for, optimal_partition
+
+
+DEPENDENT_RELATIONS = {"continues", "answer_to", "exception_to", "note_of"}
+BULLET_CHARS = ("•", "●", "▪", "▫", "◦", "‣", "⁃", "·", "–", "—", "-")
+
+
+def is_bullet_item(text):
+    s = text.lstrip()
+    for b in BULLET_CHARS:
+        if s.startswith(b):
+            rest = s[len(b):]
+            if rest and rest[0].isspace():
+                return True
+    return False
+
+
+def find_word_starts(text):
+    starts = []
+    in_word = False
+    for i, ch in enumerate(text):
+        if not ch.isspace():
+            if not in_word:
+                starts.append(i)
+                in_word = True
+        else:
+            in_word = False
+    return starts
+
+
+def find_sentence_gap_ends(text):
+    ends = []
+    i = 0
+    punctuation = ('.', '!', '?', '…')
+    closing = ('"', '”', '’', '»', ')', ']')
+    n = len(text)
+    while i < n:
+        if text[i] in ('\r', '\n'):
+            while i < n and text[i] in ('\r', '\n'):
+                i += 1
+            ends.append(i)
+        elif text[i] in punctuation:
+            i += 1
+            while i < n and text[i] in closing:
+                i += 1
+            if i < n and text[i] in (' ', '\t'):
+                while i < n and text[i] in (' ', '\t'):
+                    i += 1
+                if i < n and text[i].isalpha():
+                    ends.append(i)
+        else:
+            i += 1
+    return ends
 
 
 def normalize(text):
@@ -42,12 +100,25 @@ class ChunkPlanner:
         self.base_metadata.update({"schema_version": "2.0", "document_id": ir["document_id"],
                                    "document_version": ir["document_version"]})
         self.block_map = {block["id"]: block for block in ir["blocks"]}
+        self.relations_by_block = defaultdict(list)
+        self.dependent_pairs = set()
+        for index, relation in enumerate(ir["relations"]):
+            self.relations_by_block[relation["from"]].append(index)
+            if relation["from"] != relation["to"]:
+                self.relations_by_block[relation["to"]].append(index)
+            if relation["type"] in DEPENDENT_RELATIONS:
+                self.dependent_pairs.add(frozenset((relation["from"], relation["to"])))
+        self.boundaries_by_block = defaultdict(list)
+        for boundary in ir.get("semantic_boundaries", []):
+            self.boundaries_by_block[boundary["block_id"]].append(boundary)
         stack = []
-        section_prefix = ir["document_id"] + ":v" + ir["document_version"][:16] + ":section:"
+        revision_prefix = ir["document_id"] + ":v" + ir["document_version"][:16] + ":"
+        section_prefix = revision_prefix + "section:"
         root_id = section_prefix + "root"
         title = self.base_metadata["document_name"]
         self.parents[root_id] = {"parent_id": "", "section_title": title, "breadcrumb": title, "content": "", "block_ids": []}
         current = root_id
+        self.document_context = self.budget.shorten(title, min(40, self.budget.maximum // 6))
         pending = []
         current_region = "body"
         for block in ir["blocks"]:
@@ -58,15 +129,16 @@ class ChunkPlanner:
                 current = root_id
                 current_region = region
             if block["type"] == "heading":
-                if pending and any(item["type"] != "heading" for item in pending):
-                    self._flush(pending, current)
                 level = block.get("level", 1)
+                sibling_or_ancestor = stack and stack[-1][0] >= level
+                if pending and (sibling_or_ancestor or any(item["type"] != "heading" for item in pending)):
+                    self._flush(pending, current)
                 while stack and stack[-1][0] >= level:
                     stack.pop()
                 parent = root_id
                 if stack:
                     parent = stack[-1][1]
-                current = section_prefix + block["id"].rsplit(":", 1)[-1]
+                current = section_prefix + block["id"].removeprefix(revision_prefix)
                 breadcrumb = title + " > " + " > ".join([item[2] for item in stack] + [block["text"].strip()])
                 self.parents[current] = {"parent_id": parent, "section_title": block["text"].strip(),
                                          "breadcrumb": breadcrumb, "content": "", "block_ids": []}
@@ -82,10 +154,16 @@ class ChunkPlanner:
                 self._flush(pending, current)
                 self._image(block, current)
         self._flush(pending, current)
+        children_by_parent = defaultdict(list)
+        chunks_by_parent = defaultdict(list)
+        for identifier, parent in self.parents.items():
+            children_by_parent[parent["parent_id"]].append(identifier)
+        for chunk in self.chunks:
+            chunks_by_parent[chunk["parent_id"]].append(chunk["chunk_id"])
         # Materialize full section context; it is never embedded as a parent.
         for parent_id, parent in self.parents.items():
-            parent["children"] = [identifier for identifier, candidate in self.parents.items() if candidate["parent_id"] == parent_id]
-            parent["child_chunk_ids"] = [chunk["chunk_id"] for chunk in self.chunks if chunk["parent_id"] == parent_id]
+            parent["children"] = children_by_parent[parent_id]
+            parent["child_chunk_ids"] = chunks_by_parent[parent_id]
             pieces = []
             for block_id in parent["block_ids"]:
                 block = self.block_map[block_id]
@@ -101,48 +179,78 @@ class ChunkPlanner:
             if count > self.budget.maximum:
                 raise AssertionError("Oversized passage escaped planner")
             chunk["business_metadata"]["retrieval"]["token_count"] = count
-            own_blocks = set(chunk["business_metadata"]["provenance"]["block_ids"])
-            chunk["business_metadata"]["provenance"]["relations"] = [relation for relation in ir["relations"]
-                if relation["from"] in own_blocks or relation["to"] in own_blocks]
+            provenance = chunk["business_metadata"]["provenance"]
+            indices = {index for identifier in provenance["block_ids"] for index in self.relations_by_block[identifier]}
+            provenance["relations"] = [ir["relations"][index] for index in sorted(indices)]
         link_chunk_sequence(self.chunks)
         quality = self._validate_coverage()
         return self.chunks, {"parents": self.parents, "document": ir, "quality": quality}
 
-    def _prototype(self, kind, content, parent_id, block_ids, table_data=None, images=None):
+    def _retrieval(self, parent_id, evidence, kind="text"):
+        parent = self.parents[parent_id]
+        if kind == "text":
+            context = self.document_context
+        else:
+            context = parent.get("retrieval_context")
+        if context is None:
+            section_limit = min(56, self.budget.maximum // 5)
+            document = self.document_context
+            sections = []
+            cursor = parent
+            while cursor["parent_id"]:
+                title = self.budget.shorten(cursor["section_title"], section_limit)
+                if title and title != document:
+                    sections.append(title)
+                    section_limit -= self.budget.count(title) + 2
+                if section_limit < 5:
+                    break
+                cursor = self.parents[cursor["parent_id"]]
+            context = " > ".join(part for part in [document, *reversed(sections)] if part)
+            parent["retrieval_context"] = context
+        # Tables benefit from a short section label when the row text is terse.
+        # Keep full ancestry in the breadcrumb and out of the dense text prefix.
+        if kind == "table":
+            context = self.budget.shorten(context, 36)
+        tokenizer_name = os.getenv("EMBEDDING_MODEL", "embedding-tokenizer")
+        retrieval = {"role": "child", "context": context, "tokenizer": tokenizer_name,
+                     "tokenizer_sha256": TOKENIZER_SHA256, "max_tokens": self.budget.maximum}
+        if evidence:
+            limit = min(48, self.budget.maximum // 6)
+            retrieval["situated_context"] = self.budget.shorten(" ".join(item["text"] for item in evidence), limit)
+            retrieval["context_evidence"] = evidence
+        return retrieval
+
+    def _prototype(self, kind, content, parent_id, block_ids, table_data=None, images=None, retrieval=None):
         metadata = deepcopy(self.base_metadata)
         parent = self.parents[parent_id]
-        context = parent.get("retrieval_context")
-        if context is None:
-            document = self.budget.shorten(self.base_metadata["document_name"], 40)
-            section = self.budget.shorten(parent["section_title"], 56)
-            context = document
-            if section != document:
-                context += " > " + section
-            parent["retrieval_context"] = context
-        metadata["retrieval"] = {"role": "child", "context": context, "tokenizer": "universal-tokenizer",
-                                  "tokenizer_sha256": TOKENIZER_SHA256, "max_tokens": self.budget.maximum}
-        evidence = []
-        for identifier in block_ids:
-            evidence.extend(self.block_map[identifier].get("context_quotes", []))
-        if evidence:
-            metadata["retrieval"]["situated_context"] = self.budget.shorten(" ".join(item["text"] for item in evidence), 48)
-            metadata["retrieval"]["context_evidence"] = evidence
+        if retrieval is None:
+            evidence = [item for identifier in block_ids for item in self.block_map[identifier].get("context_quotes", [])]
+            retrieval = self._retrieval(parent_id, evidence, kind)
+        metadata["retrieval"] = deepcopy(retrieval)
         metadata["provenance"] = {"block_ids": list(block_ids), "locations": [self.block_map[identifier]["provenance"] for identifier in block_ids],
-                                   "method": "docx_openxml", "source_view": "final"}
+                                   "method": self.ir.get("extraction_method", "docx_openxml"), "source_view": "final"}
         metadata["quality"] = {"profile": self.ir.get("profile", "native"), "warnings": self.ir.get("warnings", []),
                                "source_review": self.ir.get("source_review", []), "image_policy": self.ir.get("image_policy", IMAGE_POLICY),
                                "decision_route": self.ir.get("decision_review", {}).get("answers", {}).get("review_route", {}).get("choice")}
         return build_universal_chunk(source=self.ir["source"], chunk_type=kind,
                                      parent_id=parent_id, breadcrumb=parent["breadcrumb"],
                                      section_title=parent["section_title"], content=content,
-                                     business_metadata=metadata, table_data=table_data, images=images)
+                                     # Published cell/header evidence must not alias the
+                                     # authoritative IR or sibling chunks in memory.
+                                     business_metadata=metadata, table_data=deepcopy(table_data), images=images)
 
-    def _fits(self, chunk, target=False):
+    def _measure(self, content, retrieval, target=False):
         limit = self.budget.maximum
         if target:
             limit = self.budget.target
-        within_chars = self.max_chars is None or len(chunk["content"]) <= self.max_chars
-        return within_chars and self.budget.passage_count(chunk) <= limit and len(chunk["content"].split()) <= self.max_words
+        if self.max_chars is not None and len(content) > self.max_chars:
+            return None
+        if len(content.split()) > self.max_words:
+            return None
+        count = self.budget.count(format_passage_fields(content, retrieval))
+        if count <= limit:
+            return count
+        return None
 
     def _emit(self, chunk):
         seed = self.ir["document_id"] + self.ir["document_version"] + str(len(self.chunks)) + chunk["content"]
@@ -152,53 +260,123 @@ class ChunkPlanner:
     def _flush(self, blocks, parent_id):
         if not blocks:
             return
-        group = []
-        group_text = ""
+        text = "\n\n".join(block["text"] for block in blocks)
+        if not text.strip():
+            blocks.clear()
+            return
+        starts = []
+        ends = []
+        offset = 0
         for block in blocks:
-            text = block["text"]
-            combined = text
-            if group_text:
-                combined = group_text + "\n\n" + text
-            ids = [item["id"] for item in group] + [block["id"]]
-            proposed = self._prototype("text", combined, parent_id, ids)
-            # Keep a heading/lead-in with its first body block up to the hard cap.
-            protected = group_text.rstrip().endswith(":") or (group and group[-1]["type"] == "heading")
-            if len(group_text.split()) < self.min_words or len(group_text) < self.min_chars:
-                protected = True
-            if group:
-                pair = {group[-1]["id"], block["id"]}
-                if any(relation["type"] in ("continues", "answer_to", "exception_to", "note_of")
-                       and {relation["from"], relation["to"]} == pair for relation in self.ir["relations"]):
-                    protected = True
-            if group and not self._fits(proposed, target=True) and not (protected and self._fits(proposed)):
-                self._emit_text(group_text, parent_id, [item["id"] for item in group])
-                group = []
-                group_text = ""
-            if group_text:
-                group_text += "\n\n"
-            group_text += text
-            group.append(block)
-        if group:
-            self._emit_text(group_text, parent_id, [item["id"] for item in group])
+            starts.append(offset)
+            ends.append(offset + len(block["text"]))
+            offset = ends[-1] + 2
+        starts_by_id = {block["id"]: start for block, start in zip(blocks, starts)}
+
+        candidates = {}
+        for atom in atoms_for(blocks, self.budget):
+            point = starts_by_id[atom["block_id"]] + atom["end"]
+            aligned = point == len(text) or text[point - 1].isspace() or text[point].isspace()
+            if aligned:
+                candidates[point] = 0.5
+            else:
+                candidates[point] = 0.0
+        for block, start, end in zip(blocks, starts, ends):
+            if end - start >= 256:
+                for gap_end in find_sentence_gap_ends(block["text"]):
+                    candidates.setdefault(start + gap_end, 0.38)
+            for boundary in self.boundaries_by_block.get(block["id"], []):
+                point = start + boundary["offset"]
+                candidates[point] = boundary["score"]
+        for index, block in enumerate(blocks[:-1]):
+            next_block = blocks[index + 1]
+            dependent = frozenset((block["id"], next_block["id"])) in self.dependent_pairs
+            if dependent or block["type"] == "heading" or block["text"].rstrip().endswith(":"):
+                candidates[ends[index]] = 0.0
+                if starts[index + 1] in candidates:
+                    candidates[starts[index + 1]] = 0.0
+
+        evidence_ranges = [(start, end, block["context_quotes"]) for block, start, end in zip(blocks, starts, ends)
+                           if start < end and block.get("context_quotes")]
+        evidence_starts = [start for start, _, _ in evidence_ranges]
+        evidence_ends = [end for _, end, _ in evidence_ranges]
+
+        @lru_cache(maxsize=512)
+        def retrieval_for_indices(first, last):
+            evidence = [item for _, _, quotes in evidence_ranges[first:last] for item in quotes]
+            return self._retrieval(parent_id, evidence)
+
+        def retrieval_for_range(start, end):
+            return retrieval_for_indices(bisect_right(evidence_ends, start), bisect_left(evidence_starts, end))
+
+        def measure(start, end, part):
+            return self._measure(part, retrieval_for_range(start, end))
+
+        def fits_range(start, end):
+            return measure(start, end, text[start:end]) is not None
+
+        groups = []
+        for index, block in enumerate(blocks[:-1]):
+            if not block["text"].rstrip().endswith(":") or is_bullet_item(block["text"]):
+                continue
+            last = index
+            while last + 1 < len(blocks) and is_bullet_item(blocks[last + 1]["text"]):
+                last += 1
+            if last > index and fits_range(starts[index], ends[last]):
+                groups.append((starts[index], ends[last]))
+
+        word_starts = find_word_starts(text)
+
+        def first_start(end):
+            if self.max_chars is None:
+                earliest = 0
+            else:
+                earliest = max(0, end - self.max_chars)
+            earlier_words = bisect_left(word_starts, end) - self.max_words
+            if earlier_words > 0:
+                earliest = max(earliest, word_starts[earlier_words - 1] + 1)
+            return earliest
+
+        def short_penalty(part, score):
+            if score >= 0.8:
+                return 0
+            if len(part.strip()) < self.min_chars or len(part.split()) < self.min_words:
+                return 0.5
+            return 0
+
+        # An explicit lead-in and its bullets are atomic when they fit together.
+        # Generate a feasible fallback chain through the gaps around those groups.
+        cursor = 0
+        for start, end in [*groups, (len(text), len(text))]:
+            for _, stop, _ in self.budget.split(text[cursor:start], None, align_words=True,
+                                                fits_range=lambda left, right: fits_range(cursor + left, cursor + right)):
+                candidates.setdefault(cursor + stop, 0.0)
+            if end > start:
+                for point in [point for point in candidates if start < point < end]:
+                    del candidates[point]
+                candidates[start] = max(0.58, candidates.get(start, 0.0))
+                candidates[end] = max(0.58, candidates.get(end, 0.0))
+            cursor = end
+        ranges = optimal_partition(text, candidates, None, None, self.budget.target,
+                                   first_start=first_start, measure=measure, penalty=short_penalty)
+        self._emit_text(blocks, parent_id, starts, ends, ranges, retrieval_for_range)
         blocks.clear()
 
-    def _emit_text(self, text, parent_id, ids):
-        def fits(candidate):
-            return self._fits(self._prototype("text", candidate, parent_id, ids))
-        for start, end, part in self.budget.split(text, fits):
-            chunk = self._prototype("text", part, parent_id, ids)
-            chunk["business_metadata"]["provenance"]["group_span"] = [start, end]
+    def _emit_text(self, blocks, parent_id, starts, ends, ranges, retrieval_for_range):
+        for start, end, part in ranges:
             spans = []
-            offset = 0
-            for identifier in ids:
-                source = self.block_map[identifier]["text"]
+            for index in range(bisect_right(ends, start), bisect_left(starts, end)):
+                offset = starts[index]
                 left = max(start, offset)
-                right = min(end, offset + len(source))
+                right = min(end, ends[index])
                 if left < right:
-                    spans.append({"block_id": identifier, "start": left - offset, "end": right - offset,
+                    spans.append({"block_id": blocks[index]["id"], "start": left - offset, "end": right - offset,
                                   "chunk_start": left - start, "chunk_end": right - start})
-                offset += len(source) + 2
-            chunk["business_metadata"]["provenance"]["source_spans"] = spans
+            if not spans:
+                continue
+            ids = [span["block_id"] for span in spans]
+            chunk = self._prototype("text", part, parent_id, ids, retrieval=retrieval_for_range(start, end))
+            chunk["business_metadata"]["provenance"].update(group_span=[start, end], source_spans=spans)
             self._emit(chunk)
 
     def _table(self, block, parent_id):
@@ -206,59 +384,71 @@ class ChunkPlanner:
         headers = table["headers"]
         rows = table["rows"]
         pending = []
-        start_row = table["header_row_count"]
+        header_count = table["header_row_count"]
+        header_grid = table["grid"][:header_count]
+        header_cells = [cell for cell in table["cells"] if cell["row"] < header_count]
+        start_row = header_count
+        ids = [block["id"]]
+        retrieval = self._retrieval(parent_id, block.get("context_quotes", []), "table")
+
+        def fits(content, target=False):
+            return self._measure(content, retrieval, target) is not None
 
         def make(selected, row_start):
             data = {"table_id": table["table_id"], "headers": headers, "rows": selected,
                     "row_start": row_start, "row_end": row_start + len(selected),
-                    "header_row_count": table["header_row_count"],
-                    "cells": [cell for cell in table["cells"] if row_start <= cell["row"] < row_start + len(selected)]}
-            return self._prototype("table", table_markdown(headers, selected), parent_id, [block["id"]], table_data=data)
+                    "header_row_count": header_count, "header_grid": header_grid, "header_cells": header_cells,
+                    "cells": [cell for cell in table["cells"] if cell["row"] < row_start + len(selected)
+                              and cell["row"] + cell.get("row_span", 1) > row_start]}
+            return self._prototype("table", table_markdown(headers, selected), parent_id, ids,
+                                   table_data=data, retrieval=retrieval)
 
-        for index, row in enumerate(rows, start=table["header_row_count"]):
-            candidate = make(pending + [row], start_row)
-            if pending and (len(pending) >= self.table_rows or not self._fits(candidate, target=True)):
+        for index, row in enumerate(rows, start=header_count):
+            if pending:
+                final_row = index == header_count + len(rows) - 1
+                if len(pending) < self.table_rows and fits(table_markdown(headers, pending + [row]), target=not final_row):
+                    pending.append(row)
+                    continue
                 self._emit(make(pending, start_row))
                 pending = []
-                start_row = index
-            candidate = make([row], index)
-            if not self._fits(candidate):
-                if pending:
-                    self._emit(make(pending, start_row))
-                    pending = []
+            start_row = index
+            if fits(table_markdown(headers, [row])):
+                pending.append(row)
+            else:
                 # Wide rows / long cells: preserve each value and its exact span,
                 # retain original structured cell and table ID for reconstruction.
+                label_limit = min(36, self.budget.maximum // 8)
+                row_key = self.budget.shorten(str(row[0]), label_limit)
                 for column, value in enumerate(row):
-                    label = self.budget.shorten(headers[column], 36)
-                    row_key = self.budget.shorten(str(row[0]), 36)
-                    prefix = "Dòng " + str(index + 1) + " [" + row_key + "] — " + label + ":\n"
-                    def fits(fragment):
-                        chunk = self._prototype("table", prefix + fragment, parent_id, [block["id"]])
-                        return self._fits(chunk)
-                    pieces = self.budget.split(str(value), fits)
+                    label = self.budget.shorten(headers[column], label_limit)
+                    prefix = "Row " + str(index + 1)
+                    if row_key:
+                        prefix += " [" + row_key + "]"
+                    prefix += " — " + (label or "column " + str(column + 1)) + ":\n"
+                    if not fits(prefix + value[:1]):
+                        prefix = ""
+                    pieces = self.budget.split(value, lambda fragment: fits(prefix + fragment), align_words=True)
                     if not pieces:
                         pieces = [(0, 0, "")]
                     for begin, end, fragment in pieces:
                         data = {"table_id": table["table_id"], "headers": [headers[column]],
                                 "rows": [[fragment]], "row_start": index, "row_end": index + 1,
-                                "column": column, "cell_span": [begin, end], "row_key": row_key}
-                        chunk = self._prototype("table", prefix + fragment, parent_id, [block["id"]], table_data=data)
+                                "column": column, "cell_span": [begin, end], "row_key": row_key,
+                                "header_grid": header_grid,
+                                "source_cells": [cell for cell in table["cells"] if cell["row"] <= index < cell["row"] + cell.get("row_span", 1)
+                                                 and cell["column"] <= column < cell["column"] + cell.get("col_span", cell.get("column_span", 1))]}
+                        chunk = self._prototype("table", prefix + fragment, parent_id, ids,
+                                                table_data=data, retrieval=retrieval)
                         self._emit(chunk)
-                start_row = index + 1
-            else:
-                if not pending:
-                    start_row = index
-                pending.append(row)
         if pending:
             self._emit(make(pending, start_row))
         if not rows:
             content = table_markdown(headers, [])
             data = {"table_id": table["table_id"], "headers": headers, "rows": [],
-                    "header_row_count": table["header_row_count"], "row_start": 0, "row_end": 0}
-            def fits(fragment):
-                return self._fits(self._prototype("table", fragment, parent_id, [block["id"]], table_data=data))
+                    "header_row_count": header_count, "row_start": 0, "row_end": 0,
+                    "header_grid": header_grid, "cells": table["cells"]}
             for begin, end, fragment in self.budget.split(content, fits):
-                chunk = self._prototype("table", fragment, parent_id, [block["id"]], table_data=data)
+                chunk = self._prototype("table", fragment, parent_id, ids, table_data=data, retrieval=retrieval)
                 chunk["business_metadata"]["provenance"]["header_span"] = [begin, end]
                 self._emit(chunk)
 
@@ -271,10 +461,11 @@ class ChunkPlanner:
         text = block.get("text", "")
         if not text.strip():
             raise ValueError("Supported image requires literal source text")
+        retrieval = self._retrieval(parent_id, block.get("context_quotes", []))
         def fits(fragment):
-            return self._fits(self._prototype("multimodal", fragment, parent_id, [block["id"]], images=[image]))
-        for start, end, fragment in self.budget.split(text, fits):
-            chunk = self._prototype("multimodal", fragment, parent_id, [block["id"]], images=[image])
+            return self._measure(fragment, retrieval) is not None
+        for start, end, fragment in self.budget.split(text, fits, align_words=True):
+            chunk = self._prototype("multimodal", fragment, parent_id, [block["id"]], images=[image], retrieval=retrieval)
             chunk["business_metadata"]["provenance"].update({"image_text_span": [start, end],
                                                            "method": "native_surrounding_text",
                                                            "context_evidence": image["context_evidence"]})
@@ -282,10 +473,10 @@ class ChunkPlanner:
             self._emit(chunk)
 
     def _validate_coverage(self):
+        self._validate_exact_locations()
         ids = {chunk["chunk_id"] for chunk in self.chunks}
         if len(ids) != len(self.chunks):
             raise AssertionError("Duplicate chunk IDs")
-        text_parts = {}
         table_parts = {}
         images = set()
         image_parts = {}
@@ -293,9 +484,6 @@ class ChunkPlanner:
             if chunk["parent_id"] not in self.parents:
                 raise AssertionError("Dangling parent ID")
             block_ids = chunk["business_metadata"]["provenance"]["block_ids"]
-            if chunk["chunk_type"] == "text":
-                key = tuple(block_ids)
-                text_parts.setdefault(key, []).append(chunk["content"])
             if chunk["table_data"]:
                 data = chunk["table_data"]
                 table_parts.setdefault(data["table_id"], []).append(data)
@@ -303,7 +491,20 @@ class ChunkPlanner:
                 images.add(image["sha256"])
                 for block_id in block_ids:
                     image_parts.setdefault(block_id, []).append(chunk["content"])
-        reconstructed = "\n\n".join("".join(parts) for parts in text_parts.values())
+        table_values = {}
+        for table_id, pieces in table_parts.items():
+            values = set()
+            fragmented = defaultdict(list)
+            for data in pieces:
+                if "column" in data:
+                    key = (data["row_start"], data["column"])
+                    fragmented[key].append(data["rows"][0][0])
+                else:
+                    values.update(value for row in data["rows"] for value in row)
+                values.update(data.get("headers", []))
+                values.update(value for row in data.get("header_grid", []) for value in row)
+            values.update("".join(parts) for parts in fragmented.values())
+            table_values[table_id] = {normalize(value) for value in values}
         skipped = {block["id"]: block for block in self.ir["blocks"]
                    if block["type"] == "image" and excluded_image(block, self.ir.get("profile"))}
         excluded_units = []
@@ -318,21 +519,15 @@ class ChunkPlanner:
                 if normalize(unit["text"]) not in normalize("".join(image_parts.get(block["id"], []))):
                     missing.append(unit["id"])
             elif block["type"] != "table":
-                if normalize(unit["text"]) not in normalize(reconstructed):
+                # Exact source spans have already proved reconstruction per
+                # occurrence. A global substring search is order-dependent and
+                # can both hide duplicate loss and falsely fail split blocks.
+                if normalize(unit["text"]) not in normalize(block["text"]):
                     missing.append(unit["id"])
             else:
-                pieces = table_parts.get(block["id"], [])
-                values = []
-                fragmented = {}
-                for data in pieces:
-                    if "column" in data:
-                        key = (data["row_start"], data["column"])
-                        fragmented.setdefault(key, []).append(data["rows"][0][0])
-                    else:
-                        values.extend(value for row in data["rows"] for value in row)
-                    values.extend(data.get("headers", []))
-                values.extend("".join(parts) for parts in fragmented.values())
-                if not any(normalize(unit["text"]) in normalize(value) for value in values):
+                values = table_values.get(block["id"], set())
+                expected = normalize(unit["text"])
+                if expected not in values and not any(expected in value for value in values):
                     missing.append(unit["id"])
         source_image_ids = {block["id"] for block in self.ir["blocks"] if block["type"] == "image"}
         expected_occurrences = source_image_ids - set(skipped)
@@ -349,4 +544,60 @@ class ChunkPlanner:
                                                 "reason": block["image"]["status"]} for identifier, block in skipped.items()],
                 "missing_units": [], "linked_assets": len(images), "missing_assets": [],
                 "linked_image_occurrences": len(image_parts), "missing_image_occurrences": [],
-                "oversized_passages": 0, "status": "verified_native_coverage"}
+                "oversized_passages": 0, "status": "verified_source_reconstruction",
+                "assurance": "IR_to_chunks_exact; visual_accuracy_requires_external_ground_truth"}
+
+    def _validate_exact_locations(self):
+        """Validate occurrences and coordinates, not a global substring search.
+
+        Identical text elsewhere must never conceal a missing paragraph or cell.
+        This proves preservation of the IR, not correctness of visual extraction.
+        """
+        spans = {}
+        tables = {}
+        for chunk in self.chunks:
+            for span in chunk["business_metadata"]["provenance"].get("source_spans", []):
+                identifier = span["block_id"]
+                source = self.block_map[identifier]["text"]
+                begin, end = span["start"], span["end"]
+                if not 0 <= begin < end <= len(source) or source[begin:end] != chunk["content"][span["chunk_start"]:span["chunk_end"]]:
+                    raise RuntimeError("Source span mismatch")
+                spans.setdefault(identifier, []).append((begin, end))
+            if chunk["table_data"]:
+                table = chunk["table_data"]
+                tables.setdefault(table["table_id"], []).append(table)
+        for block in self.ir["blocks"]:
+            if block["type"] in ("heading", "paragraph", "caption") and block["text"].strip():
+                cursor = 0
+                for begin, end in sorted(spans.get(block["id"], [])):
+                    if begin != cursor:
+                        raise RuntimeError("Missing or overlapping text occurrence: " + block["id"])
+                    cursor = end
+                if cursor != len(block["text"]):
+                    raise RuntimeError("Missing source text occurrence: " + block["id"])
+            if block["type"] != "table":
+                continue
+            original = block["table_data"]
+            coordinates = {}
+            for part in tables.get(block["id"], []):
+                if part.get("header_grid") != original["grid"][:original["header_row_count"]]:
+                    raise RuntimeError("Table header grid changed")
+                if "column" in part:
+                    key = (part["row_start"], part["column"])
+                    coordinates.setdefault(key, []).append((*part["cell_span"], part["rows"][0][0]))
+                else:
+                    for row_index, row in enumerate(part["rows"], part["row_start"]):
+                        for column, value in enumerate(row):
+                            coordinates.setdefault((row_index, column), []).append((0, len(value), value))
+            for row_index, row in enumerate(original["rows"], original["header_row_count"]):
+                for column, value in enumerate(row):
+                    cursor = 0
+                    pieces = coordinates.get((row_index, column), [])
+                    if not pieces:
+                        raise RuntimeError("Missing table cell occurrence")
+                    for begin, end, fragment in sorted(pieces):
+                        if begin != cursor or end < begin or fragment != value[begin:end]:
+                            raise RuntimeError("Missing, overlapping or changed table cell span")
+                        cursor = end
+                    if cursor != len(value):
+                        raise RuntimeError("Incomplete table cell")

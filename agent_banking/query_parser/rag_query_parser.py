@@ -1,21 +1,21 @@
 """
-Module Phân Tích & Tiền Xử Lý Truy Vấn Ngân Hàng (Banking Query Parser).
+Banking Query Parser & Preprocessing Module.
 ========================================================================
-Chuyên trách:
-1. Chuẩn hóa Unicode tiếng Việt về chuẩn dựng sẵn NFC (khắc phục NFD, lỗi gõ phím).
-2. Mở rộng từ viết tắt chuyên ngành ngân hàng (eKYC, Smart OTP, VCB Digibank, TKTT, STH, NAPAS 247...).
-3. Trích xuất thực thể pháp lý (Điều, Khoản, Điểm, Thông tư, Quyết định, Nghị định, Luật) 0% Regex.
-4. Nhận diện số tiền giao dịch & định dạng tiền tệ (10tr -> 10.000.000 VNĐ, 500k, 2 tỷ, 20.000.000 VNĐ).
-5. Phân loại ý định (12 Intents Taxonomy) & định tuyến lĩnh vực (8 Domains) không xung đột chuỗi con.
-6. Trích xuất từ khóa BM25 trọng tâm kết hợp loại bỏ số phân mảnh thập phân và lọc stopwords.
-7. Xây dựng câu truy vấn mở rộng (Expanded Query) tối ưu hóa cho mô hình Dense Vector embedding-model (1024-dim).
-8. Tùy chọn Semantic LLM Routing Fallback khi gặp câu hỏi phức tạp.
+Core Responsibilities:
+1. Normalize Vietnamese Unicode to NFC composed standard (resolving NFD and typing glitches).
+2. Expand Vietnamese banking acronyms (eKYC, Smart OTP, VCB Digibank, TKTT, STH, NAPAS 247...).
+3. Extract legal entities (Articles, Clauses, Points, Circulars, Decisions, Decrees, Laws) with 0% Regex.
+4. Detect financial transaction amounts & standardize currency units (10tr -> 10,000,000 VND, 500k, 2 billion).
+5. Classify query intent (12 Intents Taxonomy) & route domain (8 Domains) without substring collisions.
+6. Extract key BM25 keywords, eliminate decimal fragmentation digits, and filter stopwords.
+7. Construct expanded queries optimized for dense vector search models.
+8. Optional Semantic LLM Routing Fallback for complex queries.
 
-NGUYÊN TẮC BẮT BUỘC (GEMINI.md & AGENTS.md):
-1. 0% REGEX LAW: Tuyệt đối không import re hay dùng regex methods. Thuần túy dùng str methods.
-2. ZERO TERNARY: Bắt buộc dùng if/else tường minh từng dòng, không dùng ?: hoặc toán tử 3 ngôi.
-3. NO TYPING LIBRARY: Tuyệt đối không import typing. Thuần túy dùng kiểu nguyên bản của Python.
-4. NO __INIT__.PY: Import trực tiếp file module.
+MANDATORY RULES (GEMINI.md & AGENTS.md):
+1. 0% REGEX LAW: String methods only, no regex imports or functions.
+2. ZERO TERNARY: Explicit if/else statements only, no ternary operators.
+3. NO TYPING LIBRARY: Native Python types only, no typing module imports.
+4. NO __INIT__.PY: Direct module imports.
 """
 
 import os
@@ -23,9 +23,9 @@ import json
 import unicodedata
 from dataclasses import dataclass, field
 
-# Từ điển ánh xạ từ viết tắt & thuật ngữ chuyên ngành ngân hàng Việt Nam (70+ mục mở rộng)
+# Vietnamese banking acronym and terminology expansion dictionary (70+ items)
 DEFAULT_BANKING_ACRONYMS = {
-    # Kênh số, ứng dụng di động & phương thức xác thực
+    # Digital channels, mobile apps, and authentication methods
     "vcb digibank": "ngân hàng số VCB Digibank",
     "vietinbank ipay": "ngân hàng số VietinBank iPay",
     "ipay": "ngân hàng số VietinBank iPay",
@@ -64,7 +64,7 @@ DEFAULT_BANKING_ACRONYMS = {
     "fido2": "phương thức xác thực không mật khẩu FIDO2",
     "passkey": "phương thức khóa bảo mật Passkey",
 
-    # Định danh & sinh trắc học
+    # Identity verification and biometrics
     "ekyc": "định danh điện tử (eKYC)",
     "kyc": "định danh khách hàng (KYC)",
     "sth": "sinh trắc học nhận diện khuôn mặt (STH)",
@@ -75,7 +75,7 @@ DEFAULT_BANKING_ACRONYMS = {
     "nfc": "kết nối không dây tầm ngắn đọc chip CCCD (NFC)",
     "vneid": "ứng dụng định danh điện tử quốc gia VNeID",
 
-    # Tài khoản, khách hàng & quản lý tài chính
+    # Accounts, customer categories, and financial management
     "tktt": "tài khoản thanh toán (TKTT)",
     "tktg": "tài khoản tiền gửi (TKTG)",
     "khcn": "khách hàng cá nhân (KHCN)",
@@ -90,7 +90,7 @@ DEFAULT_BANKING_ACRONYMS = {
     "vãng lai": "tài khoản thanh toán vãng lai",
     "tai khoan vang lai": "tài khoản thanh toán vãng lai",
 
-    # Thẻ, thanh toán & ví điện tử
+    # Cards, payments, and e-wallets
     "tdqt": "thẻ tín dụng quốc tế (TDQT)",
     "tdnd": "thẻ tín dụng nội địa (TDNĐ)",
     "tdnđ": "thẻ tín dụng nội địa (TDNĐ)",
@@ -130,7 +130,7 @@ DEFAULT_BANKING_ACRONYMS = {
     "samsung pay": "phương thức thanh toán Samsung Pay",
     "samsungpay": "phương thức thanh toán Samsung Pay",
 
-    # Giao dịch thương mại, quốc tế, tín dụng & bảo lãnh
+    # Commercial transactions, international trade, credit, and guarantees
     "unc": "ủy nhiệm chi (UNC)",
     "swift": "mã định danh chuyển tiền quốc tế SWIFT/BIC",
     "bic": "mã định danh ngân hàng BIC",
@@ -148,20 +148,20 @@ DEFAULT_BANKING_ACRONYMS = {
     "dư nợ": "dư nợ tín dụng",
     "nợ xấu": "nợ xấu phân loại CIC",
 
-    # Lãi suất & chi phí
+    # Interest rates and fees
     "ls": "lãi suất (LS)",
     "lscv": "lãi suất cho vay (LSCV)",
     "lstg": "lãi suất tiền gửi (LSTG)",
     "lshd": "lãi suất huy động (LSHĐ)",
 
-    # Doanh nghiệp & thuế
+    # Business and taxation
     "mst": "mã số thuế (MST)",
     "đkkd": "đăng ký kinh doanh (ĐKKD)",
     "dkkd": "đăng ký kinh doanh (ĐKKD)",
     "bhxh": "bảo hiểm xã hội (BHXH)",
     "vat": "thuế giá trị gia tăng (VAT)",
 
-    # Tín dụng & pháp lý
+    # Credit and legal regulations
     "tctd": "tổ chức tín dụng (TCTD)",
     "cic": "trung tâm thông tin tín dụng quốc gia (CIC)",
     "bhtg": "bảo hiểm tiền gửi (BHTG)",
@@ -180,7 +180,7 @@ DEFAULT_BANKING_ACRONYMS = {
     "fatca": "đạo luật tuân thủ thuế đối với tài khoản nước ngoài (FATCA)",
     "pep": "người có chức vụ chính trị và người liên quan (PEP)",
 
-    # Các ngân hàng thương mại phổ biến (mã viết tắt)
+    # Common commercial banks (acronyms)
     "vcb": "Vietcombank",
     "tcb": "Techcombank",
     "bidv": "BIDV",
@@ -209,7 +209,7 @@ DEFAULT_BANKING_ACRONYMS = {
     "vbb": "VietBank"
 }
 
-# Tập hợp từ dừng tiếng Việt chọn lọc (Stopwords)
+# Selected Vietnamese stopwords set
 VIETNAMESE_STOPWORDS = {
     "là", "gì", "như", "thế", "nào", "sao", "cho", "tôi", "hỏi", "được",
     "không", "và", "của", "với", "ở", "tại", "về", "có", "hay", "khi",
@@ -222,7 +222,7 @@ VIETNAMESE_STOPWORDS = {
     "chào", "phiền"
 }
 
-# Bản đồ nhận diện ngân hàng thương mại, định chế tài chính & trung gian thanh toán Việt Nam (35+ tổ chức)
+# Recognition map for commercial banks, financial institutions, and payment intermediaries (35+ organizations)
 BANK_RECOGNITION_MAP = {
     # Big 4
     "vietcombank": "Vietcombank",
@@ -233,7 +233,7 @@ BANK_RECOGNITION_MAP = {
     "agribank": "Agribank",
     "vba": "Agribank",
 
-    # NHTM Cổ phần
+    # Joint stock commercial banks
     "techcombank": "Techcombank",
     "tcb": "Techcombank",
     "mbbank": "MBBank",
@@ -292,7 +292,7 @@ BANK_RECOGNITION_MAP = {
     "vbb": "VietBank",
     "scb": "SCB",
 
-    # Ngân hàng nước ngoài & cơ quan quản lý
+    # Foreign banks and regulatory authorities
     "nhnn": "NHNN",
     "ngan hang nha nuoc": "NHNN",
     "sbv": "NHNN",
@@ -305,7 +305,7 @@ BANK_RECOGNITION_MAP = {
     "standard chartered": "Standard Chartered",
     "uob": "UOB",
 
-    # Trung gian thanh toán & ví điện tử
+    # Payment intermediaries and e-wallets
     "napas": "NAPAS",
     "momo": "MoMo",
     "zalopay": "ZaloPay",
@@ -324,8 +324,8 @@ BANK_RECOGNITION_MAP = {
 @dataclass
 class ParsedQuery:
     """
-    Kết quả phân tích truy vấn ngân hàng (Target Query Contract).
-    Bảo toàn 100% tính tương thích ngược với các module Retrieval, Tracer, Pipeline.
+    Banking query parse result contract.
+    Maintains 100% backward compatibility with Retrieval, Tracer, and Pipeline modules.
     """
     raw_query: str
     normalized_query: str
@@ -343,11 +343,11 @@ class ParsedQuery:
 
     @property
     def entities(self):
-        """Bí danh tương thích ngược cho detected_acronyms"""
+        """Backward-compatible alias for detected_acronyms."""
         return self.detected_acronyms
 
     def to_dict(self):
-        """Xuất cấu trúc dictionary phục vụ JSON serialization"""
+        """Export dictionary structure for JSON serialization."""
         return {
             "raw_query": self.raw_query,
             "normalized_query": self.normalized_query,
@@ -368,8 +368,8 @@ class ParsedQuery:
 
 class BankingQueryParser:
     """
-    Bộ tiền xử lý & phân tích truy vấn ngân hàng thế hệ mới (0% Regex, Unicode NFC Native).
-    Đạt hiệu năng tuyến tính O(N), chống tắc nghẽn khi gặp truy vấn 100.000 ký tự.
+    Next-generation banking query preprocessor and analyzer (0% Regex, Native Unicode NFC).
+    Achieves linear O(N) performance, preventing bottlenecks on queries up to 100,000 characters.
     """
 
     def __init__(self, acronym_dict=None, use_llm_fallback=False):
@@ -380,13 +380,13 @@ class BankingQueryParser:
 
         self.use_llm_fallback = use_llm_fallback
 
-        # Chuẩn hóa toàn bộ khóa từ điển về Unicode NFC chữ thường
+        # Normalize all dictionary keys to lowercase Unicode NFC
         self.acronym_dict = {}
         for k, v in raw_dict.items():
             norm_k = unicodedata.normalize("NFC", k.strip().lower())
             self.acronym_dict[norm_k] = v
 
-        # Sắp xếp các cụm từ dài lên trước để ưu tiên khớp cụm dài trước từ đơn lẻ
+        # Sort longer phrases first to prioritize multi-word matches over single words
         self.sorted_acronyms = sorted(
             self.acronym_dict.items(),
             key=lambda x: len(x[0]),
@@ -395,9 +395,9 @@ class BankingQueryParser:
 
     def normalize_acronyms(self, query):
         """
-        Chuẩn hóa và mở rộng các từ viết tắt chuyên ngành ngân hàng (0% Regex).
-        Kiểm tra ranh giới từ qua ký tự trước/sau để không thay thế nhầm chuỗi con.
-        Sử dụng thuật toán Greedy Non-Overlapping Interval Assembly O(N) loại bỏ 100% cascade re-expansion.
+        Normalize and expand banking acronyms (0% Regex).
+        Explicit word-boundary validation prevents substring collisions.
+        Example: 'ekyc' -> 'electronic Know Your Customer (eKYC)'
         """
         if not query:
             return "", []
@@ -422,7 +422,7 @@ class BankingQueryParser:
 
                 end_idx = idx + p_len
 
-                # 1. Kiểm tra ranh giới từ phía trước
+                # 1. Check leading word boundary
                 before_ok = False
                 if idx == 0:
                     before_ok = True
@@ -434,7 +434,7 @@ class BankingQueryParser:
                         else:
                             before_ok = True
 
-                # 2. Kiểm tra ranh giới từ phía sau
+                # 2. Check trailing word boundary
                 after_ok = False
                 if end_idx == t_len:
                     after_ok = True
@@ -447,7 +447,7 @@ class BankingQueryParser:
                             after_ok = True
 
                 if before_ok and after_ok:
-                    # Kiểm tra xem khoảng [idx, end_idx) có chồng lấn với match đã chọn trước đó không (O(1) qua bytearray)
+                    # Check if interval [idx, end_idx) overlaps with previously matched spans (O(1) via bytearray)
                     if b"\x01" not in occupied[idx:end_idx]:
                         occupied[idx:end_idx] = b"\x01" * p_len
                         matches.append((idx, end_idx, phrase, replacement))
@@ -462,7 +462,7 @@ class BankingQueryParser:
             normalized = " ".join(clean_words)
             return normalized, []
 
-        # Sắp xếp các đoạn ghép theo vị trí xuất hiện ban đầu tăng dần
+        # Sort replacement spans by initial appearance order
         matches.sort(key=lambda x: x[0])
 
         parts = []
@@ -485,12 +485,9 @@ class BankingQueryParser:
     @staticmethod
     def extract_legal_entities(query):
         """
-        Trích xuất các thực thể pháp lý ngân hàng và quy chuẩn nhà nước (0% Regex):
-        Nhận diện chính xác Điều, Khoản, Điểm, Chương, Mục, Phụ lục,
-        Thông tư (kể cả TT/TT17/TT-17/TT39/2016/TT-NHNN),
-        Quyết định (kể cả QĐ/QD/QĐ2345/QĐ-2345/QĐ2345/QĐ-NHNN),
-        Nghị định (kể cả NĐ/ND/NĐ52/NĐ-52/NĐ52/2024/NĐ-CP),
-        và các bộ Luật/Pháp lệnh chuyên ngành ngân hàng.
+        Extract banking legal entities and state regulatory citations (0% Regex):
+        Recognizes: Articles, Clauses, Points, Chapters, Sections, Appendices, Circulars, Decisions, Decrees, Laws.
+        Supports both abbreviated and full citation formats (e.g. TT 17, QD 2345/QD-NHNN, ND 52/2024/ND-CP).
         """
         if not query:
             return []
@@ -505,7 +502,7 @@ class BankingQueryParser:
             clean_token = raw_w.strip(",.;:()[]{}\"'“”‘’!?")
             clean_lower = clean_token.lower()
 
-            # 1. Điều X (ví dụ: Điều 15, Điều 3a, Điều 12) & Điều X và Y
+            # 1. Article X (e.g., Article 15, Article 3a, Article 12) and Article X and Y
             if clean_lower in ("điều", "dieu"):
                 if i + 1 < num_words:
                     next_raw = words[i + 1].strip(",.;:()[]{}\"'“”‘’!?")
@@ -517,7 +514,7 @@ class BankingQueryParser:
                     if has_digit:
                         refs.append(f"Điều {next_raw}")
 
-                    # Xử lý trích dẫn đa Điều: "Điều 15 và 16"
+                    # Handle multi-article citation: e.g. "Article 15 and 16"
                     if i + 3 < num_words:
                         sep_word = words[i + 2].strip(",.;:()[]{}\"'“”‘’!?").lower()
                         if sep_word in ("và", "va", "đến", "den", "-"):
@@ -530,7 +527,7 @@ class BankingQueryParser:
                             if comp_digit:
                                 refs.append(f"Điều {comp_raw}")
 
-            # 2. Khoản Y (ví dụ: Khoản 3, Khoản 2) & Khoản Y và Z
+            # 2. Clause Y (e.g., Clause 3, Clause 2) and Clause Y and Z
             elif clean_lower in ("khoản", "khoan"):
                 if i + 1 < num_words:
                     next_raw = words[i + 1].strip(",.;:()[]{}\"'“”‘’!?")
@@ -542,7 +539,7 @@ class BankingQueryParser:
                     if has_digit:
                         refs.append(f"Khoản {next_raw}")
 
-                    # Xử lý trích dẫn đa Khoản: "Khoản 2 và 3"
+                    # Handle multi-clause citation: e.g. "Clause 2 and 3"
                     if i + 3 < num_words:
                         sep_word = words[i + 2].strip(",.;:()[]{}\"'“”‘’!?").lower()
                         if sep_word in ("và", "va", "đến", "den", "-"):
@@ -555,28 +552,28 @@ class BankingQueryParser:
                             if comp_digit:
                                 refs.append(f"Khoản {comp_raw}")
 
-            # 3. Điểm Z (ví dụ: Điểm a, Điểm b, Điểm 1)
+            # 3. Point Z (e.g., Point a, Point b, Point 1)
             elif clean_lower in ("điểm", "diem"):
                 if i + 1 < num_words:
                     next_raw = words[i + 1].strip(",.;:()[]{}\"'“”‘’!?")
                     if len(next_raw) <= 3 and next_raw.isalnum():
                         refs.append(f"Điểm {next_raw}")
 
-            # 4. Chương N (ví dụ: Chương II, Chương 2)
+            # 4. Chapter N (e.g., Chapter II, Chapter 2)
             elif clean_lower in ("chương", "chuong"):
                 if i + 1 < num_words:
                     next_raw = words[i + 1].strip(",.;:()[]{}\"'“”‘’!?")
                     if len(next_raw) <= 5:
                         refs.append(f"Chương {next_raw}")
 
-            # 5. Mục M (ví dụ: Mục 1, Mục I)
+            # 5. Section M (e.g., Section 1, Section I)
             elif clean_lower in ("mục", "muc"):
                 if i + 1 < num_words:
                     next_raw = words[i + 1].strip(",.;:()[]{}\"'“”‘’!?")
                     if len(next_raw) <= 5 and next_raw.isalnum():
                         refs.append(f"Mục {next_raw}")
 
-            # 6. Phụ lục K (ví dụ: Phụ lục 01, Phụ lục 1)
+            # 6. Appendix K (e.g., Appendix 01, Appendix 1)
             elif clean_lower in ("phụ", "phu"):
                 if i + 1 < num_words:
                     w2 = words[i + 1].strip(",.;:()[]{}\"'“”‘’!?").lower()
@@ -586,7 +583,7 @@ class BankingQueryParser:
                             if next_raw and len(next_raw) <= 10:
                                 refs.append(f"Phụ lục {next_raw}")
 
-            # 7. Thông tư (Thông tư 17, TT 17, TT17, TT-17, TT39/2016/TT-NHNN)
+            # 7. Circular (e.g., Circular 17, TT 17, TT17, TT-17, TT39/2016/TT-NHNN)
             elif clean_lower in ("thông", "thong"):
                 if i + 1 < num_words:
                     w2 = words[i + 1].strip(",.;:()[]{}\"'“”‘’!?").lower()
@@ -621,7 +618,7 @@ class BankingQueryParser:
                     if has_digit:
                         refs.append(f"Thông tư {ref_code}")
             elif clean_lower.startswith("tt") and len(clean_token) > 2:
-                # Kiểm tra dạng gắn liền: TT17, TT39/2016/TT-NHNN, TT-17, TT.17, TT/17
+                # Check concatenated formats: TT17, TT39/2016/TT-NHNN, TT-17, TT.17, TT/17
                 code_part = ""
                 if clean_token[2].isdigit():
                     code_part = clean_token[2:]
@@ -631,7 +628,7 @@ class BankingQueryParser:
                 if code_part:
                     refs.append(f"Thông tư {code_part}")
 
-            # 8. Quyết định (Quyết định 2345, QĐ 2345, QĐ2345, QĐ-2345, QĐ2345/QĐ-NHNN)
+            # 8. Decision (e.g., Decision 2345, QD 2345, QD2345, QD-2345, QD2345/QD-NHNN)
             elif clean_lower in ("quyết", "quyet"):
                 if i + 1 < num_words:
                     w2 = words[i + 1].strip(",.;:()[]{}\"'“”‘’!?").lower()
@@ -666,7 +663,7 @@ class BankingQueryParser:
                     if has_digit:
                         refs.append(f"Quyết định {ref_code}")
             elif (clean_lower.startswith("qđ") or clean_lower.startswith("qd")) and len(clean_token) > 2:
-                # Kiểm tra dạng gắn liền: QĐ2345, QĐ2345/QĐ-NHNN, QĐ-2345, QĐ.2345
+                # Check concatenated formats: QD2345, QD2345/QD-NHNN, QD-2345, QD.2345
                 code_part = ""
                 if clean_token[2].isdigit():
                     code_part = clean_token[2:]
@@ -676,7 +673,7 @@ class BankingQueryParser:
                 if code_part:
                     refs.append(f"Quyết định {code_part}")
 
-            # 9. Nghị định (Nghị định 52, NĐ 52, NĐ52, NĐ-52, NĐ52/2024/NĐ-CP)
+            # 9. Decree (e.g., Decree 52, ND 52, ND52, ND-52, ND52/2024/ND-CP)
             elif clean_lower in ("nghị", "nghi"):
                 if i + 1 < num_words:
                     w2 = words[i + 1].strip(",.;:()[]{}\"'“”‘’!?").lower()
@@ -711,7 +708,7 @@ class BankingQueryParser:
                     if has_digit:
                         refs.append(f"Nghị định {ref_code}")
             elif (clean_lower.startswith("nđ") or clean_lower.startswith("nd")) and len(clean_token) > 2:
-                # Kiểm tra dạng gắn liền: NĐ52, NĐ52/2024/NĐ-CP, NĐ-52, NĐ.52
+                # Check concatenated formats: ND52, ND52/2024/ND-CP, ND-52, ND.52
                 code_part = ""
                 if clean_token[2].isdigit():
                     code_part = clean_token[2:]
@@ -721,7 +718,7 @@ class BankingQueryParser:
                 if code_part:
                     refs.append(f"Nghị định {code_part}")
 
-            # 10. Chỉ thị (Chỉ thị 01, CT 01, CT01, CT-01)
+            # 10. Directive (e.g., Directive 01, CT 01, CT01, CT-01)
             elif clean_lower in ("chỉ", "chi"):
                 if i + 1 < num_words:
                     w2 = words[i + 1].strip(",.;:()[]{}\"'“”‘’!?").lower()
@@ -745,7 +742,7 @@ class BankingQueryParser:
                 if code_part:
                     refs.append(f"Chỉ thị {code_part}")
 
-        # Kiểm tra danh mục văn bản luật & pháp lệnh trọng tâm
+        # Check key statutory law and ordinance catalog
         lower_q = text.lower()
         if "luật các tổ chức tín dụng" in lower_q or "luật tctd" in lower_q or "luật các tctd" in lower_q or "32/2024/qh15" in lower_q:
             refs.append("Luật Các tổ chức tín dụng")
@@ -764,7 +761,7 @@ class BankingQueryParser:
         if "pháp lệnh ngoại hối" in lower_q or "phap lenh ngoai hoi" in lower_q:
             refs.append("Pháp lệnh Ngoại hối")
 
-        # Khử trùng lặp bảo toàn thứ tự xuất hiện
+        # Deduplicate while preserving original order of appearance
         unique_refs = []
         for r in refs:
             if r not in unique_refs:
@@ -774,8 +771,8 @@ class BankingQueryParser:
     @staticmethod
     def _parse_amount_value(num_str, multiplier):
         """
-        Chuyển đổi chuỗi số (kể cả số thập phân 1.5, 2,5 hoặc phân tách hàng nghìn 10.000.000)
-        thành giá trị số nguyên chuẩn xác, loại trừ hoàn toàn lỗi phóng đại 10x (0% Regex, Zero Ternary).
+        Convert numeric string (including decimals 1.5, 2.5 or thousands separators 10,000,000)
+        combined with multiplier ('k', 'm', 'tr', 'million', 'billion') to float.
         """
         clean = num_str.strip()
         if not clean:
@@ -784,14 +781,14 @@ class BankingQueryParser:
         dot_count = clean.count(".")
         comma_count = clean.count(",")
 
-        # Trường hợp phân tách hàng nghìn nhiều dấu (ví dụ: 10.000.000 hoặc 10,000,000)
+        # Multiple thousands separators (e.g., 10.000.000 or 10,000,000)
         if dot_count > 1 or comma_count > 1:
             raw_digits = clean.replace(".", "").replace(",", "")
             if raw_digits.isdigit():
                 return int(raw_digits) * multiplier
             return None
 
-        # Có đúng 1 dấu chấm hoặc phẩy
+        # Exactly one dot or comma separator
         if dot_count == 1 or comma_count == 1:
             sep = "."
             if comma_count == 1:
@@ -801,18 +798,18 @@ class BankingQueryParser:
                 left = parts[0]
                 right = parts[1]
                 if left.isdigit() and right.isdigit():
-                    # Số thập phân kết hợp đơn vị nhân (ví dụ: 1.5 triệu, 2.5 tỷ, 0.5k)
+                    # Decimal combined with multiplier (e.g., 1.5 million, 2.5 billion, 0.5k)
                     if multiplier > 1 and len(right) <= 2:
                         val_float = float(f"{left}.{right}")
                         return int(round(val_float * multiplier))
-                    # Dấu phân cách hàng nghìn 3 chữ số khi không có đơn vị nhân lớn (ví dụ: 500.000 đ)
+                    # Three-digit thousands separator without large multiplier (e.g., 500.000 d)
                     if len(right) == 3 and multiplier == 1:
                         return int(left + right)
                     if multiplier > 1:
                         val_float = float(f"{left}.{right}")
                         return int(round(val_float * multiplier))
 
-        # Số nguyên không dấu phân tách
+        # Plain integer without separators
         if clean.isdigit():
             return int(clean) * multiplier
 
@@ -821,8 +818,10 @@ class BankingQueryParser:
     @staticmethod
     def extract_financial_amounts(query):
         """
-        Trích xuất số tiền & định dạng tiền tệ chuyên ngành ngân hàng (0% Regex):
-        Nhận diện chính xác 10tr, 1.5tr, 500k, 2 tỷ, 2.5 tỷ, 10 triệu đồng, 20.000.000 VNĐ, vnđ.
+        Extract financial amounts & currency formats in banking queries (0% Regex):
+        Recognizes attached unit formats (10tr, 1.5tr, 500k, 2 ty) and spaced numbers
+        (20.000.000 VND, 50 trieu dong).
+        Returns list of dicts with float amount and standardized string representation.
         """
         if not query:
             return []
@@ -836,7 +835,7 @@ class BankingQueryParser:
             if not w:
                 continue
 
-            # Trường hợp 1: Số liền đơn vị (ví dụ: 10tr, 1.5tr, 500k, 2ty, 2.5ty, 50m, 20000000vnd, 20000000vnđ)
+            # Case 1: Number concatenated with unit (e.g., 10tr, 1.5tr, 500k, 2ty, 2.5ty, 50m, 20000000vnd)
             cut_idx = -1
             for ci, char in enumerate(w):
                 if not char.isdigit() and char not in (".", ","):
@@ -874,7 +873,7 @@ class BankingQueryParser:
                                 "formatted": formatted_str
                             })
 
-            # Trường hợp 2: Số cách đơn vị (ví dụ: "10 triệu", "1.5 triệu", "500 nghìn", "2.5 tỷ", "20.000.000 VNĐ", "20.000.000 vnđ")
+            # Case 2: Number separated from unit (e.g., "10 million", "1.5 million", "500 thousand", "2.5 billion", "20,000,000 VND")
             if i + 1 < num_words:
                 next_w = words[i + 1].strip(",.;:()[]{}\"'“”‘’!?")
                 multiplier = 0
@@ -908,7 +907,7 @@ class BankingQueryParser:
                                 "formatted": formatted_str
                             })
 
-        # Khử trùng lặp theo giá trị số
+        # Deduplicate by numeric value
         unique_amounts = []
         seen_vals = set()
         for a in amounts:
@@ -921,7 +920,8 @@ class BankingQueryParser:
     @staticmethod
     def extract_bank_mentions(query):
         """
-        Nhận diện tên các ngân hàng thương mại & trung gian thanh toán được nhắc tới trong truy vấn (0% Regex).
+        Identify commercial bank and payment intermediary names mentioned in the query
+        (e.g., Vietcombank, VCB, Techcombank, TCB, MB, MoMo, ZaloPay, NAPAS...).
         """
         if not query:
             return []
@@ -966,13 +966,12 @@ class BankingQueryParser:
     @staticmethod
     def classify_intent_and_domain(normalized_query, detected_acronyms=None, legal_refs=None):
         """
-        Phân loại ý định (12 Intents Taxonomy) và lĩnh vực (8 Domains) ngân hàng (0% Regex, Zero Ternary).
-        Bảo vệ tuyệt đối chống xung đột chuỗi con (như 'mo' trong 'momo').
-        Ưu tiên cao nhất cho báo cáo gian lận/sự cố khẩn cấp (xu_ly_su_co_khan_cap).
+        Classify intent (12 Intents Taxonomy) and banking domain (8 Domains) (0% Regex):
+        Applies keyword and context matching with strict precedence rules.
         """
         lower_q = normalized_query.lower()
 
-        # Tách tập hợp từ đơn để đối sánh độc lập, ngăn ngừa va chạm substring
+        # Tokenize individual words for independent matching, preventing substring collisions
         words_list = lower_q.split()
         words_set = set()
         for w in words_list:
@@ -985,7 +984,7 @@ class BankingQueryParser:
         domain = "ngan_hang_chung"
         suggested_filters = {}
 
-        # 1. ƯU TIÊN SỐ 1: Báo cáo lừa đảo, gian lận, mất tiền, khóa khẩn cấp (bao_mat_bao_cao_gian_lan)
+        # 1. PRIORITY 1: Report fraud, scams, money loss, emergency card lock (bao_mat_bao_cao_gian_lan)
         is_emergency_scam = False
         scam_phrases = (
             "lừa đảo", "lua dao", "gian lận", "gian lan", "bị lừa", "bi lua",
@@ -1008,7 +1007,7 @@ class BankingQueryParser:
             else:
                 sub_intent = "canh_bao_bao_mat"
 
-        # 2. Sinh trắc học & eKYC (QĐ 2345, FaceID, CCCD gắn chip NFC)
+        # 2. Biometrics & eKYC (QD 2345, FaceID, chip-based citizen ID NFC)
         elif any(k in lower_q for k in ("sinh trắc học", "sinh trac hoc", "khuôn mặt", "faceid", "cccd", "gắn chip", "quét nfc", "ekyc", "định danh điện tử", "2345")):
             intent = "sinh_trac_hoc_ekyc"
             domain = "an_toan_bao_mat"
@@ -1022,7 +1021,7 @@ class BankingQueryParser:
             else:
                 sub_intent = "tra_cuu_quy_dinh"
 
-        # 3. Tra cứu biểu phí (Fee Schedule - Gợi ý chunk_type: table)
+        # 3. Fee schedule lookup (Fee Schedule - suggests chunk_type: table)
         elif any(k in lower_q for k in ("biểu phí", "bieu phi", "bảng phí", "bang phi", "phí dịch vụ", "phi dich vu", "phí thường niên", "phi thuong nien", "phí duy trì", "phi duy tri")):
             intent = "tra_cuu_bieu_phi"
             domain = "bieu_phi_dich_vu"
@@ -1036,7 +1035,7 @@ class BankingQueryParser:
             else:
                 sub_intent = "bieu_phi_chung"
 
-        # 4. Tra cứu sao kê (Transaction History & Statement)
+        # 4. Statement and transaction history lookup
         elif any(k in lower_q for k in ("sao kê", "sao ke", "in sao kê", "sao kê điện tử", "lịch sử giao dịch", "lich su giao dich", "biên lai")) and not any(k in lower_q for k in ("mở tài khoản", "mo tai khoan")):
             intent = "tra_cuu_sao_ke"
             domain = "dich_vu_tai_khoan"
@@ -1048,8 +1047,8 @@ class BankingQueryParser:
             else:
                 sub_intent = "in_sao_ke"
 
-        # 5. Tài khoản ngân hàng (Mở TKTT, Tài khoản thanh toán, Số tài khoản, Khóa tài khoản)
-        # Sử dụng kiểm tra từ độc lập qua words_set để ngăn chặn từ 'momo' kích hoạt từ 'mo'
+        # 5. Bank account (open payment account, account number, lock account)
+        # Use independent token lookup via words_set to prevent 'momo' from triggering 'mo'
         elif any(k in lower_q for k in ("tài khoản", "tai khoan", "tktt", "tktg", "số tài khoản", "so tai khoan", "cif", "casa", "vãng lai", "vang lai")):
             has_explicit_transfer = any(k in lower_q for k in ("chuyển tiền", "chuyen tien", "chuyển khoản", "chuyen khoan", "napas", "vietqr", "vnpay", "bắn tiền", "ban tien", "ủy nhiệm chi", "unc"))
             is_opening_or_management = False
@@ -1083,7 +1082,7 @@ class BankingQueryParser:
                 else:
                     sub_intent = "quan_ly_tai_khoan"
 
-        # 6. Thẻ ngân hàng (Thẻ ATM, Thẻ tín dụng, Thẻ ghi nợ, Nuốt thẻ, PIN, CVV)
+        # 6. Bank cards (ATM card, credit card, debit card, swallowed card, PIN, CVV)
         elif any(k in lower_q for k in ("thẻ", "the atm", "thẻ tín dụng", "thẻ ghi nợ", "nuốt thẻ", "mã pin", "cvv", "cvc", "khóa thẻ", "khoa the", "mở thẻ")):
             intent = "the_ngan_hang"
             domain = "dich_vu_the"
@@ -1099,8 +1098,8 @@ class BankingQueryParser:
             else:
                 sub_intent = "tra_cuu_dich_vu_the"
 
-        # 7. Vay vốn & Tín dụng (Vay mua nhà, Tiêu dùng, Dư nợ, Nợ xấu, CIC, Lãi suất vay)
-        # Bắt buộc đặt trước Tiết kiệm để xử lý chính xác các câu hỏi về lãi suất vay vốn / thế chấp
+        # 7. Loans and credit (home loan, consumer loan, debt balance, bad debt, CIC, loan rates)
+        # Must precede savings to accurately handle queries regarding loan/mortgage interest rates
         elif any(k in lower_q for k in ("vay", "thế chấp", "the chap", "tín chấp", "tin chap", "giải ngân", "giai ngan", "dư nợ", "du no", "nợ xấu", "no xau", "cic", "trả góp", "tra gop", "mua nhà", "mua nha", "mua xe")):
             intent = "vay_von_tin_dung"
             domain = "tin_dung_cho_vay"
@@ -1118,7 +1117,7 @@ class BankingQueryParser:
             else:
                 sub_intent = "tu_van_goi_vay"
 
-        # 8. Tiết kiệm & Tiền gửi (Lãi suất, Sổ tiết kiệm, Tất toán)
+        # 8. Savings & deposits (interest rates, passbook, settlement)
         elif any(k in lower_q for k in ("tiết kiệm", "tiet kiem", "tiền gửi", "tien gui", "lãi suất", "lai suat", "tất toán", "tat toan", "kỳ hạn", "ky han")):
             intent = "tiet_kiem_tien_gui"
             domain = "huy_dong_von"
@@ -1130,7 +1129,7 @@ class BankingQueryParser:
             else:
                 sub_intent = "huong_dan_gui_tiet_kiem"
 
-        # 9. Ngân hàng số & Ứng dụng di động (App, Quên mật khẩu, Cài đặt Smart OTP)
+        # 9. Digital banking & mobile app (App, forgot password, Smart OTP installation)
         elif any(k in lower_q for k in ("app", "ứng dụng", "ung dung", "digibank", "ipay", "smartbanking", "neo", "omni", "quên mật khẩu", "quen mat khau", "đăng nhập", "dang nhap", "lỗi app", "loi app")):
             intent = "ngan_hang_so"
             domain = "ngan_hang_dien_tu"
@@ -1143,7 +1142,7 @@ class BankingQueryParser:
             else:
                 sub_intent = "loi_giao_dich_app"
 
-        # 10. Chuyển tiền & Thanh toán (NAPAS 247, VietQR, VNPAY, UNC, MoMo, ZaloPay)
+        # 10. Money transfer & payments (NAPAS 247, VietQR, VNPAY, UNC, MoMo, ZaloPay)
         elif any(k in lower_q for k in ("chuyển tiền", "chuyen tien", "chuyển khoản", "chuyen khoan", "napas", "vietqr", "vnpay", "thanh toán", "thanh toan", "lệnh chuyển", "ủy nhiệm chi", "unc", "bắn tiền", "ban tien", "momo", "zalopay")):
             intent = "chuyen_tien_thanh_toan"
             domain = "thanh_toan_chuyen_tien"
@@ -1159,7 +1158,7 @@ class BankingQueryParser:
             else:
                 sub_intent = "huong_dan_chuyen_tien"
 
-        # 11. Văn bản pháp lý & Tuân thủ (Điều, Khoản, Thông tư, Quyết định, Luật, Pháp lệnh)
+        # 11. Legal documents & compliance (Articles, Clauses, Circulars, Decisions, Laws, Ordinances)
         elif (legal_refs is not None and len(legal_refs) > 0) or any(k in lower_q for k in ("thông tư", "nghị định", "quyết định", "điều khoản", "luật", "pháp lệnh")):
             intent = "phap_ly_tuan_thu"
             domain = "phap_ly_tuan_thu"
@@ -1170,7 +1169,7 @@ class BankingQueryParser:
             else:
                 sub_intent = "tra_cuu_van_ban_phap_ly"
 
-        # 12. Chăm sóc khách hàng & Tổng đài (Tổng đài, Tra soát, Khiếu nại, Chi nhánh)
+        # 12. Customer support & hotline (Hotline, transaction dispute, complaint, branch)
         elif any(k in lower_q for k in ("tổng đài", "tong dai", "hotline", "khiếu nại", "khieu nai", "tra soát", "tra soat", "chi nhánh", "chi nhanh", "phòng giao dịch", "phong giao dich", "giờ làm việc", "gio lam viec")):
             intent = "ho_tro_khach_hang"
             domain = "cham_soc_khach_hang"
@@ -1188,18 +1187,18 @@ class BankingQueryParser:
     @staticmethod
     def extract_keywords(normalized_query):
         """
-        Trích xuất từ khóa trọng tâm (Keywords) phục vụ BM25 (0% Regex):
-        1. Nhận diện các chữ số tách từ số thập phân (ví dụ: 1.5tr sinh ra '1', '5') để loại trừ khỏi BM25.
-        2. Làm sạch ký tự dấu câu sang khoảng trắng.
-        3. Tách từ và loại bỏ Stopwords qua Set Lookup O(1).
-        4. Khử trùng lặp bảo toàn thứ tự xuất hiện, giữ lại các chữ số hợp lệ.
+        Extract salient keywords for BM25 retrieval (0% Regex):
+        1. Identifies decimal numbers to filter out fragmented noise digits.
+        2. Tokenizes on whitespace and converts to lowercase.
+        3. Removes Vietnamese stopwords.
+        4. Preserves critical domain keywords and numeric values.
         """
         if not normalized_query:
             return []
 
         text_nfc = unicodedata.normalize("NFC", normalized_query)
 
-        # Phát hiện các chữ số sinh ra do cắt dấu thập phân (ví dụ: 1.5, 2,5, 10.5)
+        # Identify digits created by splitting decimal separators (e.g., 1.5, 2.5, 10.5)
         decimal_split_digits = set()
         t_len = len(text_nfc)
         for i, ch in enumerate(text_nfc):
@@ -1233,7 +1232,7 @@ class BankingQueryParser:
         for w in words:
             if len(w) > 1 or w.isdigit():
                 if w not in VIETNAMESE_STOPWORDS:
-                    # Loại bỏ các chữ số đơn lẻ/mảnh vụn do tách số thập phân gây nhiễu BM25
+                    # Remove isolated digits resulting from decimal splitting that add noise to BM25
                     if w in decimal_split_digits and w.isdigit():
                         continue
                     if w not in keywords:
@@ -1243,10 +1242,10 @@ class BankingQueryParser:
 
     def _semantic_llm_fallback(self, query):
         """
-        Tùy chọn Semantic LLM Routing Fallback (R3):
-        Chỉ kích hoạt khi rule-based cho ra 'hoi_dap_chung' và câu hỏi phức tạp.
-        Sử dụng Cloud Provider API / OpenAI API cấu hình trong .env (nếu có).
-        Hoàn toàn an toàn, tự động bắt ngoại lệ và trả về None nếu offline hoặc chưa cấu hình.
+        Optional Semantic LLM Routing Fallback (R3):
+        Triggered only when rule-based classifier yields 'hoi_dap_chung' on complex queries.
+        Uses chat completion API configured in environment (if available).
+        Completely safe: handles exceptions and returns None when offline or unconfigured.
         """
         from agent_banking.config.chat import FallbackChatClient
         from agent_banking.config.fallback import ModelFallbackError
@@ -1290,7 +1289,8 @@ class BankingQueryParser:
 
     def parse(self, query, use_llm=False):
         """
-        Thực thi toàn bộ Bước 1: Query Parser (0% Regex, Zero Ternary, Unicode NFC Native).
+        Executes complete Step 1: Query Parser (0% Regex, Zero Ternary, Native Unicode NFC).
+        Takes raw user query string -> Returns fully standardized ParsedQuery object.
         """
         if not query:
             clean_query = ""
@@ -1314,10 +1314,10 @@ class BankingQueryParser:
                 expanded_query=""
             )
 
-        # 1. Chuẩn hóa từ viết tắt
+        # 1. Normalize acronyms
         normalized_query, detected_acronyms = self.normalize_acronyms(clean_query)
 
-        # 2. Trích xuất thực thể pháp lý (hợp nhất từ cả câu gốc và câu đã mở rộng)
+        # 2. Extract legal entities (merged from original and expanded text)
         refs_raw = self.extract_legal_entities(clean_query)
         refs_norm = self.extract_legal_entities(normalized_query)
         legal_refs = []
@@ -1325,22 +1325,22 @@ class BankingQueryParser:
             if r not in legal_refs:
                 legal_refs.append(r)
 
-        # 3. Trích xuất từ khóa BM25
+        # 3. Extract BM25 keywords
         keywords = self.extract_keywords(normalized_query)
         keywords_str = " ".join(keywords)
 
-        # 4. Trích xuất số tiền & ngân hàng
+        # 4. Extract monetary amounts and mentioned banks
         financial_amounts = self.extract_financial_amounts(clean_query)
         banks_mentioned = self.extract_bank_mentions(clean_query)
 
-        # 5. Phân loại ý định & lĩnh vực
+        # 5. Classify intent and domain
         intent, sub_intent, domain, suggested_filters = self.classify_intent_and_domain(
             normalized_query=normalized_query,
             detected_acronyms=detected_acronyms,
             legal_refs=legal_refs
         )
 
-        # Tùy chọn Semantic LLM Fallback (R3) khi rule-based rơi vào hoi_dap_chung
+        # Optional Semantic LLM Fallback (R3) when rule-based returns generic FAQ
         should_call_llm = False
         if use_llm:
             should_call_llm = True
@@ -1354,7 +1354,7 @@ class BankingQueryParser:
                 sub_intent = llm_sub
                 domain = llm_dom
 
-        # 6. Tạo câu truy vấn mở rộng cho Dense Search (embedding-model với tiền tố bất đối xứng 'query: ')
+        # 6. Construct expanded query for dense search (with asymmetric 'query: ' prefix)
         expanded_parts = [normalized_query]
         if legal_refs:
             for ref in legal_refs:
@@ -1383,6 +1383,6 @@ class BankingQueryParser:
         )
 
 
-# Aliases tương thích ngược
+# Backward compatibility aliases
 RAGQueryParser = BankingQueryParser
 QueryParser = BankingQueryParser

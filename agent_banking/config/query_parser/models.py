@@ -1,9 +1,10 @@
 """Models in descending priority; credentials are environment references."""
+
 MODELS = [
     {
-        "name": "fpt-primary",
+        "name": "primary",
         "model_env": "MODEL",
-        "model_default": "Language-Model",
+        "model_default": "",
         "url_env": "BASE_URL",
         "api_key_env": "API_KEY",
         "timeout": 45,

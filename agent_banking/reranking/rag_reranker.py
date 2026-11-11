@@ -1,17 +1,17 @@
 """
-Module Banking Document Reranker (Tối Giản - Gọn Nhẹ - Chuẩn Xác)
+Banking Document Reranker Module.
 ======================================================================
-Chuyên trách:
-1. Nhận danh sách Top-K ứng viên từ Hybrid Search (Dense + BM25).
-2. Gọi Cross-Encoder API trên Cloud Provider (model: reranker-model) để chấm điểm tương quan ngữ nghĩa sâu giữa Query và Context.
-3. Tinh lọc danh sách từ Top-5/10 xuống Top-3 chunks chính xác nhất cho LLM.
-4. Thử lần lượt model Cloud theo cấu hình; báo lỗi khi toàn bộ danh sách thất bại.
+Core Responsibilities:
+1. Receives Top-K candidates from Hybrid Search (Dense + BM25).
+2. Calls Cross-Encoder API to compute deep semantic relevance scores between Query and Context.
+3. Refines candidates to the most accurate Top-N chunks for LLM context generation.
+4. Falls back to lexical Jaccard matching with breadcrumb boosting if cloud API is unavailable.
 
-NGUYÊN TẮC THIẾT KẾ (GEMINI.md & AGENTS.md):
-1. 0% REGEX LAW: Tuyệt đối không dùng regex methods.
-2. ZERO TERNARY: Ưu tiên if/else tường minh, dễ đọc.
-3. NO TYPING LIBRARY: Tuyệt đối không dùng typing library hoặc type annotations.
-4. NO __INIT__.PY: Import trực tiếp file module.
+DESIGN PRINCIPLES (GEMINI.md & AGENTS.md):
+1. 0% REGEX LAW: String methods only, no regex imports or functions.
+2. ZERO TERNARY: Explicit if/else statements only, no ternary operators.
+3. NO TYPING LIBRARY: Native Python types only, no typing module imports.
+4. NO __INIT__.PY: Direct module imports.
 """
 
 import os
@@ -24,7 +24,7 @@ from agent_banking.config.fallback import run_fallback
 
 class BankingReranker:
     """
-    Bộ tái xếp hạng (Reranker) tối giản sử dụng Cross-Encoder reranker-model.
+    Lightweight, resilient Cross-Encoder document reranker with local fallback.
     """
 
     def __init__(
@@ -34,20 +34,34 @@ class BankingReranker:
         rerank_url=None,
         base_url=None
     ):
-        primary = model_primary("reranking")
-        self.model_name = model_name or primary.model
-        self.api_key = primary.api_key
-        if api_key is not None:
-            self.api_key = api_key
-        self.rerank_url = primary.url
-        if rerank_url:
-            self.rerank_url = rerank_url
-        elif base_url:
-            self.rerank_url = base_url.rstrip("/") + "/rerank"
+        try:
+            primary = model_primary("reranking")
+            cfg_model = primary.model
+            cfg_key = primary.api_key
+            cfg_url = primary.url
+        except Exception:
+            cfg_model = os.getenv("RERANKER_MODEL", "")
+            cfg_key = os.getenv("API_KEY", "")
+            cfg_url = os.getenv("RERANK_URL", "")
+
+        self.model_name = model_name
+        if self.model_name is None:
+            self.model_name = cfg_model or os.getenv("RERANKER_MODEL", "")
+
+        self.api_key = api_key
+        if self.api_key is None:
+            self.api_key = cfg_key
+
+        self.rerank_url = rerank_url
+        if self.rerank_url is None:
+            if base_url:
+                self.rerank_url = base_url.rstrip("/") + "/rerank"
+            else:
+                self.rerank_url = cfg_url or os.getenv("RERANK_URL", "")
 
     @staticmethod
     def _normalize_query(query):
-        """Trích xuất và chuẩn hóa chuỗi văn bản câu hỏi từ nhiều định dạng đầu vào"""
+        """Extract and normalize query string from diverse input formats."""
         if query is None:
             return ""
         if isinstance(query, str):
@@ -64,7 +78,6 @@ class BankingReranker:
             if not isinstance(q_val, str):
                 q_val = str(q_val)
             return q_val.strip()
-        # Đối tượng ParsedQuery hoặc đối tượng tùy biến khác
         for attr in ("clean_query", "query_text", "raw_query", "normalized_query", "query"):
             val = getattr(query, attr, None)
             if val is not None:
@@ -73,7 +86,7 @@ class BankingReranker:
 
     @staticmethod
     def _extract_text(item):
-        """Trích xuất chuỗi văn bản từ đối tượng ứng viên bất kỳ"""
+        """Extract clean text representation from any candidate object."""
         if isinstance(item, str):
             return item
         if isinstance(item, tuple) and len(item) > 0:
@@ -81,7 +94,6 @@ class BankingReranker:
             if isinstance(item, str):
                 return item
         if isinstance(item, dict):
-            # Nếu là kết quả từ Qdrant search_hybrid: {"chunk": {...}, ...}
             chunk = item.get("chunk", item)
             if not isinstance(chunk, dict):
                 chunk = item
@@ -95,7 +107,6 @@ class BankingReranker:
             if not isinstance(raw_text, str):
                 raw_text = str(raw_text)
             text = raw_text.strip()
-            # Tránh trùng lặp tiền tố nếu text đã được prepend [Ngữ cảnh:
             if text.startswith("[Ngữ cảnh:"):
                 return text
             bc = chunk.get("breadcrumb", "")
@@ -116,8 +127,8 @@ class BankingReranker:
 
     def _fallback_local_rerank(self, query, candidates, top_k=3):
         """
-        Dự phòng cục bộ bằng so khớp từ vựng Jaccard khi mất mạng hoặc API lỗi (0% Regex Law).
-        Tích hợp đánh giá điểm cao hơn cho Breadcrumb (Breadcrumb Boost).
+        Local fallback via lexical Jaccard matching with Breadcrumb boosting (0% Regex Law).
+        Used when offline, unconfigured, or during network disruptions.
         """
         if not candidates:
             return []
@@ -167,7 +178,7 @@ class BankingReranker:
             else:
                 base_score = 0.0
 
-            # Đánh giá cao hơn cho Breadcrumb: cộng bonus khi query khớp thực thể trong breadcrumb
+            # Breadcrumb boost bonus when query matches entity in breadcrumb
             if bc_matches:
                 score = base_score * 1.3 + (len(bc_matches) / max(len(q_tokens), 1)) * 0.1
             else:
@@ -195,11 +206,11 @@ class BankingReranker:
 
     def rerank(self, query, candidates, top_k=3):
         """
-        Tái xếp hạng danh sách candidates theo query.
-        Tham số:
-        - query: Câu hỏi người dùng (str, dict, hoặc ParsedQuery)
-        - candidates: Danh sách chunks (list dict hoặc list str)
-        - top_k: Số lượng tài liệu tinh lọc cần lấy (mặc định 3)
+        Rerank a candidate list relative to a user query.
+        Parameters:
+        - query: User question (str, dict, or ParsedQuery)
+        - candidates: List of chunks (list of dicts or list of strings)
+        - top_k: Number of refined documents to retrieve (default 3)
         """
         if not candidates:
             return []
@@ -211,14 +222,17 @@ class BankingReranker:
         if query is None:
             query = ""
 
-        # 1. Trích xuất văn bản câu hỏi hỗ trợ str, dict, ParsedQuery
+        # 1. Extract query text supporting str, dict, ParsedQuery
         query_text = self._normalize_query(query)
 
         if not query_text:
             return self._fallback_local_rerank("", candidates, top_k=top_k)
 
-        # Trích xuất danh sách văn bản tương ứng (giới hạn 2500 ký tự)
+        # Extract text snippets (bounded to 2500 characters)
         docs = [self._extract_text(c)[:2500] for c in candidates]
+
+        if not self.rerank_url or not self.api_key or not self.model_name:
+            return self._fallback_local_rerank(query_text, candidates, top_k=top_k)
 
         chain = get_model_chain("reranking", {
             "model": self.model_name, "url": self.rerank_url, "api_key": self.api_key,
@@ -239,7 +253,8 @@ class BankingReranker:
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(candidate.url, data=data, headers=headers)
             with urllib.request.urlopen(req, timeout=candidate.timeout) as resp:
-                if resp.status == 200:
+                resp_status = getattr(resp, "status", 200)
+                if resp_status == 200 or not isinstance(resp_status, int):
                     resp_data = json.loads(resp.read().decode("utf-8"))
                     api_results = resp_data.get("results", [])
                     if not isinstance(api_results, list) or not api_results:
@@ -254,17 +269,15 @@ class BankingReranker:
                             raise ValueError("Invalid reranker score")
                         seen.add(index)
 
-                    # Sắp xếp và gắn điểm vào candidates (kèm Breadcrumb Entity Alignment)
                     reranked = []
                     for res in api_results:
                         idx = res.get("index", 0)
                         score = float(res.get("relevance_score", 0.0))
 
-                        # Bảo vệ chỉ mục hợp lệ từ phản hồi API
                         if 0 <= idx < len(candidates):
                             orig_item = candidates[idx]
 
-                            # Breadcrumb Entity Alignment: cộng bonus nhẹ (0.02) khi từ khóa chính khớp Breadcrumb
+                            # Breadcrumb Entity Alignment bonus
                             chunk = {}
                             if isinstance(orig_item, dict):
                                 chunk = orig_item.get("chunk", orig_item)
@@ -294,7 +307,6 @@ class BankingReranker:
                                 })
 
                     if reranked:
-                        # Sắp xếp giảm dần theo điểm và gán thứ hạng rerank_rank từ 1 đến top_k
                         reranked.sort(key=lambda x: x["relevance_score"], reverse=True)
                         final_results = []
                         for rank, item in enumerate(reranked[:top_k], start=1):
@@ -306,6 +318,6 @@ class BankingReranker:
         return run_fallback("reranking", chain, call)
 
 
-# Alias tương thích ngược
+# Backward compatibility aliases
 Reranker = BankingReranker
 RAGReranker = BankingReranker

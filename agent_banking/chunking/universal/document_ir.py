@@ -9,9 +9,57 @@ from pathlib import Path
 import zipfile
 
 import docx
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import parse_xml
 from lxml import etree
+
+
+def match_numbered_heading(source):
+    s = source.lower()
+    sep_chars = (':', '.', '-', '–', '—')
+    if s.startswith('chương '):
+        rest = s[7:].lstrip()
+        idx = 0
+        while idx < len(rest) and (rest[idx].isdigit() or rest[idx] in 'ivxlcdm'):
+            idx += 1
+        if idx > 0:
+            after = rest[idx:].lstrip()
+            if after and after[0] in sep_chars:
+                tail = after[1:].lstrip()
+                if tail:
+                    return 'chapter'
+    if s.startswith('điều '):
+        rest = s[5:].lstrip()
+        idx = 0
+        while idx < len(rest) and rest[idx].isdigit():
+            idx += 1
+        if idx > 0:
+            if idx < len(rest) and 'a' <= rest[idx] <= 'z':
+                idx += 1
+            after = rest[idx:].lstrip()
+            if after and after[0] in sep_chars:
+                tail = after[1:].lstrip()
+                if tail:
+                    return 'article'
+    if s.startswith('phụ lục'):
+        rest = s[7:].lstrip()
+        if not rest:
+            return None
+        if rest[0] in sep_chars:
+            tail = rest[1:].lstrip()
+            if tail:
+                return 'appendix'
+        idx = 0
+        while idx < len(rest) and (rest[idx].isdigit() or rest[idx] in 'ivxlcdm'):
+            idx += 1
+        if idx > 0:
+            after = rest[idx:].lstrip()
+            if after and after[0] in sep_chars:
+                tail = after[1:].lstrip()
+                if tail:
+                    return 'appendix'
+    return None
 
 
 def local_name(node):
@@ -83,29 +131,8 @@ def heading_level(paragraph, ordinal):
         value = int(outline.get(qn("w:val"), "9"))
         if value < 9:
             return value + 1
-    style = ""
-    if paragraph.style is not None:
-        style = paragraph.style.name.lower()
-    if style.startswith("heading "):
-        number = style.split()[-1]
-        if number.isdigit():
-            return min(9, max(1, int(number)))
-    if style in ("title", "document title"):
-        return 1
-    first = text.split()[0].lower().rstrip(".:")
-    if len(text) < 250:
-        if first in ("chương", "chapter", "phần", "part", "book"):
-            return 2
-        if first in ("điều", "article", "section", "mục") and len(text.split()) > 1:
-            return 3
-        if first in ("subsection", "tiểu"):
-            return 4
-    letters = [character for character in text if character.isalpha()]
-    uppercase = bool(letters) and all(character.isupper() for character in letters)
-    if ordinal == 0 and (uppercase or any(run.font.size and run.font.size.pt >= 18 for run in paragraph.runs)):
-        return 1
-    if uppercase and 5 <= len(text) <= 180 and not text.startswith(("•", "-", "[")):
-        return 4
+    # Only authored OpenXML outline metadata is structural evidence. Content,
+    # capitalisation, font size and language-specific words are not rules.
     return 0
 
 
@@ -132,6 +159,7 @@ class DocxExtractor:
         self._list_counters = {}
         self._paragraph_values = {}
         self._walk(self.document.element.body, self.document.part, "body")
+        self._infer_numbered_outline()
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             for name in ("word/footnotes.xml", "word/endnotes.xml"):
                 if name in archive.namelist():
@@ -218,9 +246,15 @@ class DocxExtractor:
             kind = "paragraph"
             if level and segment == 0:
                 kind = "heading"
-            elif value.strip().lower().startswith(("hình ", "hình:", "figure ", "figure:", "sơ đồ:", "bảng ", "bảng:")):
+            elif paragraph.style is not None and paragraph.style.style_id == "Caption":
                 kind = "caption"
             block = self._append(kind, value, node, region, level=level, inline_segment=segment)
+            if segment == 0:
+                runs = [run for run in paragraph.runs if run.text.strip()]
+                sizes = {run.font.size for run in runs}
+                if runs and all(run.bold is True for run in runs) and len(sizes) == 1 and None not in sizes:
+                    block["heading_format"] = {"bold": True, "font_pt": sizes.pop().pt,
+                                               "centered": paragraph.alignment == WD_ALIGN_PARAGRAPH.CENTER}
             unit_id = self._unit(value, node, region + ":inline" + str(segment), block["id"])
             block["unit_ids"] = [unit_id]
             segment += 1
@@ -245,6 +279,45 @@ class DocxExtractor:
                 for textbox in value.iter(qn("w:txbxContent")):
                     self._walk(textbox, part, region + ":textbox")
         emit(buffer)
+
+    def _infer_numbered_outline(self):
+        """Recover manually formatted Vietnamese regulatory outlines."""
+        body = [block for block in self.ir["blocks"] if block["provenance"]["region"] == "body"]
+        if any(block["type"] == "heading" for block in body):
+            return
+        paragraphs = [block for block in body if block["type"] == "paragraph"]
+        candidates = []
+        for block in paragraphs:
+            source = block["text"].strip()
+            if not block.get("heading_format") or "\n" in source or len(source.split()) > 45:
+                continue
+            heading_role = match_numbered_heading(source)
+            if heading_role is not None:
+                candidates.append((block, heading_role))
+        if sum(role in ("chapter", "article") for _, role in candidates) < 2:
+            return
+
+        def mark(block, level, role):
+            block["type"] = "heading"
+            block["level"] = level
+            block["heading_evidence"] = {"source": "numbered_outline_formatting", "role": role}
+
+        title = paragraphs[0]
+        title_style = title.get("heading_format", {})
+        has_title = title_style.get("centered") and title_style["font_pt"] > max(
+            block["heading_format"]["font_pt"] for block, _ in candidates
+        )
+        if has_title:
+            section_level = 2
+        else:
+            section_level = 1
+        if has_title:
+            mark(title, 1, "title")
+        has_parent = False
+        for block, role in candidates:
+            level = section_level + (role == "article" and has_parent)
+            mark(block, level, role)
+            has_parent = has_parent or role in ("chapter", "appendix")
 
     def _inline_events(self, node):
         for child in node:
@@ -299,7 +372,8 @@ class DocxExtractor:
             destination = self.asset_dir / (digest + extension)
             destination.parent.mkdir(parents=True, exist_ok=True)
             if not destination.exists() or hashlib.sha256(destination.read_bytes()).hexdigest() != digest:
-                destination.write_bytes(blob)
+                from ..run_chunking import atomic_bytes
+                atomic_bytes(destination, blob)
             info = {"image_id": digest[:24], "sha256": digest, "path": str(destination.resolve()),
                     "part": str(asset.partname), "content_type": asset.content_type,
                     "relationship_id": rel_id, "status": "native_asset", "caption": "", "description": ""}
@@ -316,7 +390,8 @@ class DocxExtractor:
                     preview = drawing_preview(self._source_bytes, self.document.element, image_node)
                     visual_hash = hashlib.sha256(preview).hexdigest()
                     visual_path = self.asset_dir / (visual_hash + ".png")
-                    visual_path.write_bytes(preview)
+                    from ..run_chunking import atomic_bytes
+                    atomic_bytes(visual_path, preview)
                     info["visual_path"] = str(visual_path.resolve())
                     info["visual_sha256"] = visual_hash
             anchor = image_node
@@ -340,7 +415,8 @@ class DocxExtractor:
                 preview = drawing_preview(self._source_bytes, self.document.element, image_node, allow_blank=True)
                 visual_hash = hashlib.sha256(preview).hexdigest()
                 visual_path = self.asset_dir / (visual_hash + ".png")
-                visual_path.write_bytes(preview)
+                from ..run_chunking import atomic_bytes
+                atomic_bytes(visual_path, preview)
                 info["visual_path"] = str(visual_path.resolve())
                 info["visual_sha256"] = visual_hash
                 info["visual_method"] = "office_rendered_crop_or_transform"
@@ -414,7 +490,13 @@ class DocxExtractor:
         width = max([len(row) for row in grid] + [0])
         for row in grid:
             row.extend([""] * (width - len(row)))
-        # Unmarked tables keep row zero as data; labels are explicitly synthetic.
+        header_detection = "unmarked"
+        if header_count:
+            header_detection = "explicit_repeat_header"
+        elif self._has_grouped_header(cells, width):
+            header_count = 2
+            header_detection = "merged_bold_header_rows"
+        # Ambiguous unmarked tables retain every row as data.
         if header_count:
             headers = []
             for column in range(width):
@@ -426,9 +508,7 @@ class DocxExtractor:
         else:
             headers = ["Cột " + str(index + 1) for index in range(width)]
         table = {"headers": headers, "rows": grid[header_count:], "grid": grid,
-                 "header_row_count": header_count, "header_detection": "unmarked", "cells": cells, "parent_cell": parent_cell}
-        if header_count:
-            table["header_detection"] = "explicit_repeat_header"
+                 "header_row_count": header_count, "header_detection": header_detection, "cells": cells, "parent_cell": parent_cell}
         block = self._append("table", "", node, region, table_data=table, unit_ids=[])
         table["table_id"] = block["id"]
         for text, paragraph in units:
@@ -439,6 +519,26 @@ class DocxExtractor:
             self.ir["relations"].append({"from": block["id"], "to": cell["id"], "type": "contains_cell"})
         for child in nested:
             self._table(child, part, region + ":nested", block["id"])
+
+    @staticmethod
+    def _has_grouped_header(cells, width):
+        """Require visual and grid evidence for two unmarked header rows."""
+        groups, labels, first_record = (
+            [cell for cell in cells if cell["row"] == row and cell["text"]]
+            for row in range(3)
+        )
+        if not all(cell["all_text_bold"] and cell["row"] + cell["row_span"] <= 2
+                   for cell in groups + labels):
+            return False
+        if not any(not cell["all_text_bold"] for cell in first_record):
+            return False
+        # A whole-width merged title above a table provides no column mapping.
+        return any(
+            1 < group["col_span"] < width
+            and sum(group["column"] <= label["column"] < group["column"] + group["col_span"]
+                    for label in labels) >= 2
+            for group in groups
+        )
 
     def _cell_content(self, node, paragraphs, nested, part, region):
         name = local_name(node)

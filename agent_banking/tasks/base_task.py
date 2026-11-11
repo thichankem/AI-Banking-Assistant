@@ -1,25 +1,24 @@
 """
-Lớp Nhiệm vụ Cơ sở (Base Banking Task) - Kế Thừa Toàn Bộ Kho Node Tái Sử Dụng.
-Thiết kế theo chuẩn Flow/DAG trực quan (như Dify / LPBank / Coze Workflow):
-- Mỗi Task đại diện cho 1 luồng công việc (Workflow) nghiệp vụ hoàn chỉnh.
-- BaseBankingTask cung cấp sẵn toàn bộ các Node chuẩn:
-    * node_format_history: Chuẩn hóa lịch sử chat (như Python Code Node).
-    * node_input_guard: Kiểm tra Prompt Injection, Fraud, PII.
-    * node_knowledge_retrieval: RAG Hybrid (Dense 1024 + BM25 RRF + Rerank reranker-model).
-    * node_grade_documents: Thẩm định độ liên quan của tài liệu.
-    * node_banking_tool: Gọi các công cụ nghiệp vụ (Dư nợ giảm dần, Lãi suất, QĐ 2345, Ticket).
-    * node_llm_generate: Gọi mô hình ngôn ngữ sinh câu trả lời chuẩn Vietcombank.
-    * node_audit_answer: Kiểm soát Zero-Hallucination & Trích dẫn điều khoản.
-    * node_format_output: Đóng gói kết quả đầu ra.
-- Mọi Task con (Loan, Policy, Biometric, Card, Incident, Chat) đều kế thừa trực tiếp
-  và tự do kết hợp các Node này theo đúng nghiệp vụ riêng.
+Base Banking Task - Inherits reusable node library.
+Designed following standard workflow/DAG execution patterns:
+- Each task represents a complete business workflow.
+- BaseBankingTask provides standard reusable nodes:
+    * node_format_history: Format chat history.
+    * node_input_guard: Input validation (Prompt Injection, Fraud, PII).
+    * node_knowledge_retrieval: RAG Hybrid search and reranking.
+    * node_grade_documents: Document relevance assessment.
+    * node_banking_tool: Call business tools (Loan amortization, Interest rates, Biometrics, Ticket).
+    * node_llm_generate: Call language model to generate responses.
+    * node_audit_answer: Hallucination and citation audit.
+    * node_format_output: Package final task result.
+- All specialized tasks inherit from this base class.
 
-NGUYÊN TẮC BẮT BUỘC:
-1. KHÔNG DÙNG __INIT__.PY: Import trực tiếp file module.
-2. KHÔNG DÙNG THƯ VIỆN TYPING: Thuần túy dùng kiểu gốc của Python (dict, list, str).
-3. ZERO TERNARY: Bắt buộc dùng if/else tường minh, không dùng ?: hoặc toán tử 3 ngôi.
-4. 0% REGEX LAW: Tuyệt đối không dùng regex.
-5. HẠN CHẾ TỐI ĐA THỪA THÃI: Code ngắn gọn, trực diện, dễ hiểu.
+RULES:
+1. NO __INIT__.PY: Direct module imports.
+2. NO TYPING LIBRARY: Native Python types only (dict, list, str).
+3. ZERO TERNARY: Explicit if/else only.
+4. 0% REGEX LAW: Absolutely no regular expressions.
+5. KEEP IT SIMPLE: Clean and readable code.
 """
 
 from __future__ import annotations
@@ -33,7 +32,7 @@ from agent_banking.skills.skill_registry import SkillRegistry
 
 
 def _clean_think(text: str) -> str:
-    """Làm sạch thẻ <think>...</think> của mô hình (0% Regex)."""
+    """Clean reasoning tags <think>...</think> from model output (0% Regex)."""
     cleaned = text
     while True:
         s = cleaned.find("<think>")
@@ -48,10 +47,10 @@ def _clean_think(text: str) -> str:
 
 
 def _parse_react_step(text: str) -> dict:
-    """Bóc tách phản hồi ReAct chuẩn 0% Regex."""
+    """Parse ReAct step format with 0% Regex."""
     clean = text.strip()
 
-    # Kiểm tra Final Answer trước
+    # Check for Final Answer first
     if "Final Answer:" in clean:
         idx_final = clean.find("Final Answer:")
         ans = clean[idx_final + 13:].strip()
@@ -64,7 +63,7 @@ def _parse_react_step(text: str) -> dict:
             "action_input": {}
         }
 
-    # Bóc tách Thought
+    # Extract Thought
     thought = ""
     idx_thought = clean.find("Thought:")
     idx_action = clean.find("Action:")
@@ -74,7 +73,7 @@ def _parse_react_step(text: str) -> dict:
         else:
             thought = clean[idx_thought + 8:].strip()
 
-    # Bóc tách Action và Action Input
+    # Extract Action and Action Input
     action = None
     action_input = {}
     if idx_action != -1:
@@ -107,7 +106,7 @@ def _parse_react_step(text: str) -> dict:
 
 @dataclass
 class TaskResult:
-    """Kết quả trả về thống nhất từ mỗi Task."""
+    """Unified task execution result."""
     task_id: str
     task_name: str
     status: str
@@ -122,8 +121,7 @@ class TaskResult:
 
 class BaseBankingTask:
     """
-    Lớp cơ sở cung cấp toàn bộ Node Library cho mọi Task nghiệp vụ.
-    Mọi Task con kế thừa lớp này đều tự động sở hữu toàn bộ các Node.
+    Base class providing node library for all business tasks.
     """
 
     def __init__(
@@ -148,7 +146,7 @@ class BaseBankingTask:
         else:
             self.registry = SkillRegistry(config=self.config)
 
-        # Khởi tạo kết nối LLM dùng chung cho các Node tạo sinh & thẩm định
+        # Initialize shared LLM client
         self.client = FallbackChatClient("tasks", {
             "model": getattr(self.config, "TASKS_LLM_MODEL", self.config.LLM_MODEL),
             "url": getattr(self.config, "TASKS_LLM_BASE_URL", self.config.LLM_BASE_URL),
@@ -156,13 +154,13 @@ class BaseBankingTask:
         })
 
     # =========================================================================
-    # KHO CÁC NODE TÁI SỬ DỤNG DÙNG CHUNG CHO MỌI TASK (REUSABLE NODE LIBRARY)
+    # REUSABLE NODE LIBRARY
     # =========================================================================
 
     def node_format_history(self, chat_history: list[dict] | None) -> str:
         """
-        NODE: Format History (Chuẩn hóa lịch sử hội thoại)
-        Chuyển danh sách tin nhắn quá khứ thành văn bản ngữ cảnh rõ ràng.
+        NODE: Format History
+        Convert previous message history into clear context text.
         """
         if not chat_history:
             return ""
@@ -172,15 +170,15 @@ class BaseBankingTask:
             role = msg.get("role", msg.get("sender", "user"))
             content = msg.get("content", msg.get("text", "")).strip()
             if role == "user":
-                formatted_lines.append(f"Khách hàng: {content}")
+                formatted_lines.append(f"Customer: {content}")
             else:
-                formatted_lines.append(f"Trợ lý Vietcombank: {content}")
+                formatted_lines.append(f"Banking Assistant: {content}")
         return "\n".join(formatted_lines)
 
     def node_question_rewriter(self, user_query: str, chat_history: list[dict] | None = None) -> str:
         """
-        NODE: Question Rewriter (Tái cấu trúc câu hỏi đa lượt từ lịch sử chat)
-        Sử dụng ngữ cảnh lịch sử để biến câu hỏi phụ thuộc ('còn cái đó thì sao?') thành câu hỏi độc lập.
+        NODE: Question Rewriter
+        Resolve co-references and ambiguities from conversation history into standalone questions.
         """
         if not chat_history:
             return user_query.strip()
@@ -201,7 +199,7 @@ class BaseBankingTask:
             return user_query.strip()
 
         sys_prompt = (
-            "Bạn là trợ lý AI chuyên viết lại câu hỏi khách hàng ngân hàng Vietcombank.\n"
+            "Bạn là trợ lý AI chuyên viết lại câu hỏi khách hàng ngân hàng.\n"
             "Dựa trên lịch sử hội thoại, hãy viết lại câu hỏi cuối cùng thành câu hỏi độc lập, "
             "rõ thực thể (tên gói vay, tên thẻ, loại tài khoản). Chỉ xuất câu hỏi đã viết lại, không giải thích."
         )
@@ -214,8 +212,8 @@ class BaseBankingTask:
 
     def node_parameter_extractor(self, query: str) -> dict:
         """
-        NODE: Parameter Extractor (Bóc tách tham số tài chính tiếng Việt)
-        Tự động bóc tách: Số tiền (principal/amount_vnd), kỳ hạn (term_months), lãi suất (annual_rate).
+        NODE: Parameter Extractor
+        Extract financial parameters: amount (principal/amount_vnd), term (term_months), interest rate.
         """
         from agent_banking.tools.banking_api_tools import parse_vietnamese_financial_params
         params = parse_vietnamese_financial_params(query)
@@ -225,8 +223,8 @@ class BaseBankingTask:
 
     def node_input_guard(self, query: str) -> dict:
         """
-        NODE: Input Guardrail (Bảo mật đầu vào 0% Regex)
-        Kiểm tra Prompt Injection, gian lận tài chính và thu thập PII.
+        NODE: Input Guardrail (0% Regex)
+        Validates input against prompt injection, fraud, and sensitive queries.
         """
         q_lower = query.lower()
         injection_phrases = ["ignore all", "bypass safety", "developer mode", "system prompt", "bỏ qua quy tắc"]
@@ -234,15 +232,15 @@ class BaseBankingTask:
             if phrase in q_lower:
                 return {
                     "is_safe": False,
-                    "reason": f"Phát hiện mẫu Prompt Injection: '{phrase}'",
+                    "reason": f"Detected prompt injection pattern: '{phrase}'",
                     "refusal": "Yêu cầu bị từ chối do vi phạm quy chuẩn an toàn ngân hàng."
                 }
         return {"is_safe": True, "reason": None, "refusal": None}
 
     def node_knowledge_retrieval(self, query: str, top_k: int = 3) -> dict:
         """
-        NODE: Knowledge Retrieval (RAG Tìm kiếm Tri thức Quy chế)
-        Thực thi Hybrid Search (Dense 1024-dim + BM25 RRF k=60) và Cross-Encoder Rerank.
+        NODE: Knowledge Retrieval
+        Executes hybrid search and cross-encoder reranking.
         """
         rag_skill = self.registry.get_skill("rag_knowledge_retrieval")
         if not rag_skill:
@@ -261,8 +259,8 @@ class BaseBankingTask:
 
     def node_grade_documents(self, query: str, chunks: list[dict]) -> bool:
         """
-        NODE: Document Relevance Grader (Thẩm định tài liệu RAG)
-        Đánh giá tài liệu trích xuất có chứa nội dung giải đáp câu hỏi không.
+        NODE: Document Relevance Grader
+        Evaluates whether retrieved documents contain relevant context to answer the query.
         """
         fact_skill = self.registry.get_skill("fact_checking_audit")
         if not fact_skill or not chunks:
@@ -273,8 +271,8 @@ class BaseBankingTask:
 
     def node_reference_filter(self, chunks: list[dict], min_score: float = 0.0) -> list[dict]:
         """
-        NODE: Reference Filter (Lọc và loại bỏ tài liệu nhiễu/điểm thấp)
-        Giữ lại các tài liệu có độ tin cậy và điểm xếp hạng cao.
+        NODE: Reference Filter
+        Retains chunks meeting the score threshold.
         """
         if not chunks:
             return []
@@ -289,11 +287,11 @@ class BaseBankingTask:
 
     def node_banking_tool(self, operation: str, params: dict) -> dict:
         """
-        NODE: Banking Tool Execution (Thực thi công cụ tài chính & API)
-        Hỗ trợ: 'loan_amortization', 'savings_profit', 'fx_rates', 'interest_rates',
-                'compliance_qd2345', 'create_ticket'.
+        NODE: Banking Tool Execution
+        Supported: 'loan_amortization', 'savings_profit', 'fx_rates', 'interest_rates',
+                   'compliance_qd2345', 'create_ticket'.
         """
-        # Nhóm tính toán tài chính & tra cứu thị trường
+        # Financial calculation & market lookup
         if operation in ["loan_amortization", "savings_profit", "fx_rates", "interest_rates"]:
             calc_skill = self.registry.get_skill("financial_calculator")
             if calc_skill:
@@ -305,7 +303,7 @@ class BaseBankingTask:
                     return data
             return {}
 
-        # Nhóm thẩm định sinh trắc học QĐ 2345
+        # Biometric compliance
         if operation == "compliance_qd2345":
             comp_skill = self.registry.get_skill("compliance_qd2345_audit")
             if comp_skill:
@@ -315,7 +313,7 @@ class BaseBankingTask:
                     return data
             return {}
 
-        # Nhóm tạo ticket sự cố
+        # Support ticket creation
         if operation == "create_ticket":
             inc_skill = self.registry.get_skill("incident_support_ticket")
             if inc_skill:
@@ -335,8 +333,8 @@ class BaseBankingTask:
         max_tokens: int = 2500
     ) -> str:
         """
-        NODE: LLM Generation (Sinh văn bản trả lời)
-        Truyền prompt vào Language-Model qua Cloud Provider API.
+        NODE: LLM Generation
+        Dispatches prompt to configured LLM endpoint.
         """
         if not self.client:
             return user_prompt
@@ -363,12 +361,12 @@ class BaseBankingTask:
         except ModelFallbackError:
             raise
         except Exception as e:
-            return f"Lỗi sinh câu trả lời: {e}"
+            return f"Generation error: {e}"
 
     def node_audit_answer(self, draft_answer: str, chunks: list[dict]) -> dict:
         """
-        NODE: Hallucination Audit (Kiểm soát Ảo giác Zero-Hallucination)
-        Đối soát từng khẳng định của câu trả lời so với nguồn tài liệu căn cứ.
+        NODE: Hallucination Audit
+        Audits answer assertions against source reference documents.
         """
         fact_skill = self.registry.get_skill("fact_checking_audit")
         if not fact_skill or not chunks:
@@ -388,15 +386,15 @@ class BaseBankingTask:
         max_turns: int = 4
     ) -> dict:
         """
-        NODE: ReAct Engine (Vòng lặp Suy luận & Hành động ReAct: Thought -> Action -> Observation)
-        Đọc danh bạ kỹ năng từ SkillRegistry và tự động tương tác giải quyết câu hỏi phức tạp.
+        NODE: ReAct Engine (Reasoning + Acting Loop: Thought -> Action -> Observation)
+        Queries skill registry and iteratively resolves complex queries.
         """
         skills_schema = self.registry.get_skills_react_schema()
         ctx = context or {}
         history_str = self.node_format_history(ctx.get("chat_history"))
 
         sys_prompt = (
-            "Bạn là Trợ lý AI Thông minh của Ngân hàng TMCP Ngoại thương Việt Nam (Vietcombank).\n"
+            "Bạn là Trợ lý AI Thông minh của Ngân hàng.\n"
             "Bạn giải quyết yêu cầu của khách hàng theo phương pháp ReAct (Reasoning + Acting).\n\n"
             "DANH MỤC KỸ NĂNG KHẢ DỤNG:\n"
             f"{skills_schema}\n\n"
@@ -408,7 +406,7 @@ class BaseBankingTask:
             "Sau khi nhận được Observation, bạn tiếp tục suy luận.\n"
             "Khi đã có đầy đủ thông tin để trả lời khách hàng, bạn PHẢI xuất:\n"
             "Thought: <suy nghĩ kết luận>\n"
-            "Final Answer: <câu trả lời hoàn chỉnh, chuẩn mực, ân cần theo văn hóa Vietcombank>"
+            "Final Answer: <câu trả lời hoàn chỉnh, chuẩn mực, ân cần theo văn hóa ngân hàng>"
         )
 
         scratchpad = f"Khách hàng: {user_query}\n"
@@ -430,13 +428,13 @@ class BaseBankingTask:
 
             parsed = _parse_react_step(llm_output)
 
-            # 1. Đã ra kết luận Final Answer
+            # 1. Final answer reached
             if parsed["is_final"]:
                 final_answer = parsed["answer"]
                 steps_log.append(f"[ReAct Turn {turn}] Final Answer: {parsed['thought']}")
                 break
 
-            # 2. Có Action gọi kỹ năng
+            # 2. Action call
             action_name = parsed["action"]
             action_input = parsed["action_input"]
             thought = parsed["thought"]
@@ -448,7 +446,7 @@ class BaseBankingTask:
 
             steps_log.append(f"[ReAct Turn {turn}] Thought: {thought} | Action: {action_name}")
 
-            # Thực thi Skill từ danh bạ
+            # Execute skill from registry
             skill = self.registry.get_skill(action_name)
             observation_str = ""
             if skill:
@@ -456,20 +454,20 @@ class BaseBankingTask:
                 skill_data = skill_res.get("data", {})
                 observation_str = str(skill_data)
 
-                # Lưu citations từ RAG
+                # Capture citations from RAG
                 if action_name == "rag_knowledge_retrieval" and isinstance(skill_data, dict):
                     citations.extend(skill_data.get("citations", []))
                     sources.extend(skill_data.get("sources", []))
             else:
-                observation_str = f"Lỗi: Không tìm thấy kỹ năng '{action_name}' trong danh bạ."
+                observation_str = f"Error: Skill '{action_name}' not found in registry."
 
             steps_log.append(f"[ReAct Turn {turn}] Observation: {observation_str[:120]}...")
 
-            # Bổ sung vào Scratchpad cho turn suy luận tiếp theo
+            # Append to scratchpad for subsequent turns
             scratchpad += f"\nThought: {thought}\nAction: {action_name}\nAction Input: {action_input}\nObservation: {observation_str}\n"
 
         if not final_answer:
-            final_answer = "Kính chào Quý khách! Vietcombank đã ghi nhận yêu cầu và sẽ hỗ trợ Quý khách sớm nhất."
+            final_answer = "Kính chào Quý khách! Ngân hàng đã ghi nhận yêu cầu và sẽ hỗ trợ Quý khách sớm nhất."
 
         return {
             "answer": final_answer,
@@ -486,27 +484,46 @@ class BaseBankingTask:
         structured_data: dict | None = None
     ) -> TaskResult:
         """
-        NODE: Output Formatter (Đóng gói kết quả đầu ra chuẩn hóa)
+        NODE: Output Formatter
+        Packages normalized output result.
         """
+        if citations is not None:
+            cites = citations
+        else:
+            cites = []
+
+        if sources is not None:
+            srcs = sources
+        else:
+            srcs = []
+
+        if structured_data is not None:
+            sdata = structured_data
+        else:
+            sdata = {}
+
         return TaskResult(
             task_id=self.task_id,
             task_name=self.task_name,
             status="SUCCESS",
             answer=answer,
-            citations=citations or [],
-            sources=sources or [],
-            structured_data=structured_data or {}
+            citations=cites,
+            sources=srcs,
+            structured_data=sdata
         )
 
     # =========================================================================
-    # ĐIỀU PHỐI CHU TRÌNH THỰC THI (WORKFLOW EXECUTION)
+    # WORKFLOW EXECUTION
     # =========================================================================
 
     def execute(self, user_query: str, context: dict | None = None) -> TaskResult:
-        """Thực thi luồng công việc của Task, đo đếm thời gian và lưu các bước."""
+        """Execute task workflow, track timing and execution steps."""
         start_time = time.perf_counter()
         steps: list[str] = []
-        ctx = context or {}
+        if context is not None:
+            ctx = context
+        else:
+            ctx = {}
 
         try:
             result = self._run_flow(user_query, ctx, steps)
@@ -532,5 +549,5 @@ class BaseBankingTask:
         context: dict,
         steps: list[str]
     ) -> TaskResult:
-        """Mỗi Task con chỉ cần sắp xếp chuỗi gọi các Node có sẵn ở trên."""
-        raise NotImplementedError("Mỗi Task con phải cài đặt phương thức _run_flow().")
+        """Each subtask implements _run_flow chaining standard nodes."""
+        raise NotImplementedError("Subtasks must implement _run_flow().")

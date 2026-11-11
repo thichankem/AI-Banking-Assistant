@@ -1,17 +1,17 @@
 """
-Module Tu Dong Thu Thap Vett Tracing (Auto Tracing Node with Deduplication).
-============================================================================
-Dac diem:
-1. Doc thong tin trace tu tracing/input/sample_trace_inputs.json.
-2. Tinh toan SHA-256 hash cua tung yeu cau trace.
-3. Kiem tra StateTracker: Yeu cau nao da khoi tao trace thi tai su dung (SKIP).
-4. Chi ghi nhan va thu thap metrics cho nhung query trace moi.
-5. Xuat ket qua: sample_trace_outputs.json.
+Automated Tracing Collection Runner (Auto Tracing Node with Deduplication).
+===========================================================================
+Features:
+1. Reads trace inputs from tracing/input/sample_trace_inputs.json.
+2. Computes SHA-256 hash of each trace request.
+3. Checks StateTracker: Reuses previously traced requests (SKIP).
+4. Records spans and metrics for new trace queries.
+5. Emits results to: sample_trace_outputs.json.
 
-NGUYEN TAC BAT BUOC:
-1. KHONG DUNG __INIT__.PY.
-2. KHONG DUNG THU VIEN TYPING.
-3. ZERO TERNARY: if/else tuong minh.
+MANDATORY INVARIANTS:
+1. NO __INIT__.PY.
+2. NO TYPING LIBRARY.
+3. ZERO TERNARY: Explicit if/else statements.
 4. 0% REGEX LAW.
 """
 

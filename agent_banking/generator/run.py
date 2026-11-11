@@ -1,6 +1,6 @@
 """
-Runner truc tiep cho Module 7: Generator.
-Chay doc lap tu input/ sang output/ voi co che chong trung lap.
+Direct runner for Module 7: Generator.
+Runs independently from input/ to output/ with deduplication mechanisms.
 """
 from __future__ import annotations
 import sys
@@ -15,9 +15,9 @@ from agent_banking.generator.run_generator import run_auto_generator
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Generator Node (Input -> Output)")
-    parser.add_argument("--force", action="store_true", help="Chay lai toan bo tu dau")
-    parser.add_argument("--input", "-i", type=str, default=None, help="Duong dan tap tin input JSON")
-    parser.add_argument("--output", "-o", type=str, default=None, help="Thu muc xuat ket qua")
+    parser.add_argument("--force", action="store_true", help="Re-run everything from scratch")
+    parser.add_argument("--input", "-i", type=str, default=None, help="Input JSON file path")
+    parser.add_argument("--output", "-o", type=str, default=None, help="Output directory path")
     args = parser.parse_args()
 
     module_dir = Path(__file__).resolve().parent

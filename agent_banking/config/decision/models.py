@@ -1,11 +1,13 @@
+"""Decision model configuration for routing and verification."""
+
 MODELS = [
     {
-        "name": "jev-primary",
+        "name": "primary",
         "model_env": "DECISION_MODEL",
-        "model_default": "decision-model",
-        "url_env": "DECISION_BASE_URL",
-        "url_default": "https://api.example.com/v1",
-        "api_key_env": ("DECISION_API_KEY", "DECISION_API_KEY"),
+        "model_default": "",
+        "url_env": ("DECISION_BASE_URL", "BASE_URL"),
+        "url_default": "",
+        "api_key_env": ("DECISION_API_KEY", "API_KEY"),
         "timeout": 8,
         "attempts": 1,
     },

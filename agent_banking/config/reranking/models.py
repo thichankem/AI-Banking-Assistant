@@ -1,11 +1,13 @@
+"""Reranking model configuration; models in descending priority."""
+
 MODELS = [
     {
-        "name": "fpt-reranker-primary",
+        "name": "primary",
         "model_env": "RERANKER_MODEL",
-        "model_default": "reranker-model",
+        "model_default": "",
         "url_env": "RERANK_URL",
         "base_url_env": "BASE_URL",
-        "base_url_default": "https://api.example.com/v1",
+        "base_url_default": "",
         "path": "/rerank",
         "api_key_env": "API_KEY",
         "timeout": 20,

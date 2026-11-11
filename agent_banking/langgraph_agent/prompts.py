@@ -2,11 +2,11 @@
 """
 System Prompts for Banking LangGraph Workflow
 ======================================================================
-Tập hợp toàn bộ Prompts định hình hành vi Agent, Router, Graders và Query Rewriter.
-Tuân thủ:
-- Giọng văn chuẩn mực Ngân hàng TMCP Ngoại thương Việt Nam (Vietcombank).
-- Nghiêm cấm bịa đặt (No Hallucination).
-- Bắt buộc trích dẫn điều khoản pháp lý khi sử dụng tài liệu RAG.
+Collection of system prompts defining agent behavior, routers, graders, and query rewriter.
+Guidelines:
+- Professional tone suitable for banking advisory.
+- Strict anti-hallucination policy.
+- Mandatory legal and policy citations when referencing RAG documents.
 """
 
 ROUTER_SYSTEM_PROMPT = """Bạn là Bộ Định Tuyến Ý Định (Intent Router) của Trợ lý AI Ngân hàng Vietcombank.

@@ -1,16 +1,16 @@
 """
-Danh bạ Kỹ năng Nghiệp vụ Ngân hàng (Skill Registry - JSON-Driven Architecture).
-Thiết kế tối giản, trực quan, dễ hiểu theo chuẩn Chunking:
-- Tự động quét và nạp toàn bộ các Kỹ năng từ các tệp đặc tả JSON (*.json).
-- Không hardcode danh sách kỹ năng hay schema trong code Python.
-- Cung cấp mô tả kỹ năng cho Intent Router và cấu trúc tham số cho ReAct Engine.
+Banking Skill Registry (JSON-Driven Architecture).
+Design:
+- Automatically scans and loads skills from declarative JSON specification files (*_skill.json).
+- Zero hardcoded skills list or schemas in Python code.
+- Provides skill descriptions for Intent Router and schema definitions for ReAct Engine.
 
-NGUYÊN TẮC BẮT BUỘC:
-1. KHÔNG DÙNG __INIT__.PY: Import trực tiếp file module.
-2. KHÔNG DÙNG THƯ VIỆN TYPING: Thuần túy dùng kiểu gốc của Python.
-3. ZERO TERNARY: Bắt buộc dùng if/else tường minh, không dùng ?: hoặc toán tử 3 ngôi.
-4. 0% REGEX LAW: Tuyệt đối không dùng regex.
-5. HẠN CHẾ TỐI ĐA THỪA THÃI: Code ngắn gọn, trực diện, dễ hiểu.
+MANDATORY RULES:
+1. NO __INIT__.PY: Direct module imports.
+2. NO TYPING LIBRARY: Native Python types only.
+3. ZERO TERNARY: Explicit if/else only.
+4. 0% REGEX LAW: Absolutely no regular expressions.
+5. KEEP IT SIMPLE: Clear, direct, readable code.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from agent_banking.config.settings import Config
 
 
 class SkillRegistry:
-    """Trung tâm quản lý danh mục Kỹ năng nghiệp vụ được nạp tự động từ JSON."""
+    """Central management hub for business skills automatically loaded from JSON."""
 
     def __init__(self, pipeline_instance=None, config: Config | None = None, skills_dir: str | Path | None = None):
         if config is not None:
@@ -41,7 +41,7 @@ class SkillRegistry:
         self._load_skills_from_json_files()
 
     def _load_skills_from_json_files(self) -> None:
-        """Quét và nạp tất cả các tệp cấu hình JSON trong thư mục skills."""
+        """Scan and load all JSON configuration files in the skills directory."""
         if not self.skills_dir.exists():
             return
 
@@ -55,18 +55,18 @@ class SkillRegistry:
                 )
                 self.register(skill)
             except Exception as e:
-                print(f"⚠️ Không thể nạp kỹ năng từ {jf.name}: {e}")
+                print(f"⚠️ Failed to load skill from {jf.name}: {e}")
 
     def register(self, skill: BaseSkill) -> None:
-        """Đăng ký một skill vào danh bạ."""
+        """Register a skill into the registry."""
         self.skills[skill.metadata.skill_id] = skill
 
     def get_skill(self, skill_id: str) -> BaseSkill | None:
-        """Lấy đối tượng skill theo mã định danh."""
+        """Retrieve skill instance by identifier."""
         return self.skills.get(skill_id)
 
     def list_skills(self) -> list[dict]:
-        """Trả về danh sách tóm tắt tất cả các kỹ năng."""
+        """Return summary records of all registered skills."""
         records = []
         for s in self.skills.values():
             meta = s.metadata
@@ -82,7 +82,7 @@ class SkillRegistry:
         return records
 
     def get_skills_prompt_description(self) -> str:
-        """Xuất mô tả kỹ năng phục vụ Router phân loại Intent."""
+        """Export skills description for Intent Router classification prompt."""
         lines = []
         for s in self.skills.values():
             m = s.metadata
@@ -90,20 +90,20 @@ class SkillRegistry:
         return "\n".join(lines)
 
     def get_skills_react_schema(self) -> str:
-        """Xuất danh mục kỹ năng kèm tham số chi tiết phục vụ vòng lặp ReAct hoàn toàn từ JSON."""
+        """Export skills and parameter schemas for ReAct reasoning loop directly from JSON."""
         lines = []
         for s in self.skills.values():
             m = s.metadata
-            lines.append(f"Kỹ năng: {m.skill_id} ({m.display_name})")
-            lines.append(f"Mô tả: {m.description}")
+            lines.append(f"Skill: {m.skill_id} ({m.display_name})")
+            lines.append(f"Description: {m.description}")
             if m.react_schema_example:
-                lines.append(f"Tham số JSON: {m.react_schema_example}")
+                lines.append(f"JSON Parameters: {m.react_schema_example}")
             else:
                 param_props = m.parameters_schema.get("properties", {})
                 param_keys = list(param_props.keys())
                 example_dict = {}
                 for pk in param_keys:
                     example_dict[pk] = f"<{pk}>"
-                lines.append(f"Tham số JSON: {json.dumps(example_dict, ensure_ascii=False)}")
+                lines.append(f"JSON Parameters: {json.dumps(example_dict, ensure_ascii=False)}")
             lines.append("")
         return "\n".join(lines)

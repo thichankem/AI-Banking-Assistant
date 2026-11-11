@@ -1,19 +1,18 @@
 """
-Module Tracing & Observability Chuyên Sâu cho AI Banking Assistant
-======================================================================
-Tích hợp nền tảng giám sát AI Observability hàng đầu:
+Tracing & Observability Module for AI Banking Assistant
+=======================================================
+Integrated AI Observability platform:
 1. Arize Phoenix:
-   - Nền tảng AI Observability chuyên sâu cho RAG & AI Agents.
-   - Chuẩn hóa theo OpenTelemetry & OpenInference Semantic Conventions.
-   - Trực quan hóa đồ thị RAG (Retriever, Reranker, Chain, LLM Generation).
-   - Xem dashboard trực quan qua Arize Phoenix Web UI.
+   - AI Observability platform for RAG & AI Agents.
+   - Standardized on OpenTelemetry & OpenInference Semantic Conventions.
+   - Visualizes RAG execution graphs (Retriever, Reranker, Chain, LLM Generation).
 2. Local Tracing:
-   - Lưu trữ nhật ký vết định dạng JSONL (rag_traces.jsonl).
+   - Stores trace logs in JSONL format (rag_traces.jsonl).
 
-NGUYÊN TẮC THIẾT KẾ:
-1. 0% REGEX LAW: Tuyệt đối không dùng regex methods.
-2. ZERO TERNARY: Ưu tiên if/else tường minh, dễ đọc.
-3. NO __INIT__.PY: Import trực tiếp file module.
+DESIGN INVARIANTS:
+1. 0% REGEX LAW: No regex methods.
+2. ZERO TERNARY: Explicit if/else statements.
+3. NO __INIT__.PY: Direct module imports.
 """
 
 import sys
@@ -26,7 +25,7 @@ import math
 from urllib.parse import urlparse
 from pathlib import Path
 
-# Đảm bảo UTF-8 an toàn trên Windows console
+# Ensure safe UTF-8 encoding on Windows console
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -113,9 +112,9 @@ class ActiveTrace:
                             "3. query_parser (Entities & Keyword extraction)",
                             "4. dense_embedding (1024-dim Vector representation)",
                             "5. top_k_hybrid_retrieval (Top-5 Chunks: Dense HNSW + BM25 + RRF)",
-                            "6. top_k_cross_encoder_reranker (Top-3 Chunks: reranker-model)",
+                            "6. top_k_cross_encoder_reranker (Top-3 Chunks: Cross-Encoder)",
                             "7. context_synthesizer (Token budgeting & Citation map)",
-                            "8. llm_generation (Language-Model / Persona & Tone)",
+                            "8. llm_generation (Persona & Tone)",
                             "9. output_guardrail (PII mask & Safety audit)"
                         ]
                     }
@@ -297,7 +296,7 @@ class ActiveTrace:
         if model_name:
             chosen_model = model_name
         else:
-            chosen_model = "embedding-model"
+            chosen_model = getattr(self.tracer.config, "EMBEDDING_MODEL_1024", getattr(self.tracer.config, "EMBEDDING_MODEL", "embedding-1024"))
 
         if is_query:
             span_name = "dense_embedding"
@@ -561,7 +560,7 @@ class ActiveTrace:
         }
         self.spans.append(span_data)
 
-        # Phoenix span (Chuẩn OpenInference RETRIEVER)
+        # Phoenix span (OpenInference RETRIEVER standard)
         if self.tracer.is_phoenix_active and self.tracer.px_tracer:
             try:
                 s_px = self.tracer.px_tracer.start_span("top_k_hybrid_retrieval", context=self.px_context)
@@ -615,7 +614,7 @@ class ActiveTrace:
                 logger.debug(f"Phoenix top_k_hybrid_retrieval error: {e}")
 
     def record_rerank(self, query, candidates, reranked, duration_ms):
-        """Bước 3: Ghi nhận vết Reranking qua Cross-Encoder reranker-model đầy đủ tất cả chunk"""
+        """Record Reranking step across candidates."""
         rerank_summary = []
         for i, doc in enumerate(reranked):
             if isinstance(doc, dict):
@@ -651,14 +650,15 @@ class ActiveTrace:
         }
         self.spans.append(span_data)
 
-        # Phoenix span (Chuẩn OpenInference RERANKER)
+        # Phoenix span (OpenInference RERANKER standard)
         if self.tracer.is_phoenix_active and self.tracer.px_tracer:
             try:
                 s_px = self.tracer.px_tracer.start_span("top_k_cross_encoder_reranker", context=self.px_context)
                 if PHOENIX_AVAILABLE:
                     s_px.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, OpenInferenceSpanKindValues.RERANKER.value)
                     s_px.set_attribute(RerankerAttributes.RERANKER_QUERY, query)
-                    s_px.set_attribute(RerankerAttributes.RERANKER_MODEL_NAME, "reranker-model")
+                    reranker_model = getattr(self.tracer.config, "RERANKER_MODEL", "reranker")
+                    s_px.set_attribute(RerankerAttributes.RERANKER_MODEL_NAME, reranker_model)
                     s_px.set_attribute(RerankerAttributes.RERANKER_TOP_K, len(reranked))
                     s_px.set_attribute("reranker.top_k", len(reranked))
                     s_px.set_attribute("top_k", len(reranked))
@@ -691,13 +691,13 @@ class ActiveTrace:
                             "char_count": len(c_text)
                         })
 
-                        # Ghi nhận toàn bộ Candidate đầu vào vào OpenInference RERANKER_INPUT_DOCUMENTS
+                        # Record all input candidates to OpenInference RERANKER_INPUT_DOCUMENTS
                         in_prefix = f"{RerankerAttributes.RERANKER_INPUT_DOCUMENTS}.{i}"
                         s_px.set_attribute(f"{in_prefix}.document.id", f"[Candidate-{i+1}/{len(candidates)}] {c_id}")
                         s_px.set_attribute(f"{in_prefix}.document.content", c_text)
                         s_px.set_attribute(f"{in_prefix}.document.score", float(c_score))
 
-                    # 2. Output reranked summary (Top-K Chunks được chọn)
+                    # 2. Output reranked summary (Selected Top-K Chunks)
                     reranked_results = []
                     best_score = 0.0
                     for i, doc in enumerate(reranked):
@@ -747,7 +747,7 @@ class ActiveTrace:
                             "char_count": len(c_text)
                         })
 
-                        # OpenInference RERANKER_OUTPUT_DOCUMENTS (Top-K sau khi Cross-Encoder chấm điểm)
+                        # OpenInference RERANKER_OUTPUT_DOCUMENTS (Top-K scored by Cross-Encoder)
                         r_prefix = f"{RerankerAttributes.RERANKER_OUTPUT_DOCUMENTS}.{i}"
                         s_px.set_attribute(f"{r_prefix}.document.id", f"[Top-{i+1}/{len(reranked)} Rerank Chunk] {c_id}")
                         s_px.set_attribute(f"{r_prefix}.document.score", float(c_score))
@@ -769,13 +769,13 @@ class ActiveTrace:
 
                     inp_obj = {
                         "query": query,
-                        "model": "reranker-model",
+                        "model": reranker_model,
                         "total_input_candidates": len(candidates),
                         "requested_top_k": len(reranked),
                         "candidates_before_rerank": input_candidates_summary
                     }
                     out_obj = {
-                        "model": "reranker-model",
+                        "model": reranker_model,
                         "rerank_latency_ms": duration_ms,
                         "reranked_top_k": len(reranked),
                         "best_relevance_score": best_score,
@@ -973,7 +973,7 @@ class ActiveTrace:
         self.finished = True
         total_latency_ms = round((time.time() - self.start_time) * 1000, 1)
 
-        # Đóng Phoenix Root
+        # Close Phoenix Root span
         if self.px_root_span:
             try:
                 if PHOENIX_AVAILABLE:
@@ -1018,7 +1018,7 @@ class ActiveTrace:
             except Exception as e:
                 logger.debug(f"Phoenix end span error: {e}")
 
-        # Lưu file JSONL cục bộ để kiểm toán offline
+        # Save local JSONL file for offline auditing
         if answer:
             ans_rec = answer[:200]
         else:
@@ -1037,7 +1037,7 @@ class ActiveTrace:
         }
         self.tracer.save_local_log(trace_record)
 
-        # Hiển thị bảng tổng hợp trên terminal
+        # Display summary table on terminal
         self.tracer.print_trace_summary(trace_record)
 
     def __enter__(self):
@@ -1066,7 +1066,7 @@ class BankingTracer:
         self.enable_langfuse = False
         self.enable_phoenix = getattr(self.config, "ENABLE_PHOENIX", True)
 
-        # Thư mục lưu vết (đặt trực tiếp trong phân hệ tracing)
+        # Trace output directory (under tracing module)
         if hasattr(self.config, "TRACE_DIR"):
             self.trace_dir = self.config.TRACE_DIR
         else:
@@ -1074,7 +1074,7 @@ class BankingTracer:
         self.trace_dir.mkdir(parents=True, exist_ok=True)
         self.trace_log_file = self.trace_dir / "rag_traces.jsonl"
 
-        # Khởi tạo trạng thái Phoenix & Local Tracing
+        # Initialize Phoenix & Local Tracing state
         self.lf_client = None
         self.is_langfuse_active = False
 
@@ -1097,7 +1097,7 @@ class BankingTracer:
             self.is_phoenix_active = False
             return
 
-        # Kiểm tra nhanh xem collector có sẵn sàng không
+        # Fast health check if collector is available
         if _check_endpoint_reachable(endpoint, timeout=0.3):
             try:
                 global _PHOENIX_REGISTERED, _GLOBAL_PX_TRACER
@@ -1120,7 +1120,7 @@ class BankingTracer:
                 logger.warning(f"Không thể kết nối Phoenix OTel: {e}")
                 self.is_phoenix_active = False
         else:
-            # Phoenix server chưa khởi động, tắt tạm thời để tránh log lỗi kết nối
+            # Phoenix server not running, temporarily disable to avoid connection logs
             self.is_phoenix_active = False
             logger.debug(f"[Phoenix] Server chưa bật tại {endpoint}. Khởi chạy bằng 'python scripts/run_phoenix.py'.")
 
@@ -1270,7 +1270,7 @@ class BankingTracer:
         if model_name:
             chosen_model = model_name
         else:
-            chosen_model = "embedding-model"
+            chosen_model = getattr(self.tracer.config, "EMBEDDING_MODEL_1024", getattr(self.tracer.config, "EMBEDDING_MODEL", "embedding-1024"))
 
         input_chunks_summary = []
         embedded_chunks_details = []
@@ -1398,7 +1398,7 @@ class BankingTracer:
         query = record.get("query", "")
         spans = record.get("spans", [])
 
-        # Chỉ báo đồng bộ
+        # Synchronization indicator
         sync_tags = []
         if self.is_phoenix_active:
             sync_tags.append("Phoenix: ON")
@@ -1452,5 +1452,5 @@ class BankingTracer:
         print("└" + "─" * 70 + "┘\n")
 
 
-# Khởi tạo singleton tracer
+# Initialize singleton tracer
 tracer = BankingTracer()

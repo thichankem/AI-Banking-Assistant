@@ -1,16 +1,16 @@
 """
-Bộ định tuyến Tác vụ (Task Router - Node Đầu Tiên - Kiến trúc JSON-Driven).
-Thiết kế tối giản, trực quan, dễ hiểu theo chuẩn Chunking:
-- Tự động nạp quy tắc định tuyến ý định từ tệp JSON cấu hình (tasks_manifest.json).
-- Nhận diện Ý định (Intent) của người dùng dựa trên danh mục Kỹ năng (Skills) và Task.
-- Hỗ trợ Fallback phân loại sâu bằng LLM khi gặp câu hỏi tự do.
+Task Router (First Node - JSON-Driven Architecture).
+Architecture:
+- Dynamically loads intent routing rules from configuration JSON (tasks_manifest.json).
+- Identifies user Intent based on skill catalog and business tasks.
+- Supports Decision Model and LLM fallback for open-ended queries.
 
-NGUYÊN TẮC BẮT BUỘC:
-1. KHÔNG DÙNG __INIT__.PY: Import trực tiếp file module.
-2. KHÔNG DÙNG THƯ VIỆN TYPING: Thuần túy dùng kiểu gốc của Python.
-3. ZERO TERNARY: Bắt buộc dùng if/else tường minh, không dùng ?: hoặc toán tử 3 ngôi.
-4. 0% REGEX LAW: Tuyệt đối không dùng regex.
-5. HẠN CHẾ TỐI ĐA THỪA THÃI: Code ngắn gọn, trực diện, dễ hiểu.
+RULES:
+1. NO __INIT__.PY: Direct module imports.
+2. NO TYPING LIBRARY: Native Python types only.
+3. ZERO TERNARY: Explicit if/else only.
+4. 0% REGEX LAW: Absolutely no regular expressions.
+5. KEEP IT SIMPLE: Clear, direct, readable code.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from agent_banking.decision.decision_client import DecisionClient
 
 @dataclass
 class RoutingDecision:
-    """Quyết định điều hướng trả về từ Intent Router Node."""
+    """Routing decision returned by Intent Router Node."""
     task_id: str
     task_name: str
     target_skills: list[str]
@@ -36,7 +36,7 @@ class RoutingDecision:
 
 
 class TaskRouter:
-    """Node đầu tiên: Phân loại ý định và chỉ định Task dựa trên bộ cấu hình JSON."""
+    """First node: Classify intent and assign Task based on JSON rules and decision engine."""
 
     def __init__(self, skill_registry: SkillRegistry, config: Config | None = None, manifest_path: str | Path | None = None):
         self.registry = skill_registry
@@ -62,9 +62,8 @@ class TaskRouter:
             "api_key": getattr(self.config, "TASKS_LLM_API_KEY", self.config.LLM_API_KEY),
         })
 
-
     def _load_routing_manifest(self) -> None:
-        """Nạp các quy tắc điều hướng từ JSON manifest."""
+        """Load routing rules from JSON manifest."""
         if not self.manifest_path.exists():
             return
 
@@ -72,17 +71,17 @@ class TaskRouter:
             with open(self.manifest_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             rules = data.get("routing_rules", [])
-            # Sắp xếp theo priority tăng dần (0 là ưu tiên cao nhất)
+            # Sort by priority ascending (0 is highest priority)
             self.routing_rules = sorted(rules, key=lambda x: x.get("priority", 99))
         except Exception as e:
-            print(f"⚠️ Không thể đọc tasks_manifest.json: {e}")
+            print(f"⚠️ Failed to load tasks_manifest.json: {e}")
             self.routing_rules = []
 
     def route(self, user_query: str) -> RoutingDecision:
-        """Phân tích câu hỏi và chọn Task dựa trên bộ quy tắc JSON."""
+        """Analyze query and select Task based on JSON rules."""
         q = user_query.strip().lower()
 
-        # 1. Duyệt qua từng quy tắc được định nghĩa trong JSON
+        # 1. Iterate over JSON defined rules
         for rule in self.routing_rules:
             keywords = rule.get("keywords", [])
             task_id = rule.get("task_id", "")
@@ -98,7 +97,7 @@ class TaskRouter:
                             task_name=task_name,
                             target_skills=target_skills,
                             confidence=confidence,
-                            reason=f"Hội thoại chào hỏi xã giao khớp từ khóa: '{kw}'"
+                            reason=f"Matched greeting keyword: '{kw}'"
                         )
             else:
                 for kw in keywords:
@@ -108,50 +107,48 @@ class TaskRouter:
                             task_name=task_name,
                             target_skills=target_skills,
                             confidence=confidence,
-                            reason=f"Khớp từ khóa nghiệp vụ JSON: '{kw}'"
+                            reason=f"Matched business keyword: '{kw}'"
                         )
 
-        # 2. Fallback LLM dựa trên Skill Catalog nếu không khớp từ khóa
+        # 2. Fallback to decision engine / LLM classification
         return self._route_with_llm(user_query)
 
     def _route_with_llm(self, query: str) -> RoutingDecision:
-        """Phân tích sâu khi câu hỏi tự do: ưu tiên TypeSafe Jev System One, dự phòng LLM."""
-        # 1. Thử nghiệm phân loại siêu tốc bằng TypeSafe Jev System One
+        """Deep classification for open-ended queries: decision engine first, then LLM."""
+        # 1. Fast classification via Decision Model
         if self.decision_client.is_available():
-            jev_task = self.decision_client.route_task(query)
-            if jev_task is not None:
-                t_conf = float(jev_task.get("confidence", 0.0))
+            decision_task = self.decision_client.route_task(query)
+            if decision_task is not None:
+                t_conf = float(decision_task.get("confidence", 0.0))
                 if t_conf >= 0.70:
-                    t_id = jev_task.get("task_id", "")
+                    t_id = decision_task.get("task_id", "")
                     if t_id == "TASK_REACT_AGENT":
-                        return RoutingDecision("TASK_REACT_AGENT", "AI Agent Suy Luận & Hành Động Đa Bước (ReAct)", ["rag_knowledge_retrieval", "financial_calculator", "compliance_qd2345_audit"], t_conf, "TypeSafe Jev System One: ReAct đa bước")
+                        return RoutingDecision("TASK_REACT_AGENT", "Multi-Step ReAct Agent", ["rag_knowledge_retrieval", "financial_calculator", "compliance_qd2345_audit"], t_conf, "Decision Engine: Multi-step ReAct")
                     if t_id == "TASK_LOAN_ADVISORY":
-                        return RoutingDecision("TASK_LOAN_ADVISORY", "Tư vấn Gói Vay & Lịch Trả Nợ", ["financial_calculator", "rag_knowledge_retrieval"], t_conf, "TypeSafe Jev System One: Vay vốn")
+                        return RoutingDecision("TASK_LOAN_ADVISORY", "Loan Advisory & Amortization", ["financial_calculator", "rag_knowledge_retrieval"], t_conf, "Decision Engine: Loan Advisory")
                     if t_id == "TASK_BIOMETRIC_COMPLIANCE":
-                        return RoutingDecision("TASK_BIOMETRIC_COMPLIANCE", "Thẩm định Sinh trắc học QĐ 2345", ["compliance_qd2345_audit"], t_conf, "TypeSafe Jev System One: QĐ 2345")
+                        return RoutingDecision("TASK_BIOMETRIC_COMPLIANCE", "Biometric Compliance Evaluation", ["compliance_qd2345_audit"], t_conf, "Decision Engine: Biometrics")
                     if t_id == "TASK_CARD_SERVICE":
-                        return RoutingDecision("TASK_CARD_SERVICE", "Tư vấn Dịch vụ Thẻ", ["rag_knowledge_retrieval"], t_conf, "TypeSafe Jev System One: Dịch vụ thẻ")
+                        return RoutingDecision("TASK_CARD_SERVICE", "Card Services Advisory", ["rag_knowledge_retrieval"], t_conf, "Decision Engine: Card Services")
                     if t_id == "TASK_INCIDENT_SUPPORT":
-                        return RoutingDecision("TASK_INCIDENT_SUPPORT", "Xử lý Sự cố Khẩn cấp", ["incident_support_ticket"], t_conf, "TypeSafe Jev System One: Sự cố khẩn cấp")
+                        return RoutingDecision("TASK_INCIDENT_SUPPORT", "Urgent Incident Support", ["incident_support_ticket"], t_conf, "Decision Engine: Incident Support")
                     if t_id == "TASK_GENERAL_CHAT":
-                        return RoutingDecision("TASK_GENERAL_CHAT", "Tư vấn Tổng quan", [], t_conf, "TypeSafe Jev System One: Giao tiếp xã giao")
+                        return RoutingDecision("TASK_GENERAL_CHAT", "General Banking Chat", [], t_conf, "Decision Engine: General Chat")
                     if t_id == "TASK_POLICY_INQUIRY":
-                        return RoutingDecision("TASK_POLICY_INQUIRY", "Tra cứu Quy chế & Biểu phí Dịch vụ Ngân hàng", ["rag_knowledge_retrieval", "fact_checking_audit"], t_conf, "TypeSafe Jev System One: Quy chế RAG")
-
+                        return RoutingDecision("TASK_POLICY_INQUIRY", "Banking Policy & Tariff Inquiry", ["rag_knowledge_retrieval", "fact_checking_audit"], t_conf, "Decision Engine: Policy RAG")
 
         if not self.client:
             return RoutingDecision(
                 task_id="TASK_POLICY_INQUIRY",
-                task_name="Tra cứu Quy chế & Biểu phí Dịch vụ Ngân hàng",
+                task_name="Banking Policy & Tariff Inquiry",
                 target_skills=["rag_knowledge_retrieval", "fact_checking_audit"],
                 confidence=0.85,
-                reason="Định tuyến mặc định: Quy chế RAG"
+                reason="Default routing: Policy RAG"
             )
-
 
         skills_desc = self.registry.get_skills_prompt_description()
         system_prompt = (
-            "Bạn là Node Đầu Tiên (Intent Router) của Trợ lý AI Ngân hàng Vietcombank.\n"
+            "Bạn là Node Đầu Tiên (Intent Router) của Trợ lý AI Ngân hàng.\n"
             f"Danh bạ Kỹ năng:\n{skills_desc}\n\n"
             "Hãy phân loại câu hỏi vào DUY NHẤT 1 trong các mã sau:\n"
             "- TASK_POLICY_INQUIRY: Tra cứu quy chế, biểu phí, hạn mức mở tài khoản eKYC.\n"
@@ -180,20 +177,20 @@ class TaskRouter:
             code = raw.strip().upper()
 
             if "REACT" in code:
-                return RoutingDecision("TASK_REACT_AGENT", "AI Agent Suy Luận & Hành Động Đa Bước (ReAct)", ["rag_knowledge_retrieval", "financial_calculator", "compliance_qd2345_audit"], 0.95, "LLM phân loại ReAct đa bước")
+                return RoutingDecision("TASK_REACT_AGENT", "Multi-Step ReAct Agent", ["rag_knowledge_retrieval", "financial_calculator", "compliance_qd2345_audit"], 0.95, "LLM routed: Multi-step ReAct")
             if "LOAN" in code:
-                return RoutingDecision("TASK_LOAN_ADVISORY", "Tư vấn Gói Vay & Lịch Trả Nợ", ["financial_calculator", "rag_knowledge_retrieval"], 0.90, "LLM phân loại vay vốn")
+                return RoutingDecision("TASK_LOAN_ADVISORY", "Loan Advisory & Amortization", ["financial_calculator", "rag_knowledge_retrieval"], 0.90, "LLM routed: Loan Advisory")
             if "BIOMETRIC" in code or "2345" in code:
-                return RoutingDecision("TASK_BIOMETRIC_COMPLIANCE", "Thẩm định Sinh trắc học QĐ 2345", ["compliance_qd2345_audit"], 0.90, "LLM phân loại QĐ 2345")
+                return RoutingDecision("TASK_BIOMETRIC_COMPLIANCE", "Biometric Compliance Evaluation", ["compliance_qd2345_audit"], 0.90, "LLM routed: Biometrics")
             if "CARD" in code:
-                return RoutingDecision("TASK_CARD_SERVICE", "Tư vấn Dịch vụ Thẻ", ["rag_knowledge_retrieval"], 0.90, "LLM phân loại thẻ")
+                return RoutingDecision("TASK_CARD_SERVICE", "Card Services Advisory", ["rag_knowledge_retrieval"], 0.90, "LLM routed: Card Services")
             if "INCIDENT" in code:
-                return RoutingDecision("TASK_INCIDENT_SUPPORT", "Xử lý Sự cố Khẩn cấp", ["incident_support_ticket"], 0.90, "LLM phân loại sự cố")
+                return RoutingDecision("TASK_INCIDENT_SUPPORT", "Urgent Incident Support", ["incident_support_ticket"], 0.90, "LLM routed: Incident Support")
             if "CHAT" in code:
-                return RoutingDecision("TASK_GENERAL_CHAT", "Tư vấn Tổng quan", [], 0.90, "LLM phân loại giao tiếp")
+                return RoutingDecision("TASK_GENERAL_CHAT", "General Banking Chat", [], 0.90, "LLM routed: General Chat")
 
-            return RoutingDecision("TASK_POLICY_INQUIRY", "Tra cứu Quy chế & Biểu phí", ["rag_knowledge_retrieval"], 0.85, "LLM phân loại quy chế RAG")
+            return RoutingDecision("TASK_POLICY_INQUIRY", "Banking Policy & Tariff Inquiry", ["rag_knowledge_retrieval"], 0.85, "LLM routed: Policy RAG")
         except ModelFallbackError:
             raise
         except Exception:
-            return RoutingDecision("TASK_POLICY_INQUIRY", "Tra cứu Quy chế & Biểu phí", ["rag_knowledge_retrieval"], 0.80, "Dự phòng: Quy chế RAG")
+            return RoutingDecision("TASK_POLICY_INQUIRY", "Banking Policy & Tariff Inquiry", ["rag_knowledge_retrieval"], 0.80, "Fallback: Policy RAG")

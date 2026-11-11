@@ -1,22 +1,22 @@
 """
-Module Tu Dong Truy Van Lai Hybrid Retrieval (Auto Retrieval Node with Deduplication).
-======================================================================================
-Dac diem:
-1. Tu dong dong bo tu query_parser/output/parsed_queries.json sang retrieval/input/.
-2. Co che khoi tao nhe truc tiep (Lightweight Direct Engine Init): BankingEmbedder + QdrantBankingStore.
-3. Tai tao 100% 13 truong Target Universal Contract cua ParsedQuery, khong lam that thoat du lieu.
-4. Kiem tra StateTracker: Query nao da tim kiem thi tai su dung (SKIP).
-5. Truy van lai ket hop Dense Vector 1024 chieu + BM25 voi RRF k=60 cho queries moi.
-6. Lam giau metadata dau ra: query_id, intent, domain, expanded_query, outer chunk_id.
-7. Xuat 4 tep: retrieval_candidates.json, latest_candidates.json, retrieval_manifest.json, .state_tracker.json.
-8. Tu dong cap nhat downstream sang reranking/input/candidates.json neu ton tai.
-9. Ho tro Single Query execution tu terminal (--query) kem hien thi bang ket qua truc quan.
+Automated Hybrid Retrieval Runner (Auto Retrieval Node with Deduplication).
+===========================================================================
+Features:
+1. Synchronizes from query_parser/output/parsed_queries.json to retrieval/input/.
+2. Lightweight direct engine initialization: BankingEmbedder + QdrantBankingStore.
+3. Preserves 100% of the 13 fields in Target Universal Contract of ParsedQuery.
+4. Checks StateTracker: Reuses previously retrieved queries (SKIP).
+5. Executes hybrid search combining Dense Vector + BM25 with RRF k=60 for new queries.
+6. Enriches output metadata: query_id, intent, domain, expanded_query, outer chunk_id.
+7. Emits 4 files: retrieval_candidates.json, latest_candidates.json, retrieval_manifest.json, .state_tracker.json.
+8. Automatically cascades downstream to reranking/input/candidates.json if present.
+9. Supports single query CLI execution (--query).
 
-NGUYEN TAC BAT BUOC (GEMINI.md & AGENTS.md):
-1. KHONG DUNG __INIT__.PY: Import truc tiep module.
-2. KHONG DUNG THU VIEN TYPING: Thuan tuy dung kieu nguyen ban cua Python.
-3. ZERO TERNARY: Bat buoc dung if/else tuong minh, khong dung toan tu 3 ngoi.
-4. 0% REGEX LAW: Tuyet doi khong dung regex.
+MANDATORY INVARIANTS:
+1. NO __INIT__.PY: Direct module imports.
+2. NO TYPING LIBRARY: Native types only.
+3. ZERO TERNARY: Explicit if/else statements.
+4. 0% REGEX LAW: No regex methods or import re.
 """
 
 import sys

@@ -1,17 +1,17 @@
 """
-Module Tu Dong Thuc Thi Tools (Auto Tools Node with Deduplication).
+Automated Tool Execution Node with Deduplication.
 ===================================================================
-Dac diem:
-1. Doc yeu cau goi cong cu tu tools/input/sample_tool_inputs.json.
-2. Tinh toan SHA-256 hash cua tung tool_name va arguments.
-3. Kiem tra StateTracker: Tool call nao da chay thi tai su dung (SKIP).
-4. Chi kich hoat BankingToolRegistry thuc thi cac lenh goi moi.
-5. Xuat ket qua: sample_tool_outputs.json.
+Features:
+1. Reads tool call requests from tools/input/sample_tool_inputs.json.
+2. Computes SHA-256 hash of each tool_name and arguments.
+3. Checks StateTracker: Reuses previously completed tool calls (SKIP).
+4. Invokes BankingToolRegistry for new tool calls.
+5. Exports results to sample_tool_outputs.json.
 
-NGUYEN TAC BAT BUOC:
-1. KHONG DUNG __INIT__.PY.
-2. KHONG DUNG THU VIEN TYPING.
-3. ZERO TERNARY: if/else tuong minh.
+MANDATORY RULES:
+1. NO __INIT__.PY.
+2. NO TYPING LIBRARY.
+3. ZERO TERNARY: Explicit if/else only.
 4. 0% REGEX LAW.
 """
 
@@ -42,7 +42,7 @@ def run_auto_tools(
     force: bool = False
 ) -> list[dict]:
     """
-    Tu dong thuc thi tools tu input sang output kem co che chong trung lap.
+    Automatically execute tools from input to output with deduplication.
     """
     in_dir = PROJECT_ROOT / "agent_banking" / "tools" / "input"
     in_dir.mkdir(parents=True, exist_ok=True)
@@ -58,7 +58,7 @@ def run_auto_tools(
     if force:
         tracker.clear()
 
-    # 1. Tim nguon input
+    # 1. Resolve input source
     target_in_file = None
     if input_file is not None:
         target_in_file = Path(input_file)
@@ -68,7 +68,7 @@ def run_auto_tools(
             target_in_file = candidate
 
     if target_in_file is None or not target_in_file.exists():
-        print(f"⚠️ Khong tim thay tap tin tool inputs trong: {in_dir}")
+        print(f"⚠️ Tool inputs file not found in: {in_dir}")
         return []
 
     print(f"\n{'='*75}")
@@ -79,10 +79,10 @@ def run_auto_tools(
         raw_items = json.load(fp)
 
     if not raw_items:
-        print("⚠️ Danh sach tool inputs rong.")
+        print("⚠️ Tool inputs list is empty.")
         return []
 
-    # 2. Doc ket qua cu de tai su dung
+    # 2. Read existing results for deduplication
     prev_results = {}
     prev_file = out_path / "sample_tool_outputs.json"
     if prev_file.exists() and not force:
@@ -101,8 +101,8 @@ def run_auto_tools(
                     args_str = json.dumps(args, sort_keys=True, ensure_ascii=False)
                     t_hash_map[tool_name] = tracker.compute_text_hash(f"{tool_name}:{args_str}")
                 if tracker.are_all_items_processed(t_hash_map):
-                    print(f"  ⏭️ [SKIP ALL] Tat ca {len(raw_items)} tools da duoc thuc thi truoc do. Bo qua toan bo trong 0.0s!")
-                    print(f"✅ [Tools Hoan Tat] Da xuat {len(prev_list)} tool outputs vao: {prev_file} trong 0.0s")
+                    print(f"  ⏭️ [SKIP ALL] All {len(raw_items)} tools previously executed. Skipped in 0.0s.")
+                    print(f"✅ [Tools Complete] Exported {len(prev_list)} tool outputs to: {prev_file} in 0.0s")
                     return prev_list
         except Exception:
             prev_results = {}
@@ -125,7 +125,7 @@ def run_auto_tools(
             cached_res = dict(prev_results[tool_name])
             tool_outputs.append(cached_res)
             skipped_count += 1
-            print(f"  [{idx:02d}] [SKIP] Tool '{tool_name}' (Da thuc thi)")
+            print(f"  [{idx:02d}] [SKIP] Tool '{tool_name}' (Already executed)")
         else:
             t0 = time.time()
             res_dict = registry.execute_tool(tool_name, args)
@@ -146,12 +146,12 @@ def run_auto_tools(
     tracker.save()
     total_elapsed = round(time.time() - start_t, 2)
 
-    # 3. Xuat ket qua
+    # 3. Export output
     out_file = out_path / "sample_tool_outputs.json"
     with open(out_file, "w", encoding="utf-8") as fp:
         json.dump(tool_outputs, fp, ensure_ascii=False, indent=2)
 
-    print(f"✅ [Tools Hoan Tat] Da xuat {len(tool_outputs)} tool outputs vao: {out_file} (Moi: {new_count}, Bo qua: {skipped_count}) trong {total_elapsed}s")
+    print(f"✅ [Tools Complete] Exported {len(tool_outputs)} tool outputs to: {out_file} (New: {new_count}, Skipped: {skipped_count}) in {total_elapsed}s")
     return tool_outputs
 
 

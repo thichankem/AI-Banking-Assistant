@@ -1,21 +1,22 @@
 """
-Module Hybrid Retriever (Bước 2: Truy vấn Kết hợp Dense Vector & BM25 + Reciprocal Rank Fusion)
-======================================================================
-Nhiệm vụ:
-1. Nhận Universal Query Contract: ParsedQuery, dict, hoặc chuỗi str.
-2. Định tuyến truy vấn thông minh theo độ ưu tiên:
-   - Kênh Dense Vector 1024 chiều: ưu tiên expanded_query -> normalized_query -> raw_query.
-   - Kênh Sparse Okapi BM25: ưu tiên keywords_str -> normalized_query -> raw_query.
-3. Khai thác Smart Suggested Filters: Caller filter_dict > suggested_filters.
-4. Cơ chế Resilience & Zero-Result Fallback: Tự động chạy unconstrained retrieval khi bộ lọc làm mất ứng viên, tái sử dụng vector embedding có sẵn.
-5. Hợp nhất danh sách bằng Reciprocal Rank Fusion (RRF k=60, w_dense=0.5, w_bm25=0.5).
-6. Chuẩn hóa và bảo toàn chính xác 13 trường của Target Universal Schema và đính kèm outer chunk_id cho Reranking.
+Hybrid Retriever Module (Dense Vector & Okapi BM25 + Reciprocal Rank Fusion)
+=============================================================================
+Core Capabilities:
+1. Universal Query Contract: Accepts ParsedQuery, dict, or str.
+2. Dual-channel intelligent routing:
+   - Dense Vector channel: expanded_query -> normalized_query -> raw_query.
+   - Sparse Okapi BM25 channel: keywords_str -> normalized_query -> raw_query.
+3. Smart Suggested Filters: Caller filter_dict > suggested_filters.
+4. Resilience & Zero-Result Fallback: Automatically falls back to unconstrained search
+   if initial filters return zero candidates, reusing computed embeddings.
+5. Reciprocal Rank Fusion (RRF k=60, w_dense=0.5, w_bm25=0.5).
+6. Preserves all 13 fields of the Target Universal Schema with outer chunk_id.
 
-NGUYÊN TẮC THIẾT KẾ (GEMINI.md & AGENTS.md):
-1. 0% REGEX LAW: Tuyệt đối không dùng thư viện regex hay regex methods.
-2. ZERO TERNARY: Bắt buộc dùng if/else tường minh từng dòng, không dùng toán tử 3 ngôi (x if c else y).
-3. NO TYPING LIBRARY: Tuyệt đối không dùng thư viện typing hay type hinting phức hợp.
-4. NO __INIT__.PY: Import trực tiếp file module.
+DESIGN INVARIANTS:
+1. 0% REGEX LAW: No regex library or regex methods.
+2. ZERO TERNARY: Explicit if/else statements only.
+3. NO TYPING LIBRARY: Native types only.
+4. NO __INIT__.PY: Direct module imports.
 """
 
 import time
@@ -48,8 +49,8 @@ REQUIRED_UNIVERSAL_SCHEMA_KEYS = (
 
 class HybridRetriever:
     """
-    Bộ truy xuất lai kết hợp Dense Vector 1024 chiều và Sparse Okapi BM25
-    sử dụng thuật toán Reciprocal Rank Fusion (RRF k=60).
+    Hybrid retriever combining dense vectors and sparse Okapi BM25
+    using Reciprocal Rank Fusion (RRF k=60).
     """
 
     def __init__(
@@ -101,7 +102,7 @@ class HybridRetriever:
     @staticmethod
     def _normalize_chunk(raw_chunk):
         """
-        Chuẩn hóa chunk để bảo toàn chính xác 13 trường của Target Universal Schema.
+        Normalize chunk to preserve exact 13 fields of Target Universal Schema.
         Loại bỏ hoàn toàn các trường legacy (original_text, word_count, token_count, is_active).
         """
         if not isinstance(raw_chunk, dict):
@@ -253,19 +254,19 @@ class HybridRetriever:
         breadcrumb_boost=1.5
     ):
         """
-        Thực hiện Hybrid Retrieval và hợp nhất thứ hạng với Reciprocal Rank Fusion (RRF k=60).
-        Hỗ trợ 3 định dạng query: ParsedQuery, dict, str (Universal Query Contract).
-        Áp dụng suggested_filters thông minh kèm cơ chế fallback khi kết quả lọc rỗng.
-        Bảo toàn 100% 13 trường của Target Universal Schema và outer chunk_id.
+        Execute Hybrid Retrieval and fuse rankings using Reciprocal Rank Fusion (RRF k=60).
+        Supports 3 query formats: ParsedQuery, dict, str (Universal Query Contract).
+        Applies smart suggested_filters with automatic zero-result fallback.
+        Preserves 100% of the 13 fields in Target Universal Schema with outer chunk_id.
         """
-        # Kiểm tra điều kiện biên đầu vào
+        # Validate input boundary conditions
         if query is None:
             return []
         if isinstance(query, str):
             if len(query.strip()) == 0:
                 return []
 
-        # 1. Xác định Top-K và Candidate-K hiệu lực
+        # 1. Determine effective Top-K and Candidate-K
         if top_k is not None:
             effective_top_k = int(top_k)
         else:
@@ -286,7 +287,7 @@ class HybridRetriever:
         if effective_candidate_k < effective_top_k:
             effective_candidate_k = effective_top_k
 
-        # 2. Xử lý Universal Query Contract và trích xuất chuỗi truy vấn tối ưu
+        # 2. Process Universal Query Contract and extract optimal query string
         raw_query_text = ""
         dense_query_text = ""
         bm25_query_text = ""
@@ -298,7 +299,7 @@ class HybridRetriever:
             else:
                 raw_query_text = ""
 
-            # Kênh Dense: expanded_query -> normalized_query -> raw_query
+            # Dense channel: expanded_query -> normalized_query -> raw_query
             if query.expanded_query and str(query.expanded_query).strip():
                 dense_query_text = str(query.expanded_query).strip()
             elif query.normalized_query and str(query.normalized_query).strip():
@@ -306,7 +307,7 @@ class HybridRetriever:
             else:
                 dense_query_text = raw_query_text
 
-            # Kênh BM25: keywords_str -> normalized_query -> raw_query
+            # BM25 channel: keywords_str -> normalized_query -> raw_query
             if query.keywords_str and str(query.keywords_str).strip():
                 bm25_query_text = str(query.keywords_str).strip()
             elif query.normalized_query and str(query.normalized_query).strip():
@@ -337,7 +338,7 @@ class HybridRetriever:
                         clean_kws.append(str(kw).strip())
                 kws_q = " ".join(clean_kws)
 
-            # Kênh Dense: expanded_query -> normalized_query -> raw_query
+            # Dense channel: expanded_query -> normalized_query -> raw_query
             if exp_q and str(exp_q).strip():
                 dense_query_text = str(exp_q).strip()
             elif norm_q and str(norm_q).strip():
@@ -345,7 +346,7 @@ class HybridRetriever:
             else:
                 dense_query_text = raw_query_text
 
-            # Kênh BM25: keywords_str -> normalized_query -> raw_query
+            # BM25 channel: keywords_str -> normalized_query -> raw_query
             if kws_q and str(kws_q).strip():
                 bm25_query_text = str(kws_q).strip()
             elif norm_q and str(norm_q).strip():
@@ -368,7 +369,7 @@ class HybridRetriever:
             elif len(bm25_query_text) > 0:
                 raw_query_text = bm25_query_text
 
-        # 3. Xác định bộ lọc metadata (Caller filter_dict > suggested_filters)
+        # 3. Determine metadata filters (Caller filter_dict > suggested_filters)
         active_filter = None
         if filter_dict is not None and isinstance(filter_dict, dict):
             if len(filter_dict) > 0:
@@ -381,7 +382,7 @@ class HybridRetriever:
 
         norm_filter = self._normalize_filter_dict(active_filter)
 
-        # 4. Dense Vector Search (Cosine HNSW 1024 chiều)
+        # 4. Dense Vector Search (Cosine HNSW 1024-dim)
         t_dense_start = time.time()
         if self.embedding_model is not None and hasattr(self.embedding_model, "embed_query"):
             query_vector = self.embedding_model.embed_query(dense_query_text)
@@ -400,7 +401,7 @@ class HybridRetriever:
             dense_results = []
         t_dense_duration = (time.time() - t_dense_start) * 1000
 
-        # 5. Sparse BM25 Okapi Search (BM25F Multi-field kèm Breadcrumb Boost)
+        # 5. Sparse BM25 Okapi Search (BM25F Multi-field with Breadcrumb Boost)
         t_bm25_start = time.time()
         if self.bm25_search is not None and hasattr(self.bm25_search, "search"):
             bm25_results = self.bm25_search.search(
@@ -426,7 +427,7 @@ class HybridRetriever:
             bm25_results = []
         t_bm25_duration = (time.time() - t_bm25_start) * 1000
 
-        # 6. Cơ chế tự động dự phòng khi bộ lọc trả về 0 kết quả (Filter Zero-Result Fallback)
+        # 6. Filter Zero-Result Fallback mechanism
         fallback_unfiltered = False
         if len(dense_results) == 0 and len(bm25_results) == 0 and norm_filter is not None:
             fallback_unfiltered = True
@@ -457,10 +458,10 @@ class HybridRetriever:
                         filter_dict=None
                     )
 
-        # 7. Hợp nhất bằng thuật toán Reciprocal Rank Fusion (RRF k=60)
+        # 7. Reciprocal Rank Fusion (RRF k=60) merge
         candidates = {}
 
-        # Ghi nhận kết quả Dense
+        # Record Dense results
         for rank, item in enumerate(dense_results, start=1):
             if isinstance(item, tuple):
                 raw_chunk, score = item
@@ -484,7 +485,7 @@ class HybridRetriever:
                 candidates[chunk_id]["dense_rank"] = rank
                 candidates[chunk_id]["dense_score"] = float(score)
 
-        # Ghi nhận kết quả BM25
+        # Record BM25 results
         for rank, item in enumerate(bm25_results, start=1):
             if isinstance(item, tuple):
                 raw_chunk, score = item
@@ -508,7 +509,7 @@ class HybridRetriever:
                 candidates[chunk_id]["bm25_rank"] = rank
                 candidates[chunk_id]["bm25_score"] = float(score)
 
-        # Tính toán điểm số RRF:
+        # Compute RRF scores:
         # RRF(d) = (w_dense / (k + rank_dense)) + (w_bm25 / (k + rank_bm25))
         for item in candidates.values():
             rrf = 0.0
@@ -518,10 +519,10 @@ class HybridRetriever:
                 rrf += self.bm25_weight / (self.rrf_k + item["bm25_rank"])
             item["rrf_score"] = rrf
 
-        # Sắp xếp các ứng viên theo điểm RRF giảm dần
+        # Sort candidates descending by RRF score
         sorted_candidates = sorted(candidates.values(), key=lambda x: x["rrf_score"], reverse=True)
 
-        # Trích xuất chính xác Top-K ứng viên và cấu trúc hóa đối tượng trả về
+        # Extract exact Top-K candidates and format return objects
         top_candidates = []
         for rank, item in enumerate(sorted_candidates[:effective_top_k], start=1):
             if item["dense_score"] is not None:

@@ -1,16 +1,16 @@
 """
-Bộ Điều Phối Quản Lý Tác Vụ Ngân Hàng (Banking Task Manager).
-Thiết kế tối giản, trực quan, dễ hiểu theo chuẩn Chunking:
-- Node Đầu Tiên (Intent Node): Gọi TaskRouter phân loại ý định dựa trên Skills.
-- Điều phối Thực thi: Chuyển giao ngữ cảnh cho Task chuyên trách (chuỗi Nodes con).
-- Đóng gói Kết quả Thống nhất: Trả về câu trả lời, trích dẫn, các bước thực thi và độ trễ.
+Banking Task Manager.
+Minimalist, readable architecture:
+- First Node (Intent Node): Calls TaskRouter to classify intent based on skills.
+- Execution Coordinator: Hands off context to specialized task (sub-node chain).
+- Unified Result Packaging: Returns response, citations, execution steps, and latency.
 
-NGUYÊN TẮC BẮT BUỘC:
-1. KHÔNG DÙNG __INIT__.PY: Import trực tiếp file module.
-2. KHÔNG DÙNG THƯ VIỆN TYPING: Thuần túy dùng kiểu gốc của Python.
-3. ZERO TERNARY: Bắt buộc dùng if/else tường minh, không dùng ?: hoặc toán tử 3 ngôi.
-4. 0% REGEX LAW: Tuyệt đối không dùng regex.
-5. HẠN CHẾ TỐI ĐA THỪA THÃI: Code ngắn gọn, trực diện, dễ hiểu.
+RULES:
+1. NO __INIT__.PY: Direct module imports.
+2. NO TYPING LIBRARY: Native Python types only.
+3. ZERO TERNARY: Explicit if/else only.
+4. 0% REGEX LAW: Absolutely no regular expressions.
+5. KEEP IT SIMPLE: Clear, direct, readable code.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from .react_agent_task.task import ReActAgentTask
 
 
 class BankingTaskManager:
-    """Bộ điều phối toàn trình quản lý các Tasks và Skills nghiệp vụ."""
+    """End-to-end coordinator managing business tasks and skills."""
 
     def __init__(self, pipeline_instance=None, config: Config | None = None):
         if config is not None:
@@ -38,13 +38,13 @@ class BankingTaskManager:
         else:
             self.config = Config()
 
-        # 1. Danh bạ Kỹ năng (Skill Registry)
+        # 1. Skill Registry
         self.skill_registry = SkillRegistry(pipeline_instance=pipeline_instance, config=self.config)
 
-        # 2. Node Đầu Tiên: Intent Router
+        # 2. First Node: Intent Router
         self.router = TaskRouter(skill_registry=self.skill_registry, config=self.config)
 
-        # 3. Đăng ký các Tasks nghiệp vụ
+        # 3. Register business tasks
         self.tasks: dict[str, BaseBankingTask] = {}
         self._register(PolicyInquiryTask(skill_registry=self.skill_registry, config=self.config))
         self._register(LoanAdvisoryTask(skill_registry=self.skill_registry, config=self.config))
@@ -59,10 +59,10 @@ class BankingTaskManager:
 
     def process_query(self, user_query: str, context: dict | None = None) -> dict:
         """
-        Xử lý toàn trình:
-        1. Node 0 (Intent Router): Chọn Task dựa trên Skills.
-        2. Task Execution: Chạy chuỗi Nodes con bên trong Task.
-        3. Tổng hợp kết quả thống nhất.
+        Full-cycle processing:
+        1. Node 0 (Intent Router): Select Task based on skills.
+        2. Task Execution: Run sub-nodes inside Task.
+        3. Consolidate unified result.
         """
         start_time = time.perf_counter()
         clean_q = user_query.strip()
@@ -70,23 +70,23 @@ class BankingTaskManager:
             return {
                 "answer": "Kính chào Quý khách! Vui lòng nhập nội dung yêu cầu cần hỗ trợ.",
                 "task_id": "NONE",
-                "task_name": "Không xác định",
+                "task_name": "Unknown",
                 "execution_steps": [],
                 "latency_ms": 0.0
             }
 
-        # Node Đầu Tiên: Intent Router
+        # First Node: Intent Router
         decision = self.router.route(clean_q)
 
-        # Kích hoạt Task được chọn
+        # Execute chosen task
         task = self.tasks.get(decision.task_id, self.tasks["TASK_POLICY_INQUIRY"])
         task_res = task.execute(clean_q, context=context)
 
         total_latency = round((time.perf_counter() - start_time) * 1000, 2)
 
-        # Tổng hợp các bước thực thi
+        # Consolidate execution steps
         combined_steps = [
-            f"Node 0 (Intent Router): Điều hướng vào [{decision.task_id}] dựa trên skills: {decision.target_skills} ({decision.reason})"
+            f"Node 0 (Intent Router): Routed to [{decision.task_id}] based on skills: {decision.target_skills} ({decision.reason})"
         ]
         combined_steps.extend(task_res.execution_steps)
 

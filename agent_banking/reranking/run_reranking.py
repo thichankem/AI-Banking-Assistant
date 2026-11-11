@@ -1,18 +1,18 @@
 """
-Module Tu Dong Tai Xep Hang Cross-Encoder (Auto Reranking Node with Deduplication).
+Auto Reranking Node with Cross-Encoder and Deduplication.
 ===================================================================================
-Dac diem:
-1. Doc tu reranking/input/candidates.json (hoac tu dong lay tu retrieval/output).
-2. Tinh toan SHA-256 hash cua cau hoi kem danh sach chunk_id ung vien.
-3. Kiem tra StateTracker: Cap (Query, Candidates) nao da rerank thi tai su dung (SKIP).
-4. Chi gui Cross-Encoder reranker-model cho nhung truy van moi.
-5. Xuat ket qua: reranked_chunks.json, latest_reranked.json, reranking_manifest.json.
+Features:
+1. Reads candidates from reranking/input/candidates.json (or retrieval/output).
+2. Computes SHA-256 hash over query and candidate IDs.
+3. Checks StateTracker: Reuses previously reranked query pairs (SKIP).
+4. Only executes Cross-Encoder reranking for novel queries.
+5. Emits outputs: reranked_chunks.json, latest_reranked.json, reranking_manifest.json.
 
-NGUYEN TAC BAT BUOC:
-1. KHONG DUNG __INIT__.PY.
-2. KHONG DUNG THU VIEN TYPING.
-3. ZERO TERNARY: if/else tuong minh.
-4. 0% REGEX LAW.
+MANDATORY RULES:
+1. NO __INIT__.PY: Direct module imports.
+2. NO TYPING LIBRARY: Native Python types only.
+3. ZERO TERNARY: Explicit if/else statements only.
+4. 0% REGEX LAW: String methods only.
 """
 
 import sys
@@ -38,8 +38,7 @@ from agent_banking.state_tracker import StateTracker
 
 def extract_candidate_ids(candidates):
     """
-    Trich xuat danh sach ID dinh danh cua cac ung vien.
-    Ho tro ca list[dict] (chunk_id, id, nested chunk) va list[str] (text hash hoac str(idx)).
+    Extract candidate identification IDs supporting list[dict] and list[str].
     """
     cand_ids = []
     if not isinstance(candidates, list):
@@ -80,7 +79,7 @@ def _write_reranking_manifest(
     duration_ms
 ):
     """
-    Xuat ban tap tin reranking_manifest.json voi cac so lieu thong ke thuc thi.
+    Emit reranking_manifest.json with execution metrics.
     """
     manifest_file = out_path / "reranking_manifest.json"
     manifest_data = {
@@ -101,14 +100,14 @@ def _write_reranking_manifest(
     try:
         with open(manifest_file, "w", encoding="utf-8") as fp:
             json.dump(manifest_data, fp, ensure_ascii=False, indent=2)
-        print(f"📋 [Manifest] Da xuat manifest thong ke tai: {manifest_file.name}")
+        print(f"[Manifest] Exported manifest to: {manifest_file.name}")
     except Exception as err:
-        print(f"⚠️ [Manifest Warning] Khong the ghi manifest: {err}")
+        print(f"[Manifest Warning] Failed to write manifest: {err}")
 
 
 def sync_downstream_generator(out_file):
     """
-    Tu dong dong bo tap tin ket qua reranking sang generator/input/top_chunks.json.
+    Synchronize reranking output to generator/input/top_chunks.json.
     """
     downstream_in = PROJECT_ROOT / "agent_banking" / "generator" / "input"
     if downstream_in.exists():
@@ -126,7 +125,7 @@ def run_auto_reranking(
     force=False
 ):
     """
-    Tu dong tinh loc rerank tu input sang output kem co che chong trung lap.
+    Automatically reranks input candidates to output with deduplication.
     """
     start_t = time.time()
     cfg = Config()
@@ -144,7 +143,7 @@ def run_auto_reranking(
     if force:
         tracker.clear()
 
-    # 1. Tim nguon retrieval candidates
+    # 1. Locate retrieval candidates source
     target_in_file = None
     if input_file is not None:
         target_in_file = Path(input_file)
@@ -162,19 +161,19 @@ def run_auto_reranking(
                     target_in_file = rag_ret_out
 
     if target_in_file is None or not target_in_file.exists():
-        print(f"⚠️ Khong tim thay tap tin candidates.json trong: {in_dir}")
-        print("Vui long bo file 'candidates.json' vao agent_banking/reranking/input/")
+        print(f"[Warning] candidates.json not found in: {in_dir}")
+        print("Please provide 'candidates.json' to agent_banking/reranking/input/")
         return []
 
     print(f"\n{'='*75}")
-    print(f"▶ [MODULE 6: RERANKING] Input: {target_in_file.name} -> Output: {out_path}")
+    print(f"[MODULE 6: RERANKING] Input: {target_in_file.name} -> Output: {out_path}")
     print(f"{'='*75}")
 
     with open(target_in_file, "r", encoding="utf-8") as fp:
         raw_retrieval = json.load(fp)
 
     if not raw_retrieval:
-        print("⚠️ Danh sach retrieval candidates rong.")
+        print("[Warning] Retrieval candidates list is empty.")
         return []
 
     if isinstance(raw_retrieval, dict):
@@ -183,7 +182,7 @@ def run_auto_reranking(
         else:
             raw_retrieval = [raw_retrieval]
 
-    # Dong bo file vao in_dir
+    # Sync file to in_dir
     in_copy = in_dir / "candidates.json"
     if target_in_file != in_copy:
         try:
@@ -192,7 +191,7 @@ def run_auto_reranking(
         except Exception:
             pass
 
-    # 2. Doc ket qua cu da rerank de tai su dung
+    # 2. Read previous reranked results for deduplication
     prev_results = {}
     prev_file = out_path / "reranked_chunks.json"
     if prev_file.exists():
@@ -219,7 +218,7 @@ def run_auto_reranking(
                                 icand_str = ",".join(icand_ids)
                                 q_hash_map[iq] = tracker.compute_text_hash(f"{iq}:{icand_str}:{top_k}")
                         if tracker.are_all_items_processed(q_hash_map):
-                            print(f"  ⏭️ [SKIP ALL] Tat ca {len(raw_retrieval)} queries da duoc tai xep hang truoc do. Bo qua toan bo trong 0.0s!")
+                            print(f"  [SKIP ALL] All {len(raw_retrieval)} queries already reranked. Skipping in 0.0s.")
                             latest_file = out_path / "latest_reranked.json"
                             if prev_list:
                                 try:
@@ -238,7 +237,7 @@ def run_auto_reranking(
                                 duration_ms=duration_ms
                             )
                             sync_downstream_generator(prev_file)
-                            print(f"✅ [Reranking Hoan Tat] Da xuat {len(prev_list)} ket qua vao: {prev_file} trong 0.0s")
+                            print(f"[Reranking Complete] Exported {len(prev_list)} results to: {prev_file} in 0.0s")
                             return prev_list
             except Exception:
                 prev_results = {}
@@ -286,7 +285,7 @@ def run_auto_reranking(
                 reranked_results.append(cached_res)
                 skipped_count += 1
                 display_q = q[:40]
-                print(f"  [{q_id:02d}] [SKIP] '{display_q}...' (Da rerank san)")
+                print(f"  [{q_id:02d}] [SKIP] '{display_q}...' (Cached)")
                 continue
 
         t0 = time.time()
@@ -315,13 +314,13 @@ def run_auto_reranking(
         tracker.record_processed(q, q_hash, {"reranked_count": len(top_chunks)})
         new_count += 1
         display_q = q[:40]
-        print(f"  [{q_id:02d}] [NEW]  '{display_q}...' -> Tinh loc Top-{len(top_chunks)} chunks ({dt_ms}ms)")
+        print(f"  [{q_id:02d}] [NEW]  '{display_q}...' -> Refined Top-{len(top_chunks)} chunks ({dt_ms}ms)")
 
     tracker.save()
     total_elapsed = round(time.time() - start_t, 2)
     total_duration_ms = round((time.time() - start_t) * 1000, 2)
 
-    # 3. Xuat ket qua
+    # 3. Export results
     out_file = out_path / "reranked_chunks.json"
     with open(out_file, "w", encoding="utf-8") as fp:
         json.dump(reranked_results, fp, ensure_ascii=False, indent=2)
@@ -343,7 +342,7 @@ def run_auto_reranking(
 
     sync_downstream_generator(out_file)
 
-    print(f"✅ [Reranking Hoan Tat] Da xuat ket qua cho {len(reranked_results)} queries vao: {out_file} (Moi: {new_count}, Bo qua: {skipped_count}) trong {total_elapsed}s")
+    print(f"[Reranking Complete] Exported results for {len(reranked_results)} queries to: {out_file} (New: {new_count}, Skipped: {skipped_count}) in {total_elapsed}s")
     return reranked_results
 
 

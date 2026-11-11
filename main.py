@@ -3,19 +3,18 @@
 """
 AI Banking Assistant - Web Application Server
 ======================================================================
-Khởi chạy dịch vụ web API & kết nối trực tiếp giao diện tĩnh (Static Frontend)
-với toàn bộ các Node (Chunking, Embedding, Vector DB, Query Parser, Retrieval, Reranking, Generator):
+Launches web API service and static frontend connected to all RAG and Agentic nodes:
 
-1. Endpoint Chat: /api/chat (Xử lý toàn trình qua 7 nodes, trả về câu trả lời và vết chi tiết của từng node)
-2. Endpoint Cấu hình: /api/config
-3. Endpoint Quản lý Node Folders: /api/nodes, /api/nodes/{node_name}/{io_type}/{file_name}
-4. Endpoint Kích hoạt Pipeline từ Folder: /api/pipeline/run-folders
-5. Phục vụ Static Frontend: http://127.0.0.1:8000
+1. Chat Endpoint: /api/chat (End-to-end processing across 7 nodes with execution trace)
+2. Config Endpoint: /api/config
+3. Node Folders Management: /api/nodes, /api/nodes/{node_name}/{io_type}/{file_name}
+4. Trigger Pipeline: /api/pipeline/run-folders
+5. Static Frontend: http://127.0.0.1:8000
 
-NGUYÊN TẮC:
-- 0% REGEX LAW: Tuyệt đối không dùng regex.
-- ZERO TERNARY: Ưu tiên if/else tường minh.
-- MINH BẠCH INPUT/OUTPUT: Từng node đều lưu vết vào thư mục input/output tương ứng.
+MANDATORY RULES:
+- 0% REGEX LAW: Strictly string methods only (in, split, startswith, endswith, strip, lower, replace, find).
+- ZERO TERNARY: Explicit if/else syntax only (no x if c else y).
+- NO TYPING LIBRARY: Use Python native types only.
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ import json
 import asyncio
 from pathlib import Path
 
-# Đảm bảo UTF-8 an toàn trên Windows console
+# Ensure UTF-8 on Windows console
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -47,35 +46,42 @@ import uvicorn
 
 from agent_banking.config.settings import Config
 from agent_banking.pipeline import BankingRAGPipeline
+from agent_banking.node_pipeline import NodePipeline
 from agent_banking.generator.rag_generator import (
     PERSONA_PROFILES,
     TONE_PROFILES,
     FORMAT_PROFILES
 )
 
-# Khởi tạo FastAPI app
+# Initialize FastAPI application
 app = FastAPI(
     title="AI Banking Assistant",
-    description="Hệ thống Trợ lý Ngân hàng Số & Pipeline Quản lý Node Dữ liệu",
+    description="Enterprise Digital Banking Assistant & Pipeline Orchestration API",
     version="3.0.0"
 )
 
-# Gắn thư mục static để phục vụ index.html, style.css, app.js
+# Mount static directory for frontend assets
 static_dir = ROOT_DIR / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-# Khởi tạo BankingRAGPipeline Singleton với cơ chế Fallback In-Memory khi tệp bị khóa
+# Initialize Config & BankingRAGPipeline
 config = Config()
-use_memory_env = os.environ.get("USE_MEMORY_STORE", "0") == "1"
+use_memory_env = False
+if os.environ.get("USE_MEMORY_STORE", "0") == "1":
+    use_memory_env = True
+
 try:
     rag_pipeline = BankingRAGPipeline(config=config, use_memory=use_memory_env)
 except RuntimeError as lock_err:
     if "already accessed by another instance" in str(lock_err):
-        print("⚠️ [Qdrant Lock] Thư mục Qdrant đang được giữ bởi tiến trình khác -> Chuyển sang In-Memory mode an toàn!")
+        print("[Lock Warning] Vector store locked by another process -> Falling back to In-Memory store.")
         rag_pipeline = BankingRAGPipeline(config=config, use_memory=True)
     else:
         raise
+
+# Initialize NodePipeline connected with rag_pipeline
+node_pipe = NodePipeline(config=config, rag_pipeline=rag_pipeline)
 
 
 # Pydantic Schemas
@@ -89,7 +95,7 @@ class ChatRequest(BaseModel):
 
 
 # -----------------------------------------------------------------------------
-# 1. SERVE FRONTEND GIAO DIỆN CHÍNH
+# 1. SERVE FRONTEND USER INTERFACE
 # -----------------------------------------------------------------------------
 @app.get("/")
 def serve_index():
@@ -103,16 +109,16 @@ def serve_index():
                 "Expires": "0"
             }
         )
-    return {"message": "AI Banking Assistant Server đang chạy thành công!"}
+    return {"message": "AI Banking Assistant Server is running."}
 
 
 # -----------------------------------------------------------------------------
-# 2. CẤU HÌNH HỆ THỐNG & PERSONA PROFILES
+# 2. SYSTEM CONFIGURATION & PERSONA PROFILES
 # -----------------------------------------------------------------------------
 @app.get("/api/persona/profiles")
 def get_persona_profiles():
     """
-    Trả về danh mục cấu hình Persona, Tông giọng và Định dạng phản hồi cho giao diện Frontend.
+    Return persona, tone, and format profiles for frontend configuration.
     """
     tone_list = []
     for k, v in TONE_PROFILES.items():
@@ -125,7 +131,7 @@ def get_persona_profiles():
     format_list = []
     for k, v in FORMAT_PROFILES.items():
         if ":" in v:
-            f_name = v.split(":")[0].replace("Định dạng ", "")
+            f_name = v.split(":")[0].replace("Format ", "").replace("Định dạng ", "")
         else:
             f_name = v
         format_list.append({"id": k, "name": f_name, "description": v})
@@ -147,16 +153,18 @@ def get_persona_profiles():
 @app.get("/api/config")
 def get_config():
     total_points = rag_pipeline.vector_store.count()
-    jev_active = False
-    if getattr(config, "ENABLE_JEV_DECISION", False):
-        if getattr(config, "DECISION_API_KEY", "") or getattr(config, "DECISION_API_KEY", ""):
-            jev_active = True
+    decision_active = False
+    if getattr(config, "ENABLE_DECISION", False):
+        if getattr(config, "DECISION_API_KEY", ""):
+            decision_active = True
+    decision_model_name = getattr(config, "DECISION_MODEL", "")
+
     return {
         "default_model": config.LLM_MODEL,
         "embedding_model": config.EMBEDDING_MODEL_1024,
         "reranker_model": config.RERANKER_MODEL,
-        "decision_model": getattr(config, "DECISION_MODEL", "decision-model"),
-        "decision_model_enabled": jev_active,
+        "decision_model": decision_model_name,
+        "decision_model_enabled": decision_active,
         "qdrant_collection": config.QDRANT_COLLECTION,
         "points_count": total_points,
         "tracing_enabled": rag_pipeline.tracer.is_phoenix_active,
@@ -175,56 +183,83 @@ def get_config():
 
 @app.get("/api/decision/status")
 def get_decision_status(ping: bool = False):
-    """Kiểm tra trạng thái kết nối mô hình TypeSafe AI Jev (System One)."""
-    from agent_banking.decision.decision_client import DecisionClient
-    client = DecisionClient(config=config)
-    status_str = "unavailable"
-    if client.is_available():
-        status_str = "ready"
-    res = {
-        "status": status_str,
-        "model": client.model,
-        "base_url": client.base_url,
-        "enabled": client.enabled,
-        "has_api_key": bool(client.api_key),
-        "timeout": client.timeout
-    }
-    if ping:
-        ping_res = client.ping()
-        res["ping"] = ping_res
-        if not ping_res.get("ok", False):
-            res["status"] = "unreachable"
-    return res
-
+    """Check decision model connection status."""
+    try:
+        from agent_banking.decision.decision_client import DecisionClient
+        client = DecisionClient(config=config)
+        status_str = "unavailable"
+        if client.is_available():
+            status_str = "ready"
+        res = {
+            "status": status_str,
+            "model": client.model,
+            "base_url": client.base_url,
+            "enabled": client.enabled,
+            "has_api_key": bool(client.api_key),
+            "timeout": client.timeout
+        }
+        if ping:
+            ping_res = client.ping()
+            res["ping"] = ping_res
+            if not ping_res.get("ok", False):
+                res["status"] = "unreachable"
+        return res
+    except Exception as e:
+        return {
+            "status": "unavailable",
+            "model": getattr(config, "DECISION_MODEL", "decision-model"),
+            "base_url": getattr(config, "DECISION_BASE_URL", ""),
+            "enabled": False,
+            "has_api_key": False,
+            "timeout": 30.0,
+            "error": str(e)
+        }
 
 
 # -----------------------------------------------------------------------------
-# 3. TRUY VẤN HỎI ĐÁP & THEO DÕI LIÊN HOÀN 7 NODES (KÈM DYNAMIC PERSONA & TRACING)
+# 3. DIRECT CHAT QUERY ACROSS 7 RAG NODES
 # -----------------------------------------------------------------------------
 @app.post("/api/chat")
 def handle_chat(req: ChatRequest):
     query_text = req.message.strip()
     if not query_text:
-        raise HTTPException(status_code=400, detail="Nội dung câu hỏi không được để trống.")
+        raise HTTPException(status_code=400, detail="Query message cannot be empty.")
+
+    persona_val = "advisor"
+    if req.persona:
+        persona_val = req.persona
+
+    tone_val = "formal"
+    if req.tone:
+        tone_val = req.tone
+
+    format_style_val = "standard"
+    if req.format_style:
+        format_style_val = req.format_style
+
+    custom_persona_val = ""
+    if req.custom_persona:
+        custom_persona_val = req.custom_persona
 
     persona_config = {
-        "persona": req.persona or "advisor",
-        "tone": req.tone or "formal",
-        "format_style": req.format_style or "standard",
-        "custom_persona": req.custom_persona or ""
+        "persona": persona_val,
+        "tone": tone_val,
+        "format_style": format_style_val,
+        "custom_persona": custom_persona_val
     }
 
     try:
         result = node_pipe.run_single_query_with_node_trace(query_text, persona_config=persona_config)
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Lỗi xử lý đường ống RAG: {e}")
+        raise HTTPException(status_code=500, detail=f"RAG pipeline execution error: {e}")
 
 
 # -----------------------------------------------------------------------------
 # 3.1 LANGGRAPH AI AGENT (SELF-REFLECTIVE RAG & BANKING ACTION TOOLS)
 # -----------------------------------------------------------------------------
 _agent_pipeline_instance = None
+
 
 def get_agent_pipeline():
     global _agent_pipeline_instance
@@ -237,36 +272,50 @@ def get_agent_pipeline():
 @app.post("/api/agent/chat")
 def handle_agent_chat(req: ChatRequest):
     """
-    Endpoint LangGraph Agentic RAG: Phân loại ý định, Self-Reflection, gọi Banking Tools và quản lý Memory.
+    LangGraph Agentic RAG Endpoint: Intent classification, Self-Reflection, banking tools, and memory.
     """
     query_text = req.message.strip()
     if not query_text:
-        raise HTTPException(status_code=400, detail="Nội dung câu hỏi không được để trống.")
+        raise HTTPException(status_code=400, detail="Query message cannot be empty.")
 
-    session_id = req.session_id or "default_session"
+    session_id = "default_session"
+    if req.session_id:
+        session_id = req.session_id
+
+    persona_val = "advisor"
+    if req.persona:
+        persona_val = req.persona
+
+    tone_val = "formal"
+    if req.tone:
+        tone_val = req.tone
+
+    format_style_val = "standard"
+    if req.format_style:
+        format_style_val = req.format_style
+
     try:
         agent = get_agent_pipeline()
         result = agent.chat(
             query=query_text,
             session_id=session_id,
-            persona=req.persona or "advisor",
-            tone=req.tone or "formal",
-            format_type=req.format_style or "standard"
+            persona=persona_val,
+            tone=tone_val,
+            format_type=format_style_val
         )
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Lỗi xử lý LangGraph Agent: {e}")
+        raise HTTPException(status_code=500, detail=f"LangGraph Agent execution error: {e}")
 
 
 @app.post("/api/agent/stream")
 async def stream_agent_chat(req: ChatRequest):
     """
-    Endpoint phát Server-Sent Events (SSE) thời gian thực cho từng Node trong LangGraph v4.0
-    và stream nội dung trả lời cuối cùng ra giao diện Web.
+    Server-Sent Events (SSE) streaming endpoint for real-time node progress and token streaming.
     """
     query_text = req.message.strip()
     if query_text == "":
-        raise HTTPException(status_code=400, detail="Nội dung câu hỏi không được để trống.")
+        raise HTTPException(status_code=400, detail="Query message cannot be empty.")
 
     session_id = "default_session"
     if req.session_id is not None:
@@ -314,23 +363,23 @@ async def stream_agent_chat(req: ChatRequest):
 
                     node_description = node_name
                     if node_name == "input_guardrail":
-                        node_description = "Đang kiểm duyệt an toàn & làm sạch trạng thái..."
+                        node_description = "Validating input safety and resetting turn state..."
                     elif node_name == "router":
-                        node_description = f"Multi-Agent Supervisor: Định tuyến tới {sub_agent_used}..."
+                        node_description = f"Multi-Agent Supervisor: Routing to {sub_agent_used}..."
                     elif node_name == "retrieve":
-                        node_description = "Đang truy xuất tri thức quy chế từ Qdrant & BM25..."
+                        node_description = "Retrieving policy knowledge from Vector DB and BM25..."
                     elif node_name == "grade_documents":
-                        node_description = "Đang thẩm định độ liên quan của tài liệu trích xuất..."
+                        node_description = "Evaluating relevance of retrieved context documents..."
                     elif node_name == "rewrite_query":
-                        node_description = "Tài liệu chưa tối ưu, đang tự động viết lại câu hỏi..."
+                        node_description = "Optimizing search query for improved retrieval precision..."
                     elif node_name == "banking_tool":
-                        node_description = "Đang thực thi công cụ nghiệp vụ ngân hàng..."
+                        node_description = "Executing banking business action tool..."
                     elif node_name == "generate":
-                        node_description = "Đang sinh câu trả lời căn cứ điều khoản Vietcombank..."
+                        node_description = "Generating grounded response based on regulatory articles..."
                     elif node_name == "audit_generation":
-                        node_description = "Đang kiểm toán trích dẫn [Điều X, Khoản Y] & chống ảo giác..."
+                        node_description = "Auditing citations [Article X, Clause Y] and checking for hallucinations..."
                     elif node_name == "output_guardrail":
-                        node_description = "Kiểm duyệt an toàn đầu ra & hoàn tất phản hồi..."
+                        node_description = "Auditing output safety and finalizing response..."
 
                     step_payload = {
                         "event_type": "node_progress",
@@ -365,7 +414,7 @@ async def stream_agent_chat(req: ChatRequest):
                     for ch in punctuation_chars:
                         cleaned_q = cleaned_q.replace(ch, " ")
                     raw_tokens = cleaned_q.split(" ")
-                    stopwords = {"cho", "tôi", "hỏi", "được", "không", "như", "thế", "nào", "vietcombank", "với", "các", "những", "có", "là", "và", "của", "tại"}
+                    stopwords = {"cho", "tôi", "hỏi", "được", "không", "như", "thế", "nào", "với", "các", "những", "có", "là", "và", "của", "tại", "bank"}
                     kws = []
                     for t in raw_tokens:
                         stripped_t = t.strip()
@@ -394,7 +443,7 @@ async def stream_agent_chat(req: ChatRequest):
         except Exception as err:
             error_payload = {
                 "event_type": "error",
-                "message": f"Hệ thống đang bảo trì kết nối: {err}"
+                "message": f"Service connection error: {err}"
             }
             err_str = json.dumps(error_payload, ensure_ascii=False)
             yield f"data: {err_str}\n\n"
@@ -410,12 +459,12 @@ async def stream_agent_chat(req: ChatRequest):
 
 
 # -----------------------------------------------------------------------------
-# 4. QUẢN LÝ FOLDERS & TẬP TIN CỦA TỪNG NODE
+# 4. NODE FOLDERS & FILES MANAGEMENT
 # -----------------------------------------------------------------------------
 @app.get("/api/nodes")
 def get_nodes_info():
     """
-    Trả về danh sách 7 node và toàn bộ các tệp tin hiện diện trong input/output folder của mỗi node.
+    Return list of nodes and all files present in input/output directories.
     """
     folders = node_pipe.get_node_folders()
     result = {}
@@ -455,23 +504,21 @@ def get_nodes_info():
 @app.get("/api/nodes/{node_name}/{io_type}/{file_name:path}")
 def get_node_file_content(node_name: str, io_type: str, file_name: str):
     """
-    Đọc nội dung chi tiết của một tệp tin trong thư mục input hoặc output của node.
-    Hỗ trợ cả đường dẫn tệp lồng nhau trong thư mục con.
+    Read detailed content of a file in the input or output folder of a node.
     """
     folders = node_pipe.get_node_folders()
     if node_name not in folders:
-        raise HTTPException(status_code=404, detail=f"Không tìm thấy node: {node_name}")
+        raise HTTPException(status_code=404, detail=f"Node not found: {node_name}")
     if io_type not in ["input", "output"]:
-        raise HTTPException(status_code=400, detail="Loại thư mục chỉ chấp nhận 'input' hoặc 'output'")
+        raise HTTPException(status_code=400, detail="Directory type must be 'input' or 'output'")
 
     target_dir = folders[node_name][io_type]
     target_file = target_dir / file_name
 
     if not target_file.exists() or not target_file.is_file():
-        raise HTTPException(status_code=404, detail=f"Không tìm thấy tệp: {file_name}")
+        raise HTTPException(status_code=404, detail=f"File not found: {file_name}")
 
     try:
-        # Nếu là file json, parse và trả về định dạng json
         if target_file.suffix.lower() == ".json":
             with open(target_file, "r", encoding="utf-8", errors="replace") as fp:
                 data = json.load(fp)
@@ -481,27 +528,27 @@ def get_node_file_content(node_name: str, io_type: str, file_name: str):
                 raw_text = fp.read()
             return {"file_name": file_name, "is_json": False, "content": raw_text}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Không thể đọc tệp: {e}")
+        raise HTTPException(status_code=500, detail=f"Unable to read file: {e}")
 
 
 # -----------------------------------------------------------------------------
-# 5. KÍCH HOẠT CHẠY PIPELINE TỪ FOLDER INPUT CỦA CÁC NODE
+# 5. TRIGGER PIPELINE EXECUTION ACROSS NODE FOLDERS
 # -----------------------------------------------------------------------------
 @app.post("/api/pipeline/run-folders")
 def run_folders_pipeline():
     """
-    Kích hoạt chạy liên hoàn toàn bộ nodes từ các thư mục input/output nội bộ.
+    Trigger end-to-end processing across all node input/output folders.
     """
     return {
         "status": "SUCCESS",
-        "message": "Toàn bộ hệ thống đã chuyển sang mô hình Task-Oriented & LangGraph StateGraph.",
+        "message": "System operating in Task-Oriented & LangGraph StateGraph mode.",
         "points_count": rag_pipeline.vector_store.count()
     }
 
 
 if __name__ == "__main__":
     print("=" * 70)
-    print("  🚀 KHỞI ĐỘNG AI BANKING ASSISTANT SERVER")
+    print("  AI BANKING ASSISTANT SERVER")
     print("  * Web UI : http://127.0.0.1:8000")
     print("  * API Doc: http://127.0.0.1:8000/docs")
     print("=" * 70)

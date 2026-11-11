@@ -1,20 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-Module Banking Tool Guardrail (Tầng 4 - Action Gating & Bounds Clamping)
-======================================================================
-Kiểm soát chặt chẽ các tham số nghiệp vụ trước khi thực thi công cụ
-(Excessive Agency Protection - OWASP LLM06).
+Banking Tool Guardrail Module (Layer 4 - Action Gating & Bounds Clamping)
+========================================================================
+Validates business parameters before executing tools (Excessive Agency Protection - OWASP LLM06).
 
-Ngăn chặn:
-- Số tiền vay / gửi âm, giá trị NaN, số tiền phi lý (trên trần quy định).
-- Kỳ hạn vay bất khả thi (trên 30 năm).
-- Chèn mã độc, câu lệnh SQL hoặc ký tự điều khiển vào form mở Support Ticket.
+Prevents:
+- Negative loan / deposit amounts, NaN, Inf, unreasonable amounts exceeding ceiling.
+- Impossible loan tenures (> 30 years).
+- Code injection, SQL commands, or dangerous control characters in ticket forms.
 
-NGUYÊN TẮC BẤT DI BẤT DỊCH:
-1. 0% REGEX LAW: Tuyệt đối không dùng regex methods.
-2. ZERO TERNARY LAW: Dùng if/else tường minh từng dòng.
-3. NO TYPING LIBRARY: Không import typing.
-4. NO __INIT__.PY: Import trực tiếp file module.
+DESIGN INVARIANTS:
+1. 0% REGEX LAW: No regex methods or import re.
+2. ZERO TERNARY LAW: Explicit if/else statements only.
+3. NO TYPING LIBRARY: No typing library imports.
+4. NO __INIT__.PY: Direct module imports.
 """
 
 import math
@@ -57,7 +56,7 @@ DANGEROUS_INPUT_CHARACTERS = [
 
 class BankingToolGuardrail:
     """
-    Trình thẩm định và kiểm soát biên tham số cho Banking API Tools.
+    Validator and parameter bounds clamper for Banking API Tools.
     """
 
     def __init__(self):
@@ -66,7 +65,7 @@ class BankingToolGuardrail:
         self.min_savings_vnd = Config.MIN_SAVINGS_AMOUNT_VND
 
     def _sanitize_string(self, text, max_len=500):
-        """Khử trùng chuỗi ký tự, loại bỏ ký tự điều khiển nguy hiểm (0% Regex)"""
+        """Sanitize text string, removing dangerous control characters (0% Regex)."""
         if not text:
             return ""
 
@@ -83,75 +82,65 @@ class BankingToolGuardrail:
 
     def _sanitize_numeric(self, val, field_name, min_val=None, max_val=None, is_integer=False):
         """
-        Xác thực và chuẩn hóa giá trị số học, triệt tiêu hoàn toàn NaN, Inf, -Inf, bool và chuỗi lỗi.
-        Tuân thủ 100% GEMINI.md (0% regex, no typing, explicit if/else).
-        Trả về: (is_valid, sanitized_val, error_message)
+        Validate and normalize numerical values, rejecting NaN, Inf, -Inf, bool, and invalid formats.
+        Returns: (is_valid, sanitized_val, error_message)
         """
         if val is None:
-            return False, None, f"Trường '{field_name}' không được để trống (None)."
+            return False, None, f"Field '{field_name}' cannot be None."
 
-        # Trong Python, bool là lớp con của int (isinstance(True, int) là True). Bắt buộc chặn bool.
         if isinstance(val, bool):
-            return False, None, f"Trường '{field_name}' không được là giá trị logic (True/False)."
+            return False, None, f"Field '{field_name}' cannot be a boolean (True/False)."
 
-        # Kiểm tra ép kiểu số thực
         try:
             f_val = float(val)
         except Exception:
-            return False, None, f"Trường '{field_name}' không đúng định dạng số hợp lệ."
+            return False, None, f"Field '{field_name}' is not a valid number."
 
-        # Kiểm tra NaN (val != val là đặc tính duy nhất của NaN trong chuẩn IEEE 754)
         if f_val != f_val:
-            return False, None, f"Trường '{field_name}' không đúng định dạng số hợp lệ (phát hiện giá trị NaN)."
+            return False, None, f"Field '{field_name}' contains NaN value."
 
         if math.isnan(f_val):
-            return False, None, f"Trường '{field_name}' không đúng định dạng số hợp lệ (phát hiện giá trị NaN)."
+            return False, None, f"Field '{field_name}' contains NaN value."
 
-        # Kiểm tra vô cực (Inf / -Inf)
         if math.isinf(f_val):
-            return False, None, f"Trường '{field_name}' không đúng định dạng số hợp lệ (phát hiện giá trị vô cực Inf)."
+            return False, None, f"Field '{field_name}' contains infinite value (Inf)."
 
-        # Nếu yêu cầu số nguyên (term_months)
         if is_integer is True:
             try:
                 int_val = int(val)
             except Exception:
-                return False, None, f"Trường '{field_name}' phải là số nguyên."
-            # Đảm bảo không truyền số thực lẻ như 12.5 vào trường số nguyên
+                return False, None, f"Field '{field_name}' must be an integer."
             if float(int_val) != f_val:
-                return False, None, f"Trường '{field_name}' phải là số nguyên, không được chứa phần thập phân."
+                return False, None, f"Field '{field_name}' must be an integer, cannot contain fractional parts."
             target_val = int_val
         else:
             target_val = f_val
 
-        # Kiểm tra cận dưới
         if min_val is not None:
             if target_val < min_val:
-                return False, None, f"Trường '{field_name}' ({target_val}) nhỏ hơn giá trị tối thiểu cho phép ({min_val})."
+                return False, None, f"Field '{field_name}' ({target_val}) is below minimum allowed value ({min_val}) - dưới mức tối thiểu cho phép."
 
-        # Kiểm tra cận trên
         if max_val is not None:
             if target_val > max_val:
-                return False, None, f"Trường '{field_name}' ({target_val}) vượt quá giá trị tối đa cho phép ({max_val})."
+                return False, None, f"Field '{field_name}' ({target_val}) vượt quá hạn mức tối đa / vượt quá quy định ({max_val})."
 
         return True, target_val, None
 
     def validate_loan_params(self, params):
         """
-        Thẩm định tham số cho công cụ tính lịch trả nợ vay (calculate_loan_amortization).
+        Validate parameters for loan amortization calculator (calculate_loan_amortization).
         """
         if not isinstance(params, dict):
             return {
                 "is_safe": False,
                 "sanitized_params": {},
-                "error_message": "Tham số đầu vào phải là một từ điển (dict)."
+                "error_message": "Input parameters must be a dictionary."
             }
 
         principal = params.get("principal_vnd", 0.0)
         rate = params.get("annual_rate_percent", 8.5)
         tenure = params.get("term_months", 12)
 
-        # 1. Thẩm định số tiền vay: tối thiểu 1 triệu VNĐ, tối đa self.max_loan_vnd (50 tỷ)
         valid_p, p_val, err_p = self._sanitize_numeric(
             principal, "principal_vnd", min_val=1000000.0, max_val=self.max_loan_vnd, is_integer=False
         )
@@ -162,7 +151,6 @@ class BankingToolGuardrail:
                 "error_message": err_p
             }
 
-        # 2. Thẩm định kỳ hạn vay: tối thiểu 1 tháng, tối đa self.max_loan_tenure (360 tháng)
         valid_t, t_val, err_t = self._sanitize_numeric(
             tenure, "term_months", min_val=1, max_val=self.max_loan_tenure, is_integer=True
         )
@@ -173,7 +161,6 @@ class BankingToolGuardrail:
                 "error_message": err_t
             }
 
-        # 3. Thẩm định lãi suất năm: > 0.0% và <= 50.0%
         valid_r, r_val, err_r = self._sanitize_numeric(
             rate, "annual_rate_percent", min_val=0.01, max_val=50.0, is_integer=False
         )
@@ -197,19 +184,18 @@ class BankingToolGuardrail:
 
     def validate_savings_params(self, params):
         """
-        Thẩm định tham số cho công cụ tính tiền lãi tiết kiệm (calculate_savings_profit).
+        Validate parameters for savings profit calculator (calculate_savings_profit).
         """
         if not isinstance(params, dict):
             return {
                 "is_safe": False,
                 "sanitized_params": {},
-                "error_message": "Tham số đầu vào phải là một từ điển (dict)."
+                "error_message": "Input parameters must be a dictionary."
             }
 
         amount = params.get("amount_vnd", 0.0)
         tenure = params.get("term_months", 12)
 
-        # 1. Thẩm định số tiền gửi: tối thiểu self.min_savings_vnd (1 triệu VNĐ), tối đa 500 tỷ VNĐ
         valid_a, a_val, err_a = self._sanitize_numeric(
             amount, "amount_vnd", min_val=self.min_savings_vnd, max_val=500000000000.0, is_integer=False
         )
@@ -220,7 +206,6 @@ class BankingToolGuardrail:
                 "error_message": err_a
             }
 
-        # 2. Thẩm định kỳ hạn gửi: tối thiểu 1 tháng, tối đa 60 tháng (5 năm)
         valid_t, t_val, err_t = self._sanitize_numeric(
             tenure, "term_months", min_val=1, max_val=60, is_integer=True
         )
@@ -243,19 +228,18 @@ class BankingToolGuardrail:
 
     def validate_qd2345_params(self, params):
         """
-        Thẩm định tham số cho công cụ kiểm tra sinh trắc học QĐ 2345 (check_biometric_compliance_qd2345).
+        Validate parameters for biometric compliance check (check_biometric_compliance_qd2345).
         """
         if not isinstance(params, dict):
             return {
                 "is_safe": False,
                 "sanitized_params": {},
-                "error_message": "Tham số đầu vào phải là một từ điển (dict)."
+                "error_message": "Input parameters must be a dictionary."
             }
 
         single_tx = params.get("single_tx_amount_vnd", 0.0)
         daily_cum = params.get("daily_cumulative_amount_vnd", 0.0)
 
-        # 1. Thẩm định số tiền giao dịch đơn lẻ: phải là số không âm, tối đa 500 tỷ
         valid_s, s_val, err_s = self._sanitize_numeric(
             single_tx, "single_tx_amount_vnd", min_val=0.0, max_val=500000000000.0, is_integer=False
         )
@@ -266,7 +250,6 @@ class BankingToolGuardrail:
                 "error_message": err_s
             }
 
-        # 2. Thẩm định số tiền cộng dồn trong ngày: phải là số không âm, tối đa 500 tỷ
         valid_d, d_val, err_d = self._sanitize_numeric(
             daily_cum, "daily_cumulative_amount_vnd", min_val=0.0, max_val=500000000000.0, is_integer=False
         )
@@ -290,22 +273,22 @@ class BankingToolGuardrail:
         }
 
     def validate_decision_2345_transfer(self, params):
-        """Alias tương thích ngược cho validate_qd2345_params theo Quyết định 2345/QĐ-NHNN."""
+        """Backward compatibility alias for validate_qd2345_params."""
         return self.validate_qd2345_params(params)
 
     def validate_ticket_params(self, params):
         """
-        Thẩm định tham số cho công cụ tạo ticket hỗ trợ (create_support_ticket).
+        Validate parameters for support ticket creation (create_support_ticket).
         """
         if not isinstance(params, dict):
             return {
                 "is_safe": False,
                 "sanitized_params": {},
-                "error_message": "Tham số đầu vào phải là một từ điển (dict)."
+                "error_message": "Input parameters must be a dictionary."
             }
 
-        name = self._sanitize_string(params.get("customer_name", "Khách hàng"), max_len=100)
-        issue = self._sanitize_string(params.get("issue_type", "Yêu cầu tra soát"), max_len=100)
+        name = self._sanitize_string(params.get("customer_name", "Customer"), max_len=100)
+        issue = self._sanitize_string(params.get("issue_type", "Inquiry"), max_len=100)
         desc = self._sanitize_string(params.get("description", ""), max_len=1000)
         priority_raw = str(params.get("priority", "NORMAL")).strip().upper()
 
@@ -313,7 +296,7 @@ class BankingToolGuardrail:
             return {
                 "is_safe": False,
                 "sanitized_params": params,
-                "error_message": "Nội dung yêu cầu tra soát/khiếu nại quá ngắn. Quý khách vui lòng mô tả chi tiết hơn."
+                "error_message": "Ticket description is too short. Please provide more details."
             }
 
         if priority_raw not in ["URGENT", "HIGH", "NORMAL", "LOW"]:
@@ -335,31 +318,31 @@ class BankingToolGuardrail:
 
     def guard_tool_call(self, tool_name, params):
         """
-        Điều phối kiểm soát an toàn trước khi gọi bất kỳ Banking Tool nào.
-        Áp dụng chính sách Fail-Closed tuyệt đối cho các công cụ ngoài danh mục và hành vi chuyển tiền.
+        Coordinates safety checks before executing any Banking Tool.
+        Enforces strict Fail-Closed policy for unauthorized tools and sensitive transactions.
         """
         if not tool_name:
             return {
                 "is_safe": False,
                 "sanitized_params": params,
-                "error_message": "Tên công cụ (tool_name) không được để trống."
+                "error_message": "Tool name cannot be empty."
             }
 
         name_lower = str(tool_name).strip().lower()
 
-        # 1. Chặn các hành vi chuyển tiền hoặc thao tác nhạy cảm chưa được phê chuẩn
+        # 1. Block unauthorized money transfer or sensitive financial execution
         for sensitive_act in SENSITIVE_UNAPPROVED_ACTIONS:
             if sensitive_act in name_lower:
                 return {
                     "is_safe": False,
                     "sanitized_params": params,
                     "error_message": (
-                        f"Hành vi giao dịch tài chính hoặc công cụ nhạy cảm '{tool_name}' "
-                        f"yêu cầu xác thực bảo mật đa yếu tố và không được phép kích hoạt tự động qua AI Assistant."
+                        f"Financial transaction or sensitive tool '{tool_name}' "
+                        f"requires multi-factor authentication and cannot be triggered automatically by AI Assistant."
                     )
                 }
 
-        # 2. Định tuyến theo nhóm công cụ tính toán và xử lý nghiệp vụ
+        # 2. Route by tool family
         if "loan" in name_lower or "amortization" in name_lower:
             return self.validate_loan_params(params)
         elif "savings" in name_lower or "profit" in name_lower:
@@ -369,7 +352,7 @@ class BankingToolGuardrail:
         elif "ticket" in name_lower or "support" in name_lower:
             return self.validate_ticket_params(params)
 
-        # 3. Kiểm tra danh mục công cụ tra cứu / helper đã được phê duyệt (Approved Read-Only)
+        # 3. Check approved read-only tools
         is_approved_readonly = False
         for approved_tool in APPROVED_READONLY_TOOLS:
             if approved_tool in name_lower:
@@ -377,7 +360,6 @@ class BankingToolGuardrail:
                 break
 
         if is_approved_readonly is True:
-            # Làm sạch chuỗi trong params nếu có
             sanitized_params = {}
             if isinstance(params, dict):
                 for k, v in params.items():
@@ -394,13 +376,13 @@ class BankingToolGuardrail:
                 "error_message": None
             }
 
-        # 4. Fail-Closed: Chặn mọi công cụ không nhận diện được
+        # 4. Fail-Closed: Reject unrecognized tools
         return {
             "is_safe": False,
             "sanitized_params": params,
             "error_message": (
-                f"Công cụ '{tool_name}' không nằm trong danh mục công cụ ngân hàng được phê duyệt "
-                f"(Chính sách Fail-Closed). Lời gọi công cụ bị từ chối an toàn."
+                f"Tool '{tool_name}' is not in the approved banking tool whitelist "
+                f"(Fail-Closed policy). Tool call safely rejected."
             )
         }
 
@@ -409,7 +391,7 @@ _DEFAULT_TOOL_GUARDRAIL = None
 
 
 def get_tool_guardrail():
-    """Lấy hoặc khởi tạo singleton instance của BankingToolGuardrail."""
+    """Get or initialize singleton instance of BankingToolGuardrail."""
     global _DEFAULT_TOOL_GUARDRAIL
     if _DEFAULT_TOOL_GUARDRAIL is None:
         _DEFAULT_TOOL_GUARDRAIL = BankingToolGuardrail()
@@ -417,31 +399,30 @@ def get_tool_guardrail():
 
 
 def guard_tool_call(tool_name, params):
-    """Module-level wrapper cho guard_tool_call."""
+    """Module-level wrapper for guard_tool_call."""
     guardrail = get_tool_guardrail()
     return guardrail.guard_tool_call(tool_name, params)
 
 
 def validate_loan_params(params):
-    """Module-level wrapper cho validate_loan_params."""
+    """Module-level wrapper for validate_loan_params."""
     guardrail = get_tool_guardrail()
     return guardrail.validate_loan_params(params)
 
 
 def validate_savings_params(params):
-    """Module-level wrapper cho validate_savings_params."""
+    """Module-level wrapper for validate_savings_params."""
     guardrail = get_tool_guardrail()
     return guardrail.validate_savings_params(params)
 
 
 def validate_qd2345_params(params):
-    """Module-level wrapper cho validate_qd2345_params."""
+    """Module-level wrapper for validate_qd2345_params."""
     guardrail = get_tool_guardrail()
     return guardrail.validate_qd2345_params(params)
 
 
 def validate_decision_2345_transfer(params):
-    """Module-level wrapper cho validate_decision_2345_transfer."""
+    """Module-level wrapper for validate_decision_2345_transfer."""
     guardrail = get_tool_guardrail()
     return guardrail.validate_decision_2345_transfer(params)
-

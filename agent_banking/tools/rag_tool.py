@@ -2,11 +2,11 @@
 """
 Banking RAG Tool for LangGraph / Agentic Workflows
 ======================================================================
-Đóng gói toàn bộ luồng RAG chuyên sâu (Query Parser -> Hybrid Retrieval -> Cross-Encoder Reranker)
-thành một Công cụ chuẩn (Standard Tool) cho AI Agent:
-- Tái sử dụng 100% các class và logic hiện có trong pipeline.py.
-- Không phụ thuộc vào LangChain Runnable hay BaseRetriever.
-- Trả về cấu trúc Payload chuẩn hóa phục vụ Context Grounding và Citation.
+Encapsulates RAG pipeline (Query Parser -> Hybrid Retrieval -> Cross-Encoder Reranker)
+into a standard tool for AI Agents:
+- Reuses classes and logic from pipeline.py.
+- Independent of LangChain Runnable or BaseRetriever.
+- Returns normalized payload for Context Grounding and Citation.
 """
 
 from __future__ import annotations
@@ -16,19 +16,19 @@ from pathlib import Path
 
 class BankingRAGTool:
     """
-    Công cụ tra cứu tri thức nghiệp vụ ngân hàng Vietcombank.
+    Tool for retrieving banking knowledge and regulatory policies.
     """
     name: str = "search_banking_knowledge"
     description: str = (
         "Tra cứu tài liệu quy chế, quy trình mở tài khoản eKYC, hạn mức giao dịch, "
-        "biểu phí dịch vụ và điều khoản sử dụng thẻ Vietcombank."
+        "biểu phí dịch vụ và điều khoản sử dụng thẻ."
     )
 
     def __init__(self, pipeline_instance=None, config=None, use_memory: bool = False):
         if pipeline_instance is not None:
             self.pipeline = pipeline_instance
         else:
-            # Lazy import để tránh circular import
+            # Lazy import to avoid circular imports
             try:
                 from agent_banking.pipeline import BankingRAGPipeline
                 self.pipeline = BankingRAGPipeline(config=config, use_memory=use_memory)
@@ -38,11 +38,11 @@ class BankingRAGTool:
 
     def execute(self, query: str, top_k: int = 3) -> dict:
         """
-        Thực thi tra cứu tri thức ngân hàng thông qua Hybrid Retrieval & Reranker.
+        Execute banking knowledge retrieval via Hybrid Retrieval & Reranker.
         """
         start_t = time.perf_counter()
         clean_query = query.strip()
-        
+
         if not clean_query:
             return {
                 "status": "empty_query",
@@ -55,22 +55,22 @@ class BankingRAGTool:
         # 1. Parse Query & Acronym Normalization
         parsed_q = self.pipeline.query_parser.parse(clean_query)
         search_query = parsed_q.normalized_query
-        
-        # 2. Hybrid Retrieval (Dense Vector + BM25 Okapi với RRF k=60)
+
+        # 2. Hybrid Retrieval (Dense Vector + BM25 Okapi with RRF k=60)
         candidates = self.pipeline.retriever.retrieve(
             query=parsed_q,
             top_k=self.pipeline.config.HYBRID_TOP_K,
             candidate_k=self.pipeline.config.HYBRID_CANDIDATE_K
         )
-        
-        # 3. Cross-Encoder Reranker (reranker-model)
+
+        # 3. Cross-Encoder Reranker
         reranked = self.pipeline.reranker.rerank(
             query=clean_query,
             candidates=candidates,
             top_k=top_k
         )
 
-        # 4. Trích xuất tài liệu và văn bản nguồn
+        # 4. Extract documents and source references
         docs = []
         sources = set()
         citations = []
@@ -79,19 +79,19 @@ class BankingRAGTool:
             chunk = item.get("chunk", {})
             if not isinstance(chunk, dict):
                 content = str(chunk)
-                source = "Tài liệu Vietcombank"
+                source = "Tài liệu ngân hàng"
                 breadcrumb = ""
                 chunk_id = f"chunk_{idx}"
             else:
                 content = chunk.get("content", "")
-                source = chunk.get("source", "Tài liệu Vietcombank")
+                source = chunk.get("source", "Tài liệu ngân hàng")
                 breadcrumb = chunk.get("breadcrumb", "")
                 chunk_id = chunk.get("chunk_id", f"chunk_{idx}")
 
             if source:
                 sources.add(source)
 
-            # Tạo citation tag nếu có breadcrumb hoặc tên điều khoản
+            # Build citation tag from breadcrumb or source name
             if breadcrumb:
                 cite_label = f"[{breadcrumb}]"
             else:

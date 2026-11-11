@@ -1,17 +1,17 @@
 """
-Module Qdrant Vector Database & Hybrid Store (Localhost - Zero Docker)
+Qdrant Vector Database & Hybrid Store Module (Localhost - Zero Docker)
 ======================================================================
-Chuyên trách:
-1. Lưu trữ Dense Vector 1024 chiều (Cosine Distance HNSW) vào đĩa cứng cục bộ.
-2. Lọc Metadata cực mạnh (Filterable HNSW: theo source, chunk_type, parent_id, business_metadata.domain, business_metadata.category).
-3. Tích hợp sẵn BM25F Okapi Keyword Search đa trường (content, section_title, breadcrumb, table_data, images) kèm Inverted Index.
-4. Hybrid Search tự động: Hợp nhất Dense + BM25 qua giải thuật RRF (Reciprocal Rank Fusion k=60).
+Responsibilities:
+1. Stores dense vectors (Cosine Distance HNSW) to local persistent disk.
+2. Metadata filtering (Filterable HNSW: source, chunk_type, parent_id, business_metadata.domain, business_metadata.category).
+3. Multi-field BM25F Okapi Keyword Search (content, section_title, breadcrumb, table_data, images) with Inverted Index.
+4. Hybrid Search: Fuses Dense + BM25 via Reciprocal Rank Fusion (RRF k=60).
 
-NGUYÊN TẮC THIẾT KẾ:
-1. 0% REGEX LAW: Tuyệt đối không sử dụng regex methods hay thư viện biểu thức chính quy.
-2. ZERO TERNARY: Bắt buộc dùng if/else tường minh từng dòng, không dùng toán tử 3 ngôi.
-3. NO TYPING LIBRARY: Tuyệt đối không sử dụng kiểu từ thư viện bổ trợ, thuần túy dùng kiểu gốc.
-4. NO __INIT__.PY: Import trực tiếp file module.
+DESIGN INVARIANTS:
+1. 0% REGEX LAW: No regex methods or import re.
+2. ZERO TERNARY: Explicit if/else statements only.
+3. NO TYPING LIBRARY: Native types only.
+4. NO __INIT__.PY: Direct module imports.
 """
 
 import gc
@@ -38,7 +38,7 @@ from qdrant_client.models import (
 
 class QdrantBankingStore:
     """
-    Cơ sở dữ liệu Vector & Tìm kiếm Lai (Hybrid Search) chạy trực tiếp trên Localhost.
+    Vector database & Hybrid Search store running locally.
     """
 
     def __init__(
@@ -53,7 +53,7 @@ class QdrantBankingStore:
         self.storage_path = storage_path
         self.use_memory = use_memory
 
-        # 1. Khởi tạo Qdrant Client (chạy file cục bộ hoặc memory)
+        # 1. Initialize Qdrant Client (local path or in-memory)
         if use_memory:
             self.client = QdrantClient(":memory:")
         else:
@@ -65,10 +65,10 @@ class QdrantBankingStore:
                 self.client = QdrantClient(":memory:")
                 self.use_memory = True
 
-        # 2. Khởi tạo Collection HNSW Cosine và Payload Indexes
+        # 2. Initialize HNSW Cosine Collection and Payload Indexes
         self._init_collection()
 
-        # 3. Bộ nhớ đệm BM25F Inverted Index cục bộ
+        # 3. Local in-memory BM25F Inverted Index cache
         self._bm25_corpus = []
         self._bm25_inverted_index = {}
         self._bm25_doc_len = []
@@ -78,7 +78,7 @@ class QdrantBankingStore:
         self.k1 = 1.5
         self.b = 0.75
 
-        # Tự động nạp lại BM25 từ đĩa nếu collection đã có dữ liệu trước đó
+        # Automatically reload BM25 from disk if collection pre-exists
         if not use_memory:
             self._load_bm25_from_existing_store()
 
@@ -128,7 +128,7 @@ class QdrantBankingStore:
         except Exception as e:
             print(f"⚠️ [Qdrant Store] Lỗi khi xóa collection '{self.collection_name}': {e}")
 
-        # Dọn dẹp tệp vật lý phòng thủ đa tầng (Defense-in-depth trên đĩa)
+        # Multi-tier physical cleanup (Defense-in-depth on disk)
         if not self.use_memory:
             try:
                 gc.collect()
@@ -138,7 +138,7 @@ class QdrantBankingStore:
             except Exception:
                 pass
 
-        # Khởi tạo lại collection mới
+        # Recreate fresh collection
         self.client.create_collection(
             collection_name=self.collection_name,
             vectors_config=VectorParams(
@@ -151,10 +151,10 @@ class QdrantBankingStore:
             )
         )
 
-        # Tạo lại 5 payload indexes
+        # Rebuild 5 payload indexes
         self._create_payload_indexes()
 
-        # Xóa sạch bộ đệm BM25
+        # Clear BM25 cache
         self._bm25_corpus = []
         self._bm25_inverted_index = {}
         self._bm25_doc_len = []
@@ -211,7 +211,7 @@ class QdrantBankingStore:
             pass
 
     # -------------------------------------------------------------------------
-    # 1. NẠP DỮ LIỆU (INGESTION)
+    # 1. DATA INGESTION
     # -------------------------------------------------------------------------
     def add_chunks(self, chunks, batch_size=64):
         """
@@ -237,14 +237,14 @@ class QdrantBankingStore:
             except Exception:
                 point_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(pt_id)))
 
-            # Chuẩn hóa chunk_type theo Target Universal Schema
+            # Normalize chunk_type to Target Universal Schema
             raw_type = chunk.get("chunk_type")
             if raw_type in ("text", "table", "multimodal"):
                 chunk_type = raw_type
             else:
                 chunk_type = "text"
 
-            # Trích xuất metadata an toàn
+            # Safely extract metadata
             b_meta = chunk.get("business_metadata")
             if not isinstance(b_meta, dict):
                 b_meta = {}
@@ -265,8 +265,8 @@ class QdrantBankingStore:
             else:
                 next_c = str(next_c)
 
-            # Đóng gói Payload chính xác 13 trường của Target Universal Schema
-            # Loại bỏ hoàn toàn các trường legacy: original_text, word_count, token_count, is_active
+            # Pack exact 13-field Payload of Target Universal Schema
+            # Completely remove legacy fields: original_text, word_count, token_count, is_active
             payload = {
                 "chunk_id": str(pt_id),
                 "parent_id": str(chunk.get("parent_id") or ""),
@@ -292,7 +292,7 @@ class QdrantBankingStore:
             )
             new_payloads.append(payload)
 
-        # Upsert theo từng batch vào Qdrant
+        # Upsert in batches into Qdrant
         total_points = len(points)
         for i in range(0, total_points, batch_size):
             batch_slice = points[i : i + batch_size]
@@ -301,7 +301,7 @@ class QdrantBankingStore:
                 points=batch_slice
             )
 
-        # Đồng bộ và lập chỉ mục BM25F (True Upsert đồng bộ với Qdrant)
+        # Synchronize and index BM25F (True Upsert synchronized with Qdrant)
         corpus_id_to_idx = {}
         for idx, c in enumerate(self._bm25_corpus):
             cid = c.get("chunk_id")
@@ -325,7 +325,7 @@ class QdrantBankingStore:
     upsert_chunks = add_chunks
 
     # -------------------------------------------------------------------------
-    # 2. XÂY DỰNG CHỈ MỤC BM25F ĐA TRƯỜNG & INVERTED INDEX TỐI ƯU HÓA
+    # 2. BUILD MULTI-FIELD BM25F INDEX & OPTIMIZED INVERTED INDEX
     # -------------------------------------------------------------------------
     @staticmethod
     def _tokenize(text):
@@ -456,14 +456,14 @@ class QdrantBankingStore:
         else:
             self._bm25_avgdl = 0.0
 
-        # Tính IDF chuẩn Okapi
+        # Compute standard Okapi IDF
         for term, posting in self._bm25_inverted_index.items():
             freq_docs = len(posting)
             self._bm25_idf[term] = math.log(
                 ((total_docs - freq_docs + 0.5) / (freq_docs + 0.5)) + 1.0
             )
 
-        # Tiền tính toán hệ số chuẩn hóa độ dài tài liệu cho truy vấn siêu tốc (<4ms)
+        # Precompute document length normalization for fast queries (<4ms)
         for d_len in self._bm25_doc_len:
             if self._bm25_avgdl > 0.0:
                 norm_val = self.k1 * (1.0 - self.b + self.b * (d_len / self._bm25_avgdl))
@@ -472,7 +472,7 @@ class QdrantBankingStore:
             self._bm25_doc_norm.append(norm_val)
 
     # -------------------------------------------------------------------------
-    # 3. CƠ CHẾ LỌC METADATA (PAYLOAD FILTER & NESTED RESOLVER)
+    # 3. METADATA FILTERING MECHANISM (PAYLOAD FILTER & NESTED RESOLVER)
     # -------------------------------------------------------------------------
     @staticmethod
     def _get_nested_field(chunk, key):
@@ -522,7 +522,7 @@ class QdrantBankingStore:
         return None
 
     # -------------------------------------------------------------------------
-    # 4. TÌM KIẾM VECTOR (DENSE SEARCH)
+    # 4. VECTOR SEARCH (DENSE SEARCH)
     # -------------------------------------------------------------------------
     def search_vector(self, query_vector, top_k=5, filter_dict=None):
         """
@@ -548,7 +548,7 @@ class QdrantBankingStore:
             return []
 
     # -------------------------------------------------------------------------
-    # 5. TÌM KIẾM TỪ KHÓA (BM25F OKAPI SEARCH SỬ DỤNG INVERTED INDEX)
+    # 5. KEYWORD SEARCH (BM25F OKAPI SEARCH USING INVERTED INDEX)
     # -------------------------------------------------------------------------
     def search_bm25(self, query_text, top_k=5, filter_dict=None, breadcrumb_boost=1.5):
         """
@@ -565,7 +565,7 @@ class QdrantBankingStore:
         if not q_tokens:
             return []
 
-        # Chuẩn bị bộ lọc metadata (bỏ qua giá trị None để đồng bộ tuyệt đối với Qdrant Filter)
+        # Prepare metadata filter (ignore None values to sync with Qdrant Filter)
         parsed_filter = []
         if filter_dict and isinstance(filter_dict, dict):
             for fk, fv in filter_dict.items():
@@ -592,7 +592,7 @@ class QdrantBankingStore:
 
             term_weight = idf * (self.k1 + 1.0)
             for doc_idx, freq in posting.items():
-                # Kiểm tra bộ lọc metadata
+                # Check metadata filter
                 if parsed_filter:
                     if doc_idx not in filter_cache:
                         chunk = self._bm25_corpus[doc_idx]
@@ -639,7 +639,7 @@ class QdrantBankingStore:
         if not scores:
             return []
 
-        # Sắp xếp top_k điểm cao nhất
+        # Sort top-k highest scores
         sorted_indices = sorted(scores.keys(), key=lambda i: scores[i], reverse=True)[:top_k]
         results = []
         for idx in sorted_indices:
@@ -647,7 +647,7 @@ class QdrantBankingStore:
         return results
 
     # -------------------------------------------------------------------------
-    # 6. TÌM KIẾM LAI (HYBRID SEARCH: DENSE + BM25F + RRF)
+    # 6. HYBRID SEARCH (DENSE + BM25F + RRF)
     # -------------------------------------------------------------------------
     def search_hybrid(
         self,
@@ -666,7 +666,7 @@ class QdrantBankingStore:
         2. Sparse BM25F (bắt chính xác mã thẻ, số thông tư, lãi suất) qua Inverted Index.
         3. Hợp nhất thứ hạng bằng Reciprocal Rank Fusion (RRF k=60).
         """
-        # 1. Gọi truy vấn
+        # 1. Execute queries
         dense_hits = self.search_vector(query_vector, top_k=candidate_k, filter_dict=filter_dict)
         bm25_hits = self.search_bm25(
             query_text,
@@ -675,12 +675,12 @@ class QdrantBankingStore:
             breadcrumb_boost=breadcrumb_boost
         )
 
-        # 2. Hợp nhất RRF
+        # 2. RRF Merge
         candidates = {}
         dense_weight = alpha
         bm25_weight = 1.0 - alpha
 
-        # Ghi nhận thứ hạng Dense
+        # Record Dense ranking
         for rank, (chunk, score) in enumerate(dense_hits, start=1):
             c_id = chunk.get("chunk_id")
             if not c_id:
@@ -694,7 +694,7 @@ class QdrantBankingStore:
                 "rrf_score": 0.0
             }
 
-        # Ghi nhận thứ hạng BM25
+        # Record BM25 ranking
         for rank, (chunk, score) in enumerate(bm25_hits, start=1):
             c_id = chunk.get("chunk_id")
             if not c_id:
@@ -712,7 +712,7 @@ class QdrantBankingStore:
                 candidates[c_id]["bm25_rank"] = rank
                 candidates[c_id]["bm25_score"] = round(score, 4)
 
-        # Tính toán điểm RRF: Score = w1 / (k + rank1) + w2 / (k + rank2)
+        # Compute RRF score: Score = w1 / (k + rank1) + w2 / (k + rank2)
         for c_id, item in candidates.items():
             rrf = 0.0
             if item["dense_rank"] is not None:
@@ -721,19 +721,19 @@ class QdrantBankingStore:
                 rrf += bm25_weight / (rrf_k + item["bm25_rank"])
             item["rrf_score"] = round(rrf, 6)
 
-        # Sắp xếp kết quả theo RRF giảm dần và lấy Top-K
+        # Sort results descending by RRF and take Top-K
         sorted_candidates = sorted(candidates.values(), key=lambda x: x["rrf_score"], reverse=True)
         return sorted_candidates[:top_k]
 
     def count(self):
-        """Đếm tổng số bản ghi vector hiện có"""
+        """Count total stored vector records."""
         try:
             return self.client.get_collection(self.collection_name).points_count
         except Exception:
             return 0
 
     def close(self):
-        """Giải phóng tài nguyên"""
+        """Release client resources."""
         if self.client:
             try:
                 self.client.close()
@@ -741,5 +741,5 @@ class QdrantBankingStore:
                 pass
 
 
-# Alias chuẩn hóa
+# Standardized Alias
 QdrantVectorStore = QdrantBankingStore

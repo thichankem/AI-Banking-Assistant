@@ -1,6 +1,6 @@
 """
-Runner truc tiep cho Module 6: Reranking.
-Chay doc lap tu input/ sang output/ voi co che chong trung lap.
+Direct runner for Module 6: Reranking.
+Runs independently from input/ to output/ with StateTracker deduplication.
 """
 import sys
 import argparse
@@ -14,8 +14,8 @@ from agent_banking.reranking.run_reranking import run_auto_reranking
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Reranking Node (Input -> Output)")
-    parser.add_argument("--force", action="store_true", help="Chay lai toan bo tu dau")
-    parser.add_argument("--top-k", type=int, default=3, help="So luong tai lieu rerank giu lai")
+    parser.add_argument("--force", action="store_true", help="Re-run everything from scratch")
+    parser.add_argument("--top-k", type=int, default=3, help="Number of reranked candidates to retain")
     args = parser.parse_args()
 
     module_dir = Path(__file__).resolve().parent

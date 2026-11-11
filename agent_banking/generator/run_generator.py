@@ -1,18 +1,18 @@
 """
-Module Tu Dong Sinh Cau Tra Loi LLM (Auto Generator Node with Deduplication).
-=============================================================================
-Dac diem:
-1. Doc tu generator/input/top_chunks.json (hoac tu dong lay tu reranking/output).
-2. Tinh toan SHA-256 hash cua cau hoi kem top_chunks.
-3. Kiem tra StateTracker: Cau hoi nao da sinh tra loi roi thi tai su dung (SKIP).
-4. Chi goi LLM API (Language-Model) sinh cau tra loi cho nhung truy van moi.
-5. Xuat ket qua: answers.json, answers.md, latest_answer.json.
+Auto Generator Node with Deduplication.
+=======================================
+Features:
+1. Reads from generator/input/top_chunks.json (or automatically takes from reranking/output).
+2. Computes SHA-256 hash of query and top_chunks.
+3. Checks StateTracker: Reuses previously generated answers if already processed (SKIP).
+4. Calls configured LLM API to generate answers only for new/modified queries.
+5. Exports results: answers.json, answers.md, latest_answer.json.
 
-NGUYEN TAC BAT BUOC:
-1. KHONG DUNG __INIT__.PY.
-2. KHONG DUNG THU VIEN TYPING.
-3. ZERO TERNARY: if/else tuong minh.
-4. 0% REGEX LAW.
+MANDATORY RULES:
+1. NO __INIT__.PY.
+2. NO TYPING LIBRARY (use native types).
+3. ZERO TERNARY: explicit if/else blocks only.
+4. 0% REGEX LAW (string operations only).
 """
 
 from __future__ import annotations
@@ -39,8 +39,8 @@ from agent_banking.state_tracker import StateTracker
 
 def _compute_chunk_signature(chunk):
     """
-    Trích xuất định danh hoặc chữ ký nội dung đại diện cho một chunk (0% Regex, Zero Ternary).
-    Khi chunk thiếu chunk_id hoặc id, dự phòng lấy 100 ký tự đầu của content, document, parent_content hoặc text.
+    Extract content signature or identifier for a chunk (0% Regex, Zero Ternary).
+    Falls back to first 100 characters of content, document, parent_content, or text.
     """
     if isinstance(chunk, dict):
         if "chunk" in chunk and isinstance(chunk["chunk"], dict):
@@ -67,7 +67,7 @@ def _compute_chunk_signature(chunk):
 
 def _compute_query_chunks_hash(tracker, query, top_chunks):
     """
-    Tính hash SHA-256 nhất quán cho truy vấn kèm danh sách chunks.
+    Compute consistent SHA-256 hash for query along with its chunk signatures.
     """
     signatures = []
     for c in top_chunks:
@@ -83,7 +83,7 @@ def run_auto_generator(
     force: bool = False
 ) -> list[dict]:
     """
-    Tu dong dong goi ngu canh va sinh cau tra loi tu input sang output kem co che chong trung lap.
+    Automatically formats context and generates answers with deduplication state tracking.
     """
     cfg = Config()
     in_dir = PROJECT_ROOT / "agent_banking" / "generator" / "input"
@@ -100,7 +100,7 @@ def run_auto_generator(
     if force:
         tracker.clear()
 
-    # 1. Tim nguon top chunks
+    # 1. Locate top_chunks source
     target_in_file = None
     if input_file is not None:
         target_in_file = Path(input_file)
@@ -118,8 +118,8 @@ def run_auto_generator(
                     target_in_file = rag_rerank_out
 
     if target_in_file is None or not target_in_file.exists():
-        print(f"⚠️ Khong tim thay tap tin top_chunks.json trong: {in_dir}")
-        print("Vui long bo file 'top_chunks.json' vao agent_banking/generator/input/")
+        print(f"⚠️ Top chunks file not found in: {in_dir}")
+        print("Please place 'top_chunks.json' into agent_banking/generator/input/")
         return []
 
     print(f"\n{'='*75}")
@@ -130,10 +130,10 @@ def run_auto_generator(
         raw_reranked = json.load(fp)
 
     if not raw_reranked:
-        print("⚠️ Danh sach top_chunks rong.")
+        print("⚠️ Top chunks list is empty.")
         return []
 
-    # 2. Doc cau tra loi cu de tai su dung
+    # 2. Read previous answers for deduplication reuse
     prev_answers = {}
     prev_file = out_path / "answers.json"
     if prev_file.exists() and not force:
@@ -159,7 +159,7 @@ def run_auto_generator(
                     top_chunks = item.get("top_chunks", [])
                     q_hash_map[q] = _compute_query_chunks_hash(tracker, q, top_chunks)
                 if tracker.are_all_items_processed(q_hash_map):
-                    print(f"  ⏭️ [SKIP ALL] Tat ca {len(raw_reranked)} queries da duoc sinh cau tra loi truoc do. Bo qua toan bo trong 0.0s!")
+                    print(f"  ⏭️ [SKIP ALL] All {len(raw_reranked)} queries previously generated. Skipping in 0.0s!")
                     print(f"✅ [Generator Hoan Tat] Da xuat {len(prev_list)} cau tra loi vao: {prev_file} trong 0.0s")
                     return prev_list
         except Exception:
@@ -190,7 +190,7 @@ def run_auto_generator(
         q_id = item.get("query_id", 1)
         top_chunks = item.get("top_chunks", [])
 
-        # Tinh hash nhat quan dua tren query va chu ky chunk
+        # Compute consistent hash based on query and chunk signatures
         q_hash = _compute_query_chunks_hash(tracker, q, top_chunks)
 
         is_done = tracker.is_processed(q, q_hash)
@@ -219,7 +219,7 @@ def run_auto_generator(
             if srcs:
                 markdown_reports.append(f"* **Tài liệu nguồn:** {', '.join(srcs)}")
             markdown_reports.append("---\n")
-            print(f"  [{q_id:02d}] [SKIP] '{q[:40]}...' (Da sinh cau tra loi)")
+            print(f"  [{q_id:02d}] [SKIP] '{q[:40]}...' (Previously generated)")
         else:
             t0 = time.time()
             synthesized_context = generator.format_chunks(top_chunks)
@@ -255,12 +255,12 @@ def run_auto_generator(
                 markdown_reports.append(f"* **Tài liệu nguồn:** {', '.join(sources)}")
             markdown_reports.append(f"* **Thời gian sinh:** {dt_ms}ms\n---\n")
 
-            print(f"  [{q_id:02d}] [NEW]  '{q[:40]}...' -> Hoan tat sinh ({dt_ms}ms)")
+            print(f"  [{q_id:02d}] [NEW]  '{q[:40]}...' -> Generated ({dt_ms}ms)")
 
     tracker.save()
     total_elapsed = round(time.time() - start_t, 2)
 
-    # 3. Xuat ket qua
+    # 3. Export results
     json_out = out_path / "answers.json"
     with open(json_out, "w", encoding="utf-8") as fp:
         json.dump(final_answers, fp, ensure_ascii=False, indent=2)

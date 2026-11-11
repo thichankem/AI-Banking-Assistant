@@ -1,16 +1,16 @@
 """
-Kỹ năng cơ sở (Base Skill) cho hệ thống AI Banking Assistant - Kiến trúc JSON-Driven v2.0.
-Thiết kế tối giản, trực quan, dễ hiểu theo chuẩn Chunking:
-- Mọi Skill được định nghĩa khai báo hoàn toàn dưới dạng tệp JSON chuẩn hóa.
-- BaseSkill nạp metadata, input/output schemas và cơ chế thực thi trực tiếp từ JSON.
-- Tự động đo lường độ trễ và xử lý ngoại lệ an toàn.
+Base Skill for AI Banking Assistant - JSON-Driven Architecture v2.0.
+Clean, intuitive, and modular:
+- Every skill is defined declaratively as a standardized JSON specification.
+- BaseSkill loads metadata, input/output schemas, and execution configuration from JSON.
+- Measures execution latency and handles exceptions safely.
 
-NGUYÊN TẮC BẮT BUỘC:
-1. KHÔNG DÙNG __INIT__.PY: Import trực tiếp file module.
-2. KHÔNG DÙNG THƯ VIỆN TYPING: Thuần túy dùng kiểu gốc của Python (dict, list, str, int, float).
-3. ZERO TERNARY: Bắt buộc dùng if/else tường minh, không dùng ?: hoặc toán tử 3 ngôi.
-4. 0% REGEX LAW: Tuyệt đối không dùng regex.
-5. HẠN CHẾ TỐI ĐA THỪA THÃI: Code ngắn gọn, trực diện, dễ hiểu.
+MANDATORY RULES:
+1. NO __INIT__.PY: Direct module imports.
+2. NO TYPING LIBRARY: Native Python types only (dict, list, str, int, float).
+3. ZERO TERNARY: Explicit if/else only.
+4. 0% REGEX LAW: Absolutely no regular expressions.
+5. KEEP IT SIMPLE: Clear, direct, readable code.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from agent_banking.config.settings import Config
 
 
 def _clean_think_tags(text: str) -> str:
-    """Làm sạch thẻ <think>...</think> của LLM (0% Regex)."""
+    """Clean reasoning tags <think>...</think> from LLM output (0% Regex)."""
     cleaned = text
     while True:
         s = cleaned.find("<think>")
@@ -41,7 +41,7 @@ def _clean_think_tags(text: str) -> str:
 
 @dataclass
 class SkillMetadata:
-    """Siêu dữ liệu mô tả kỹ năng được nạp từ cấu hình JSON."""
+    """Skill metadata loaded from JSON configuration."""
     skill_id: str
     display_name: str
     description: str
@@ -56,7 +56,7 @@ class SkillMetadata:
 
 
 class BaseSkill:
-    """Lớp thực thi kỹ năng đa năng được điều khiển bằng đặc tả JSON."""
+    """General-purpose skill executor driven by declarative JSON specification."""
 
     def __init__(
         self,
@@ -79,7 +79,7 @@ class BaseSkill:
 
     @classmethod
     def from_json_file(cls, json_path: str, config: Config | None = None, pipeline_instance=None):
-        """Khởi tạo Skill trực tiếp từ tệp đặc tả JSON."""
+        """Initialize Skill directly from a JSON specification file."""
         p = Path(json_path)
         with open(p, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -100,7 +100,7 @@ class BaseSkill:
         return cls(metadata=meta, config=config, pipeline_instance=pipeline_instance)
 
     def execute(self, params: dict) -> dict:
-        """Thực thi kỹ năng và trả về kết quả chuẩn hóa kèm độ trễ ms."""
+        """Execute skill and return normalized result with latency in ms."""
         start_time = time.perf_counter()
         try:
             data = self._run(params)
@@ -123,11 +123,11 @@ class BaseSkill:
             }
 
     def _run(self, params: dict):
-        """Điều phối thực thi dựa trên cấu hình execution trong JSON."""
+        """Dispatch execution based on JSON execution config."""
         exec_cfg = self.metadata.execution_config
         exec_type = exec_cfg.get("type", "generic")
 
-        # 1. Thực thi Thẩm định Sinh trắc học QĐ 2345
+        # 1. Biometric Compliance Execution (Decision 2345)
         if exec_type == "tool_call":
             from agent_banking.tools.banking_api_tools import check_biometric_compliance_qd2345
             amount = params.get("transaction_amount", params.get("single_tx_amount_vnd", 0.0))
@@ -150,7 +150,7 @@ class BaseSkill:
                 "full_audit_details": audit_result
             }
 
-        # 2. Thực thi Tính toán Tài chính & Lãi suất & Tỷ giá
+        # 2. Financial Calculator & Rates Execution
         if exec_type == "financial_dispatcher":
             from agent_banking.tools.banking_api_tools import (
                 calculate_loan_amortization,
@@ -205,7 +205,7 @@ class BaseSkill:
             result = get_interest_rates(deposit_type=dep_type)
             return {"operation": "interest_rates", "rates_data": result}
 
-        # 3. Thực thi Tiếp nhận Sự cố Khẩn cấp
+        # 3. Incident Support Execution
         if exec_type == "incident_dispatcher":
             from agent_banking.tools.banking_api_tools import create_support_ticket
             issue_type = params.get("issue_type", params.get("incident_type", "tra_soat_giao_dich"))
@@ -235,8 +235,8 @@ class BaseSkill:
 
             if urgency == "CRITICAL":
                 guide = (
-                    "Quý khách vui lòng mở VCB Digibank > Dịch vụ thẻ > Khóa thẻ tạm thời ngay lập tức, "
-                    "hoặc gọi Tổng đài 1900 54 54 13 để khóa khẩn cấp."
+                    "Quý khách vui lòng mở ứng dụng ngân hàng số > Dịch vụ thẻ > Khóa thẻ tạm thời ngay lập tức, "
+                    "hoặc gọi Tổng đài hỗ trợ để khóa khẩn cấp."
                 )
             else:
                 guide = (
@@ -250,7 +250,7 @@ class BaseSkill:
                 "hotline_support": exec_cfg.get("hotline", "1900 54 54 13 (24/7)")
             }
 
-        # 4. Thực thi Truy xuất Tri thức Quy chế RAG
+        # 4. RAG Knowledge Retrieval Execution
         if exec_type == "rag_pipeline":
             if self.pipeline is None:
                 from agent_banking.pipeline import BankingRAGPipeline
@@ -310,7 +310,7 @@ class BaseSkill:
                 "query_used": raw_query
             }
 
-        # 5. Thực thi Thẩm định Tài liệu & Kiểm soát Ảo giác
+        # 5. Document Grader & Hallucination Audit Execution
         if exec_type == "fact_checker_engine":
             check_type = params.get("check_type", "audit_answer")
 
@@ -365,7 +365,7 @@ class BaseSkill:
                 "compliance_score": compliance_score
             }
 
-        return {"status": "SUCCESS", "message": f"Kỹ năng {self.metadata.skill_id} đã thực thi."}
+        return {"status": "SUCCESS", "message": f"Skill {self.metadata.skill_id} executed successfully."}
 
     def _call_llm_checker(self, prompt: str) -> str:
         if not self.llm_client:
@@ -384,7 +384,5 @@ class BaseSkill:
             if not raw:
                 return "yes"
             return _clean_think_tags(raw).lower()
-        except ModelFallbackError:
-            raise
         except Exception:
             return "yes"

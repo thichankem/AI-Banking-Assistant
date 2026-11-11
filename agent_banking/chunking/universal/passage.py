@@ -3,7 +3,10 @@
 
 def format_passage(chunk):
     metadata = chunk.get("business_metadata", {})
-    retrieval = metadata.get("retrieval", {})
+    return format_passage_fields(chunk.get("content", ""), metadata.get("retrieval", {}))
+
+
+def format_passage_fields(content, retrieval):
     context = str(retrieval.get("context", "")).strip()
     derived = str(retrieval.get("situated_context", "")).strip()
     parts = ["passage:"]
@@ -11,5 +14,5 @@ def format_passage(chunk):
         parts.append("[" + context + "]")
     if derived:
         parts.append("Ngữ cảnh: " + derived)
-    parts.append(str(chunk.get("content", "")))
+    parts.append(str(content))
     return "\n".join(parts)

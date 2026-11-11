@@ -50,9 +50,10 @@ def run_fallback(module, candidates, operation, retry_delays=(1.0, 2.0, 4.0)):
                 status = getattr(error, "status_code", getattr(error, "code", None))
                 if isinstance(status, int):
                     reason += " HTTP " + str(status)
-                if attempt + 1 == candidate.attempts:
+                if attempt + 1 == candidate.attempts or getattr(error, "retryable", True) is False:
                     failures.append((label, reason))
                     logger.warning("%s %s failed (%s); trying next priority", module, label, reason)
+                    break
                 elif retry_delays:
                     time.sleep(retry_delays[min(attempt, len(retry_delays) - 1)])
     if not failures:

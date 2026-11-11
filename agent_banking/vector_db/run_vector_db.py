@@ -1,21 +1,21 @@
 """
-Module Tu Dong Lap Chi Muc Vector DB & BM25 (Auto Vector DB Node with Deduplication).
-=====================================================================================
-Dac diem:
-1. Dong bo va nap truc tiep tu agent_banking/embedding/output/embedded_chunks.json (2.627 chunks).
-2. Du phong nap tu agent_banking/vector_db/input/embedded_chunks.json neu khong tim thay nguon embedding.
-3. Tinh toan SHA-256 hash toan dien: chunk_id, chunk_type, content, vector head/tail.
-4. Kiem tra StateTracker: Chunk nao da lap chi muc thi bo qua (SKIP).
-5. Ho tro Clean Rebuild voi co --force: xoa sach collection cu va nap lai tu dau.
-6. Xuat bao cao indexing_manifest.json voi day du cac truong canonical va aliases tuong thich.
+Automated Vector DB & BM25 Indexing Runner (Auto Vector DB Node with Deduplication).
+===================================================================================
+Features:
+1. Ingests from agent_banking/embedding/output/embedded_chunks.json.
+2. Fallback input from agent_banking/vector_db/input/embedded_chunks.json.
+3. Computes SHA-256 hash across chunk content and vector properties.
+4. Checks StateTracker: Skips previously indexed chunks.
+5. Supports clean rebuild with --force flag.
+6. Emits indexing_manifest.json report with canonical fields.
 
-NGUYEN TAC BAT BUOC (GEMINI.md & AGENTS.md):
-1. 0% REGEX LAW: Tuyet doi khong dung thu vien re hoac bieu thuc chinh quy.
-2. ZERO TERNARY LAW: Bat buoc dung if/else tuong minh tung dong, khong dung cu phap ternary.
-3. NO TYPING LIBRARY: Tuyet doi khong su dung kieu tu typing module, chi dung kieu co san.
-4. KHONG TAO HOAC GIU FILE __INIT__.PY.
-5. 100% MERMAID: Khong dung draw.io.
-6. ZERO NOTEBOOKLM: Khong su dung NotebookLM / NLM.
+MANDATORY INVARIANTS:
+1. 0% REGEX LAW: No regex library or import re.
+2. ZERO TERNARY LAW: Explicit if/else statements only.
+3. NO TYPING LIBRARY: Native types only.
+4. NO __INIT__.PY: Direct module imports.
+5. 100% MERMAID: No draw.io.
+6. ZERO NOTEBOOKLM: No NotebookLM / NLM.
 """
 
 import sys

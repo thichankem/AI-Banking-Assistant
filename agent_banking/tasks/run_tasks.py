@@ -1,17 +1,17 @@
 """
-Module Tu Dong Xu Ly Tasks Nghiep Vu (Auto Tasks Node with Deduplication).
+Automated Business Tasks Processing Node with Deduplication.
 ==========================================================================
-Dac diem:
-1. Doc yeu cau tu tasks/input/sample_task_inputs.json.
-2. Tinh toan SHA-256 hash cua tung truy van va ngu canh (context).
-3. Kiem tra StateTracker: Yeu cau nao da thuc thi thi tai su dung (SKIP).
-4. Chi kich hoat TaskManager xu ly nhung yeu cau moi.
-5. Xuat ket qua: sample_task_outputs.json.
+Features:
+1. Reads requests from tasks/input/sample_task_inputs.json.
+2. Computes SHA-256 hash of each query and context.
+3. Checks StateTracker: Reuses previously processed tasks (SKIP).
+4. Dispatches new requests to BankingTaskManager.
+5. Saves results to sample_task_outputs.json.
 
-NGUYEN TAC BAT BUOC:
-1. KHONG DUNG __INIT__.PY.
-2. KHONG DUNG THU VIEN TYPING.
-3. ZERO TERNARY: if/else tuong minh.
+MANDATORY RULES:
+1. NO __INIT__.PY.
+2. NO TYPING LIBRARY.
+3. ZERO TERNARY: Explicit if/else only.
 4. 0% REGEX LAW.
 """
 
@@ -43,7 +43,7 @@ def run_auto_tasks(
     force: bool = False
 ) -> list[dict]:
     """
-    Tu dong xu ly tasks tu input sang output kem co che chong trung lap.
+    Automatically process tasks from input to output with deduplication.
     """
     cfg = Config()
     in_dir = PROJECT_ROOT / "agent_banking" / "tasks" / "input"
@@ -60,7 +60,7 @@ def run_auto_tasks(
     if force:
         tracker.clear()
 
-    # 1. Tim nguon input
+    # 1. Resolve input source
     target_in_file = None
     if input_file is not None:
         target_in_file = Path(input_file)
@@ -70,7 +70,7 @@ def run_auto_tasks(
             target_in_file = candidate
 
     if target_in_file is None or not target_in_file.exists():
-        print(f"⚠️ Khong tim thay tap tin task inputs trong: {in_dir}")
+        print(f"⚠️ Task inputs file not found in: {in_dir}")
         return []
 
     print(f"\n{'='*75}")
@@ -81,10 +81,10 @@ def run_auto_tasks(
         raw_items = json.load(fp)
 
     if not raw_items:
-        print("⚠️ Danh sach task inputs rong.")
+        print("⚠️ Task inputs list is empty.")
         return []
 
-    # 2. Doc ket qua cu de tai su dung
+    # 2. Read existing results for deduplication
     prev_results = {}
     prev_file = out_path / "sample_task_outputs.json"
     if prev_file.exists() and not force:
@@ -107,8 +107,8 @@ def run_auto_tasks(
                     ctx_str = json.dumps(ctx, sort_keys=True, ensure_ascii=False)
                     q_hash_map[uq] = tracker.compute_text_hash(f"{uq}:{ctx_str}")
                 if tracker.are_all_items_processed(q_hash_map):
-                    print(f"  ⏭️ [SKIP ALL] Tat ca {len(raw_items)} tasks da duoc thuc thi truoc do. Bo qua toan bo trong 0.0s!")
-                    print(f"✅ [Tasks Hoan Tat] Da xuat {len(prev_list)} task results vao: {prev_file} trong 0.0s")
+                    print(f"  ⏭️ [SKIP ALL] All {len(raw_items)} tasks previously completed. Skipped in 0.0s.")
+                    print(f"✅ [Tasks Complete] Exported {len(prev_list)} task results to: {prev_file} in 0.0s")
                     return prev_list
         except Exception:
             prev_results = {}
@@ -137,7 +137,7 @@ def run_auto_tasks(
             cached_res = dict(prev_results[uq])
             task_outputs.append(cached_res)
             skipped_count += 1
-            print(f"  [{idx:02d}] [SKIP] '{uq[:35]}...' (Da thuc thi)")
+            print(f"  [{idx:02d}] [SKIP] '{uq[:35]}...' (Already processed)")
         else:
             t0 = time.time()
             res_dict = task_manager.process_query(uq, context=ctx)
@@ -161,12 +161,12 @@ def run_auto_tasks(
     tracker.save()
     total_elapsed = round(time.time() - start_t, 2)
 
-    # 3. Xuat ket qua
+    # 3. Export output
     out_file = out_path / "sample_task_outputs.json"
     with open(out_file, "w", encoding="utf-8") as fp:
         json.dump(task_outputs, fp, ensure_ascii=False, indent=2)
 
-    print(f"✅ [Tasks Hoan Tat] Da xuat {len(task_outputs)} task results vao: {out_file} (Moi: {new_count}, Bo qua: {skipped_count}) trong {total_elapsed}s")
+    print(f"✅ [Tasks Complete] Exported {len(task_outputs)} task results to: {out_file} (New: {new_count}, Skipped: {skipped_count}) in {total_elapsed}s")
     return task_outputs
 
 

@@ -1,6 +1,6 @@
 """
-Runner truc tiep cho Module 12: Tools.
-Chay doc lap tu input/ sang output/ voi co che chong trung lap.
+Direct Runner for Module 12: Tools.
+Runs independently from input/ to output/ with deduplication.
 """
 from __future__ import annotations
 import sys
@@ -15,7 +15,7 @@ from agent_banking.tools.run_tools import run_auto_tools
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Tools Node (Input -> Output)")
-    parser.add_argument("--force", action="store_true", help="Chay lai toan bo tu dau")
+    parser.add_argument("--force", action="store_true", help="Rerun all tools from scratch")
     args = parser.parse_args()
 
     module_dir = Path(__file__).resolve().parent

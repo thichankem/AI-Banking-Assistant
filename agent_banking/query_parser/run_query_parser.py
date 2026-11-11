@@ -1,18 +1,18 @@
 """
-Module Tự Động Phân Tích Câu Hỏi (Auto Query Parser Node with Deduplication).
+Auto Query Parser Node with Deduplication.
 =============================================================================
-Đặc điểm:
-1. Đọc câu hỏi từ input/ (queries.json, latest_query.json, queries.txt) hoặc qua tham số CLI --query.
-2. Tính toán SHA-256 hash của từng câu hỏi.
-3. Kiểm tra StateTracker: Tái sử dụng kết quả đã phân tích (SKIP), loại bỏ 100% xử lý trùng lặp.
-4. Chuẩn hóa viết tắt, bóc tách thực thể pháp lý, nhận diện số tiền, phân loại ý định & trích xuất từ khóa BM25.
-5. Xuất kết quả chuẩn: parsed_queries.json, latest_parsed.json, parsing_manifest.json.
+Features:
+1. Reads queries from input/ (queries.json, latest_query.json, queries.txt) or via CLI --query.
+2. Computes SHA-256 hash for each query.
+3. Checks StateTracker: Reuses parsed results (SKIP), eliminating 100% duplicate processing.
+4. Normalizes acronyms, extracts legal entities, identifies amounts, classifies intent, and extracts BM25 keywords.
+5. Emits standard outputs: parsed_queries.json, latest_parsed.json, parsing_manifest.json.
 
-NGUYÊN TẮC BẮT BUỘC (GEMINI.md & AGENTS.md):
-1. KHÔNG DÙNG __INIT__.PY: Import trực tiếp file module.
-2. KHÔNG DÙNG THU VIEN TYPING: Thuần túy dùng kiểu nguyên bản của Python.
-3. ZERO TERNARY: Bắt buộc dùng if/else tường minh từng dòng, không dùng toán tử 3 ngôi.
-4. 0% REGEX LAW: Tuyệt đối không dùng regex hay import re.
+MANDATORY RULES (GEMINI.md & AGENTS.md):
+1. NO __INIT__.PY: Direct module imports.
+2. NO TYPING LIBRARY: Native Python types only.
+3. ZERO TERNARY: Explicit if/else statements only.
+4. 0% REGEX LAW: String methods only.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def run_auto_query_parser(
     single_query=None
 ):
     """
-    Tự động phân tích câu hỏi từ input sang output kèm cơ chế chống trùng lặp StateTracker.
+    Automatically parses queries from input to output with StateTracker deduplication.
     """
     in_dir = PROJECT_ROOT / "agent_banking" / "query_parser" / "input"
     in_dir.mkdir(parents=True, exist_ok=True)
@@ -60,7 +60,7 @@ def run_auto_query_parser(
     if force:
         tracker.clear()
 
-    # 1. Xác định danh sách truy vấn đầu vào
+    # 1. Determine input query list
     query_list = []
 
     if single_query is not None and str(single_query).strip():
@@ -109,7 +109,7 @@ def run_auto_query_parser(
                         if l:
                             query_list.append(l)
 
-    # Nếu chưa có câu hỏi nào, tạo mẫu mặc định thực tế cho ngân hàng
+    # If no query found, supply realistic banking default examples
     if not query_list:
         query_list = [
             "Hạn mức giao dịch mở tài khoản eKYC tối đa bao nhiêu một ngày?",
@@ -126,7 +126,7 @@ def run_auto_query_parser(
     print(f"▶ [MODULE 4: QUERY PARSER] Input: {len(query_list)} queries -> Output: {out_path}")
     print(f"{'='*75}")
 
-    # 2. Đọc kết quả cũ đã phân tích để tái sử dụng
+    # 2. Read previous parsed results for deduplication reuse
     prev_parsed = {}
     prev_file = out_path / "parsed_queries.json"
     if prev_file.exists() and not force:
@@ -143,8 +143,8 @@ def run_auto_query_parser(
                     clean_q = q.strip()
                     q_hash_map[clean_q] = tracker.compute_text_hash(clean_q)
                 if tracker.are_all_items_processed(q_hash_map):
-                    print(f"  ⏭️ [SKIP ALL] Tất cả {len(query_list)} queries đã được phân tích trước đó. Bỏ qua toàn bộ trong 0.0s!")
-                    print(f"✅ [Query Parser Hoàn Tất] Đã xuất {len(prev_list)} queries vào: {prev_file} (Bỏ qua: {len(query_list)}, Mới: 0) trong 0.0s")
+                    print(f"  [SKIP ALL] All {len(query_list)} queries already parsed. Skipping all in 0.0s.")
+                    print(f"[Query Parser Complete] Exported {len(prev_list)} queries to: {prev_file} (Skipped: {len(query_list)}, New: 0) in 0.0s")
                     return prev_list
         except Exception:
             prev_parsed = {}
@@ -168,7 +168,7 @@ def run_auto_query_parser(
             skipped_count += 1
             it = item.get("intent", "hoi_dap_chung")
             intents_breakdown[it] = intents_breakdown.get(it, 0) + 1
-            print(f"  [{idx:02d}] [SKIP] '{clean_q[:42]}...' (Đã phân tích)")
+            print(f"  [{idx:02d}] [SKIP] '{clean_q[:42]}...' (Cached)")
         else:
             t0 = time.time()
             parsed = parser.parse(clean_q)
@@ -185,15 +185,15 @@ def run_auto_query_parser(
             new_count += 1
             it = parsed.intent
             intents_breakdown[it] = intents_breakdown.get(it, 0) + 1
-            print(f"  [{idx:02d}] [NEW]  '{clean_q[:38]}...' -> Intent: {parsed.intent} | Từ khóa: {parsed.keywords_str[:35]} ({dt_ms}ms)")
+            print(f"  [{idx:02d}] [NEW]  '{clean_q[:38]}...' -> Intent: {parsed.intent} | Keywords: {parsed.keywords_str[:35]} ({dt_ms}ms)")
 
     tracker.save()
     total_elapsed = round(time.time() - start_t, 4)
 
-    # 3. Xuất các tệp kết quả
+    # 3. Export output files
     out_file = out_path / "parsed_queries.json"
     if single_query is not None and prev_parsed:
-        # Hợp nhất câu hỏi đơn lẻ vào tập queries sẵn có thay vì xóa sạch tệp batch
+        # Merge single query into existing queries file
         merged_dict = dict(prev_parsed)
         for res_item in parsed_results:
             rq = res_item.get("raw_query")
@@ -215,7 +215,7 @@ def run_auto_query_parser(
         with open(latest_file, "w", encoding="utf-8") as fp:
             json.dump(parsed_results[-1], fp, ensure_ascii=False, indent=2)
 
-    # Xuất Manifest theo quy chuẩn hệ thống (tương đương indexing_manifest.json)
+    # Export manifest following system standard
     manifest_file = out_path / "parsing_manifest.json"
     manifest_data = {
         "status": "success",
@@ -232,16 +232,16 @@ def run_auto_query_parser(
     with open(manifest_file, "w", encoding="utf-8") as fp:
         json.dump(manifest_data, fp, ensure_ascii=False, indent=2)
 
-    print(f"✅ [Query Parser Hoàn Tất] Đã xuất {len(parsed_results)} queries vào: {out_file} (Mới: {new_count}, Bỏ qua: {skipped_count}) trong {total_elapsed}s")
+    print(f"[Query Parser Complete] Exported {len(parsed_results)} queries to: {out_file} (New: {new_count}, Skipped: {skipped_count}) in {total_elapsed}s")
     return parsed_results
 
 
 if __name__ == "__main__":
     cli_parser = argparse.ArgumentParser(description="Auto Query Parser Pipeline with Deduplication")
-    cli_parser.add_argument("--force", action="store_true", help="Chạy lại toàn bộ và xóa sạch cache state tracker")
-    cli_parser.add_argument("--input", type=str, default=None, help="Đường dẫn tệp input json/txt tùy chọn")
-    cli_parser.add_argument("--output", type=str, default=None, help="Thư mục xuất kết quả tùy chọn")
-    cli_parser.add_argument("--query", type=str, default=None, help="Phân tích trực tiếp một câu hỏi cụ thể")
+    cli_parser.add_argument("--force", action="store_true", help="Re-run everything and clear state tracker cache")
+    cli_parser.add_argument("--input", type=str, default=None, help="Optional input json/txt file path")
+    cli_parser.add_argument("--output", type=str, default=None, help="Optional output directory path")
+    cli_parser.add_argument("--query", type=str, default=None, help="Parse a single query directly")
     args = cli_parser.parse_args()
 
     run_auto_query_parser(

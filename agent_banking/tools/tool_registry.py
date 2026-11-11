@@ -1,16 +1,16 @@
 """
-Bộ Quản Lý Danh Mục Công Cụ Ngân Hàng (Banking Tool Registry - JSON-Driven Architecture).
-Thiết kế tối giản, trực quan, dễ hiểu theo chuẩn Chunking:
-- Quét và nạp toàn bộ định nghĩa công cụ từ các tệp JSON (*.json).
-- Xuất định dạng chuẩn OpenAI Tool Calling / Anthropic Tool Use / LangGraph.
-- Điều phối thực thi an toàn kèm theo kiểm tra tham số.
+Banking Tool Registry (JSON-Driven Architecture).
+Design:
+- Scans and loads tool definitions from JSON specification files (*.json).
+- Exports standard Tool Calling and execution specifications.
+- Coordinates safe execution with parameter validation.
 
-NGUYÊN TẮC BẮT BUỘC:
-1. KHÔNG DÙNG __INIT__.PY: Import trực tiếp file module.
-2. KHÔNG DÙNG THƯ VIỆN TYPING: Thuần túy dùng kiểu gốc của Python.
-3. ZERO TERNARY: Bắt buộc dùng if/else tường minh, không dùng ?: hoặc toán tử 3 ngôi.
-4. 0% REGEX LAW: Tuyệt đối không dùng regex.
-5. HẠN CHẾ TỐI ĐA THỪA THÃI: Code ngắn gọn, trực diện, dễ hiểu.
+MANDATORY RULES:
+1. NO __INIT__.PY: Direct module imports.
+2. NO TYPING LIBRARY: Native Python types only.
+3. ZERO TERNARY: Explicit if/else only.
+4. 0% REGEX LAW: Absolutely no regular expressions.
+5. KEEP IT SIMPLE: Clear, direct, readable code.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from pathlib import Path
 
 
 class BankingToolRegistry:
-    """Quản lý tập trung các công cụ nghiệp vụ ngân hàng được khai báo bằng JSON."""
+    """Centralized manager for banking tools defined declaratively via JSON."""
 
     def __init__(self, tools_dir: str | Path | None = None, pipeline_instance=None):
         if tools_dir is not None:
@@ -33,7 +33,7 @@ class BankingToolRegistry:
         self._load_tools_from_json()
 
     def _load_tools_from_json(self) -> None:
-        """Nạp tất cả các tệp công cụ JSON."""
+        """Load all tool JSON specification files."""
         if not self.tools_dir.exists():
             return
 
@@ -47,10 +47,10 @@ class BankingToolRegistry:
                 tool_name = tool_def.get("name", jf.stem)
                 self.tools_definitions[tool_name] = tool_def
             except Exception as e:
-                print(f"⚠️ Không thể nạp tool từ {jf.name}: {e}")
+                print(f"⚠️ Failed to load tool from {jf.name}: {e}")
 
     def list_tools(self) -> list[dict]:
-        """Trả về danh sách tóm tắt toàn bộ công cụ."""
+        """Return summary list of all registered tools."""
         result = []
         for name, t in self.tools_definitions.items():
             result.append({
@@ -62,11 +62,11 @@ class BankingToolRegistry:
         return result
 
     def get_tool_definition(self, name: str) -> dict | None:
-        """Lấy toàn bộ đặc tả JSON của một công cụ."""
+        """Get full JSON specification of a tool."""
         return self.tools_definitions.get(name)
 
-    def get_openai_tool_specs(self) -> list[dict]:
-        """Xuất danh sách công cụ theo chuẩn OpenAI Function / Tool Calling."""
+    def get_tool_specs(self) -> list[dict]:
+        """Export tool specifications conforming to standard Tool Calling specifications."""
         specs = []
         for name, t in self.tools_definitions.items():
             specs.append({
@@ -80,13 +80,13 @@ class BankingToolRegistry:
         return specs
 
     def execute_tool(self, name: str, params: dict) -> dict:
-        """Thực thi công cụ theo tên và tham số truyền vào."""
+        """Execute a tool by name and parameter payload."""
         start_t = time.perf_counter()
         tool_def = self.tools_definitions.get(name)
         if not tool_def:
             return {
                 "status": "ERROR",
-                "message": f"Không tìm thấy công cụ '{name}' trong danh bạ JSON.",
+                "message": f"Tool '{name}' not found in registry.",
                 "latency_ms": 0.0
             }
 
@@ -159,7 +159,7 @@ class BankingToolRegistry:
                 prod = params.get("product_type", "the_va_tai_khoan")
                 result = deflect_competitor_comparison(competitor_name=comp, product_type=prod)
             else:
-                result = {"status": "ERROR", "message": f"Chưa cài đặt handler cho tool '{name}'"}
+                result = {"status": "ERROR", "message": f"Handler not implemented for tool '{name}'"}
 
             latency_ms = round((time.perf_counter() - start_t) * 1000, 2)
             return {

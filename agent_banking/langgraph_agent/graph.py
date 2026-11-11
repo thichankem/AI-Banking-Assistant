@@ -2,12 +2,12 @@
 """
 LangGraph StateGraph Builder for Banking Agent v4.0
 ======================================================================
-Xây dựng và biên dịch đồ thị luân chuyển trạng thái (StateGraph) với:
-- 9 Nodes toàn trình (bao gồm Node 7: audit_generation).
-- Multi-Agent Supervisor Router (Chỉ định Sub-Agent chuyên trách).
-- Persistent SQLite Checkpointer (SqliteSaver) lưu trữ lịch sử phiên bền vững.
-- Chống lặp vô tận (Infinite Loop Protection) tại Grader (max 2 retries) và Audit (max 1 retry).
-- 0% REGEX & ZERO TERNARY tuân thủ 100%.
+Builds and compiles the state transition graph (StateGraph) with:
+- 9 End-to-end Nodes (including Node 7: audit_generation).
+- Multi-Agent Supervisor Router (Assigning specialized Sub-Agents).
+- Persistent SQLite Checkpointer (SqliteSaver) for persistent session history.
+- Infinite Loop Protection at Grader (max 2 retries) and Audit (max 1 retry).
+- 0% REGEX & ZERO TERNARY 100% compliance.
 """
 
 from __future__ import annotations
@@ -27,7 +27,6 @@ from agent_banking.langgraph_agent.edges import (
     route_after_audit
 )
 
-
 from pathlib import Path
 
 DEFAULT_SQLITE_DB = str(Path(__file__).resolve().parent.parent / "tracing" / "agent_memory.db")
@@ -35,8 +34,8 @@ DEFAULT_SQLITE_DB = str(Path(__file__).resolve().parent.parent / "tracing" / "ag
 
 def create_persistent_checkpointer(db_path: str = DEFAULT_SQLITE_DB):
     """
-    Khởi tạo SqliteSaver để lưu trữ bền vững lịch sử chat qua các lần khởi động lại Server.
-    Nếu môi trường thiếu thư viện sqlite checkpointer, tự động chuyển về MemorySaver an toàn.
+    Initialize SqliteSaver to persist chat history across server restarts.
+    If the sqlite checkpointer is unavailable, automatically fall back to MemorySaver safely.
     """
     parent_dir = os.path.dirname(db_path)
     if parent_dir != "":
@@ -50,7 +49,7 @@ def create_persistent_checkpointer(db_path: str = DEFAULT_SQLITE_DB):
         checkpointer.setup()
         return checkpointer
     except Exception as e:
-        print(f"[Checkpointer] Chuyển về MemorySaver dự phòng (Lý do: {e})")
+        print(f"[Checkpointer] Fallback to MemorySaver (Reason: {e})")
         fallback_memory = MemorySaver()
         return fallback_memory
 
@@ -62,7 +61,7 @@ def build_banking_agent_graph(
     sqlite_db_path: str = DEFAULT_SQLITE_DB
 ):
     """
-    Xây dựng và biên dịch đồ thị LangGraph Agentic RAG phiên bản 4.0.
+    Build and compile the LangGraph Agentic RAG graph version 4.0.
     """
     if config is not None:
         cfg = config
@@ -71,10 +70,10 @@ def build_banking_agent_graph(
 
     nodes = BankingAgentNodes(pipeline_instance=pipeline_instance, config=cfg)
 
-    # 1. Khởi tạo StateGraph với AgentState
+    # 1. Initialize StateGraph with AgentState
     workflow = StateGraph(AgentState)
 
-    # 2. Đăng ký toàn bộ 9 Nodes
+    # 2. Register all 9 Nodes
     workflow.add_node("input_guardrail", nodes.input_guardrail_node)
     workflow.add_node("router", nodes.supervisor_router_node)
     workflow.add_node("retrieve", nodes.retrieve_node)
@@ -85,10 +84,10 @@ def build_banking_agent_graph(
     workflow.add_node("audit_generation", nodes.audit_generation_node)
     workflow.add_node("output_guardrail", nodes.output_guardrail_node)
 
-    # 3. Nối luồng đi (Edges & Conditional Edges)
+    # 3. Connect flow (Edges & Conditional Edges)
     workflow.add_edge(START, "input_guardrail")
 
-    # Node 0 -> Node 1 (Router) hoặc Node 8 (Output Guardrail nếu bị từ chối)
+    # Node 0 -> Node 1 (Router) or Node 8 (Output Guardrail if rejected)
     workflow.add_conditional_edges(
         "input_guardrail",
         route_after_input_guardrail,
@@ -98,7 +97,7 @@ def build_banking_agent_graph(
         }
     )
 
-    # Node 1 (Supervisor Router) -> 3 nhánh
+    # Node 1 (Supervisor Router) -> 3 branches
     workflow.add_conditional_edges(
         "router",
         route_after_router,
@@ -109,10 +108,10 @@ def build_banking_agent_graph(
         }
     )
 
-    # Nhánh RAG: Retrieve -> Thẩm định tài liệu
+    # RAG branch: Retrieve -> Document Grader
     workflow.add_edge("retrieve", "grade_documents")
 
-    # Node 3 (Grade Documents) -> Generate hoặc Rewrite
+    # Node 3 (Grade Documents) -> Generate or Rewrite
     workflow.add_conditional_edges(
         "grade_documents",
         route_after_grader,
@@ -123,16 +122,16 @@ def build_banking_agent_graph(
         }
     )
 
-    # Node 4 (Rewrite) -> Tìm kiếm lại (Retrieve)
+    # Node 4 (Rewrite) -> Re-search (Retrieve)
     workflow.add_edge("rewrite_query", "retrieve")
 
-    # Node 5 (Banking Tool) -> Tổng hợp kết quả tại Generate
+    # Node 5 (Banking Tool) -> Synthesize results at Generate
     workflow.add_edge("banking_tool", "generate")
 
     # Node 6 (Generate) -> Node 7 (Audit Generation)
     workflow.add_edge("generate", "audit_generation")
 
-    # Node 7 (Audit Generation) -> Sinh lại (Generate) hoặc Hoàn tất (Output Guardrail)
+    # Node 7 (Audit Generation) -> Regenerate or Complete (Output Guardrail)
     workflow.add_conditional_edges(
         "audit_generation",
         route_after_audit,
@@ -145,7 +144,7 @@ def build_banking_agent_graph(
     # Node 8 (Output Guardrail) -> END
     workflow.add_edge("output_guardrail", END)
 
-    # 4. Xác định Checkpointer
+    # 4. Resolve Checkpointer
     active_checkpointer = checkpointer
     if active_checkpointer is None:
         active_checkpointer = create_persistent_checkpointer(sqlite_db_path)

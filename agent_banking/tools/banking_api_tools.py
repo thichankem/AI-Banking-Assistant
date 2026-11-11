@@ -1,23 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-Banking API Tools (Bộ Công Cụ Nghiệp Vụ Ngân Hàng Số v4.0)
+Banking API Tools (Digital Banking Business Toolset v4.0)
 ======================================================================
-Cung cấp các công cụ tương tác trực tiếp cho AI Agent:
-1. get_interest_rates: Bảng lãi suất tiền gửi tiết kiệm Vietcombank.
-2. get_foreign_exchange_rates: Bảng tỷ giá ngoại tệ hôm nay.
-3. calculate_savings_profit: Công cụ tính lãi tiết kiệm tự động.
-4. calculate_loan_amortization: Tính lịch trả nợ vay theo dư nợ giảm dần.
-5. check_biometric_compliance_qd2345: Thẩm định sinh trắc học theo QĐ 2345 & TT 50.
-6. create_support_ticket: Tạo ticket hỗ trợ sự cố khẩn cấp (nuốt thẻ, khiếu nại).
-7. parse_vietnamese_financial_params: Bóc tách số liệu tài chính tiếng Việt.
-8. check_complain_count: Đếm phàn nàn & chuyển giao tư vấn viên.
-9. transfer_to_agent: Chuyển giao Live Agent theo khung giờ làm việc.
-10. rate_agent_csat: Đánh giá độ hài lòng CSAT 1-5 sao.
-11. deflect_competitor_comparison: Điều hướng so sánh ngân hàng đối thủ.
+Provides execution tools for AI Agents:
+1. get_interest_rates: Deposit interest rates schedule.
+2. get_foreign_exchange_rates: Foreign exchange rates today.
+3. calculate_savings_profit: Automated savings profit calculator.
+4. calculate_loan_amortization: Declining balance loan amortization schedule.
+5. check_biometric_compliance_qd2345: Biometric compliance under Decision 2345 & Circular 50.
+6. create_support_ticket: Create support ticket for urgent incidents.
+7. parse_vietnamese_financial_params: Parse Vietnamese financial parameters.
+8. check_complain_count: Track complaint counts & suggest human escalation.
+9. transfer_to_agent: Live Agent handoff during business hours.
+10. rate_agent_csat: Record CSAT ratings 1-5 stars.
+11. deflect_competitor_comparison: Deflect competitor comparison inquiries.
 
-NGUYÊN TẮC:
-- 0% REGEX LAW: Tuyệt đối không dùng thư viện re hoặc regex.
-- ZERO TERNARY LAW: Ưu tiên if/else tường minh từng dòng.
+RULES:
+- 0% REGEX LAW: Absolutely no regex or re library imports.
+- ZERO TERNARY LAW: Explicit if/else only.
 - NO TYPING LIBRARY: Native Python types.
 """
 
@@ -27,7 +27,7 @@ import datetime
 
 
 def get_interest_rates(deposit_type: str = "vnd") -> dict:
-    """Tra cứu bảng lãi suất tiền gửi tiết kiệm niêm yết của Vietcombank."""
+    """Look up listed deposit interest rates."""
     dep_type = deposit_type.strip().lower()
     if dep_type == "vnd" or dep_type == "dong":
         rates = [
@@ -44,16 +44,16 @@ def get_interest_rates(deposit_type: str = "vnd") -> dict:
             "status": "success",
             "currency": "VND",
             "effective_date": "2026-10-25",
-            "bank": "Ngân hàng TMCP Ngoại thương Việt Nam (Vietcombank)",
+            "bank": "Ngân hàng Thương mại",
             "interest_rates": rates,
-            "disclaimer": "Lãi suất có thể thay đổi theo từng thời kỳ và áp dụng ưu đãi khi gửi online qua VCB Digibank."
+            "disclaimer": "Lãi suất có thể thay đổi theo từng thời kỳ và áp dụng ưu đãi khi gửi online."
         }
     else:
         return {
             "status": "success",
             "currency": "USD",
             "effective_date": "2026-10-25",
-            "bank": "Vietcombank",
+            "bank": "Ngân hàng Thương mại",
             "interest_rates": [
                 {"term": "Mọi kỳ hạn", "rate_percent_per_year": 0.0, "note": "Áp dụng theo quy định của NHNN đối với ngoại tệ USD"}
             ],
@@ -62,7 +62,7 @@ def get_interest_rates(deposit_type: str = "vnd") -> dict:
 
 
 def get_foreign_exchange_rates(currency: str = "USD") -> dict:
-    """Tra cứu bảng tỷ giá ngoại tệ hiện hành tại Vietcombank."""
+    """Look up current foreign exchange rates."""
     curr = currency.strip().upper()
 
     rate_table = {
@@ -84,16 +84,16 @@ def get_foreign_exchange_rates(currency: str = "USD") -> dict:
     return {
         "status": "success",
         "effective_date": "2026-10-25",
-        "bank": "Vietcombank",
+        "bank": "Ngân hàng Thương mại",
         "rates": selected_rate,
-        "note": "Tỷ giá mua chuyển khoản và bán được cập nhật thời gian thực từ hệ thống Vietcombank."
+        "note": "Tỷ giá mua chuyển khoản và bán được cập nhật thời gian thực từ hệ thống."
     }
 
 
 def calculate_savings_profit(amount_vnd: float, term_months: int) -> dict:
     """
-    Tính số tiền lãi tiết kiệm thực nhận và tổng số tiền khi đáo hạn tại Vietcombank.
-    Công thức: Tiền lãi = Số tiền gửi * Lãi suất (%/năm) * (Kỳ hạn tháng / 12)
+    Calculate estimated savings profit and total maturity balance.
+    Formula: Interest = Deposit amount * Rate (%/year) * (Months / 12)
     """
     if amount_vnd <= 0:
         return {
@@ -138,7 +138,7 @@ def calculate_loan_amortization(
     term_months: int
 ) -> dict:
     """
-    Tính toán lịch trả nợ vay theo phương pháp Dư nợ giảm dần chuẩn Vietcombank.
+    Calculate loan repayment schedule using declining balance amortization method.
     """
     if principal_vnd <= 0:
         return {
@@ -206,17 +206,17 @@ def check_biometric_compliance_qd2345(
     has_verified_chip_cccd: bool
 ) -> dict:
     """
-    Thẩm định yêu cầu xác thực sinh trắc học theo QĐ 2345/QĐ-NHNN & TT 50/2024/TT-NHNN.
-    - Giao dịch đơn lẻ > 10.000.000 VNĐ
-    - Tổng giao dịch cộng dồn trong ngày > 20.000.000 VNĐ
-    - Kích hoạt VCB Digibank lần đầu hoặc đổi thiết bị mới.
+    Evaluate biometric authentication requirements under Decision 2345 & Circular 50.
+    - Single transaction > 10,000,000 VND
+    - Daily cumulative amount > 20,000,000 VND
+    - First activation or login on new mobile device.
     """
     requires_biometric = False
     reasons = []
 
     if is_first_time_new_device is True:
         requires_biometric = True
-        reasons.append("Kích hoạt ứng dụng VCB Digibank lần đầu hoặc đăng nhập trên thiết bị di động mới.")
+        reasons.append("Kích hoạt ứng dụng lần đầu hoặc đăng nhập trên thiết bị di động mới.")
 
     if single_tx_amount_vnd > 10000000.0:
         requires_biometric = True
@@ -256,9 +256,9 @@ def create_support_ticket(
     description: str,
     priority: str = "NORMAL"
 ) -> dict:
-    """Tạo ticket yêu cầu trợ giúp và điều phối sang nhân viên nghiệp vụ ngân hàng."""
+    """Create customer support ticket and dispatch to banking specialist."""
     ts = int(time.time())
-    ticket_id = f"VCB-TK-{ts}"
+    ticket_id = f"TK-{ts}"
 
     clean_priority = priority.strip().upper()
     if clean_priority not in ["URGENT", "HIGH", "NORMAL", "LOW"]:
@@ -274,8 +274,8 @@ def create_support_ticket(
         "emergency_hotline": "1900 54 54 13 (Phục vụ 24/7)",
         "message": (
             f"Hệ thống đã tạo thành công phiếu yêu cầu hỗ trợ mã [{ticket_id}]. "
-            "Chuyên viên chăm sóc khách hàng Vietcombank sẽ liên hệ xác minh trong vòng 15-30 phút. "
-            "Trong trường hợp khẩn cấp (mất thẻ, nghi ngờ lộ thông tin), vui lòng gọi ngay Tổng đài 1900 54 54 13 để khóa dịch vụ tức thì."
+            "Chuyên viên chăm sóc khách hàng sẽ liên hệ xác minh trong vòng 15-30 phút. "
+            "Trong trường hợp khẩn cấp (mất thẻ, nghi ngờ lộ thông tin), vui lòng gọi ngay Tổng đài để khóa dịch vụ tức thì."
         )
     }
 
@@ -327,8 +327,8 @@ def _parse_float_or_int(tok: str) -> float | None:
 
 def parse_vietnamese_financial_params(query: str) -> dict:
     """
-    Bóc tách số liệu tài chính tiếng Việt chuẩn Vietcombank (0% Regex Law, Zero Ternary).
-    Trích xuất số tiền, kỳ hạn, lãi suất phần trăm, trạng thái thiết bị và CCCD gắn chip.
+    Extract Vietnamese financial parameters (0% Regex Law, Zero Ternary).
+    Extracts principal/amount, term, interest percentage, device status, and chip CCCD status.
     """
     cleaned_q = query.lower().replace("/", " ")
     words = cleaned_q.split()
@@ -345,7 +345,7 @@ def parse_vietnamese_financial_params(query: str) -> dict:
         raw_tok = words[i]
         clean_tok = _clean_token_number_str(raw_tok)
 
-        # 1. Bóc tách lãi suất %
+        # 1. Parse rate percentage
         if "%" in raw_tok:
             num = _parse_float_or_int(clean_tok)
             if num is not None:
@@ -359,7 +359,7 @@ def parse_vietnamese_financial_params(query: str) -> dict:
                     annual_rate_percent = num
                     continue
 
-        # 2. Bóc tách kỳ hạn (tháng / năm)
+        # 2. Parse term (months / years)
         if i + 1 < len(words):
             next_clean = _clean_token_number_str(words[i + 1])
             if next_clean in ["năm", "nam"]:
@@ -373,7 +373,7 @@ def parse_vietnamese_financial_params(query: str) -> dict:
                     term_months = int(num)
                     continue
 
-        # 3. Bóc tách số tiền
+        # 3. Parse monetary amounts
         num = _parse_float_or_int(clean_tok)
         if num is not None:
             multiplier = 1.0
@@ -401,7 +401,7 @@ def parse_vietnamese_financial_params(query: str) -> dict:
                     context_prev = " ".join(words[start_context:i])
                     amounts_found.append((num, context_prev))
 
-    # Phân bổ số tiền đơn lẻ vs cộng dồn trong ngày
+    # Allocate single vs daily cumulative amounts
     for val, ctx in amounts_found:
         if "tổng" in ctx or "cộng dồn" in ctx or "trong ngày" in ctx or "đã chuyển" in ctx:
             if daily_cumulative_amount_vnd == 0.0:
@@ -420,7 +420,7 @@ def parse_vietnamese_financial_params(query: str) -> dict:
     elif daily_cumulative_amount_vnd > 0.0 and single_tx_amount_vnd == 0.0:
         single_tx_amount_vnd = daily_cumulative_amount_vnd
 
-    # Nhận diện kích hoạt thiết bị mới
+    # Detect new device activation
     is_first_time_new_device = False
     device_kws = ["thiết bị mới", "thiet bi moi", "lần đầu", "lan dau", "đổi máy", "doi may", "đăng nhập lần đầu"]
     for dkw in device_kws:
@@ -428,7 +428,7 @@ def parse_vietnamese_financial_params(query: str) -> dict:
             is_first_time_new_device = True
             break
 
-    # Nhận diện trạng thái CCCD gắn chip
+    # Detect chip CCCD verification status
     has_verified_chip_cccd = True
     no_cccd_markers = ["chưa có cccd", "chưa gắn chip", "chưa xác thực", "chưa cập nhật cccd", "chưa đối soát", "chưa cập nhật"]
     for ncm in no_cccd_markers:
@@ -436,7 +436,7 @@ def parse_vietnamese_financial_params(query: str) -> dict:
             has_verified_chip_cccd = False
             break
 
-    # Thẩm định yêu cầu sinh trắc học theo QĐ 2345
+    # Biometric requirement evaluation under Decision 2345
     requires_biometric = False
     if is_first_time_new_device is True:
         requires_biometric = True
@@ -458,7 +458,7 @@ def parse_vietnamese_financial_params(query: str) -> dict:
 
 
 def check_complain_count(complain_count: int = 0) -> dict:
-    """Theo dõi số lần khách hàng phàn nàn và đề xuất chuyển giao Tư vấn viên nếu >= 2."""
+    """Track complaint counts and suggest human agent escalation if >= 2."""
     updated_count = int(complain_count) + 1
     escalate_to_human = False
     if updated_count >= 2:
@@ -486,7 +486,7 @@ def transfer_to_agent(
     business_process: str = "request_human_agent",
     customer_segment: str = "individual"
 ) -> dict:
-    """Chuyển giao phiên hội thoại cho Tư vấn viên (Live Agent Handoff) theo giờ làm việc."""
+    """Transfer session to Live Agent based on operating hours."""
     now_vn = datetime.datetime.now()
     current_hour = now_vn.hour
 
@@ -501,7 +501,7 @@ def transfer_to_agent(
     if is_working_hour:
         handoff_status = "queued"
         customer_notice = (
-            "Dạ, yêu cầu của Quý khách đã được chuyển tới hàng đợi Chuyên viên Tư vấn Vietcombank. "
+            "Dạ, yêu cầu của Quý khách đã được chuyển tới hàng đợi Chuyên viên Tư vấn. "
             "Chuyên viên sẽ tiếp nhận và phản hồi Quý khách trong ít phút. "
             "Quý khách vui lòng giữ kết nối màn hình trò chuyện."
         )
@@ -510,7 +510,7 @@ def transfer_to_agent(
         customer_notice = (
             "Hiện tại đang ngoài khung giờ hỗ trợ trực tuyến của Chuyên viên (7h00 - 23h00 hàng ngày). "
             "Để được xử lý khẩn cấp (như khóa thẻ, tra soát giao dịch), Quý khách vui lòng liên hệ ngay "
-            "Tổng đài Trung tâm Hỗ trợ Khách hàng Vietcombank 24/7 qua số hotline: 1900 54 54 13."
+            "Tổng đài Trung tâm Hỗ trợ Khách hàng 24/7 qua số hotline: 1900 54 54 13."
         )
 
     return {
@@ -530,7 +530,7 @@ def rate_agent_csat(
     user_message: str = "",
     channel: str = "web"
 ) -> dict:
-    """Ghi nhận đánh giá độ hài lòng CSAT 1-5 sao."""
+    """Record customer CSAT rating from 1 to 5 stars."""
     score = int(rating_score)
     if score < 1:
         score = 1
@@ -538,14 +538,14 @@ def rate_agent_csat(
         score = 5
 
     feedback_map = {
-        1: "Vietcombank chân thành xin lỗi vì trải nghiệm chưa được như mong đợi của Quý khách. Chúng tôi xin ghi nhận ý kiến để cải thiện chất lượng phục vụ ngay lập tức.",
-        2: "Vietcombank rất tiếc khi trải nghiệm hôm nay của Quý khách chưa thực sự hài lòng. Đội ngũ phát triển sẽ rà soát và nâng cao năng lực hỗ trợ.",
-        3: "Vietcombank cảm ơn phản hồi của Quý khách. Chúng tôi sẽ không ngừng nỗ lực để mang lại trải nghiệm tốt hơn trong các lần giao dịch tới.",
-        4: "Vietcombank rất vui khi đã hỗ trợ được Quý khách. Chúc Quý khách một ngày làm việc hiệu quả và nhiều niềm vui!",
-        5: "Vietcombank xin chân thành cảm ơn Quý khách đã tin tưởng và đánh giá 5 sao. Rất vinh hạnh được đồng hành cùng Quý khách!"
+        1: "Ngân hàng chân thành xin lỗi vì trải nghiệm chưa được như mong đợi của Quý khách. Chúng tôi xin ghi nhận ý kiến để cải thiện chất lượng phục vụ ngay lập tức.",
+        2: "Ngân hàng rất tiếc khi trải nghiệm hôm nay của Quý khách chưa thực sự hài lòng. Đội ngũ phát triển sẽ rà soát và nâng cao năng lực hỗ trợ.",
+        3: "Ngân hàng cảm ơn phản hồi của Quý khách. Chúng tôi sẽ không ngừng nỗ lực để mang lại trải nghiệm tốt hơn trong các lần giao dịch tới.",
+        4: "Ngân hàng rất vui khi đã hỗ trợ được Quý khách. Chúc Quý khách một ngày làm việc hiệu quả và nhiều niềm vui!",
+        5: "Ngân hàng xin chân thành cảm ơn Quý khách đã tin tưởng và đánh giá 5 sao. Rất vinh hạnh được đồng hành cùng Quý khách!"
     }
 
-    response_text = feedback_map.get(score, "Cảm ơn Quý khách đã đóng góp ý kiến cho Vietcombank.")
+    response_text = feedback_map.get(score, "Cảm ơn Quý khách đã đóng góp ý kiến cho Ngân hàng.")
 
     return {
         "status": "success",
@@ -560,14 +560,14 @@ def deflect_competitor_comparison(
     competitor_name: str = "",
     query: str = ""
 ) -> dict:
-    """Chiến lược điều hướng câu hỏi so sánh với ngân hàng đối thủ (Competitor Deflection)."""
+    """Deflect competitor comparison queries with bank strength highlights."""
     return {
         "status": "success",
         "strategy": "deflection",
         "directive": (
             "Tuyệt đối không so sánh tiêu cực với ngân hàng đối thủ. "
-            "Tập trung làm rõ các chính sách vượt trội của Vietcombank: "
-            "Mạng lưới thanh toán lớn nhất Việt Nam, miễn phí chuyển tiền VCB Digibank, "
+            "Tập trung làm rõ các chính sách vượt trội của Ngân hàng: "
+            "Mạng lưới thanh toán rộng khắp, miễn phí chuyển tiền ngân hàng số, "
             "chuẩn mực an toàn thông tin quốc tế PCI-DSS Level 1 cao nhất."
         ),
         "competitor_mentioned": competitor_name,

@@ -1,24 +1,24 @@
 # -*- coding: utf-8 -*-
 """
-Hệ Thống Phòng Vệ RAG Ngân Hàng (Banking Guardrails - Tinh Gọn & Trực Quan)
-========================================================================
-Kiến trúc 3 giai đoạn bảo vệ toàn diện cho RAG tra cứu thông tin ngân hàng:
-1. Giai đoạn 1 (Input Guardrail):
-   - Chặn Prompt Injection & Jailbreak (Bẻ vai trò, chiếm quyền, trích xuất prompt).
-   - Chặn Gian lận tài chính & An ninh mạng (Hack eKYC, skimming, rửa tiền).
-   - Chống trả lời linh tinh (Out-of-Domain: ẩm thực, thơ văn, code, thời tiết, bói toán).
-   - Quét đối soát ngữ nghĩa tương phản (Semantic Vector Guardrail).
-2. Giai đoạn 2 (Pre-Generation Relevance Gating):
-   - Chống ảo giác trước khi sinh. Ngắt luồng fail-fast nếu RAG không có tài liệu liên quan.
-3. Giai đoạn 3 (Post-Generation Grounding & Faithfulness):
-   - Làm sạch output (khử suy nghĩ rò rỉ, độc thoại).
-   - Đối soát trích dẫn pháp lý [Điều X, Khoản Y] và số liệu với tài liệu RAG thực tế.
+Banking Guardrails System (Streamlined & Robust Protection)
+===========================================================
+Comprehensive 3-stage defense architecture for banking RAG:
+1. Stage 1 (Input Guardrail):
+   - Blocks Prompt Injection & Jailbreak (Role hijacking, system prompt leakage).
+   - Blocks Financial Fraud & Cyber Attacks (eKYC bypass, skimming, money laundering).
+   - Blocks Out-of-Domain queries (cooking, poetry, programming, astrology).
+   - Contrastive semantic vector guardrail (SemanticBankingGuardrail).
+2. Stage 2 (Pre-Generation Relevance Gating):
+   - Prevents hallucinations prior to generation; fail-fast if no relevant documents.
+3. Stage 3 (Post-Generation Grounding & Faithfulness):
+   - Cleans output (removes leaked thinking tags, monologue).
+   - Verifies legal citations and financial numerical figures against retrieved chunks.
 
-QUY TẮC CỐT LÕI:
-- 0% Regex Law: Tuyệt đối không dùng regex.
-- Zero Ternary Law: Dùng if/else tường minh từng dòng.
-- No Typing Library: Không import typing.
-- No __init__.py: Import module trực tiếp.
+CORE DESIGN INVARIANTS:
+- 0% Regex Law: No regex methods or import re.
+- Zero Ternary Law: Explicit if/else statements only.
+- No Typing Library: No typing module imports.
+- No __init__.py: Direct module imports.
 """
 
 import unicodedata
@@ -28,11 +28,11 @@ from agent_banking.guardrails.indirect_injection_guardrail import strip_vietname
 
 
 # =====================================================================
-# 1. CẤU TRÚC DỮ LIỆU KẾT QUẢ PHÒNG VỆ
+# 1. GUARDRAIL RESULT DATA STRUCTURES
 # =====================================================================
 
 class InputGuardResult:
-    """Kết quả kiểm tra đầu vào"""
+    """Result of input security evaluation."""
     def __init__(self, is_safe, sanitized_query, trigger_reason=None, refusal_message=None, warning_message=None, details=None):
         self.is_safe = is_safe
         self.sanitized_query = sanitized_query
@@ -46,7 +46,7 @@ class InputGuardResult:
 
 
 class OutputGuardResult:
-    """Kết quả làm sạch đầu ra"""
+    """Result of output sanitization and grounding."""
     def __init__(self, is_safe, sanitized_answer, flags=None):
         self.is_safe = is_safe
         self.sanitized_answer = sanitized_answer
@@ -57,12 +57,12 @@ class OutputGuardResult:
 
 
 # =====================================================================
-# 2. DANH MỤC MẪU NHẬN DIỆN TẤN CÔNG & NGOÀI PHẠM VI (0% REGEX)
+# 2. ATTACK AND OUT-OF-DOMAIN DETECTION CATALOG (0% REGEX)
 # =====================================================================
 
-# Danh mục Prompt Injection / Jailbreak
+# Prompt Injection / Jailbreak Taxonomy
 INJECTION_PHRASES = [
-    # Tiếng Anh
+    # English
     "ignore all", "ignore previous", "ignore the above", "ignore above",
     "disregard previous", "disregard all", "forget previous", "forget everything",
     "forget all", "override system", "bypass safety", "bypass guardrail",
@@ -89,7 +89,7 @@ INJECTION_PHRASES = [
     "/admin_login", "[system_message]", "disable_guardrails", "godmode",
     "mock_guardrail_pass", "allow everything", "| role |",
 
-    # Tiếng Việt
+    # Vietnamese
     "bỏ qua toàn bộ chỉ dẫn trước", "bỏ qua toàn bộ chỉ dẫn", "bỏ qua toàn bộ hướng dẫn",
     "bỏ qua toàn bộ quy tắc", "bỏ qua tất cả chỉ dẫn", "bỏ qua tất cả hướng dẫn",
     "bỏ qua tất cả quy tắc", "bỏ qua các hướng dẫn", "quên toàn bộ chỉ dẫn",
@@ -111,7 +111,7 @@ INJECTION_PHRASES = [
     "các quy tắc ẩn", "tưởng tượng bạn đang", "tưởng tượng bạn là", "kịch bản phim",
     "red team", "thử nghiệm xâm nhập",
 
-    # Bổ sung trích xuất System Prompt tự nhiên & vai trò tấn công
+    # Supplementary natural system prompt extraction and role-based attacks
     "system prompt", "prompt hệ thống", "prompt he thong",
     "chỉ thị hệ thống", "chi thi he thong", "chỉ dẫn hệ thống", "chi dan he thong",
     "hướng dẫn hệ thống", "huong dan he thong", "quy tắc hệ thống", "quy tac he thong",
@@ -127,7 +127,7 @@ INJECTION_PHRASES = [
     "bạn là một hacker", "ban la mot hacker"
 ]
 
-# Danh mục tiền xử lý tiếng Việt không dấu cho Prompt Injection
+# Unaccented Vietnamese taxonomy for Prompt Injection pre-processing
 UNACCENTED_INJECTION_PHRASES = []
 for _p in INJECTION_PHRASES:
     _u = strip_vietnamese_accents(_p)
@@ -135,23 +135,23 @@ for _p in INJECTION_PHRASES:
         UNACCENTED_INJECTION_PHRASES.append(_u)
 
 
-# Danh mục Out-of-Domain (Chống trả lời linh tinh)
+# Out-of-Domain Taxonomy (Prevent off-topic queries)
 OFF_TOPIC_DOMAINS = [
-    # Ẩm thực & Nấu ăn
+    # Food & Cooking
     "cách nấu", "công thức nấu", "món ăn", "nấu ăn", "luộc trứng", "nấu phở", "làm bánh",
     "nướng thịt", "cách làm món", "pha nước chấm", "canh chua", "cá lóc", "ướp thịt", "bún chả",
     "chè hạt sen", "long nhãn", "sốt spaghetti", "chiên khoai tây", "kim chi", "cháo sườn",
     "trà sữa", "sườn xào", "gỏi cuốn", "bột ngọt", "nước mắm", "gia vị", "nguyên liệu nấu",
     "delicious pasta", "cook a",
 
-    # Văn nghệ, Thơ ca, Truyện cười, Tâm sự
+    # Arts, Poetry, Jokes, Personal chat
     "viết bài thơ", "làm thơ", "sáng tác thơ", "kể chuyện cười", "kể truyện cười", "câu chuyện cười",
     "viết thư tình", "tâm sự tình cảm", "tán gái", "hát cho tôi nghe", "viết một câu chuyện",
     "viết truyện ngắn", "tình mẫu tử", "tâm sự chuyện buồn", "chia tay mối tình",
     "du hành thời gian", "bài phát biểu", "lễ cưới", "chúc mừng sinh nhật",
     "bãi biển nha trang", "thơ trào phúng", "review quán cà phê", "menu quán cà phê", "quán cà phê view đẹp", "mở quán cà phê", "câu chuyện ma", "love poem",
 
-    # Lập trình & CNTT ngoài ngành
+    # Non-banking IT & Programming
     "viết code python", "code game", "viết hàm c++", "lập trình game", "fix bug js", "code html",
     "giải thuật leetcode", "viết code", "viết phần mềm", "cors error", "react kết nối",
     "landing page", "docker compose", "microservices", "shader", "unity 3d", "script bash",
@@ -159,20 +159,20 @@ OFF_TOPIC_DOMAINS = [
     "tối ưu hóa câu truy vấn sql join", "smart contract erc-20", "solidity", "lập trình rust",
     "hugging face", "transformers", "snake game in pygame",
 
-    # Chiêm tinh, Bói toán, Phong thủy, Thời tiết
+    # Astrology, Fortune telling, Feng Shui, Weather
     "thời tiết hôm nay", "dự báo thời tiết", "tử vi hôm nay", "bói bài tarot", "xem tướng số",
     "cung hoàng đạo", "xem chỉ tay", "phong thủy phòng ngủ", "nhiệt độ hiện tại", "thời tiết đà lạt", "du lịch đà lạt", "khách sạn đà lạt",
     "xem tử vi", "giáp tuất", "phong thủy", "hướng bàn làm việc", "mệnh hỏa", "giải mã giấc mơ",
     "ngày hoàng đạo", "động thổ", "bói chỉ tay", "sinh đạo", "mùa mưa", "chất lượng không khí aqi",
     "tuổi làm nhà", "kim lâu", "hoang ốc", "cung song ngư", "thời tiết sa pa", "du lịch sa pa", "khách sạn sa pa", "tuyết rơi", "nốt ruồi",
 
-    # Game, Thể thao, Điện ảnh, Giải trí
+    # Games, Sports, Movies, Entertainment
     "chơi game", "liên minh huyền thoại", "tải pubg", "mẹo chơi game", "bóng đá ngoại hạng anh",
     "pubg", "arsenal", "manchester city", "world cup", "đào phở và piano", "candy crush",
     "cầu thủ bóng đá", "messi", "ronaldo", "fifa online", "phim chiếu rạp", "headshot",
     "cs2", "bóng chuyền", "genshin impact", "grammy", "tâng bóng",
 
-    # Khoa học, Toán học, Lịch sử, Địa lý phổ thông
+    # General Science, Math, History, Geography
     "giải bài toán", "vật lý lớp", "hóa học lớp", "lịch sử tam quốc", "dịch bài tập",
     "định luật", "newton", "phương trình phản ứng", "axit nitric", "chiến tranh thế giới",
     "diện tích hình thang", "tam giác đều", "nhật thực", "nguyệt thực", "cách mạng tháng tám",
@@ -180,14 +180,14 @@ OFF_TOPIC_DOMAINS = [
     "thủ đô của", "du học canada", "định cư canada", "visa canada", "du lịch canada", "thời tiết canada", "saccarozơ", "tinh bột", "chu kỳ bán rã", "truyện kiều",
     "dãy số fibonacci", "nguyên phân", "giảm phân",
 
-    # Y tế, Sức khỏe, Bệnh học
+    # Medical, Health, Pathology
     "chữa bệnh", "thuốc kháng sinh", "khám bệnh", "triệu chứng cúm", "đau bụng uống gì",
     "đau đầu uống gì", "đau nửa đầu", "buồn nôn", "thuốc gì uống", "sốt xuất huyết",
     "đuối nước", "hô hấp nhân tạo", "tiểu đường tuýp 2", "hạ sốt", "sốt cao",
     "dị ứng nổi mề đay", "ngứa ngáy", "giảm mỡ bụng", "mất ngủ kinh niên"
 ]
 
-# Danh mục Gian lận tài chính & An ninh mạng ngân hàng
+# Financial Fraud & Banking Cyber Security Taxonomy
 FRAUD_CATEGORIES = {
     "EKYC_BIOMETRIC_FRAUD": [
         "qua mặt ekyc", "vượt qua ekyc", "lách ekyc", "fake ekyc", "giả mạo ekyc",
@@ -255,7 +255,7 @@ FRAUD_CATEGORIES = {
 
 ENTERPRISE_GUARDRAIL_TOPICS = FRAUD_CATEGORIES
 
-# Thông điệp từ chối chuyên biệt theo danh mục
+# Domain-specific refusal messages
 REFUSAL_MESSAGES = {
     "PROMPT_INJECTION_DETECTED": (
         "Hệ thống AI xin thông báo: Yêu cầu của Quý khách chứa nội dung hoặc cấu trúc "
@@ -314,7 +314,7 @@ REFUSAL_MESSAGES = {
     )
 }
 
-# Các cụm từ rò rỉ system prompt cần lọc ở đầu ra
+# System prompt leak phrases to filter at output
 PROMPT_LEAK_SIGNATURES = [
     "HỆ THỐNG NGUYÊN TẮC AN TOÀN & BẢO VỆ NGÂN HÀNG",
     "SYSTEM GUARDRAILS",
@@ -326,12 +326,12 @@ PROMPT_LEAK_SIGNATURES = [
 
 
 # =====================================================================
-# 3. TRÌNH QUẢN LÝ PHÒNG VỆ NGÂN HÀNG (BANKING GUARDRAIL MANAGER)
+# 3. Banking Guardrail Manager
 # =====================================================================
 
 class BankingGuardrailManager:
     """
-    Trình quản lý Guardrails Ngân Hàng Tinh Gọn (3 Giai Đoạn Phòng Vệ Chuẩn RAG).
+    Streamlined Banking Guardrails Manager (3-stage RAG defense pipeline).
     """
 
     def __init__(self, embedder=None, decision_client=None, use_decision_model=True):
@@ -359,12 +359,12 @@ class BankingGuardrailManager:
         self.indirect_guardrail = IndirectInjectionGuardrail()
         self.tool_guardrail = BankingToolGuardrail()
 
-        # L1 In-Memory LRU Decision Cache (Tối đa 5,000 queries)
+        # L1 In-Memory LRU Decision Cache (Max 5,000 queries)
         self._decision_cache = {}
         self._cache_max_size = 5000
 
     def _get_refusal_for_category(self, category):
-        """Lấy thông điệp từ chối chuyên biệt cho từng danh mục vi phạm"""
+        """Retrieve category-specific refusal message for guardrail violation"""
         if category in REFUSAL_MESSAGES:
             return REFUSAL_MESSAGES[category]
         return "Yêu cầu của Quý khách không phù hợp với quy chuẩn an toàn của ngân hàng."
@@ -400,12 +400,12 @@ class BankingGuardrailManager:
 
     def _check_prompt_injection(self, text_lower):
         """Quét Prompt Injection / Jailbreak, Spaced Text, Tiếng Việt Không Dấu và Leetspeak (0% Regex)"""
-        # 1. Quét danh mục từ khóa trực tiếp trên văn bản gốc
+        # 1. Scan direct keyword taxonomy on raw text
         for phrase in INJECTION_PHRASES:
             if phrase in text_lower:
                 return phrase
 
-        # 2. Heuristic đồng xuất hiện cặp từ khóa điều khiển (Dual-Keyword Co-occurrence)
+        # 2. Dual-Keyword Co-occurrence Heuristic
         action_keywords = [
             "bỏ qua", "quên", "lờ đi", "xoá", "xóa",
             "bo qua", "quen", "lo di", "xoa",
@@ -425,7 +425,7 @@ class BankingGuardrailManager:
                     if tgt in window:
                         return f"{act} ... {tgt}"
 
-        # 3. Nén ký tự phân mảnh có dấu cách hoặc dấu chấm/gạch nối (e.g. 'b o  q u a', 'b.o. .q.u.a')
+        # 3. Compress fragmented characters with spaces or dots/hyphens (e.g. 'b o  q u a')
         text_clean = text_lower.replace(".", " ").replace("_", " ")
         condensed = condense_spaced_text(text_clean)
         if condensed != text_lower:
@@ -440,7 +440,7 @@ class BankingGuardrailManager:
                         if tgt in window:
                             return f"{act} ... {tgt}"
 
-        # 4. Chuẩn hóa tiếng Việt không dấu (Unaccented Vietnamese Normalization)
+        # 4. Unaccented Vietnamese Normalization
         unacc = strip_vietnamese_accents(condensed)
         for phrase in UNACCENTED_INJECTION_PHRASES:
             if phrase in unacc:
@@ -453,7 +453,7 @@ class BankingGuardrailManager:
                     if tgt in window:
                         return f"{act} ... {tgt}"
 
-        # 5. Chuẩn hóa Leetspeak và quét lại
+        # 5. Leetspeak Normalization and re-scan
         leet_norm = self._normalize_leetspeak(unacc)
         for phrase in UNACCENTED_INJECTION_PHRASES:
             if phrase in leet_norm:
@@ -484,7 +484,7 @@ class BankingGuardrailManager:
             "mã bảo mật", "ma bao mat", "cvv", "cvc"
         ]
 
-        # Kiểm tra xem có cấu trúc trực tiếp CVV không cần leak marker (ví dụ "mã bảo vệ 456")
+        # Check direct CVV pattern without leak marker
         has_direct_cvv = False
         for cvk in cvv_checkers:
             if cvk in text_lower:
@@ -500,18 +500,18 @@ class BankingGuardrailManager:
         if not has_leak_marker and not has_direct_cvv:
             return False, None, None
 
-        # 1. Rò rỉ Mật khẩu (Có phân biệt với câu hỏi về quy định mật khẩu)
+        # 1. Password leak (distinguished from password policy inquiries)
         if has_leak_marker:
             for pw in ["mật khẩu", "mat khau", "password"]:
                 if pw in text_lower:
-                    # Trích xuất đoạn văn bản ngay sau marker
+                    # Extract text substring right after marker
                     marker_pos = text_lower.find(matched_marker)
                     after_text = text_lower[marker_pos + len(matched_marker):].strip()
                     tokens = after_text.split()
 
                     if len(tokens) > 0:
                         cand = tokens[0].strip(".,;:?!\"'()[]{}")
-                        # Danh mục các từ thể hiện câu hỏi quy định/hỏi đáp, không phải mật khẩu:
+                        # Words representing policy/inquiry questions, not password values:
                         non_secret_words = [
                             "gì", "gi", "sao", "nào", "nao", "đâu", "dau", "thế", "the",
                             "bao", "mấy", "may", "đúng", "dung", "phải", "phai", "không", "khong",
@@ -524,7 +524,7 @@ class BankingGuardrailManager:
                         if cand.lower() in non_secret_words:
                             is_non_secret = True
 
-                        # Nếu là số chỉ độ dài (e.g. "8 ký tự")
+                        # If number indicates length (e.g. '8 characters')
                         if cand.isdigit() and len(cand) <= 2:
                             if len(tokens) > 1:
                                 next_tok = tokens[1].strip(".,;:?!\"'()[]{}").lower()
@@ -532,8 +532,8 @@ class BankingGuardrailManager:
                                     is_non_secret = True
 
                         if not is_non_secret:
-                            # Kiểm tra xem cand có đặc điểm của token mật khẩu thực tế
-                            # Độ dài >= 6, hoặc có cả chữ và số, hoặc số >= 6
+                            # Check if candidate has properties of an actual password token
+                            # Length >= 6, or alphanumeric, or digits >= 6
                             is_pw_leak = False
                             if len(cand) >= 6:
                                 is_pw_leak = True
@@ -546,10 +546,10 @@ class BankingGuardrailManager:
                                 msg = self._get_refusal_for_category("AUTH_LEAK_PASSWORD")
                                 return True, "AUTH_LEAK_PASSWORD", msg
 
-        # 2. Rò rỉ mã bảo mật thẻ CVV/CVC
+        # 2. Card security code CVV/CVC leak
         for cvk in cvv_checkers:
             if cvk in text_lower:
-                # 2.1. Nếu có số 3-4 chữ số trực tiếp sau từ khóa CVV
+                # 2.1. If 3-4 digit number directly follows CVV keyword
                 idx = text_lower.find(cvk)
                 after_part = text_lower[idx + len(cvk):].strip(" :,.")
                 parts = after_part.split()
@@ -559,7 +559,7 @@ class BankingGuardrailManager:
                         msg = self._get_refusal_for_category("AUTH_LEAK_CVV")
                         return True, "AUTH_LEAK_CVV", msg
 
-                # 2.2. Nếu có marker rò rỉ và xuất hiện số 3-4 chữ số ngay sau marker
+                # 2.2. If leak marker exists and 3-4 digit number follows marker
                 if has_leak_marker:
                     marker_pos = text_lower.find(matched_marker)
                     after_marker = text_lower[marker_pos + len(matched_marker):].strip(" :,.")
@@ -570,7 +570,7 @@ class BankingGuardrailManager:
                             msg = self._get_refusal_for_category("AUTH_LEAK_CVV")
                             return True, "AUTH_LEAK_CVV", msg
 
-        # 3. Rò rỉ mã OTP
+        # 3. OTP code leak
         for ok in ["mã otp", "ma otp", "otp"]:
             if ok in text_lower:
                 clean_t = text_lower.replace(":", " ").replace(",", " ")
@@ -581,7 +581,7 @@ class BankingGuardrailManager:
                         msg = self._get_refusal_for_category("AUTH_LEAK_OTP")
                         return True, "AUTH_LEAK_OTP", msg
 
-        # 4. Rò rỉ mã PIN
+        # 4. PIN code leak
         for pk in ["mã pin", "ma pin", "pin"]:
             if pk in text_lower:
                 clean_t = text_lower.replace(":", " ").replace(",", " ")
@@ -599,7 +599,7 @@ class BankingGuardrailManager:
         sanitized = text
         text_lower = text.lower()
 
-        # 1. Che số thẻ tín dụng phân cách bằng khoảng trắng (4 nhóm 4 chữ số)
+        # 1. Mask space-separated credit card numbers (4 groups of 4 digits)
         words = sanitized.split(" ")
         idx = 0
         while idx <= len(words) - 4:
@@ -615,7 +615,7 @@ class BankingGuardrailManager:
             else:
                 idx += 1
 
-        # 2. Xử lý từng token
+        # 2. Process each token
         tokens = sanitized.split(" ")
         out_tokens = []
         for token in tokens:
@@ -632,14 +632,14 @@ class BankingGuardrailManager:
                             out_tokens.append(token.replace(clean_tok, "[EMAIL_REDACTED]"))
                             continue
 
-            # 2.2. Che Thẻ tín dụng có dấu gạch ngang hoặc dấu chấm (1234-5678-9012-3456)
+            # 2.2. Mask credit card with hyphens or dots (1234-5678-9012-3456)
             if len(clean_tok) == 19 and ("-" in clean_tok or "." in clean_tok):
                 card_digits = clean_tok.replace("-", "").replace(".", "")
                 if len(card_digits) == 16 and card_digits.isdigit():
                     out_tokens.append(token.replace(clean_tok, "[CARD_NUMBER_REDACTED]"))
                     continue
 
-            # 2.3. Che Số điện thoại có dấu phân cách (0987.654.321, 0987-654-321, 098-765-4321)
+            # 2.3. Mask phone numbers with separators (0987.654.321, etc.)
             if ("." in clean_tok or "-" in clean_tok) and not clean_tok.startswith("http"):
                 phone_digits = clean_tok.replace(".", "").replace("-", "")
                 if phone_digits.startswith("+84"):
@@ -649,14 +649,14 @@ class BankingGuardrailManager:
                         out_tokens.append(token.replace(clean_tok, "[PHONE_NUMBER_REDACTED]"))
                         continue
 
-            # 2.4. Che Số điện thoại quốc tế (+84987654321)
+            # 2.4. Mask international phone number (+84987654321)
             if clean_tok.startswith("+84"):
                 norm_int_phone = "0" + clean_tok[3:]
                 if len(norm_int_phone) == 10 and norm_int_phone.isdigit():
                     out_tokens.append(token.replace(clean_tok, "[PHONE_NUMBER_REDACTED]"))
                     continue
 
-            # 2.5. Che CVV/CVC khi có ngữ cảnh và số đứng sau từ khóa nhận diện
+            # 2.5. Mask CVV/CVC when context and number follow recognition keyword
             is_cvv = False
             if clean_tok.isdigit():
                 if len(clean_tok) == 3 or len(clean_tok) == 4:
@@ -676,17 +676,17 @@ class BankingGuardrailManager:
                 out_tokens.append(token.replace(clean_tok, "[CVV_REDACTED]"))
                 continue
 
-            # 2.6. Che các số liền nhau
+            # 2.6. Mask contiguous numbers
             if clean_tok.isdigit():
                 if len(clean_tok) == 16:
                     out_tokens.append(token.replace(clean_tok, "[CARD_NUMBER_REDACTED]"))
                 elif len(clean_tok) == 12 and clean_tok.startswith("0"):
                     out_tokens.append(token.replace(clean_tok, "[CITIZEN_ID_REDACTED]"))
                 elif len(clean_tok) == 9:
-                    # Số CMND cũ 9 số
+                    # Legacy 9-digit ID number
                     out_tokens.append(token.replace(clean_tok, "[CITIZEN_ID_REDACTED]"))
                 elif len(clean_tok) == 10 and clean_tok.startswith(("03", "05", "07", "08", "09")):
-                    # Số điện thoại 10 số di động
+                    # 10-digit mobile phone number
                     out_tokens.append(token.replace(clean_tok, "[PHONE_NUMBER_REDACTED]"))
                 elif len(clean_tok) >= 10 and len(clean_tok) <= 14:
                     out_tokens.append(token.replace(clean_tok, "[ACCOUNT_NUMBER_REDACTED]"))
@@ -699,7 +699,7 @@ class BankingGuardrailManager:
 
     def _check_fraud_and_crime(self, text_lower):
         """Quét Gian lận tài chính & Tội phạm mạng (0% Regex)"""
-        # Ngoại lệ hợp lệ cho nghiệp vụ chi trả lương nhân viên của doanh nghiệp
+        # Valid exception for corporate payroll services
         if "lương nhân viên" in text_lower:
             payroll_markers = [
                 "chi trả", "trả lương", "doanh nghiệp", "dịch vụ", "thủ tục",
@@ -709,7 +709,7 @@ class BankingGuardrailManager:
                 if pm in text_lower:
                     return None, None
 
-        # Nhận diện các dấu hiệu câu hỏi nghiệp vụ, quy định, phòng chống lừa đảo hợp lệ:
+        # Recognize legitimate business, policy, and anti-fraud inquiries:
         benign_markers = [
             "trách nhiệm", "phòng chống", "ngăn chặn", "làm gì để tự bảo vệ", "phân biệt",
             "nhận biết", "theo quy định", "quy định về", "hạn mức", "hồ sơ chứng minh",
@@ -726,7 +726,7 @@ class BankingGuardrailManager:
             for p in phrases:
                 if p in text_lower:
                     if has_benign:
-                        # Chỉ chặn nếu chứa từ khóa hành động tấn công trực tiếp:
+                        # Block only if containing direct attack action keywords:
                         direct_malicious = [
                             "hướng dẫn", "cách", "làm sao để", "mẹo", "dịch vụ", "thuê",
                             "tấn công", "chiếm đoạt", "bẻ khóa", "làm giả", "vô hiệu hóa", "lách"
@@ -743,12 +743,12 @@ class BankingGuardrailManager:
 
     def _check_domain_boundary(self, text_lower):
         """Quét Ranh giới Miền Nghiệp vụ - Chống trả lời linh tinh (0% Regex)"""
-        # Nếu câu hỏi là về dịch vụ tài khoản số đẹp, số phong thủy của ngân hàng -> Hợp lệ:
+        # If query is about lucky account number service -> Legitimate:
         if "phong thủy" in text_lower:
             if "tài khoản" in text_lower or "ngân hàng" in text_lower or "số đẹp" in text_lower:
                 return False, None
 
-        # Ngoại lệ địa điểm và thanh toán mua sắm tại quán cà phê
+        # Location and payment exception at coffee shops
         banking_context_words = [
             "chi nhánh", "phòng giao dịch", "atm", "cây atm", "địa chỉ", "ngân hàng",
             "vietcombank", "vcb", "thanh toán", "quét mã", "qr", "chuyển tiền",
@@ -761,7 +761,7 @@ class BankingGuardrailManager:
                 break
 
         if has_banking_context:
-            # Nếu có nhắc tới đà lạt, sa pa, quán cà phê hoặc canada trong ngữ cảnh ngân hàng -> Cho phép
+            # Allow if mentioning locations in banking transaction context
             exempt_locations = ["đà lạt", "sa pa", "quán cà phê", "canada"]
             for el in exempt_locations:
                 if el in text_lower:
@@ -773,20 +773,20 @@ class BankingGuardrailManager:
         return False, None
 
     # -----------------------------------------------------------------
-    # GIAI ĐOẠN 1: INPUT GUARDRAIL (CHỐNG INJECTION & NGOÀI MIỀN)
+    # STAGE 1: INPUT GUARDRAIL (INJECTION & OUT-OF-DOMAIN PROTECTION)
     # -----------------------------------------------------------------
     def guard_input(self, query, use_decision_model=None):
         """
-        Kiểm tra câu hỏi đầu vào (Tối ưu thứ tự & Caching):
+        Validate input query (optimized ordering & caching):
         1. L1 Decision Cache Hit (<0.001ms)
-        2. Quét rỗng
-        3. Quét Auth Leak (Mật khẩu, OTP, PIN, CVV)
+        2. Empty check
+        3. Auth Leak check (Password, OTP, PIN, CVV)
         4. Fast-path Prompt Injection (Heuristics & Co-occurrence)
-        5. Quét Gian lận tài chính & An ninh mạng
-        6. Quét Ranh giới Miền
-        7. Hoãn che giấu PII (Chỉ chạy trên query hợp lệ)
-        8. Quét Semantic Guardrail (nếu kích hoạt)
-        9. Lưu kết quả vào L1 Decision Cache
+        5. Financial Fraud & Cyber Crime check
+        6. Domain Boundary check
+        7. Deferred PII Masking
+        8. Semantic Vector Guardrail
+        9. Store result in L1 Decision Cache
         """
         if not query:
             return InputGuardResult(
@@ -803,7 +803,7 @@ class BankingGuardrailManager:
                 refusal_message="Quý khách vui lòng nhập nội dung câu hỏi để Trợ lý AI hỗ trợ."
             )
 
-        # Chuẩn hóa Unicode NFC và loại bỏ ký tự ẩn / zero-width characters (0% Regex)
+        # Normalize Unicode NFC and remove invisible / zero-width characters (0% Regex)
         raw_query = unicodedata.normalize("NFC", str(query)).strip()
         zero_width_chars = ["\u200b", "\u200c", "\u200d", "\ufeff", "\u00ad", "\u2060"]
         for zwc in zero_width_chars:
@@ -821,7 +821,7 @@ class BankingGuardrailManager:
 
         norm_key = raw_query.lower()
 
-        # 1. Tra cứu L1 Decision Cache
+        # 1. Check L1 Decision Cache
         if norm_key in self._decision_cache:
             cached = self._decision_cache.pop(norm_key)
             self._decision_cache[norm_key] = cached
@@ -834,7 +834,7 @@ class BankingGuardrailManager:
                 details=dict(cached.details)
             )
 
-        # 2. Quét nguy cơ rò rỉ thông tin xác thực
+        # 2. Scan authentication leak risks
         is_leak, leak_reason, leak_msg = self._check_auth_leak(norm_key)
         if is_leak:
             res = InputGuardResult(
@@ -861,7 +861,7 @@ class BankingGuardrailManager:
             self._save_to_decision_cache(norm_key, res)
             return res
 
-        # 4. Quét Gian lận tài chính & An ninh mạng
+        # 4. Scan Financial Fraud & Cyber Security
         fraud_category, matched_phrase = self._check_fraud_and_crime(norm_key)
         if fraud_category:
             refusal = self._get_refusal_for_category(fraud_category)
@@ -875,7 +875,7 @@ class BankingGuardrailManager:
             self._save_to_decision_cache(norm_key, res)
             return res
 
-        # 5. Quét Ranh giới Miền
+        # 5. Scan Domain Boundary
         is_off_topic, off_topic_phrase = self._check_domain_boundary(norm_key)
         if is_off_topic:
             refusal = self._get_refusal_for_category("OUT_OF_DOMAIN_OFF_TOPIC")
@@ -889,14 +889,14 @@ class BankingGuardrailManager:
             self._save_to_decision_cache(norm_key, res)
             return res
 
-        # 6. Hoãn che giấu PII (Chỉ chạy trên câu hỏi hợp lệ)
+        # 6. Deferred PII masking (runs only on legitimate queries)
         sanitized_query = self._mask_pii(raw_query)
 
         should_use_decision = self.use_decision_model
         if use_decision_model is not None:
             should_use_decision = use_decision_model
 
-        # 7. Tầng Thẩm Định Quyết Định Tối Đa Độ Chuẩn Xác (Jev Decision System One Tier)
+        # 7. Decision Verification Tier
         if should_use_decision is True:
             if self.decision_client is not None:
                 try:
@@ -919,7 +919,7 @@ class BankingGuardrailManager:
                                     trigger_reason="PROMPT_INJECTION_DETECTED",
                                     refusal_message=refusal,
                                     details={
-                                        "decision_model": audit.get("model", "decision-model"),
+                                        "decision_model": audit.get("model", ""),
                                         "confidence": audit.get("confidence", 1.0),
                                         "audit": audit
                                     }
@@ -927,10 +927,10 @@ class BankingGuardrailManager:
                                 self._save_to_decision_cache(norm_key, res)
                                 return res
                 except Exception as e:
-                    # Fail-safe: tự động fallback an toàn về bộ quy tắc và vector
+                    # Fail-safe: safe fallback to rules and vector store
                     print(f"⚠️ [Banking Guardrail] DecisionClient fallback: {e}")
 
-        # 8. Quét Đối soát Ngữ nghĩa Tương phản (Semantic Vector Guardrail)
+        # 8. Semantic Vector Guardrail Scan
         if Config.ENABLE_SEMANTIC_GUARDRAIL is True:
             sem_res = self.semantic_guardrail.check_query(raw_query, use_decision_model=False)
             if sem_res["is_safe"] is False:
@@ -964,7 +964,7 @@ class BankingGuardrailManager:
         self._decision_cache[key] = result
 
     # -----------------------------------------------------------------
-    # GIAI ĐOẠN 2: PRE-GENERATION RAG RELEVANCE GATING (CHỐNG HALU)
+    # STAGE 2: PRE-GENERATION RAG RELEVANCE GATING (ANTI-HALLUCINATION)
     # -----------------------------------------------------------------
     def guard_rag_relevance(self, query, top_chunks, min_score=0.25, use_decision_model=None):
         """
@@ -1034,7 +1034,7 @@ class BankingGuardrailManager:
                                     "decision_grade": grade
                                 }
                 except Exception as e:
-                    # Fail-safe: tự động fallback về kiểm tra ngưỡng điểm
+                    # Fail-safe: safe fallback to score threshold verification
                     print(f"⚠️ [Banking Guardrail] DecisionClient grade fallback: {e}")
 
         return True, "", {"max_score": max_score, "min_score": min_score}
@@ -1046,7 +1046,7 @@ class BankingGuardrailManager:
         return chunks, 0, []
 
     # -----------------------------------------------------------------
-    # GIAI ĐOẠN 3: POST-GENERATION GROUNDING & FAITHFULNESS
+    # STAGE 3: POST-GENERATION GROUNDING & FAITHFULNESS
     # -----------------------------------------------------------------
     def guard_output(self, answer):
         """
@@ -1061,7 +1061,7 @@ class BankingGuardrailManager:
         sanitized = unicodedata.normalize("NFC", answer).strip()
         flags = []
 
-        # 1. Bỏ toàn bộ khối suy nghĩ <think>...</think> (hỗ trợ cả unclosed và lồng nhau)
+        # 1. Remove thought blocks <think>...</think> (supports unclosed and nested)
         while "<think>" in sanitized:
             start_idx = sanitized.find("<think>")
             open_tag = "<think>"
@@ -1101,13 +1101,13 @@ class BankingGuardrailManager:
         if "</think>" in sanitized:
             sanitized = sanitized.replace("</think>", "")
 
-        # 2. Lọc bỏ các dấu hiệu rò rỉ System Prompt
+        # 2. Filter out System Prompt leak markers
         for sig in PROMPT_LEAK_SIGNATURES:
             if sig.lower() in sanitized.lower():
                 flags.append(f"SYSTEM_PROMPT_LEAK_{sig}")
                 sanitized = sanitized.replace(sig, "")
 
-        # 3. Loại bỏ lời độc thoại phân tích trước lời chào khách hàng
+        # 3. Remove preliminary analytical monologue before greeting
         for greeting in ['Kính thưa Quý khách', 'Kính chào Quý khách', 'Chào Quý khách', 'Thưa Quý khách']:
             if greeting in sanitized:
                 g_idx = sanitized.find(greeting)
@@ -1117,7 +1117,7 @@ class BankingGuardrailManager:
                         sanitized = sanitized[g_idx:]
                 break
 
-        # 4. Bắt cụm từ chốt đáp án sau đoạn nháp
+        # 4. Capture conclusive answer phrases after draft
         for fa in [
             "Vậy câu trả lời cuối cùng:", "Câu trả lời cuối cùng:", "Phản hồi cuối cùng:",
             "Soạn:", "Soạn thảo:", "Có lẽ nên trả lời:", "Có thể trả lời:",
@@ -1132,7 +1132,7 @@ class BankingGuardrailManager:
         if sanitized.startswith('"') or sanitized.startswith("'"):
             sanitized = sanitized[1:].strip()
 
-        # 5. Cắt bỏ đoạn độc thoại tự kiểm duyệt guardrail nếu xuất hiện ở đuôi
+        # 5. Trim guardrail self-censoring monologue if present at tail
         for ca in [
             '" Kiểm tra:', 'Kiểm tra:', 'Kiểm tra lại:', "Cần trích dẫn điều khoản",
             "Cần trích dẫn", "Như vậy có ổn không?", "Cần lưu ý guardrail",
@@ -1215,13 +1215,13 @@ class BankingGuardrailManager:
 
         all_chunks_lower = all_chunks_text.lower()
 
-        # 1. Đối soát trích dẫn pháp lý
+        # 1. Verify legal references and citations
         citation_res = self.verify_citation_grounding(answer, retrieved_chunks)
         if citation_res.get("is_grounded") is False:
             unv = citation_res.get("unverified_citations", [])
             flags.append(f"UNGROUNDED_CITATIONS: {', '.join(unv)}")
 
-        # 2. Kiểm tra tỷ lệ % trong câu trả lời có căn cứ trong tài liệu RAG không (0% Regex)
+        # 2. Verify percentages in answer against RAG context (0% Regex)
         context_rates = self._extract_rates_from_text(all_chunks_lower)
         start_pos = 0
         answer_lower = answer.lower()
@@ -1268,7 +1268,7 @@ class BankingGuardrailManager:
 
             start_pos = pct_idx + 1
 
-        # 3. Kiểm tra số tiền tài chính cam kết (triệu/tỷ/nghìn đồng)
+        # 3. Verify committed financial amounts
         currency_units = ["triệu", "tỷ", "trieu", "ty", "nghìn", "ngàn"]
         words = answer.replace(",", " ").replace(";", " ").split()
         for i in range(len(words)):
@@ -1276,11 +1276,11 @@ class BankingGuardrailManager:
             if i + 1 < len(words):
                 next_w = words[i+1].strip("().:;[]{}").lower()
                 if next_w in currency_units:
-                    # Kiểm tra xem w có phải là số tiền
+                    # Check if token is a financial amount
                     clean_num = w.replace(".", "").replace(",", "")
                     if clean_num.isdigit():
                         num_val = int(clean_num)
-                        # Bỏ qua nếu là năm (e.g. năm 2024, năm 2025)
+                        # Skip if token represents a calendar year (e.g. 2024, 2025)
                         if not (2020 <= num_val <= 2030):
                             candidate_amount = f"{w} {next_w}"
                             if candidate_amount not in all_chunks_lower:
@@ -1375,7 +1375,7 @@ class BankingGuardrailManager:
         return {"is_safe": True, "sanitized_params": params, "error_message": None}
 
 
-# Khởi tạo singleton & aliases tương thích ngược
+# Initialize singleton & backward-compatible aliases
 guardrail_manager = BankingGuardrailManager()
 RAGGuardrailManager = BankingGuardrailManager
 GuardrailManager = BankingGuardrailManager

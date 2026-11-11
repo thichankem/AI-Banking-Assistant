@@ -15,13 +15,11 @@ else:
     active_dataset_dir = chunking_dir
 
 
-
 class PathConfig:
-    # 1. Đường dẫn dữ liệu
+    # 1. Data paths
     ROOT_DIR = ROOT_DIR
     RETRIEVAL_DATASET_DIR = retrieval_dir
     CHUNKING_DATASET_DIR = chunking_dir
     DATASET_DIR = active_dataset_dir
     STORAGE_DIR = ROOT_DIR / "agent_banking" / "vector_db"
     TRACE_DIR = ROOT_DIR / "agent_banking" / "tracing" / "traces"
-

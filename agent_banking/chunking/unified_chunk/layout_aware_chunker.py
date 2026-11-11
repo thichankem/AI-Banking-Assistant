@@ -1,10 +1,9 @@
 """
-Bộ điều phối phân đoạn tài liệu nhận thức bố cục (LayoutAwareChunker / DLAChunker).
-Thiết kế tối giản, trực quan, chuyên sâu:
-Chuẩn hóa 100% dữ liệu tài liệu Microsoft Word (.docx) ngân hàng qua OpenXML AST.
+Document Layout Aware Chunker (LayoutAwareChunker / DLAChunker).
+Minimalist, intuitive, and domain-focused design:
+Normalizes Microsoft Word (.docx) and PDF banking documents via OpenXML AST and document IR.
 """
 
-from __future__ import annotations
 import json
 import logging
 import time
@@ -15,19 +14,19 @@ logger = logging.getLogger("layout_aware_chunker")
 
 class LayoutAwareChunker:
     """
-    Bộ điều phối phân đoạn nhận thức bố cục OpenXML (DLA) cho hệ thống AI Banking Assistant.
-    Chuyên trách phân đoạn tài liệu văn bản chuẩn mực: .docx.
+    OpenXML Document Layout Aware (DLA) chunking orchestrator for AI Banking Assistant.
+    Specialized for standardized document chunking: .docx and .pdf.
     """
 
     def __init__(
         self,
-        max_chunk_size: int | None = None,
-        min_section_size: int = 120,
-        table_rows_per_chunk: int = 4,
-        target_chunk_tokens: int = 400,
-        max_chunk_words: int = 300,
-        min_chunk_words: int = 30,
-        config: object | None = None,
+        max_chunk_size=None,
+        min_section_size=120,
+        table_rows_per_chunk=4,
+        target_chunk_tokens=400,
+        max_chunk_words=300,
+        min_chunk_words=30,
+        config=None,
         **kwargs
     ):
         try:
@@ -48,9 +47,12 @@ class LayoutAwareChunker:
         self.min_section_size = min_section_size
         self.config = config
 
-    def chunk_docx(self, file_path: str | Path, **kwargs) -> list[dict]:
-        """Phân đoạn DOCX bằng OpenXML và LLM text theo chính sách ảnh hiện hành."""
+    def chunk_docx(self, file_path, **kwargs):
+        """Chunk DOCX using OpenXML and text models under active image policies."""
         return self.docx_chunker.chunk_document(docx_path=file_path, **kwargs)
+
+    def chunk_pdf(self, file_path, **kwargs):
+        return self.docx_chunker.chunk_pdf(file_path, **kwargs)
 
     @property
     def last_artifact(self):
@@ -68,34 +70,36 @@ class LayoutAwareChunker:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
-    def chunk_file(self, file_path: str | Path, **kwargs) -> list[dict]:
+    def chunk_file(self, file_path, **kwargs):
         """
-        Tự động phân đoạn tệp tài liệu:
-        Chuẩn hóa 100% đầu vào qua định dạng .docx (Canonical Contract).
+        Automatically chunk document file:
+        Normalizes inputs via canonical format contract.
         """
         path = Path(file_path)
         ext = path.suffix.lower()
 
         if ext == ".docx":
             return self.chunk_docx(path, **kwargs)
+        elif ext == ".pdf":
+            return self.chunk_pdf(path, **kwargs)
         else:
-            logger.warning(f"[LayoutAwareChunker] Bỏ qua định dạng chưa hỗ trợ: {ext} ({path.name})")
+            logger.warning(f"[LayoutAwareChunker] Skipping unsupported format: {ext} ({path.name})")
             raise ValueError("Unsupported document format: " + ext)
 
     def chunk_directory(
         self,
-        dir_path: str | Path,
-        extensions: list[str] | None = None,
-        max_files: int | None = None
-    ) -> list[dict]:
+        dir_path,
+        extensions=None,
+        max_files=None
+    ):
         """
-        Duyệt và phân đoạn toàn bộ tệp trong thư mục (chuẩn hóa 100% tệp .docx).
+        Traverse and chunk all files in directory.
         """
         target_dir = Path(dir_path)
         if not target_dir.exists():
             return []
 
-        allowed_exts = {extension.lower() for extension in (extensions or [".docx"])}
+        allowed_exts = {extension.lower() for extension in (extensions or [".docx", ".pdf"])}
         files = [p for p in target_dir.rglob("*") if p.is_file() and p.suffix.lower() in allowed_exts and not p.name.startswith("~$")]
         files.sort()
 
@@ -104,7 +108,7 @@ class LayoutAwareChunker:
                 raise ValueError("max_files cannot be negative")
             files = files[:max_files]
 
-        all_chunks: list[dict] = []
+        all_chunks = []
         for f in files:
             chunks = self.chunk_file(f, source_name=f.relative_to(target_dir).as_posix())
             all_chunks.extend(chunks)
@@ -113,11 +117,11 @@ class LayoutAwareChunker:
 
     def chunk_dataset(
         self,
-        dataset_dir: str | Path,
-        output_dir: str | Path | None = None
-    ) -> tuple[list[dict], dict]:
+        dataset_dir,
+        output_dir=None
+    ):
         """
-        Phân đoạn trọn gói dataset ngân hàng, lưu kết quả và trả về thống kê.
+        Chunk complete banking dataset, save results and return statistics.
         """
         start_t = time.time()
         dataset_path = Path(dataset_dir)
@@ -139,7 +143,7 @@ class LayoutAwareChunker:
         return all_chunks, stats
 
 
-# Bí danh tương thích ngược
+# Backward compatibility alias
 DLAChunker = LayoutAwareChunker
 
 __all__ = ["LayoutAwareChunker", "DLAChunker"]

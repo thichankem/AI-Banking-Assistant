@@ -124,7 +124,7 @@ def get_sat_segmenter(model_name="sat-3l-sm"):
 
 
 # Universal abbreviations across academic, technical, business, and general text
-# Zero hardcoded banking/currency units (no đ/tháng, đ/năm, tr., tỷ., đ.)
+# Zero hardcoded banking/currency units
 UNIVERSAL_KNOWN_ABBREVIATIONS = {
     "tp.", "tp.hcm", "hcm.", "hn.", "v.v.", "ths.", "ts.", "bs.", "mr.", "mrs.", "ms.",
     "dr.", "prof.", "assoc.", "stt.", "no.", "inc.", "corp.", "ltd.", "co.", "approx.",
@@ -406,7 +406,7 @@ def extract_document_identifier(filename="", text=""):
 
 def extract_hierarchical_units(text="", text_chunk=""):
     """
-    Extracts structural section units (e.g. Chapter 1, Section 2, Article III, Điều 1, Khoản 2).
+    Extracts structural section units (e.g., Chapter 1, Section 2, Article III, Article 1, Clause 2).
     Purely pattern-driven: [Latin Title Word] [Number / Roman Numeral].
     """
     content = text or text_chunk

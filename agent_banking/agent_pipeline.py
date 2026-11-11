@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-AI Banking Agent Pipeline (LangGraph Production Entrypoint v4.0)
+AI Banking Agent Pipeline (LangGraph Production Entrypoint)
 ======================================================================
-Điểm khởi chạy chính (Entrypoint) cho hệ thống Agentic RAG Ngân hàng Vietcombank:
-- Tích hợp toàn diện LangGraph StateGraph v4.0 (Multi-Agent Supervisor + Self-Auditing RAG).
-- Duy trì bộ nhớ phiên hội thoại bền vững (Persistent SQLite Checkpointer với Thread ID).
-- Bổ sung Node 7 Thẩm định ảo giác và bắt buộc trích dẫn văn bản pháp lý [Điều X, Khoản Y].
-- Mở rộng bộ công cụ nghiệp vụ: Khấu hao dư nợ giảm dần & Thẩm định sinh trắc học QĐ 2345/QĐ-NHNN.
-- Tương thích 100% với giao diện người dùng và API Web hiện tại.
+Core entrypoint for the Enterprise Banking Agentic RAG system:
+- Comprehensive integration with LangGraph StateGraph (Multi-Agent Supervisor + Self-Auditing RAG).
+- Persistent session memory (Persistent SQLite Checkpointer with Thread ID).
+- Hallucination auditing and legal citation verification [Article X, Clause Y].
+- Banking action tools: reducing balance loan amortization, biometric compliance checks.
+- 100% compatible with frontend UI and web API.
 
-NGUYÊN TẮC:
-- 0% REGEX LAW: Tuyệt đối không dùng regex.
-- ZERO TERNARY LAW: Tuyệt đối không dùng toán tử 3 ngôi (x if c else y).
+MANDATORY RULES:
+- 0% REGEX LAW: Strictly string methods only (in, split, startswith, endswith, strip, lower, replace, find).
+- ZERO TERNARY LAW: Explicit if/else syntax only (no x if c else y).
+- NO TYPING LIBRARY: Use Python native types only.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ import sys
 import time
 from pathlib import Path
 
-# Đảm bảo UTF-8 an toàn trên Windows console
+# Ensure UTF-8 on Windows console
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -40,7 +41,7 @@ from agent_banking.regression_test.eval_benchmark import BankingRAGEvaluator
 
 class BankingAgentPipeline:
     """
-    Bộ điều phối toàn trình AI Banking Agent ứng dụng LangGraph StateGraph.
+    Enterprise AI Banking Agent orchestrator using LangGraph StateGraph.
     """
 
     def __init__(
@@ -60,21 +61,21 @@ class BankingAgentPipeline:
             self.sqlite_db_path = str(Path(__file__).resolve().parent / "tracing" / "agent_memory.db")
 
         print("=" * 70)
-        print("  🚀 KHỞI TẠO LANGGRAPH AI BANKING AGENT (VIETCOMBANK PRODUCTION)")
+        print("  INITIALIZING LANGGRAPH AI BANKING AGENT PIPELINE")
         print("=" * 70)
 
-        # 1. Khởi tạo RAG Pipeline nền tảng (Dual Index Qdrant + BM25)
+        # 1. Initialize foundation RAG Pipeline (Dual Index Vector + BM25)
         self.rag_pipeline = BankingRAGPipeline(config=self.config, use_memory=self.use_memory)
 
-        # 2. Khởi tạo LangGraph StateGraph (Self-Reflective RAG & Banking Tools)
+        # 2. Initialize LangGraph StateGraph (Self-Reflective RAG & Banking Tools)
         self.graph = build_banking_agent_graph(
             pipeline_instance=self.rag_pipeline,
             config=self.config,
             sqlite_db_path=self.sqlite_db_path
         )
-        print("✅ [LangGraph Engine] Đồ thị State Machine đã sẵn sàng phục vụ!")
+        print("[LangGraph Engine] State Machine graph initialized successfully.")
 
-        # 3. Khởi tạo Tracing Manager & Chấm điểm 3 chỉ số vàng (Arize Phoenix & Benchmark)
+        # 3. Initialize Tracing Manager & Metric Evaluator (Arize Phoenix & Benchmark)
         self.tracer = BankingTracer(config=self.config)
         self.evaluator = BankingRAGEvaluator()
 
@@ -87,14 +88,14 @@ class BankingAgentPipeline:
         format_type: str = "standard"
     ) -> dict:
         """
-        Thực thi phiên hội thoại với LangGraph Agent kèm Session Memory (Thread ID).
+        Execute chat turn with LangGraph Agent and persistent session memory (Thread ID).
         """
         start_time = time.perf_counter()
         clean_query = query.strip()
 
         if clean_query == "":
             return {
-                "answer": "Kính chào Quý khách! Vui lòng nhập nội dung câu hỏi hoặc yêu cầu cần hỗ trợ.",
+                "answer": "Welcome! Please enter your question or inquiry to get started.",
                 "citations": [],
                 "sources": [],
                 "intent": "CHIT_CHAT",
@@ -113,10 +114,10 @@ class BankingAgentPipeline:
                 "nodes": {}
             }
 
-        # Thiết lập Thread ID cho Checkpointer (Quản lý bộ nhớ phiên)
+        # Configure Thread ID for Checkpointer (session memory)
         thread_config = {"configurable": {"thread_id": session_id}}
 
-        # Trạng thái khởi tạo đưa vào StateGraph (Làm mới toàn bộ biến tạm của turn mới)
+        # Initial state payload for StateGraph
         initial_state = {
             "user_query": clean_query,
             "query": clean_query,
@@ -144,16 +145,16 @@ class BankingAgentPipeline:
             "execution_steps": []
         }
 
-        # Kích hoạt thực thi qua LangGraph StateGraph
+        # Execute through LangGraph StateGraph
         try:
             final_state = self.graph.invoke(initial_state, config=thread_config)
         except Exception as e:
-            print(f"❌ [LangGraph Execution Error]: {e}")
+            print(f"[LangGraph Execution Error]: {e}")
             latency_err = round((time.perf_counter() - start_time) * 1000.0, 2)
             return {
                 "answer": (
-                    "Hệ thống đang bảo trì một số tính năng nâng cao. "
-                    "Quý khách vui lòng liên hệ hotline Vietcombank 1900 54 54 13 để được trợ giúp tức thì."
+                    "The system is currently undergoing scheduled maintenance on some advanced features. "
+                    "Please contact customer service for immediate assistance."
                 ),
                 "citations": [],
                 "sources": [],
@@ -175,7 +176,7 @@ class BankingAgentPipeline:
 
         total_latency_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
 
-        # Trích xuất dữ liệu trả về cho Frontend UI Inspector
+        # Extract output fields for Frontend UI Inspector
         answer = final_state.get("final_answer")
         if answer is None or answer == "":
             answer = final_state.get("draft_answer", "")
@@ -201,7 +202,7 @@ class BankingAgentPipeline:
         if is_input_safe is True:
             status_guardrail = "passed"
 
-        # Tính toán 3 chỉ số vàng (Context Precision, Faithfulness, Answer Relevance)
+        # Calculate evaluation metrics (Context Precision, Faithfulness, Answer Relevance)
         eval_metrics = {
             "context_precision": 1.0,
             "faithfulness": 1.0,
@@ -222,7 +223,7 @@ class BankingAgentPipeline:
             for ch in punctuation_chars:
                 cleaned_q = cleaned_q.replace(ch, " ")
             raw_tokens = cleaned_q.split(" ")
-            stopwords = {"cho", "tôi", "hỏi", "được", "không", "như", "thế", "nào", "vietcombank", "với", "các", "những", "có", "là", "và", "của", "tại"}
+            stopwords = {"cho", "tôi", "hỏi", "được", "không", "như", "thế", "nào", "với", "các", "những", "có", "là", "và", "của", "tại", "bank"}
             query_keywords = []
             for t in raw_tokens:
                 stripped_t = t.strip()
@@ -238,7 +239,7 @@ class BankingAgentPipeline:
                 expected_keywords=query_keywords
             )
 
-        # Ghi nhận Telemetry vết phiên vào BankingTracer & Arize Phoenix
+        # Record telemetry into BankingTracer & Phoenix
         with self.tracer.trace_query(query=clean_query) as trace:
             for s in steps:
                 trace.spans.append({
@@ -258,7 +259,7 @@ class BankingAgentPipeline:
                 guardrail_trigger=None
             )
 
-        # Đóng gói Node Inspector Data chi tiết
+        # Package node inspection details
         nodes_detail = {
             "00_guardrail": {
                 "name": "Node 0: Banking Input Guardrail (State Reset)",
@@ -312,14 +313,13 @@ class BankingAgentPipeline:
 
     def query(self, query: str) -> dict:
         """
-        Hàm giao tiếp tương thích ngược 100% với pipeline.py cũ.
+        Backward-compatible query method.
         """
         return self.chat(query=query)
 
     def execute_task(self, query: str, context: dict | None = None) -> dict:
         """
-        Thực thi câu hỏi theo kiến trúc Task-Oriented DAG (tasks/ và skills/).
-        Node đầu tiên phân loại intent dựa trên skills, kích hoạt task con kế thừa toàn bộ nodes.
+        Execute query using Task-Oriented DAG architecture (tasks/ and skills/).
         """
         if not hasattr(self, "_task_manager") or self._task_manager is None:
             from agent_banking.tasks.task_manager import BankingTaskManager
@@ -332,7 +332,7 @@ class BankingAgentPipeline:
         session_id: str = "default_session"
     ):
         """
-        Stream toàn bộ sự kiện Super-steps từ Native Pregel Engine.
+        Stream all super-step events from graph execution.
         """
         clean_query = query.strip()
         initial_state = {

@@ -8,6 +8,8 @@ import time
 import sqlite3
 import threading
 
+_SCHEMA_LOCK = threading.Lock()
+
 
 class PageVisionCache:
     """
@@ -66,10 +68,21 @@ class PageVisionCache:
         """
         Configure SQLite PRAGMAs for high-throughput read/write and create table.
         """
-        with self._lock:
+        with _SCHEMA_LOCK, self._lock:
             cur = self._conn.cursor()
+            cur.execute("PRAGMA busy_timeout=30000;")
             # Enable Write-Ahead Logging for non-blocking concurrent reads and writes
-            cur.execute("PRAGMA journal_mode=WAL;")
+            mode = cur.execute("PRAGMA journal_mode;").fetchone()[0]
+            if mode != "wal":
+                deadline = time.monotonic() + 30
+                while True:
+                    try:
+                        cur.execute("PRAGMA journal_mode=WAL;")
+                        break
+                    except sqlite3.OperationalError as error:
+                        if getattr(error, "sqlite_errorcode", None) not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) or time.monotonic() >= deadline:
+                            raise
+                        time.sleep(0.05)
             # NORMAL synchronous avoids syncing to disk on every commit in WAL mode
             cur.execute("PRAGMA synchronous=NORMAL;")
             # -64000 KiB = 62.5 MiB in-process cache page memory
