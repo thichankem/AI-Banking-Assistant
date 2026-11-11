@@ -22,6 +22,7 @@ from agent_banking.config.chat import FallbackChatClient
 from agent_banking.config.fallback import ModelFallbackError
 
 from agent_banking.config.settings import Config
+from agent_banking.skills.config.prompts import GRADE_DOCUMENTS_PROMPT_TEMPLATE, AUDIT_ANSWER_PROMPT_TEMPLATE
 
 
 def _clean_think_tags(text: str) -> str:
@@ -323,10 +324,9 @@ class BaseSkill:
                 else:
                     doc_str = str(raw_docs)
 
-                prompt = (
-                    f"Câu hỏi: {query}\n"
-                    f"Tài liệu trích xuất:\n{doc_str}\n\n"
-                    f"Tài liệu có chứa thông tin trả lời câu hỏi không? Trả lời 'yes' hoặc 'no'."
+                prompt = GRADE_DOCUMENTS_PROMPT_TEMPLATE.format(
+                    query=query,
+                    documents=doc_str
                 )
                 verdict = self._call_llm_checker(prompt)
                 is_relevant = "yes" in verdict or "đúng" in verdict
@@ -345,10 +345,9 @@ class BaseSkill:
                 doc_str = str(raw_docs)
 
             has_citation = "[" in draft and "]" in draft
-            prompt = (
-                f"Tài liệu căn cứ:\n{doc_str}\n\n"
-                f"Câu trả lời dự thảo:\n{draft}\n\n"
-                f"Câu trả lời có bịa đặt so với tài liệu căn cứ không? Trả lời 'yes' nếu đúng, 'no' nếu bịa đặt."
+            prompt = AUDIT_ANSWER_PROMPT_TEMPLATE.format(
+                documents=doc_str,
+                draft=draft
             )
             verdict = self._call_llm_checker(prompt)
             is_faithful = "no" not in verdict

@@ -23,6 +23,7 @@ from agent_banking.config.fallback import ModelFallbackError
 from agent_banking.skills.skill_registry import SkillRegistry
 from agent_banking.config.settings import Config
 from agent_banking.decision.decision_client import DecisionClient
+from agent_banking.tasks.config.prompts import TASK_ROUTER_SYSTEM_PROMPT_TEMPLATE
 
 
 @dataclass
@@ -147,19 +148,7 @@ class TaskRouter:
             )
 
         skills_desc = self.registry.get_skills_prompt_description()
-        system_prompt = (
-            "Bạn là Node Đầu Tiên (Intent Router) của Trợ lý AI Ngân hàng.\n"
-            f"Danh bạ Kỹ năng:\n{skills_desc}\n\n"
-            "Hãy phân loại câu hỏi vào DUY NHẤT 1 trong các mã sau:\n"
-            "- TASK_POLICY_INQUIRY: Tra cứu quy chế, biểu phí, hạn mức mở tài khoản eKYC.\n"
-            "- TASK_LOAN_ADVISORY: Vay vốn, lãi suất vay, trả nợ, dư nợ giảm dần.\n"
-            "- TASK_BIOMETRIC_COMPLIANCE: Sinh trắc học, QĐ 2345, Facepay, CCCD gắn chip.\n"
-            "- TASK_CARD_SERVICE: Mở thẻ tín dụng, quyền lợi thẻ, ưu đãi thẻ.\n"
-            "- TASK_INCIDENT_SUPPORT: Sự cố nuốt thẻ, mất thẻ, lừa đảo.\n"
-            "- TASK_GENERAL_CHAT: Chào hỏi, cảm ơn, thông tin chung.\n"
-            "- TASK_REACT_AGENT: Câu hỏi phức tạp kết hợp nhiều nghiệp vụ hoặc cần suy luận đa bước.\n"
-            "Chỉ trả về duy nhất mã task. Không giải thích."
-        )
+        system_prompt = TASK_ROUTER_SYSTEM_PROMPT_TEMPLATE.format(skills_desc=skills_desc)
 
         try:
             resp = self.client.chat.completions.create(

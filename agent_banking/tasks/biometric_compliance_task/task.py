@@ -15,6 +15,7 @@ from __future__ import annotations
 from agent_banking.tasks.base_task import BaseBankingTask, TaskResult
 from agent_banking.skills.skill_registry import SkillRegistry
 from agent_banking.config.settings import Config
+from agent_banking.tasks.config.prompts import BIOMETRIC_COMPLIANCE_SYSTEM_PROMPT, BIOMETRIC_USER_PROMPT_TEMPLATE
 
 
 class BiometricComplianceTask(BaseBankingTask):
@@ -66,16 +67,13 @@ class BiometricComplianceTask(BaseBankingTask):
 
         # 5. Inherited LLM Generate Node
         steps.append("Node 5: LLM Generation (Generate biometric guidance & legal basis)")
-        sys_prompt = (
-            "Bạn là Chuyên gia Pháp chế & An toàn Bảo mật Ngân hàng.\n"
-            "Hãy giải thích rõ ràng căn cứ Quyết định 2345/QĐ-NHNN, nêu bật các mốc quan trọng "
-            "(trên 10 triệu đồng/giao dịch hoặc trên 20 triệu đồng cộng dồn/ngày phải quét khuôn mặt qua CCCD gắn chip NFC)."
-        )
-        user_prompt = (
-            f"LỊCH SỬ CHAT:\n{history_str}\n\n"
-            f"CÂU HỎI: {user_query}\n\n"
-            f"KẾT QUẢ THẨM ĐỊNH TỰ ĐỘNG: {action_required} (Căn cứ: {legal_basis})\n\n"
-            f"VĂN BẢN QUY PHẠM (RAG):\n{law_context}"
+        sys_prompt = BIOMETRIC_COMPLIANCE_SYSTEM_PROMPT
+        user_prompt = BIOMETRIC_USER_PROMPT_TEMPLATE.format(
+            history=history_str,
+            query=user_query,
+            action_required=action_required,
+            legal_basis=legal_basis,
+            law_context=law_context
         )
         answer = self.node_llm_generate(sys_prompt, user_prompt, temperature=0.1)
         if not answer or answer == user_prompt:

@@ -88,119 +88,16 @@ class ProfileBundle(tuple):
         return super().__iter__()
 
 
-# Persona, tone, and response format profiles loaded from JSON (0% Regex & Zero Ternary)
-def _load_prompt_profiles_from_json(filepath=None):
-    if filepath is not None:
-        p = Path(filepath)
-    else:
-        p = Path(__file__).resolve().parent / "prompt_profiles.json"
-
-    if p.exists():
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return ProfileBundle((
-                data.get("persona_profiles", {}),
-                data.get("tone_profiles", {}),
-                data.get("format_profiles", {}),
-                data.get("system_guardrails", {}),
-                data.get("prompt_leak_signatures", [])
-            ))
-        except Exception:
-            pass
-    return ProfileBundle(({}, {}, {}, {}, []))
-
-
-_profiles_data = _load_prompt_profiles_from_json()
-PERSONA_PROFILES = _profiles_data[0]
-TONE_PROFILES = _profiles_data[1]
-FORMAT_PROFILES = _profiles_data[2]
-SYSTEM_GUARDRAILS = _profiles_data[3]
-PROMPT_LEAK_SIGNATURES = _profiles_data[4]
-
-
-def build_banking_system_prompt(persona_key="advisor", tone_key="formal", format_key="standard", custom_persona=""):
-    """
-    Construct Dynamic System Prompt combining Core Banking Guardrails, Persona, Tone, and Format.
-    100% compliant with 0% Regex and Zero Ternary.
-    """
-    if persona_key == "custom" and custom_persona and custom_persona.strip():
-        persona_text = custom_persona.strip()
-    elif persona_key in PERSONA_PROFILES:
-        p_obj = PERSONA_PROFILES[persona_key]
-        p_name = p_obj.get("name", "")
-        p_prompt = p_obj.get("prompt", "")
-        if not p_prompt:
-            p_prompt = p_obj.get("role_definition", "")
-        if p_name and p_name not in p_prompt:
-            persona_text = f"Vai trò: {p_name}\n{p_prompt}"
-        else:
-            persona_text = p_prompt
-    else:
-        adv = PERSONA_PROFILES.get("advisor", {})
-        persona_text = adv.get("prompt", "Bạn là Chuyên viên Tư vấn Tài chính Cao cấp của Ngân hàng. Phong thái điềm đạm, am tường nghiệp vụ ngân hàng, đưa ra các chỉ dẫn và giải pháp tài chính chuẩn mực, minh bạch, phân tích logic và có chiều sâu.")
-
-    if tone_key in TONE_PROFILES:
-        tone_text = TONE_PROFILES[tone_key]
-    else:
-        tone_text = TONE_PROFILES.get("formal", "Trang trọng & Lịch thiệp.")
-
-    if format_key in FORMAT_PROFILES:
-        format_text = FORMAT_PROFILES[format_key]
-    else:
-        format_text = FORMAT_PROFILES.get("standard", "Định dạng Tiêu chuẩn.")
-
-    guardrails_text = ""
-    if isinstance(SYSTEM_GUARDRAILS, dict):
-        guardrails_text = SYSTEM_GUARDRAILS.get("prompt_guardrails_text", "")
-        if not guardrails_text and "mandatory_rules" in SYSTEM_GUARDRAILS:
-            rules_list = SYSTEM_GUARDRAILS.get("mandatory_rules", [])
-            rule_lines = []
-            for idx, r in enumerate(rules_list, start=1):
-                rule_lines.append(f"{idx}. {r}")
-            guardrails_text = "QUY TẮC BẢO MẬT & AN TOÀN NGÂN HÀNG BẮT BUỘC (100% TUÂN THỦ):\n" + "\n".join(rule_lines)
-    elif isinstance(SYSTEM_GUARDRAILS, str):
-        guardrails_text = SYSTEM_GUARDRAILS
-
-    if not guardrails_text:
-        guardrails_text = (
-            "QUY TẮC BẢO MẬT & AN TOÀN NGÂN HÀNG BẮT BUỘC (100% TUÂN THỦ):\n"
-            "1. BẮT ĐẦU CÂU TRẢ LỜI NGAY LẬP TỨC CHO KHÁCH HÀNG. TUYỆT ĐỐI KHÔNG SUY NGHĨ THÀNH LỜI, KHÔNG XUẤT THẺ <think>/<thought>/<scratchpad>, KHÔNG PHÂN TÍCH NHÁP, KHÔNG ĐỘC THOẠI.\n"
-            "2. Chỉ trả lời dựa trên thông tin có trong tài liệu được cung cấp. TUYỆT ĐỐI KHÔNG TỰ Ý BỊA ĐẶT SỐ LIỆU TÀI CHÍNH (lãi suất %, hạn mức, biểu phí).\n"
-            "3. Nếu có điều khoản quy định trong tài liệu, trích dẫn kèm [Điều X, Khoản Y]. Tuyệt đối không bịa đặt số hiệu điều khoản khi tài liệu không đề cập.\n"
-            "4. Tuyệt đối không bao giờ yêu cầu hoặc phản hồi lặp lại mật khẩu, mã PIN, mã OTP, số CVV/CVC của khách hàng.\n"
-            "5. Nếu thông tin hoặc số liệu không có trong tài liệu, hãy thông báo lịch sự rằng tài liệu hiện chưa có dữ liệu và hướng dẫn khách hàng liên hệ Hotline hoặc quầy giao dịch."
-        )
-
-    few_shot_text = ""
-    if persona_key in PERSONA_PROFILES and isinstance(PERSONA_PROFILES[persona_key], dict):
-        fs_data = PERSONA_PROFILES[persona_key].get("few_shot", [])
-        few_shot_list = []
-        if isinstance(fs_data, list):
-            few_shot_list = fs_data
-        elif isinstance(fs_data, dict):
-            few_shot_list = [fs_data]
-
-        if few_shot_list:
-            fs_blocks = ["VÍ DỤ MẪU ĐỐI THOẠI CHUẨN MỰC (FEW-SHOT EXAMPLES):"]
-            for ex in few_shot_list:
-                if isinstance(ex, dict):
-                    u = ex.get("user", "")
-                    a = ex.get("assistant", "")
-                    if u and a:
-                        fs_blocks.append(f"Khách hàng: {u}\nChuyên viên: {a}")
-            if len(fs_blocks) > 1:
-                few_shot_text = "\n\n".join(fs_blocks)
-
-    sections = [
-        persona_text,
-        f"QUY TẮC TÔNG GIỌNG & ĐỊNH DẠNG CÂU TRẢ LỜI:\n- Tông giọng: {tone_text}\n- Định dạng trình bày: {format_text}",
-        guardrails_text
-    ]
-    if few_shot_text:
-        sections.append(few_shot_text)
-
-    return "\n\n".join(sections)
+from agent_banking.generator.config.prompts import (
+    ProfileBundle,
+    PERSONA_PROFILES,
+    TONE_PROFILES,
+    FORMAT_PROFILES,
+    SYSTEM_GUARDRAILS,
+    PROMPT_LEAK_SIGNATURES,
+    load_prompt_profiles,
+    build_banking_system_prompt
+)
 
 
 def _extract_legal_citations_from_text(text, citations_list=None):

@@ -16,6 +16,7 @@ from __future__ import annotations
 from agent_banking.tasks.base_task import BaseBankingTask, TaskResult
 from agent_banking.skills.skill_registry import SkillRegistry
 from agent_banking.config.settings import Config
+from agent_banking.tasks.config.prompts import POLICY_INQUIRY_SYSTEM_PROMPT, POLICY_INQUIRY_USER_PROMPT_TEMPLATE
 
 
 class PolicyInquiryTask(BaseBankingTask):
@@ -56,12 +57,12 @@ class PolicyInquiryTask(BaseBankingTask):
 
         # 5. Inherited LLM Generate Node
         steps.append("Node 5: LLM Generation (Generate answer with citations)")
-        sys_prompt = (
-            "Bạn là Chuyên viên Quy chế Ngân hàng.\n"
-            "Chỉ trả lời dựa CHÍNH XÁC trên tài liệu được cung cấp dưới đây.\n"
-            "Luôn đính kèm nguồn tham chiếu điều khoản [Điều X, Khoản Y]. Tuyệt đối không bịa đặt."
+        sys_prompt = POLICY_INQUIRY_SYSTEM_PROMPT
+        user_prompt = POLICY_INQUIRY_USER_PROMPT_TEMPLATE.format(
+            history=history_str,
+            context=context_str,
+            query=effective_query
         )
-        user_prompt = f"LỊCH SỬ CHAT:\n{history_str}\n\nTÀI LIỆU CĂN CỨ:\n{context_str}\n\nCÂU HỎI:\n{effective_query}"
         answer = self.node_llm_generate(sys_prompt, user_prompt, temperature=0.1)
 
         # 6. Inherited Audit Answer Node

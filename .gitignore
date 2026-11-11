@@ -32,6 +32,15 @@ llm_config.json
 gateway_config.*
 
 # ==============================================================================
+# Module Prompts Configuration (hidden & customizable)
+# ==============================================================================
+agent_banking/*/config/prompts.py
+agent_banking/config/*/prompts.py
+agent_banking/*/config/prompt_profiles.json
+agent_banking/config/*/prompt_profiles.json
+agent_banking/generator/prompt_profiles.json
+
+# ==============================================================================
 # Python Cache, Bytecode & Build Artifacts
 # ==============================================================================
 __pycache__/

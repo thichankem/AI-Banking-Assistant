@@ -15,6 +15,7 @@ from __future__ import annotations
 from agent_banking.tasks.base_task import BaseBankingTask, TaskResult
 from agent_banking.skills.skill_registry import SkillRegistry
 from agent_banking.config.settings import Config
+from agent_banking.tasks.config.prompts import LOAN_ADVISORY_SYSTEM_PROMPT, LOAN_ADVISORY_USER_PROMPT_TEMPLATE
 
 
 class LoanAdvisoryTask(BaseBankingTask):
@@ -63,17 +64,13 @@ class LoanAdvisoryTask(BaseBankingTask):
 
         # 5. Inherited LLM Generate Node
         steps.append("Node 5: LLM Generation (Generate loan advisory report)")
-        sys_prompt = (
-            "Bạn là Chuyên viên Tín dụng Ngân hàng.\n"
-            "Hãy tư vấn vay vốn chuyên nghiệp: giải thích phương pháp Dư nợ giảm dần, "
-            "trình bày các con số tài chính và đính kèm bảng lịch trả nợ mẫu."
-        )
-        user_prompt = (
-            f"LỊCH SỬ CHAT:\n{history_str}\n\n"
-            f"CÂU HỎI: {user_query}\n\n"
-            f"QUY CHẾ VAY (RAG):\n{policy_context}\n\n"
-            f"BẢNG LỊCH TRẢ NỢ:\n{schedule_md}\n\n"
-            f"TỔNG KẾT: {summary}"
+        sys_prompt = LOAN_ADVISORY_SYSTEM_PROMPT
+        user_prompt = LOAN_ADVISORY_USER_PROMPT_TEMPLATE.format(
+            history=history_str,
+            query=user_query,
+            policy_context=policy_context,
+            schedule_md=schedule_md,
+            summary=summary
         )
         answer = self.node_llm_generate(sys_prompt, user_prompt, temperature=0.2)
         if not answer or answer == user_prompt:

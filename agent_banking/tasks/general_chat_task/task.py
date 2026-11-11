@@ -13,6 +13,7 @@ from __future__ import annotations
 from agent_banking.tasks.base_task import BaseBankingTask, TaskResult
 from agent_banking.skills.skill_registry import SkillRegistry
 from agent_banking.config.settings import Config
+from agent_banking.tasks.config.prompts import GENERAL_CHAT_SYSTEM_PROMPT, GENERAL_CHAT_USER_PROMPT_TEMPLATE
 
 
 class GeneralChatTask(BaseBankingTask):
@@ -58,14 +59,14 @@ class GeneralChatTask(BaseBankingTask):
 
         # 3. Inherited LLM Generate Node for general conversational inquiries
         steps.append("Node 3: LLM Generation (Generate banking-appropriate response)")
-        sys_prompt = (
-            "Bạn là Trợ lý AI Chăm sóc Khách hàng của Ngân hàng.\n"
-            "Hãy giao tiếp lịch sự, chuẩn mực, ân cần và tôn trọng khách hàng."
-        )
+        sys_prompt = GENERAL_CHAT_SYSTEM_PROMPT
 
         user_prompt = user_query
         if history_str:
-            user_prompt = f"LỊCH SỬ CHAT:\n{history_str}\n\nTin nhắn hiện tại của khách hàng: {user_query}"
+            user_prompt = GENERAL_CHAT_USER_PROMPT_TEMPLATE.format(
+                history=history_str,
+                query=user_query
+            )
 
         final_answer = self.node_llm_generate(
             system_prompt=sys_prompt,

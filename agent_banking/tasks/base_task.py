@@ -29,6 +29,7 @@ from agent_banking.config.fallback import ModelFallbackError
 
 from agent_banking.config.settings import Config
 from agent_banking.skills.skill_registry import SkillRegistry
+from agent_banking.tasks.config.prompts import QUERY_REWRITE_SYSTEM_PROMPT, REACT_AGENT_SYSTEM_PROMPT_TEMPLATE
 
 
 def _clean_think(text: str) -> str:
@@ -198,11 +199,7 @@ class BaseBankingTask:
         if not has_cue:
             return user_query.strip()
 
-        sys_prompt = (
-            "Bạn là trợ lý AI chuyên viết lại câu hỏi khách hàng ngân hàng.\n"
-            "Dựa trên lịch sử hội thoại, hãy viết lại câu hỏi cuối cùng thành câu hỏi độc lập, "
-            "rõ thực thể (tên gói vay, tên thẻ, loại tài khoản). Chỉ xuất câu hỏi đã viết lại, không giải thích."
-        )
+        sys_prompt = QUERY_REWRITE_SYSTEM_PROMPT
         user_prompt = f"LỊCH SỬ CHAT:\n{history_str}\n\nCÂU HỎI HIỆN TẠI: {user_query}"
         rewritten = self.node_llm_generate(sys_prompt, user_prompt, temperature=0.1, max_tokens=120)
         clean_rewritten = rewritten.strip()
@@ -393,21 +390,7 @@ class BaseBankingTask:
         ctx = context or {}
         history_str = self.node_format_history(ctx.get("chat_history"))
 
-        sys_prompt = (
-            "Bạn là Trợ lý AI Thông minh của Ngân hàng.\n"
-            "Bạn giải quyết yêu cầu của khách hàng theo phương pháp ReAct (Reasoning + Acting).\n\n"
-            "DANH MỤC KỸ NĂNG KHẢ DỤNG:\n"
-            f"{skills_schema}\n\n"
-            "QUY TẮC ĐỊNH DẠNG BẮT BUỘC:\n"
-            "Khi cần suy luận và gọi kỹ năng, bạn PHẢI xuất:\n"
-            "Thought: <suy nghĩ phân tích tình huống, cần làm gì>\n"
-            "Action: <tên kỹ năng chính xác trong danh mục>\n"
-            "Action Input: <JSON tham số tương ứng>\n\n"
-            "Sau khi nhận được Observation, bạn tiếp tục suy luận.\n"
-            "Khi đã có đầy đủ thông tin để trả lời khách hàng, bạn PHẢI xuất:\n"
-            "Thought: <suy nghĩ kết luận>\n"
-            "Final Answer: <câu trả lời hoàn chỉnh, chuẩn mực, ân cần theo văn hóa ngân hàng>"
-        )
+        sys_prompt = REACT_AGENT_SYSTEM_PROMPT_TEMPLATE.format(skills_schema=skills_schema)
 
         scratchpad = f"Khách hàng: {user_query}\n"
         if history_str:

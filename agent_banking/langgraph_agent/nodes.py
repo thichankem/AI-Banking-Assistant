@@ -26,11 +26,16 @@ from agent_banking.config.fallback import ModelFallbackError
 
 from agent_banking.config.settings import Config
 from agent_banking.langgraph_agent.state import AgentState
-from agent_banking.langgraph_agent.prompts import (
+from agent_banking.langgraph_agent.config.prompts import (
     ROUTER_SYSTEM_PROMPT,
+    DOCUMENT_GRADER_SYSTEM_MESSAGE,
     DOCUMENT_GRADER_PROMPT,
+    QUERY_REWRITER_SYSTEM_MESSAGE,
     QUERY_REWRITER_PROMPT,
+    ANSWER_GRADER_SYSTEM_MESSAGE,
+    ANSWER_GRADER_PROMPT,
     BANKING_AGENT_SYSTEM_PROMPT,
+    GENERATE_USER_PROMPT_TEMPLATE,
     SUB_AGENT_SYSTEM_PROMPTS
 )
 from agent_banking.guardrails.rag_guardrails import BankingGuardrailManager
@@ -450,7 +455,7 @@ class BankingAgentNodes:
         # 2. LLM Fallback
         grader_prompt = DOCUMENT_GRADER_PROMPT.format(query=query, documents=context_str)
 
-        verdict = self._call_llm_quick("You are a banking document evaluation assistant.", grader_prompt, max_tokens=256).lower()
+        verdict = self._call_llm_quick(DOCUMENT_GRADER_SYSTEM_MESSAGE, grader_prompt, max_tokens=256).lower()
 
         quality = "IRRELEVANT"
         if "yes" in verdict or verdict.strip() == "y":
@@ -478,7 +483,7 @@ class BankingAgentNodes:
         curr_q = str(state.get("query") or state.get("user_query") or "")
 
         rewrite_user = QUERY_REWRITER_PROMPT.format(original_query=orig_q, current_query=curr_q)
-        new_query = self._call_llm_quick("Bạn là chuyên gia viết lại truy vấn tìm kiếm ngân hàng.", rewrite_user, max_tokens=60).strip().strip('"\'')
+        new_query = self._call_llm_quick(QUERY_REWRITER_SYSTEM_MESSAGE, rewrite_user, max_tokens=60).strip().strip('"\'')
 
         if len(new_query) < 3:
             new_query = f"Quy định về {orig_q}"

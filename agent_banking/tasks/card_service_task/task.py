@@ -14,6 +14,7 @@ from __future__ import annotations
 from agent_banking.tasks.base_task import BaseBankingTask, TaskResult
 from agent_banking.skills.skill_registry import SkillRegistry
 from agent_banking.config.settings import Config
+from agent_banking.tasks.config.prompts import CARD_SERVICE_SYSTEM_PROMPT, CARD_SERVICE_USER_PROMPT_TEMPLATE
 
 
 class CardServiceTask(BaseBankingTask):
@@ -54,11 +55,12 @@ class CardServiceTask(BaseBankingTask):
 
         # 4. Inherited LLM Generate Node
         steps.append("Node 4: LLM Generation (Generate card advisory report with citations)")
-        sys_prompt = (
-            "Bạn là Chuyên gia Tư vấn Thẻ Ngân hàng.\n"
-            "Tư vấn điều kiện mở thẻ, biểu phí thường niên, hạn mức và ưu đãi điểm thưởng."
+        sys_prompt = CARD_SERVICE_SYSTEM_PROMPT
+        user_prompt = CARD_SERVICE_USER_PROMPT_TEMPLATE.format(
+            history=history_str,
+            query=user_query,
+            specs_context=specs_context
         )
-        user_prompt = f"LỊCH SỬ CHAT:\n{history_str}\n\nCÂU HỎI: {user_query}\n\nTÀI LIỆU BIỂU PHÍ RAG:\n{specs_context}"
         answer = self.node_llm_generate(sys_prompt, user_prompt, temperature=0.2)
         if not answer or answer == user_prompt:
             answer = f"Căn cứ biểu phí dịch vụ thẻ ngân hàng:\n{specs_context}"
