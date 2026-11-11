@@ -104,7 +104,7 @@ class UniversalDocxChunker:
                          "dependencies": {package: version(package) for package in ("python-docx", "tokenizers", "PyMuPDF", "Pillow")}}
         # Code changes invalidate document outputs even if the version constant
         # was accidentally left unchanged. Secrets are never part of manifests.
-        from agent_banking.config.models import chain_fingerprint
+        from agent_banking.core.models import chain_fingerprint
         configuration["model_chains"] = {name: chain_fingerprint("chunking." + name)
                                           for name in ("text", "decision", "vision", "vision_review")}
         for role, client in (("extraction", self.pdf_extractor.vision_client), ("review", self.pdf_extractor.review_client)):

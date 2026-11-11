@@ -17,11 +17,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from dataclasses import dataclass
-from agent_banking.config.chat import FallbackChatClient
-from agent_banking.config.fallback import ModelFallbackError
+from agent_banking.core.chat import FallbackChatClient
+from agent_banking.core.fallback import ModelFallbackError
 
 from agent_banking.skills.skill_registry import SkillRegistry
-from agent_banking.config.settings import Config
+from agent_banking.core.settings import Config
 from agent_banking.decision.decision_client import DecisionClient
 from agent_banking.tasks.config.prompts import TASK_ROUTER_SYSTEM_PROMPT_TEMPLATE
 

@@ -1247,8 +1247,8 @@ class BankingQueryParser:
         Uses chat completion API configured in environment (if available).
         Completely safe: handles exceptions and returns None when offline or unconfigured.
         """
-        from agent_banking.config.chat import FallbackChatClient
-        from agent_banking.config.fallback import ModelFallbackError
+        from agent_banking.core.chat import FallbackChatClient
+        from agent_banking.core.fallback import ModelFallbackError
 
         try:
             client = FallbackChatClient("query_parser")

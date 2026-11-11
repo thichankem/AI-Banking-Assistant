@@ -1059,7 +1059,7 @@ class BankingTracer:
     """
 
     def __init__(self, config=None):
-        from ..config.settings import Config
+        from agent_banking.core.settings import Config
         self.config = config or Config()
 
         self.enabled = getattr(self.config, "ENABLE_TRACING", True)

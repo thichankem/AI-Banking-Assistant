@@ -4,12 +4,12 @@ import json
 import io
 import os
 from pathlib import Path
-from agent_banking.config.models import model_primary
-from agent_banking.config.fallback import ModelFallbackError
+from agent_banking.core.models import model_primary
+from agent_banking.core.fallback import ModelFallbackError
 
 
 def _ensure_env_loaded():
-    from agent_banking.config.environment import load_environment
+    from agent_banking.core.environment import load_environment
     load_environment()
 
 

@@ -9,7 +9,7 @@ import math
 from collections import defaultdict
 
 from .model_enrichment import cloud_json, ordered_parallel
-from agent_banking.config.models import model_primary, chain_fingerprint
+from agent_banking.core.models import model_primary, chain_fingerprint
 
 BOUNDARY_VERSION = "semantic-lattice-v3-source-start-anchors"
 ATOM_SCORE_VERSION = "semantic-lattice-v2-anchored-cuts"

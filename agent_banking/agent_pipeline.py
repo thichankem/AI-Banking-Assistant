@@ -32,7 +32,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent_banking.config.settings import Config
+from agent_banking.core.settings import Config
 from agent_banking.pipeline import BankingRAGPipeline
 from agent_banking.langgraph_agent.graph import build_banking_agent_graph
 from agent_banking.tracing.tracer import BankingTracer

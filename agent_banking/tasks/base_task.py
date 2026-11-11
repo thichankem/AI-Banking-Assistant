@@ -24,10 +24,10 @@ RULES:
 from __future__ import annotations
 import time
 from dataclasses import dataclass, field
-from agent_banking.config.chat import FallbackChatClient
-from agent_banking.config.fallback import ModelFallbackError
+from agent_banking.core.chat import FallbackChatClient
+from agent_banking.core.fallback import ModelFallbackError
 
-from agent_banking.config.settings import Config
+from agent_banking.core.settings import Config
 from agent_banking.skills.skill_registry import SkillRegistry
 from agent_banking.tasks.config.prompts import QUERY_REWRITE_SYSTEM_PROMPT, REACT_AGENT_SYSTEM_PROMPT_TEMPLATE
 

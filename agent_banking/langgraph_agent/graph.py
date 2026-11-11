@@ -17,7 +17,7 @@ import sqlite3
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 
-from agent_banking.config.settings import Config
+from agent_banking.core.settings import Config
 from agent_banking.langgraph_agent.state import AgentState
 from agent_banking.langgraph_agent.nodes import BankingAgentNodes
 from agent_banking.langgraph_agent.edges import (

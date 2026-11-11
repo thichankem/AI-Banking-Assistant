@@ -18,10 +18,10 @@ import json
 import time
 from pathlib import Path
 from dataclasses import dataclass, field
-from agent_banking.config.chat import FallbackChatClient
-from agent_banking.config.fallback import ModelFallbackError
+from agent_banking.core.chat import FallbackChatClient
+from agent_banking.core.fallback import ModelFallbackError
 
-from agent_banking.config.settings import Config
+from agent_banking.core.settings import Config
 from agent_banking.skills.config.prompts import GRADE_DOCUMENTS_PROMPT_TEMPLATE, AUDIT_ANSWER_PROMPT_TEMPLATE
 
 

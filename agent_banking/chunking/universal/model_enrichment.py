@@ -10,8 +10,8 @@ import urllib.error
 import urllib.request
 
 from .cloud_config import load_environment
-from agent_banking.config.fallback import ModelFallbackError
-from agent_banking.config.models import model_primary, chain_fingerprint
+from agent_banking.core.fallback import ModelFallbackError
+from agent_banking.core.models import model_primary, chain_fingerprint
 from .image_context import (IMAGE_POLICY, RESOLVED_IMAGE_STATUSES, source_text as context_source_text,
                             surrounding_sources, validate_context_selection, apply_context_selection)
 
@@ -126,8 +126,8 @@ def validate_decisions(result, questions):
 
 def cloud_json(endpoint, key, payload, timeout=None, retries=None, allow_layout_list=False,
                max_output_tokens=131072, model_module=None, validate=None, dimension=None):
-    from agent_banking.config.fallback import run_fallback
-    from agent_banking.config.models import get_model_chain
+    from agent_banking.core.fallback import run_fallback
+    from agent_banking.core.models import get_model_chain
 
     if model_module is None:
         model_module = "chunking.text"

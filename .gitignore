@@ -32,12 +32,14 @@ llm_config.json
 gateway_config.*
 
 # ==============================================================================
-# Module Prompts Configuration (hidden & customizable)
+# Module Prompts & Settings Configuration (hidden & customizable)
 # ==============================================================================
 agent_banking/*/config/prompts.py
 agent_banking/config/*/prompts.py
 agent_banking/*/config/prompts/
 agent_banking/*/config/prompts/**
+agent_banking/*/config/settings/
+agent_banking/*/config/settings/**
 agent_banking/config/*/prompts/
 agent_banking/config/*/prompts/**
 agent_banking/*/config/prompt_profiles.json

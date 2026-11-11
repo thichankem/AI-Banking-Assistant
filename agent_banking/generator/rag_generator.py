@@ -22,9 +22,9 @@ import sqlite3
 import hashlib
 from pathlib import Path
 import unicodedata
-from agent_banking.config.chat import FallbackChatClient
-from agent_banking.config.models import model_primary
-from agent_banking.config.generator.settings import GeneratorConfig
+from agent_banking.core.chat import FallbackChatClient
+from agent_banking.core.models import model_primary
+from agent_banking.generator.config.settings import GeneratorConfig
 
 class ContextBundle:
     def __init__(self, markdown_context="", total_tokens=0, legal_citations=None, sources_used=None, chunks_included=0):

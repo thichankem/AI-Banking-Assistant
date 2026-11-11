@@ -17,7 +17,7 @@ DESIGN INVARIANTS:
 """
 
 import math
-from agent_banking.config.settings import Config
+from agent_banking.core.settings import Config
 
 
 APPROVED_READONLY_TOOLS = [

@@ -169,7 +169,7 @@ class PdfExtractor:
 
     def _read(self, pixels, native, width, height, region_depth=0, source_regions=None, render_zoom=None, zoom_source=None):
         from .vision_client import DocumentVisionClient, VisionPageOverflow
-        from agent_banking.config.models import chain_fingerprint
+        from agent_banking.core.models import chain_fingerprint
         client = self.vision_client
         if client is None:
             client = DocumentVisionClient()
@@ -418,7 +418,7 @@ class PdfExtractor:
         rows, dropping cells or manufacturing values with formatting heuristics.
         """
         from .model_enrichment import cloud_json
-        from agent_banking.config.models import model_primary
+        from agent_banking.core.models import model_primary
         endpoint = model_primary("chunking.text")
         for element in layout.get("elements", []):
             if element.get("type") != "table":
@@ -533,7 +533,7 @@ class PdfExtractor:
         if occupied != {(row, column) for row in range(len(grid)) for column in range(len(proposed["headers"]))}:
             return None
         from .model_enrichment import cloud_json, validate_decisions
-        from agent_banking.config.models import model_primary
+        from agent_banking.core.models import model_primary
         endpoint = model_primary("chunking.decision")
         questions = {"table": {"type": "choice", "instructions": (
             "A visual reviewer returned an inconclusive verdict, zero uncertainties, and independent "
@@ -607,7 +607,7 @@ class PdfExtractor:
         The semantic equivalence is a model judgment, explicitly recorded.
         """
         from .model_enrichment import cloud_json
-        from agent_banking.config.models import model_primary
+        from agent_banking.core.models import model_primary
         text = layout_text(layout)
         missing = [line for line in native if compact(line) and compact(line) not in compact(text)]
         if not missing:

@@ -20,9 +20,9 @@ DESIGN INVARIANTS:
 import json
 import urllib.request
 
-from agent_banking.config.settings import Config
-from agent_banking.config.models import get_model_chain
-from agent_banking.config.fallback import run_fallback
+from agent_banking.core.settings import Config
+from agent_banking.core.models import get_model_chain
+from agent_banking.core.fallback import run_fallback
 
 
 class DecisionClient:

@@ -21,10 +21,10 @@ RULES:
 """
 
 from __future__ import annotations
-from agent_banking.config.chat import FallbackChatClient
-from agent_banking.config.fallback import ModelFallbackError
+from agent_banking.core.chat import FallbackChatClient
+from agent_banking.core.fallback import ModelFallbackError
 
-from agent_banking.config.settings import Config
+from agent_banking.core.settings import Config
 from agent_banking.langgraph_agent.state import AgentState
 from agent_banking.langgraph_agent.config.prompts import (
     ROUTER_SYSTEM_PROMPT,

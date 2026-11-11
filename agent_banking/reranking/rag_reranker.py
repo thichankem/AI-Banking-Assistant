@@ -18,8 +18,8 @@ import os
 import json
 import urllib.request
 import math
-from agent_banking.config.models import get_model_chain, model_primary
-from agent_banking.config.fallback import run_fallback
+from agent_banking.core.models import get_model_chain, model_primary
+from agent_banking.core.fallback import run_fallback
 
 
 class BankingReranker:

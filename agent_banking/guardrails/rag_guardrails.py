@@ -22,7 +22,7 @@ CORE DESIGN INVARIANTS:
 """
 
 import unicodedata
-from agent_banking.config.settings import Config
+from agent_banking.core.settings import Config
 from agent_banking.guardrails.indirect_injection_guardrail import strip_vietnamese_accents, condense_spaced_text
 
 

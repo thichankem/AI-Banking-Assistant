@@ -44,7 +44,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 
-from agent_banking.config.settings import Config
+from agent_banking.core.settings import Config
 from agent_banking.pipeline import BankingRAGPipeline
 from agent_banking.node_pipeline import NodePipeline
 from agent_banking.generator.rag_generator import (

@@ -22,7 +22,7 @@ import sqlite3
 import hashlib
 import random
 from pathlib import Path
-from agent_banking.config.models import model_primary
+from agent_banking.core.models import model_primary
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
