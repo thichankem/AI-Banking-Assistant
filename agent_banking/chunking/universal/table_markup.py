@@ -38,7 +38,11 @@ class _Cells(HTMLParser):
             while (self.row, self.column) in self.occupied:
                 self.column += 1
             values = dict(attrs)
-            height, width = int(values.get("rowspan", "1")), int(values.get("colspan", "1"))
+            raw_rowspan = str(values.get("rowspan") or "1").strip()
+            raw_colspan = str(values.get("colspan") or "1").strip()
+            if not raw_rowspan.isdigit() or not raw_colspan.isdigit():
+                raise ValueError("Invalid non-integer span attribute")
+            height, width = int(raw_rowspan), int(raw_colspan)
             if not 1 <= height <= 4096 or not 1 <= width <= 256 or self.row + height > 4096 or self.column + width > 256:
                 raise ValueError("Serialized table exceeds span limits")
             locations = {(r, c) for r in range(self.row, self.row + height)
@@ -50,7 +54,12 @@ class _Cells(HTMLParser):
                          "column_span": width, "text": ""}
         elif tag == "br" and self.cell is not None:
             self.cell["text"] += "\n"
-        elif tag in ("b", "i", "em", "strong", "span", "u", "sub", "sup", "code") and self.cell is not None:
+        elif tag in ("p", "div", "li") and self.cell is not None:
+            if self.cell["text"] and not self.cell["text"].endswith("\n"):
+                self.cell["text"] += "\n"
+        elif tag in ("b", "i", "em", "strong", "span", "u", "sub", "sup", "code", "font", "small", "mark", "ul", "ol") and self.cell is not None:
+            pass
+        elif tag in ("colgroup", "col") and self.in_table and not self.in_row:
             pass
         else:
             raise ValueError("Unsupported serialized table tag: " + tag)
@@ -78,7 +87,11 @@ class _Cells(HTMLParser):
                 raise ValueError("Unclosed serialized row")
             self.in_table = False
             self.finished = True
-        elif tag not in ("thead", "tbody", "tfoot", "b", "i", "em", "strong", "span", "u", "sub", "sup", "code", "br"):
+        elif tag not in (
+            "thead", "tbody", "tfoot", "b", "i", "em", "strong", "span",
+            "u", "sub", "sup", "code", "br", "p", "div", "li", "font",
+            "small", "mark", "ul", "ol", "colgroup", "col",
+        ):
             raise ValueError("Unexpected serialized tag ending")
 
 
@@ -99,6 +112,11 @@ def table_from_html(markup, header_rows):
     grid = [[""] * width for _ in range(height)]
     for cell in parser.cells:
         grid[cell["row"]][cell["column"]] = cell["text"]
+        if cell["row"] >= header_rows and (cell["row_span"] > 1 or cell["column_span"] > 1):
+            for r in range(cell["row"], cell["row"] + cell["row_span"]):
+                for c in range(cell["column"], cell["column"] + cell["column_span"]):
+                    if not grid[r][c]:
+                        grid[r][c] = cell["text"]
     headers = []
     for column in range(width):
         labels = [cell["text"] for cell in parser.cells if cell["row"] < header_rows

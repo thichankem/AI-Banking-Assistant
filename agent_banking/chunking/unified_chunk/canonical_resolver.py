@@ -123,91 +123,29 @@ def get_sat_segmenter(model_name="sat-3l-sm"):
     return _SAT_MODEL
 
 
-# Universal abbreviations across academic, technical, business, and general text
-# Zero hardcoded banking/currency units
-UNIVERSAL_KNOWN_ABBREVIATIONS = {
-    "tp.", "tp.hcm", "hcm.", "hn.", "v.v.", "ths.", "ts.", "bs.", "mr.", "mrs.", "ms.",
-    "dr.", "prof.", "assoc.", "stt.", "no.", "inc.", "corp.", "ltd.", "co.", "approx.",
-    "dept.", "est.", "fig.", "vs.", "etc.", "e.g.", "i.e.", "vol.", "pp.", "ed."
-}
-
-
 def split_universal_sentences(text):
     """
-    Universal domain-agnostic sentence boundary splitter.
-    Preserves decimals (10.5), thousand separators (10,000 / 10.000), percentages (12.5%),
-    universal abbreviations, and structural markers.
+    Universal domain-agnostic sentence boundary splitter powered by the decision model
+    for ambiguous period boundaries.
     Strictly 0% Regex Law, Zero Ternary Law, No Typing Library.
     """
     if not text:
         return []
-
+    from ..universal.chunk_planner import find_sentence_gap_ends
     raw_lines = [l.strip() for l in text.splitlines() if l.strip()]
     all_sentences = []
-    structural_delims = ("-", "*", "•", "\"", "'", "“", "”", "(", "[")
-
     for line in raw_lines:
-        n = len(line)
+        gap_ends = find_sentence_gap_ends(line, use_decision_for_dots=True)
         start_idx = 0
-        i = 0
-        while i < n:
-            ch = line[i]
-            is_boundary = False
-
-            if ch in (".", "!", "?"):
-                # 1. Ellipsis check: "..."
-                if i + 1 < n and line[i + 1] == ".":
-                    i += 1
-                    continue
-                if i > 0 and line[i - 1] == ".":
-                    i += 1
-                    continue
-
-                # 2. Decimal / number check: "10.5" or "10.000" or "1.5%"
-                if i > 0 and line[i - 1].isdigit() and i + 1 < n and line[i + 1].isdigit():
-                    i += 1
-                    continue
-
-                # 3. Universal abbreviation check
-                word_start = i
-                while word_start > 0 and not line[word_start - 1].isspace():
-                    word_start -= 1
-                curr_word = line[word_start : i + 1].lower()
-                if curr_word in UNIVERSAL_KNOWN_ABBREVIATIONS:
-                    i += 1
-                    continue
-
-                # 4. End of line or boundary confirmation
-                if i == n - 1:
-                    is_boundary = True
-                else:
-                    if line[i + 1].isspace():
-                        next_char_idx = i + 1
-                        while next_char_idx < n and line[next_char_idx].isspace():
-                            next_char_idx += 1
-                        if next_char_idx < n:
-                            next_ch = line[next_char_idx]
-                            if next_ch.isupper() or next_ch.isdigit() or next_ch in structural_delims:
-                                is_boundary = True
-                        else:
-                            is_boundary = True
-
-            if is_boundary:
-                sent = line[start_idx : i + 1].strip()
-                if sent:
-                    all_sentences.append(sent)
-                start_idx = i + 1
-                while start_idx < n and line[start_idx].isspace():
-                    start_idx += 1
-                i = start_idx
-            else:
-                i += 1
-
-        if start_idx < n:
-            remaining = line[start_idx:].strip()
-            if remaining:
-                all_sentences.append(remaining)
-
+        for end_idx in gap_ends:
+            sent = line[start_idx:end_idx].strip()
+            if sent:
+                all_sentences.append(sent)
+            start_idx = end_idx
+        if start_idx < len(line):
+            tail = line[start_idx:].strip()
+            if tail:
+                all_sentences.append(tail)
     return all_sentences
 
 
@@ -326,10 +264,11 @@ is_valid_vietnamese_text = is_valid_readable_text
 # -----------------------------------------------------------------------------
 def detect_and_remove_headers_footers(text, custom_ignore_phrases=None, config=None):
     """
-    Removes header/footer noise, page numbers, and form codes in a domain-agnostic manner.
+    Removes header/footer noise, page numbers, and form codes using the decision model.
     """
     if not text:
         return ""
+    from ..universal.decision_engine import decide_furniture_lines
 
     ignore_phrases = []
     if custom_ignore_phrases is not None:
@@ -339,39 +278,16 @@ def detect_and_remove_headers_footers(text, custom_ignore_phrases=None, config=N
             ignore_phrases.extend(config.custom_ignore_phrases)
 
     lines = text.splitlines()
+    noise_indices = decide_furniture_lines(lines)
     filtered = []
 
-    for line in lines:
+    for idx, line in enumerate(lines):
         s = line.strip()
         if not s:
             continue
+        if idx in noise_indices:
+            continue
         s_lower = s.lower()
-        words = s.split()
-
-        # Page numbers: "1", "1/5", "Page 2", "Trang 3"
-        if len(words) == 1:
-            w0 = words[0]
-            if w0.isdigit() or (all(c.isdigit() or c in "/-" for c in w0) and any(c.isdigit() for c in w0)):
-                continue
-        else:
-            if len(words) in (2, 3) and words[0].isalpha() and len(words[0]) <= 6:
-                remainder = "".join(words[1:])
-                if all(c.isdigit() or c in "/-" for c in remainder) and any(c.isdigit() for c in remainder):
-                    continue
-
-        # Form codes with colons: "01/TNDN:", "FORM-A1:"
-        if ":" in s and len(words) <= 10:
-            prefix = s.split(":", 1)[0].strip()
-            prefix_words = prefix.split()
-            if prefix_words:
-                code_token = prefix_words[-1]
-                has_digit = any(c.isdigit() for c in code_token)
-                has_code_delim = any(c in "/-#_" for c in code_token) or (
-                    len(code_token) <= 5 and any(c.isdigit() for c in code_token) and any(c.isalpha() for c in code_token)
-                )
-                if has_digit and has_code_delim:
-                    continue
-
         if ignore_phrases:
             should_skip = False
             for p in ignore_phrases:
@@ -380,7 +296,6 @@ def detect_and_remove_headers_footers(text, custom_ignore_phrases=None, config=N
                     break
             if should_skip:
                 continue
-
         filtered.append(line)
 
     return "\n".join(filtered)

@@ -15,51 +15,90 @@ from docx.oxml import parse_xml
 from lxml import etree
 
 
-def match_numbered_heading(source):
-    s = source.lower()
-    sep_chars = (':', '.', '-', '–', '—')
-    if s.startswith('chương '):
-        rest = s[7:].lstrip()
-        idx = 0
-        while idx < len(rest) and (rest[idx].isdigit() or rest[idx] in 'ivxlcdm'):
-            idx += 1
-        if idx > 0:
-            after = rest[idx:].lstrip()
-            if after and after[0] in sep_chars:
-                tail = after[1:].lstrip()
-                if tail:
-                    return 'chapter'
-    if s.startswith('điều '):
-        rest = s[5:].lstrip()
-        idx = 0
-        while idx < len(rest) and rest[idx].isdigit():
-            idx += 1
-        if idx > 0:
-            if idx < len(rest) and 'a' <= rest[idx] <= 'z':
-                idx += 1
-            after = rest[idx:].lstrip()
-            if after and after[0] in sep_chars:
-                tail = after[1:].lstrip()
-                if tail:
-                    return 'article'
-    if s.startswith('phụ lục'):
-        rest = s[7:].lstrip()
-        if not rest:
-            return None
-        if rest[0] in sep_chars:
-            tail = rest[1:].lstrip()
-            if tail:
-                return 'appendix'
-        idx = 0
-        while idx < len(rest) and (rest[idx].isdigit() or rest[idx] in 'ivxlcdm'):
-            idx += 1
-        if idx > 0:
-            after = rest[idx:].lstrip()
-            if after and after[0] in sep_chars:
-                tail = after[1:].lstrip()
-                if tail:
-                    return 'appendix'
-    return None
+def resolve_run_font_pt(run, paragraph):
+    if run.font is not None and run.font.size is not None:
+        return round(run.font.size.pt, 1)
+    run_style = getattr(run, "style", None)
+    hops = 0
+    while run_style is not None and hops < 10:
+        font = getattr(run_style, "font", None)
+        if font is not None and font.size is not None:
+            return round(font.size.pt, 1)
+        run_style = getattr(run_style, "base_style", None)
+        hops += 1
+    para_style = getattr(paragraph, "style", None)
+    hops = 0
+    while para_style is not None and hops < 10:
+        font = getattr(para_style, "font", None)
+        if font is not None and font.size is not None:
+            return round(font.size.pt, 1)
+        para_style = getattr(para_style, "base_style", None)
+        hops += 1
+    return 10.5
+
+
+def build_typography_record(value, mode_font_pt, total_chars, size_chars, all_bold, all_italic, starts_bold_label, centered):
+    clean_val = value.strip()
+    letters = [ch for ch in clean_val if ch.isalpha()]
+    is_upper = False
+    if letters:
+        upper_count = sum(1 for ch in letters if ch.isupper())
+        if upper_count * 5 >= len(letters) * 4:
+            is_upper = True
+    single_line = "\n" not in clean_val and len(clean_val.split()) <= 45
+    return {
+        "font_pt": mode_font_pt,
+        "char_count": total_chars,
+        "size_chars": size_chars,
+        "all_bold": bool(all_bold),
+        "all_italic": bool(all_italic),
+        "starts_bold_label": bool(starts_bold_label),
+        "is_upper": is_upper,
+        "centered": bool(centered),
+        "single_line": single_line,
+    }
+
+
+def extract_paragraph_typography(paragraph, value):
+    runs = [run for run in paragraph.runs if run.text.strip()]
+    if not runs:
+        return None
+    size_chars = {}
+    total_chars = 0
+    for run in runs:
+        sz = resolve_run_font_pt(run, paragraph)
+        ch_len = len(run.text.strip())
+        size_chars[sz] = size_chars.get(sz, 0) + ch_len
+        total_chars += ch_len
+    mode_font_pt = 10.5
+    best_chars = -1
+    for sz, ch_len in size_chars.items():
+        if ch_len > best_chars:
+            best_chars = ch_len
+            mode_font_pt = sz
+    all_bold = all(run.bold is True for run in runs)
+    all_italic = all(run.italic is True for run in runs)
+    starts_bold_label = False
+    if not all_bold and runs[0].bold is True:
+        first_txt = runs[0].text.strip()
+        if first_txt.endswith(":") and len(first_txt.split()) <= 6:
+            starts_bold_label = True
+    centered = paragraph.alignment == WD_ALIGN_PARAGRAPH.CENTER
+    return build_typography_record(
+        value, mode_font_pt, total_chars, size_chars, all_bold, all_italic, starts_bold_label, centered
+    )
+
+
+def apply_typography_hierarchy(ir):
+    """Shared decision-model hierarchy and caption detector for both DOCX and PDF IRs."""
+    from .decision_engine import decide_breadcrumb_hierarchy
+    decide_breadcrumb_hierarchy(ir)
+
+
+def link_visual_captions(ir):
+    """Link caption blocks to adjacent image or table blocks across both DOCX and PDF IRs."""
+    from .decision_engine import decide_caption_attachments
+    decide_caption_attachments(ir)
 
 
 def local_name(node):
@@ -125,8 +164,13 @@ def heading_level(paragraph, ordinal):
     if not text:
         return 0
     outline = paragraph._p.find(".//" + qn("w:outlineLvl"))
-    if outline is None and paragraph.style is not None:
-        outline = paragraph.style.element.find(".//" + qn("w:outlineLvl"))
+    style = paragraph.style
+    hops = 0
+    while outline is None and style is not None and hops < 10:
+        if getattr(style, "element", None) is not None:
+            outline = style.element.find(".//" + qn("w:outlineLvl"))
+        style = getattr(style, "base_style", None)
+        hops += 1
     if outline is not None:
         value = int(outline.get(qn("w:val"), "9"))
         if value < 9:
@@ -250,11 +294,15 @@ class DocxExtractor:
                 kind = "caption"
             block = self._append(kind, value, node, region, level=level, inline_segment=segment)
             if segment == 0:
-                runs = [run for run in paragraph.runs if run.text.strip()]
-                sizes = {run.font.size for run in runs}
-                if runs and all(run.bold is True for run in runs) and len(sizes) == 1 and None not in sizes:
-                    block["heading_format"] = {"bold": True, "font_pt": sizes.pop().pt,
-                                               "centered": paragraph.alignment == WD_ALIGN_PARAGRAPH.CENTER}
+                typo = extract_paragraph_typography(paragraph, value)
+                if typo is not None:
+                    block["typography"] = typo
+                    if typo["all_bold"] and len(typo["size_chars"]) == 1:
+                        block["heading_format"] = {
+                            "bold": True,
+                            "font_pt": typo["font_pt"],
+                            "centered": typo["centered"],
+                        }
             unit_id = self._unit(value, node, region + ":inline" + str(segment), block["id"])
             block["unit_ids"] = [unit_id]
             segment += 1
@@ -281,43 +329,7 @@ class DocxExtractor:
         emit(buffer)
 
     def _infer_numbered_outline(self):
-        """Recover manually formatted Vietnamese regulatory outlines."""
-        body = [block for block in self.ir["blocks"] if block["provenance"]["region"] == "body"]
-        if any(block["type"] == "heading" for block in body):
-            return
-        paragraphs = [block for block in body if block["type"] == "paragraph"]
-        candidates = []
-        for block in paragraphs:
-            source = block["text"].strip()
-            if not block.get("heading_format") or "\n" in source or len(source.split()) > 45:
-                continue
-            heading_role = match_numbered_heading(source)
-            if heading_role is not None:
-                candidates.append((block, heading_role))
-        if sum(role in ("chapter", "article") for _, role in candidates) < 2:
-            return
-
-        def mark(block, level, role):
-            block["type"] = "heading"
-            block["level"] = level
-            block["heading_evidence"] = {"source": "numbered_outline_formatting", "role": role}
-
-        title = paragraphs[0]
-        title_style = title.get("heading_format", {})
-        has_title = title_style.get("centered") and title_style["font_pt"] > max(
-            block["heading_format"]["font_pt"] for block, _ in candidates
-        )
-        if has_title:
-            section_level = 2
-        else:
-            section_level = 1
-        if has_title:
-            mark(title, 1, "title")
-        has_parent = False
-        for block, role in candidates:
-            level = section_level + (role == "article" and has_parent)
-            mark(block, level, role)
-            has_parent = has_parent or role in ("chapter", "appendix")
+        apply_typography_hierarchy(self.ir)
 
     def _inline_events(self, node):
         for child in node:
@@ -383,7 +395,7 @@ class DocxExtractor:
                 xml = parse_xml(blob)
                 values = [item.text for item in xml.iter() if local_name(item) in ("t", "v") and item.text]
                 info["native_values"] = values
-                source_text = "Dữ liệu hình gốc:\n" + "\n".join(values)
+                source_text = "\n".join(values)
                 info["native_text"] = source_text
                 if self.render_figures:
                     from .office_figures import drawing_preview
@@ -496,6 +508,9 @@ class DocxExtractor:
         elif self._has_grouped_header(cells, width):
             header_count = 2
             header_detection = "merged_bold_header_rows"
+        elif self._has_single_bold_header(cells, grid, width):
+            header_count = 1
+            header_detection = "single_bold_header_row"
         # Ambiguous unmarked tables retain every row as data.
         if header_count:
             headers = []
@@ -506,7 +521,7 @@ class DocxExtractor:
                         labels.append(row[column])
                 headers.append(" / ".join(labels))
         else:
-            headers = ["Cột " + str(index + 1) for index in range(width)]
+            headers = ["#" + str(index + 1) for index in range(width)]
         table = {"headers": headers, "rows": grid[header_count:], "grid": grid,
                  "header_row_count": header_count, "header_detection": header_detection, "cells": cells, "parent_cell": parent_cell}
         block = self._append("table", "", node, region, table_data=table, unit_ids=[])
@@ -540,6 +555,23 @@ class DocxExtractor:
             for group in groups
         )
 
+    @staticmethod
+    def _has_single_bold_header(cells, grid, width):
+        """Detect a single unmarked bold header row followed by non-bold data rows."""
+        if len(grid) < 2 or width < 2:
+            return False
+        first_row = [cell for cell in cells if cell["row"] == 0]
+        second_row = [cell for cell in cells if cell["row"] == 1 and cell["text"]]
+        if len(first_row) != width or not second_row:
+            return False
+        if not all(
+            cell["text"] and cell["all_text_bold"] and cell["row_span"] == 1
+            and cell["col_span"] == 1 and len(cell["text"].split()) <= 18
+            for cell in first_row
+        ):
+            return False
+        return any(not cell["all_text_bold"] for cell in second_row)
+
     def _cell_content(self, node, paragraphs, nested, part, region):
         name = local_name(node)
         if name in ("del", "moveFrom", "tcPr"):
@@ -557,22 +589,7 @@ class DocxExtractor:
             self._cell_content(child, paragraphs, nested, part, region)
 
     def _link_captions(self):
-        blocks = self.ir["blocks"]
-        for index, block in enumerate(blocks):
-            if block["type"] != "caption":
-                continue
-            candidates = []
-            if index:
-                candidates.append(blocks[index - 1])
-            if index + 1 < len(blocks):
-                candidates.append(blocks[index + 1])
-            for candidate in candidates:
-                if candidate["type"] in ("image", "table"):
-                    candidate["caption"] = block["text"]
-                    if candidate["type"] == "image":
-                        candidate["image"]["caption"] = block["text"]
-                    self.ir["relations"].append({"from": block["id"], "to": candidate["id"], "type": "caption_of"})
-                    break
+        link_visual_captions(self.ir)
 
     def _link_notes(self):
         for block in self.ir["blocks"]:

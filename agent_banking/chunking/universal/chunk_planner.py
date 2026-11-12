@@ -17,6 +17,35 @@ DEPENDENT_RELATIONS = {"continues", "answer_to", "exception_to", "note_of"}
 BULLET_CHARS = ("•", "●", "▪", "▫", "◦", "‣", "⁃", "·", "–", "—", "-")
 
 
+def is_furniture_block(block):
+    region = block.get("provenance", {}).get("region", "body")
+    return str(region).startswith("furniture:")
+
+
+def build_lead_in(blocks):
+    non_empty = [b for b in (blocks or []) if b.get("text", "").strip()]
+    if not non_empty:
+        return "", [], []
+    parts = []
+    spans = []
+    ids = []
+    offset = 0
+    for b in non_empty:
+        txt = b["text"]
+        b_len = len(txt)
+        parts.append(txt)
+        ids.append(b["id"])
+        spans.append({
+            "block_id": b["id"],
+            "start": 0,
+            "end": b_len,
+            "chunk_start": offset,
+            "chunk_end": offset + b_len,
+        })
+        offset += b_len + 2
+    return "\n\n".join(parts), spans, ids
+
+
 def is_bullet_item(text):
     s = text.lstrip()
     for b in BULLET_CHARS:
@@ -40,10 +69,12 @@ def find_word_starts(text):
     return starts
 
 
-def find_sentence_gap_ends(text):
+def find_sentence_gap_ends(text, use_decision_for_dots=True):
+    from .decision_engine import decide_period_boundaries
     ends = []
+    ambiguous_dots = []
     i = 0
-    punctuation = ('.', '!', '?', '…')
+    punctuation = ('.', '!', '?', '…', ';')
     closing = ('"', '”', '’', '»', ')', ']')
     n = len(text)
     while i < n:
@@ -52,16 +83,31 @@ def find_sentence_gap_ends(text):
                 i += 1
             ends.append(i)
         elif text[i] in punctuation:
+            dot_index = i
+            punct_char = text[i]
+            word_start = i
+            while word_start > 0 and not text[word_start - 1].isspace():
+                word_start -= 1
+            raw_token = text[word_start:i + 1]
             i += 1
             while i < n and text[i] in closing:
                 i += 1
-            if i < n and text[i] in (' ', '\t'):
-                while i < n and text[i] in (' ', '\t'):
+            if i < n and text[i] in (' ', '\t', '\r', '\n'):
+                while i < n and text[i] in (' ', '\t', '\r', '\n'):
                     i += 1
-                if i < n and text[i].isalpha():
-                    ends.append(i)
+                if i < n and (text[i].isalpha() or text[i].isdigit() or text[i] in BULLET_CHARS):
+                    if punct_char == '.' and len(raw_token) <= 6:
+                        if use_decision_for_dots:
+                            ambiguous_dots.append((dot_index, i, raw_token))
+                    else:
+                        ends.append(i)
         else:
             i += 1
+    if ambiguous_dots:
+        valid_dot_breaks = decide_period_boundaries(text, ambiguous_dots)
+        for gap_end in valid_dot_breaks:
+            ends.append(gap_end)
+        ends.sort()
     return ends
 
 
@@ -80,7 +126,7 @@ def table_markdown(headers, rows):
 
 class ChunkPlanner:
     def __init__(self, target_tokens=400, max_tokens=512, max_words=350, table_rows=4, tokenizer=None,
-                 max_chars=None, min_words=30, min_chars=0):
+                 max_chars=None, min_words=30, min_chars=0, max_parent_words=650):
         self.budget = TokenBudget(target_tokens, max_tokens, tokenizer)
         if max_words < 1 or table_rows < 1:
             raise ValueError("Chunk words and table rows must be positive")
@@ -89,6 +135,7 @@ class ChunkPlanner:
         self.max_chars = max_chars
         self.min_words = min_words
         self.min_chars = min_chars
+        self.max_parent_words = max_parent_words
         if max_chars is not None and max_chars < 1:
             raise ValueError("Character ceiling must be positive")
 
@@ -101,7 +148,8 @@ class ChunkPlanner:
                                    "document_version": ir["document_version"]})
         self.block_map = {block["id"]: block for block in ir["blocks"]}
         self.relations_by_block = defaultdict(list)
-        self.dependent_pairs = set()
+        from .decision_engine import decide_prompt_pairs
+        self.dependent_pairs = set(decide_prompt_pairs(ir["blocks"]))
         for index, relation in enumerate(ir["relations"]):
             self.relations_by_block[relation["from"]].append(index)
             if relation["from"] != relation["to"]:
@@ -122,6 +170,9 @@ class ChunkPlanner:
         pending = []
         current_region = "body"
         for block in ir["blocks"]:
+            if is_furniture_block(block):
+                block["section_id"] = root_id
+                continue
             region = block.get("provenance", {}).get("region", "body").split(":", 1)[0]
             if region != current_region:
                 self._flush(pending, current)
@@ -131,7 +182,15 @@ class ChunkPlanner:
             if block["type"] == "heading":
                 level = block.get("level", 1)
                 sibling_or_ancestor = stack and stack[-1][0] >= level
-                if pending and (sibling_or_ancestor or any(item["type"] != "heading" for item in pending)):
+                has_body_in_pending = any(item["type"] != "heading" for item in pending)
+                pending_words = sum(len(item["text"].split()) for item in pending)
+                if pending and has_body_in_pending:
+                    if pending_words < self.min_words:
+                        if self.chunks and pending[0]["type"] != "heading":
+                            self._try_append_tail_to_last_chunk(pending)
+                    else:
+                        self._flush(pending, current)
+                elif pending and sibling_or_ancestor and pending_words >= self.min_words:
                     self._flush(pending, current)
                 while stack and stack[-1][0] >= level:
                     stack.pop()
@@ -148,11 +207,23 @@ class ChunkPlanner:
             if block["type"] in ("heading", "paragraph", "caption"):
                 pending.append(block)
             elif block["type"] == "table":
-                self._flush(pending, current)
-                self._table(block, current)
+                pending_words = sum(len(item["text"].split()) for item in pending)
+                if pending and (pending_words < self.min_words or all(item["type"] in ("heading", "caption") for item in pending)):
+                    self._table(block, current, lead_in_blocks=pending)
+                else:
+                    self._flush(pending, current)
+                    self._table(block, current)
             elif block["type"] == "image":
-                self._flush(pending, current)
-                self._image(block, current)
+                if excluded_image(block, self.ir.get("profile")):
+                    continue
+                pending_words = sum(len(item["text"].split()) for item in pending)
+                if pending and (pending_words < self.min_words or all(item["type"] in ("heading", "caption") for item in pending)):
+                    self._image(block, current, lead_in_blocks=pending)
+                else:
+                    self._flush(pending, current)
+                    self._image(block, current)
+        if pending and sum(len(item["text"].split()) for item in pending) < self.min_words and self.chunks:
+            self._try_append_tail_to_last_chunk(pending)
         self._flush(pending, current)
         children_by_parent = defaultdict(list)
         chunks_by_parent = defaultdict(list)
@@ -174,7 +245,7 @@ class ChunkPlanner:
                     pieces.append(block.get("text", "") or block.get("image", {}).get("caption", ""))
             parent["content"] = "\n\n".join(piece for piece in pieces if piece)
         for chunk in self.chunks:
-            chunk["parent_content"] = self.parents[chunk["parent_id"]]["content"]
+            chunk["parent_content"] = self._windowed_parent_content(chunk, self.parents[chunk["parent_id"]])
             count = self.budget.passage_count(chunk)
             if count > self.budget.maximum:
                 raise AssertionError("Oversized passage escaped planner")
@@ -186,31 +257,131 @@ class ChunkPlanner:
         quality = self._validate_coverage()
         return self.chunks, {"parents": self.parents, "document": ir, "quality": quality}
 
+    def _try_append_tail_to_last_chunk(self, pending):
+        lead_text, lead_spans, lead_ids = build_lead_in(pending)
+        if not lead_text:
+            pending.clear()
+            return
+        last = self.chunks[-1]
+        if last["chunk_type"] not in ("text", "table", "multimodal"):
+            return
+        retrieval = last["business_metadata"]["retrieval"]
+        combined = last["content"] + "\n\n" + lead_text
+        if self._measure(combined, retrieval) is None:
+            return
+        base_offset = len(last["content"]) + 2
+        prov = last["business_metadata"]["provenance"]
+        for span in lead_spans:
+            prov.setdefault("source_spans", []).append({
+                "block_id": span["block_id"],
+                "start": span["start"],
+                "end": span["end"],
+                "chunk_start": base_offset + span["chunk_start"],
+                "chunk_end": base_offset + span["chunk_end"],
+            })
+        prov["block_ids"].extend(lead_ids)
+        prov["locations"].extend(self.block_map[identifier]["provenance"] for identifier in lead_ids)
+        last["content"] = combined
+        seed = self.ir["document_id"] + self.ir["document_version"] + str(len(self.chunks) - 1) + last["content"]
+        last["chunk_id"] = self.ir["document_id"] + ":c:" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:20]
+        pending.clear()
+
+    def _windowed_parent_content(self, chunk, parent):
+        full_content = parent.get("content", "")
+        if not self.max_parent_words or len(full_content.split()) <= self.max_parent_words:
+            return full_content
+        block_ids = parent.get("block_ids", [])
+        if not block_ids:
+            return " ".join(full_content.split()[:self.max_parent_words])
+        piece_by_id = {}
+        words_by_id = {}
+        for bid in block_ids:
+            block = self.block_map[bid]
+            if block["type"] == "table":
+                table = block["table_data"]
+                piece = table_markdown(table["headers"], table["rows"])
+            else:
+                piece = block.get("text", "") or block.get("image", {}).get("caption", "")
+            piece_by_id[bid] = piece
+            words_by_id[bid] = len(piece.split())
+        chunk_bids = set(chunk["business_metadata"]["provenance"].get("block_ids", []))
+        anchor_indices = [idx for idx, bid in enumerate(block_ids) if bid in chunk_bids]
+        if not anchor_indices:
+            anchor_indices = [0]
+        left = min(anchor_indices)
+        right = max(anchor_indices)
+        header_bid = None
+        if block_ids and self.block_map[block_ids[0]]["type"] == "heading" and left > 0:
+            header_bid = block_ids[0]
+        budget = self.max_parent_words
+        if header_bid is not None:
+            budget -= words_by_id[header_bid]
+        current_words = sum(words_by_id[block_ids[idx]] for idx in range(left, right + 1))
+        while current_words < budget and (left > 0 or right + 1 < len(block_ids)):
+            expanded = False
+            if left > 0 and block_ids[left - 1] != header_bid:
+                w = words_by_id[block_ids[left - 1]]
+                if current_words + w <= budget:
+                    left -= 1
+                    current_words += w
+                    expanded = True
+            if right + 1 < len(block_ids):
+                w = words_by_id[block_ids[right + 1]]
+                if current_words + w <= budget:
+                    right += 1
+                    current_words += w
+                    expanded = True
+            if not expanded:
+                break
+        selected_pieces = []
+        if header_bid is not None and piece_by_id[header_bid]:
+            selected_pieces.append(piece_by_id[header_bid])
+        for idx in range(left, right + 1):
+            piece = piece_by_id[block_ids[idx]]
+            if piece:
+                selected_pieces.append(piece)
+        window_text = "\n\n".join(selected_pieces)
+        window_words = window_text.split()
+        if len(window_words) > self.max_parent_words:
+            if chunk["chunk_type"] == "table" and chunk.get("table_data"):
+                header_prefix = ""
+                if header_bid is not None and piece_by_id[header_bid]:
+                    header_prefix = piece_by_id[header_bid] + "\n\n"
+                return (header_prefix + chunk["content"]).strip()
+            return " ".join(window_words[:self.max_parent_words])
+        return window_text
+
     def _retrieval(self, parent_id, evidence, kind="text"):
         parent = self.parents[parent_id]
-        if kind == "text":
-            context = self.document_context
-        else:
-            context = parent.get("retrieval_context")
+        context = parent.get("retrieval_context")
         if context is None:
-            section_limit = min(56, self.budget.maximum // 5)
+            section_limit = min(44, self.budget.maximum // 6)
             document = self.document_context
             sections = []
             cursor = parent
             while cursor["parent_id"]:
-                title = self.budget.shorten(cursor["section_title"], section_limit)
+                parent_node = self.parents.get(cursor["parent_id"])
+                is_root_child = parent_node is not None and not parent_node.get("parent_id")
+                if is_root_child and len(sections) >= 2:
+                    break
+                step_limit = 16
+                if not sections:
+                    step_limit = 22
+                if step_limit > section_limit:
+                    step_limit = section_limit
+                title = self.budget.shorten(cursor["section_title"], step_limit)
                 if title and title != document:
                     sections.append(title)
                     section_limit -= self.budget.count(title) + 2
-                if section_limit < 5:
+                if section_limit < 6:
                     break
                 cursor = self.parents[cursor["parent_id"]]
             context = " > ".join(part for part in [document, *reversed(sections)] if part)
             parent["retrieval_context"] = context
-        # Tables benefit from a short section label when the row text is terse.
-        # Keep full ancestry in the breadcrumb and out of the dense text prefix.
         if kind == "table":
-            context = self.budget.shorten(context, 36)
+            context = self.budget.shorten(context, 44)
+        else:
+            context = self.budget.shorten(context, 56)
         tokenizer_name = os.getenv("EMBEDDING_MODEL", "embedding-tokenizer")
         retrieval = {"role": "child", "context": context, "tokenizer": tokenizer_name,
                      "tokenizer_sha256": TOKENIZER_SHA256, "max_tokens": self.budget.maximum}
@@ -278,13 +449,15 @@ class ChunkPlanner:
             point = starts_by_id[atom["block_id"]] + atom["end"]
             aligned = point == len(text) or text[point - 1].isspace() or text[point].isspace()
             if aligned:
-                candidates[point] = 0.5
+                candidates[point] = 0.18
             else:
                 candidates[point] = 0.0
         for block, start, end in zip(blocks, starts, ends):
-            if end - start >= 256:
-                for gap_end in find_sentence_gap_ends(block["text"]):
-                    candidates.setdefault(start + gap_end, 0.38)
+            candidates[end] = max(candidates.get(end, 0.0), 0.72)
+            needs_dot_decision = len(block["text"].split()) > 60
+            for gap_end in find_sentence_gap_ends(block["text"], use_decision_for_dots=needs_dot_decision):
+                gap_point = start + gap_end
+                candidates[gap_point] = max(candidates.get(gap_point, 0.0), 0.62)
             for boundary in self.boundaries_by_block.get(block["id"], []):
                 point = start + boundary["offset"]
                 candidates[point] = boundary["score"]
@@ -317,6 +490,10 @@ class ChunkPlanner:
 
         groups = []
         for index, block in enumerate(blocks[:-1]):
+            if frozenset((block["id"], blocks[index + 1]["id"])) in self.dependent_pairs:
+                if fits_range(starts[index], ends[index + 1]):
+                    groups.append((starts[index], ends[index + 1]))
+                continue
             if not block["text"].rstrip().endswith(":") or is_bullet_item(block["text"]):
                 continue
             last = index
@@ -338,10 +515,11 @@ class ChunkPlanner:
             return earliest
 
         def short_penalty(part, score):
-            if score >= 0.8:
-                return 0
-            if len(part.strip()) < self.min_chars or len(part.split()) < self.min_words:
-                return 0.5
+            words_count = len(part.split())
+            if len(part.strip()) < self.min_chars or words_count < self.min_words:
+                if words_count < 15:
+                    return 12.0
+                return 8.0
             return 0
 
         # An explicit lead-in and its bullets are atomic when they fit together.
@@ -354,8 +532,8 @@ class ChunkPlanner:
             if end > start:
                 for point in [point for point in candidates if start < point < end]:
                     del candidates[point]
-                candidates[start] = max(0.58, candidates.get(start, 0.0))
-                candidates[end] = max(0.58, candidates.get(end, 0.0))
+                candidates[start] = max(0.78, candidates.get(start, 0.0))
+                candidates[end] = max(0.78, candidates.get(end, 0.0))
             cursor = end
         ranges = optimal_partition(text, candidates, None, None, self.budget.target,
                                    first_start=first_start, measure=measure, penalty=short_penalty)
@@ -363,23 +541,33 @@ class ChunkPlanner:
         blocks.clear()
 
     def _emit_text(self, blocks, parent_id, starts, ends, ranges, retrieval_for_range):
-        for start, end, part in ranges:
+        full_text = "\n\n".join(block["text"] for block in blocks)
+        for start, end, _ in ranges:
+            active_indices = [
+                index for index in range(bisect_right(ends, start), bisect_left(starts, end))
+                if max(start, starts[index]) < min(end, ends[index])
+            ]
+            if not active_indices:
+                continue
+            actual_start = max(start, starts[active_indices[0]])
+            actual_end = min(end, ends[active_indices[-1]])
+            part = full_text[actual_start:actual_end]
             spans = []
-            for index in range(bisect_right(ends, start), bisect_left(starts, end)):
+            for index in active_indices:
                 offset = starts[index]
-                left = max(start, offset)
-                right = min(end, ends[index])
+                left = max(actual_start, offset)
+                right = min(actual_end, ends[index])
                 if left < right:
                     spans.append({"block_id": blocks[index]["id"], "start": left - offset, "end": right - offset,
-                                  "chunk_start": left - start, "chunk_end": right - start})
+                                  "chunk_start": left - actual_start, "chunk_end": right - actual_start})
             if not spans:
                 continue
             ids = [span["block_id"] for span in spans]
-            chunk = self._prototype("text", part, parent_id, ids, retrieval=retrieval_for_range(start, end))
-            chunk["business_metadata"]["provenance"].update(group_span=[start, end], source_spans=spans)
+            chunk = self._prototype("text", part, parent_id, ids, retrieval=retrieval_for_range(actual_start, actual_end))
+            chunk["business_metadata"]["provenance"].update(group_span=[actual_start, actual_end], source_spans=spans)
             self._emit(chunk)
 
-    def _table(self, block, parent_id):
+    def _table(self, block, parent_id, lead_in_blocks=None):
         table = block["table_data"]
         headers = table["headers"]
         rows = table["rows"]
@@ -390,9 +578,28 @@ class ChunkPlanner:
         start_row = header_count
         ids = [block["id"]]
         retrieval = self._retrieval(parent_id, block.get("context_quotes", []), "table")
+        lead_text, lead_spans, lead_ids = build_lead_in(lead_in_blocks)
+        lead_attached = not bool(lead_text)
+        if not lead_text and lead_in_blocks is not None:
+            lead_in_blocks.clear()
 
         def fits(content, target=False):
             return self._measure(content, retrieval, target) is not None
+
+        def with_lead(md_text):
+            if not lead_attached and lead_text:
+                return lead_text + "\n\n" + md_text
+            return md_text
+
+        def attach_lead_metadata(chunk):
+            nonlocal lead_attached
+            if not lead_attached and lead_text:
+                prov = chunk["business_metadata"]["provenance"]
+                prov["source_spans"] = deepcopy(lead_spans)
+                lead_attached = True
+                if lead_in_blocks is not None:
+                    lead_in_blocks.clear()
+            return chunk
 
         def make(selected, row_start):
             data = {"table_id": table["table_id"], "headers": headers, "rows": selected,
@@ -400,19 +607,29 @@ class ChunkPlanner:
                     "header_row_count": header_count, "header_grid": header_grid, "header_cells": header_cells,
                     "cells": [cell for cell in table["cells"] if cell["row"] < row_start + len(selected)
                               and cell["row"] + cell.get("row_span", 1) > row_start]}
-            return self._prototype("table", table_markdown(headers, selected), parent_id, ids,
-                                   table_data=data, retrieval=retrieval)
+            chunk_ids = ids
+            if not lead_attached and lead_text:
+                chunk_ids = lead_ids + ids
+            chunk = self._prototype("table", with_lead(table_markdown(headers, selected)), parent_id, chunk_ids,
+                                    table_data=data, retrieval=retrieval)
+            return attach_lead_metadata(chunk)
 
         for index, row in enumerate(rows, start=header_count):
             if pending:
                 final_row = index == header_count + len(rows) - 1
-                if len(pending) < self.table_rows and fits(table_markdown(headers, pending + [row]), target=not final_row):
+                if len(pending) < self.table_rows and fits(with_lead(table_markdown(headers, pending + [row])), target=not final_row):
                     pending.append(row)
                     continue
                 self._emit(make(pending, start_row))
                 pending = []
             start_row = index
-            if fits(table_markdown(headers, [row])):
+            if not lead_attached and lead_text and not fits(with_lead(table_markdown(headers, [row]))):
+                self._flush(lead_in_blocks, parent_id)
+                lead_text = ""
+                lead_spans = []
+                lead_ids = []
+                lead_attached = True
+            if fits(with_lead(table_markdown(headers, [row]))):
                 pending.append(row)
             else:
                 # Wide rows / long cells: preserve each value and its exact span,
@@ -443,6 +660,9 @@ class ChunkPlanner:
         if pending:
             self._emit(make(pending, start_row))
         if not rows:
+            if not lead_attached and lead_text and lead_in_blocks:
+                self._flush(lead_in_blocks, parent_id)
+                lead_attached = True
             content = table_markdown(headers, [])
             data = {"table_id": table["table_id"], "headers": headers, "rows": [],
                     "header_row_count": header_count, "row_start": 0, "row_end": 0,
@@ -452,7 +672,7 @@ class ChunkPlanner:
                 chunk["business_metadata"]["provenance"]["header_span"] = [begin, end]
                 self._emit(chunk)
 
-    def _image(self, block, parent_id):
+    def _image(self, block, parent_id, lead_in_blocks=None):
         if excluded_image(block, self.ir.get("profile")):
             return
         image = deepcopy(block["image"])
@@ -462,6 +682,23 @@ class ChunkPlanner:
         if not text.strip():
             raise ValueError("Supported image requires literal source text")
         retrieval = self._retrieval(parent_id, block.get("context_quotes", []))
+        lead_text, lead_spans, lead_ids = build_lead_in(lead_in_blocks)
+        if lead_text and self._measure(lead_text + "\n\n" + text, retrieval) is not None:
+            combined = lead_text + "\n\n" + text
+            chunk = self._prototype("multimodal", combined, parent_id, lead_ids + [block["id"]], images=[image], retrieval=retrieval)
+            chunk["business_metadata"]["provenance"].update({
+                "source_spans": deepcopy(lead_spans),
+                "image_text_span": [0, len(text)],
+                "method": "native_surrounding_text",
+                "context_evidence": image["context_evidence"],
+            })
+            chunk["business_metadata"]["retrieval"]["representation"] = "image_text_context"
+            self._emit(chunk)
+            if lead_in_blocks is not None:
+                lead_in_blocks.clear()
+            return
+        if lead_in_blocks:
+            self._flush(lead_in_blocks, parent_id)
         def fits(fragment):
             return self._measure(fragment, retrieval) is not None
         for start, end, fragment in self.budget.split(text, fits, align_words=True):
@@ -506,11 +743,15 @@ class ChunkPlanner:
             values.update("".join(parts) for parts in fragmented.values())
             table_values[table_id] = {normalize(value) for value in values}
         skipped = {block["id"]: block for block in self.ir["blocks"]
-                   if block["type"] == "image" and excluded_image(block, self.ir.get("profile"))}
+                   if block["type"] == "image" and (excluded_image(block, self.ir.get("profile")) or is_furniture_block(block))}
         excluded_units = []
         missing = []
         for unit in self.ir["units"]:
             block = self.block_map[unit["block_id"]]
+            if is_furniture_block(block):
+                excluded_units.append({"unit_id": unit["id"], "block_id": block["id"],
+                                       "reason": "document_furniture_header_footer"})
+                continue
             if block["type"] == "image":
                 if block["id"] in skipped:
                     excluded_units.append({"unit_id": unit["id"], "block_id": block["id"],
@@ -541,7 +782,7 @@ class ChunkPlanner:
                 "image_policy": self.ir.get("image_policy", IMAGE_POLICY), "preserved_assets": len(self.ir["assets"]),
                 "source_image_occurrences": len(source_image_ids),
                 "skipped_image_occurrences": [{"block_id": identifier, "sha256": block["image"]["sha256"],
-                                                "reason": block["image"]["status"]} for identifier, block in skipped.items()],
+                                                "reason": block["image"].get("status", "document_furniture_header_footer")} for identifier, block in skipped.items()],
                 "missing_units": [], "linked_assets": len(images), "missing_assets": [],
                 "linked_image_occurrences": len(image_parts), "missing_image_occurrences": [],
                 "oversized_passages": 0, "status": "verified_source_reconstruction",
@@ -567,6 +808,8 @@ class ChunkPlanner:
                 table = chunk["table_data"]
                 tables.setdefault(table["table_id"], []).append(table)
         for block in self.ir["blocks"]:
+            if is_furniture_block(block):
+                continue
             if block["type"] in ("heading", "paragraph", "caption") and block["text"].strip():
                 cursor = 0
                 for begin, end in sorted(spans.get(block["id"], [])):

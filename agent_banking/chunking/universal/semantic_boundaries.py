@@ -212,8 +212,11 @@ def optimal_partition(text, candidates, fits, count, target, *, first_start=None
     previous = [None] * len(points)
     costs[0] = 0
     interior = [0.0]
-    for point in points:
-        interior.append(interior[-1] + 3 * candidates.get(point, 0.0) ** 4)
+    for index, point in enumerate(points):
+        loss = 3 * candidates.get(point, 0.0) ** 4
+        if index > 0 and not text[points[index - 1]:point].strip():
+            loss = 0.0
+        interior.append(interior[-1] + loss)
     for right in range(1, len(points)):
         if first_start is None:
             earliest = 0

@@ -174,30 +174,12 @@ def infer_business_metadata(file_path):
             if folder.lower() not in GENERIC_ROOT_NAMES:
                 meaningful_folders.append(folder)
 
-    # Dynamic domain, category, and folder resolution
+    # Dynamic domain, category, and folder resolution (100% structural path hierarchy, zero keyword filtering)
     total_folders = len(meaningful_folders)
     if total_folders == 0:
-        stem_lower = doc_stem.lower().replace("-", " ").replace("_", " ")
-        if "health" in stem_lower or "clinical" in stem_lower or "y te" in stem_lower:
-            domain = "healthcare"
-            category = "clinical"
-            folder = "root"
-        elif "tech" in stem_lower or "architect" in stem_lower or "spec" in stem_lower:
-            domain = "technical"
-            category = "architecture"
-            folder = "root"
-        elif "legal" in stem_lower or "bylaw" in stem_lower or "luat" in stem_lower:
-            domain = "legal"
-            category = "corporate"
-            folder = "root"
-        elif "bank" in stem_lower or "nv " in stem_lower or "the " in stem_lower:
-            domain = "banking"
-            category = "retail"
-            folder = "root"
-        else:
-            domain = "general"
-            category = "general"
-            folder = "root"
+        domain = "general"
+        category = "general"
+        folder = "root"
     elif total_folders == 1:
         domain = meaningful_folders[0]
         category = meaningful_folders[0]

@@ -14,6 +14,8 @@ import unicodedata
 
 from agent_banking.chunking.config.prompts import PDF_PROMPT_VERSION, PAGE_PROMPT
 
+PDF_SCHEMA_VERSION = "pdf-ir-v2.1"
+
 
 def compact(value):
     return "".join(unicodedata.normalize("NFC", value).split())
@@ -187,13 +189,11 @@ class PdfExtractor:
             reviewer_id = reviewer.identity()
         else:
             reviewer_id = getattr(reviewer, "model", type(reviewer).__name__)
-        identity = {"version": PDF_PROMPT_VERSION, "prompt": PAGE_PROMPT,
+        identity = {"version": PDF_PROMPT_VERSION, "schema_version": PDF_SCHEMA_VERSION, "prompt": PAGE_PROMPT,
                     "image": hashlib.sha256(pixels).hexdigest(), "native": native,
                     "models": chain_fingerprint("chunking.vision"), "text_model": chain_fingerprint("chunking.text"),
                     "review_models": chain_fingerprint("chunking.vision_review"),
                     "decision_model": chain_fingerprint("chunking.decision"), "use_decision": self.use_decision,
-                    "implementation": {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-                                       for name in ("pdf_extractor.py", "vision_client.py", "table_markup.py")},
                     "client": client_id,
                     "reviewer": reviewer_id}
         identity["region_depth"] = region_depth
@@ -255,7 +255,6 @@ class PdfExtractor:
                     outline_only.append({"type": "heading", "text": heading["text"], "level": heading["level"],
                         "bbox": [0, 0, 1, 1], "bbox_granularity": "page", "order_evidence": "separate_model_outline"})
             corrected["elements"] = outline_only + corrected["elements"]
-            self._repair_tables(corrected, pixels, reviewer)
             # Missing localization cannot justify invented region precision.
             # The whole rendered page is a valid conservative source container.
             for element in corrected.get("elements", []):
@@ -267,6 +266,7 @@ class PdfExtractor:
                     element["bbox"] = [0, 0, 1, 1]
                     element["bbox_granularity"] = "page"
             try:
+                self._repair_tables(corrected, pixels, reviewer)
                 validate_page(corrected, [], allow_unread_images=True)
                 if not corrected["elements"]:
                     from PIL import Image, ImageChops
@@ -565,17 +565,24 @@ class PdfExtractor:
     def _supplement_regions(self, layout, pixels, width, height, region_depth=0):
         """Read all pixels at higher local detail when page vision skips images.
 
-        Region observations are an explicit additional view; they are not
-        silently deduplicated with page prose or merged into invented tables.
-        A fixed 2x2 raster grid is content-independent and has exact coordinates.
+        Uses overlapping padded quadrants (12.5% margin across center splits) so
+        multi-column or multi-step slides never have words clipped at the split
+        boundary, and deduplicates regional observations already captured in the
+        full-page reading.
         """
         from PIL import Image
         import io
         observations = []
         audit = []
+        pad_x = max(1, width // 8)
+        pad_y = max(1, height // 8)
+        y_bands = ((0, min(height, height // 2 + pad_y)), (max(0, height // 2 - pad_y), height))
+        x_bands = ((0, min(width, width // 2 + pad_x)), (max(0, width // 2 - pad_x), width))
+        existing_compact = compact(layout_text(layout))
+        seen_compact = set()
         with Image.open(io.BytesIO(pixels)) as original:
-            for top, bottom in ((0, height // 2), (height // 2, height)):
-                for left, right in ((0, width // 2), (width // 2, width)):
+            for top, bottom in y_bands:
+                for left, right in x_bands:
                     box = (left, top, right, bottom)
                     stream = io.BytesIO()
                     original.crop(box).save(stream, "PNG")
@@ -584,6 +591,12 @@ class PdfExtractor:
                                   "children": region.get("region_audit", [])})
                     for element in region["elements"]:
                         item = deepcopy(element)
+                        if item.get("type") != "table":
+                            sig = compact(item.get("text", ""))
+                            if sig and (sig in existing_compact or sig in seen_compact):
+                                continue
+                            if sig:
+                                seen_compact.add(sig)
                         local = item["bbox"]
                         item["bbox"] = [(left + local[0] * (right - left)) / width,
                                         (top + local[1] * (bottom - top)) / height,
@@ -681,9 +694,7 @@ class PdfExtractor:
                 pages_without_native_text += not native
                 if profile == "native":
                     if native:
-                        element = {"type": "paragraph", "text": "\n".join(native), "bbox": [0, 0, 1, 1],
-                                   "bbox_granularity": "page", "order_evidence": "native_text_sort"}
-                        self._append(ir, element, page_index, None, page.rotation)
+                        self._extract_native_page_blocks(ir, page, page_index, native)
                     ir["warnings"].append({"code": "PDF_VISUAL_CONTENT_UNASSESSED", "page_index": page_index,
                                            "native_lines": len(native), "requires_review": True})
                     continue
@@ -713,10 +724,133 @@ class PdfExtractor:
                     "native_reconciliation": layout.get("native_reconciliation", []), "region_audit": layout.get("region_audit", [])})
                 for element in layout["elements"]:
                     self._append(ir, element, page_index, sha, page.rotation)
+            self._merge_continued_pdf_tables(ir)
+            self._infer_pdf_visual_typography(ir)
             ir["statistics"] = {"pages": len(document), "blocks": len(ir["blocks"]), "units": len(ir["units"]),
                                   "pages_without_native_text": pages_without_native_text,
                                   "tables": sum(block["type"] == "table" for block in ir["blocks"])}
         return ir
+
+    @staticmethod
+    def _merge_continued_pdf_tables(ir):
+        """Merge multi-page continued tables using the decision model."""
+        from .decision_engine import decide_continued_tables
+        decide_continued_tables(ir)
+
+    def _extract_native_page_blocks(self, ir, page, page_index, native):
+        from .document_ir import build_typography_record
+        page_dict = page.get_text("dict", sort=True)
+        w = float(page.rect.width or 1.0)
+        h = float(page.rect.height or 1.0)
+        emitted = 0
+        for b in page_dict.get("blocks", []):
+            if b.get("type") != 0:
+                continue
+            lines_text = []
+            size_chars = {}
+            total_chars = 0
+            spans_meta = []
+            for ln in b.get("lines", []):
+                ln_parts = []
+                for sp in ln.get("spans", []):
+                    txt = sp.get("text", "")
+                    if not txt.strip():
+                        continue
+                    ln_parts.append(txt)
+                    sz = round(float(sp.get("size", 10.5)), 1)
+                    ch_len = len(txt.strip())
+                    size_chars[sz] = size_chars.get(sz, 0) + ch_len
+                    total_chars += ch_len
+                    flags = int(sp.get("flags", 0))
+                    font_name = str(sp.get("font", "")).lower()
+                    is_bold = bool(flags & 16) or "bold" in font_name
+                    is_italic = bool(flags & 2) or "italic" in font_name
+                    spans_meta.append((txt.strip(), is_bold, is_italic))
+                if ln_parts:
+                    lines_text.append("".join(ln_parts).strip())
+            block_text = "\n".join(lines_text).strip()
+            if not block_text or not spans_meta:
+                continue
+            mode_sz = 10.5
+            best_c = -1
+            for sz, c_len in size_chars.items():
+                if c_len > best_c:
+                    best_c = c_len
+                    mode_sz = sz
+            all_bold = all(item[1] for item in spans_meta)
+            all_italic = all(item[2] for item in spans_meta)
+            starts_bold = False
+            if not all_bold and spans_meta[0][1]:
+                first_t = spans_meta[0][0]
+                if first_t.endswith(":") and len(first_t.split()) <= 6:
+                    starts_bold = True
+            raw_box = b.get("bbox", (0.0, 0.0, w, h))
+            norm_box = [
+                max(0.0, min(1.0, float(raw_box[0]) / w)),
+                max(0.0, min(1.0, float(raw_box[1]) / h)),
+                max(0.0, min(1.0, float(raw_box[2]) / w)),
+                max(0.0, min(1.0, float(raw_box[3]) / h)),
+            ]
+            center_x = (norm_box[0] + norm_box[2]) / 2.0
+            centered = 0.40 <= center_x <= 0.60 and (norm_box[2] - norm_box[0]) < 0.85
+            element = {
+                "type": "paragraph",
+                "text": block_text,
+                "bbox": norm_box,
+                "bbox_granularity": "region",
+                "order_evidence": "native_text_sort",
+                "typography": build_typography_record(
+                    block_text, mode_sz, total_chars, size_chars, all_bold, all_italic, starts_bold, centered
+                ),
+            }
+            self._append(ir, element, page_index, None, page.rotation)
+            emitted += 1
+        if emitted == 0:
+            element = {
+                "type": "paragraph",
+                "text": "\n".join(native),
+                "bbox": [0, 0, 1, 1],
+                "bbox_granularity": "page",
+                "order_evidence": "native_text_sort",
+            }
+            self._append(ir, element, page_index, None, page.rotation)
+
+    @staticmethod
+    def _infer_pdf_visual_typography(ir):
+        """Populate missing block typography from bbox line-height and run shared hierarchy & caption inference."""
+        from .document_ir import apply_typography_hierarchy, build_typography_record, link_visual_captions
+        for block in ir["blocks"]:
+            if block["type"] == "table" or block.get("typography") is not None:
+                continue
+            text = block.get("text", "").strip()
+            if not text:
+                continue
+            prov = block.get("provenance", {})
+            if prov.get("bbox_granularity") == "page":
+                continue
+            bbox = prov.get("bbox", [0, 0, 1, 0.02])
+            lines = [ln for ln in text.splitlines() if ln.strip()]
+            line_count = len(lines)
+            if line_count < 1:
+                line_count = 1
+            raw_lh = ((bbox[3] - bbox[1]) / line_count) * 1000.0
+            bucket = round(raw_lh * 2.0) / 2.0
+            ch_len = len(text)
+            center_x = (bbox[0] + bbox[2]) / 2.0
+            centered = 0.40 <= center_x <= 0.60 and (bbox[2] - bbox[0]) < 0.85
+            letters = [ch for ch in text if ch.isalpha()]
+            is_upper = False
+            if letters:
+                upper_count = sum(1 for ch in letters if ch.isupper())
+                if upper_count * 5 >= len(letters) * 4:
+                    is_upper = True
+            all_bold = block["type"] == "heading" or is_upper
+            starts_bold = ":" in text[:35] and not is_upper
+            block["typography"] = build_typography_record(
+                text, bucket, ch_len, {bucket: ch_len}, all_bold, False, starts_bold, centered
+            )
+        apply_typography_hierarchy(ir)
+        link_visual_captions(ir)
 
     def _append(self, ir, element, page, sha, rotation):
         identifier = ir["document_id"] + ":v" + ir["document_version"][:16] + ":b" + str(len(ir["blocks"]))
@@ -730,6 +864,10 @@ class PdfExtractor:
                                 "order_evidence": element.get("order_evidence", "visual_reading_order"),
                                 "rotation": rotation,
                                 "method": ir.get("extraction_method", "pdf_cloud_vision_reviewed")}}
+        if element.get("image_info"):
+            block["provenance"]["image_info"] = deepcopy(element["image_info"])
+        if element.get("typography"):
+            block["typography"] = deepcopy(element["typography"])
         if sha is None:
             block["provenance"]["coordinate_system"] = "normalized_pdf_page"
         else:

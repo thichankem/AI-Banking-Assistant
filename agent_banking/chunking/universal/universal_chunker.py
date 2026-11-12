@@ -113,56 +113,65 @@ class UniversalDocxChunker:
         configuration["sources"] = self._code_snapshot
         return hashlib.sha256(json.dumps(configuration, sort_keys=True).encode("utf-8")).hexdigest()
 
-    def _resolve_source(self, docx_path=None, docx_bytes=None, source_name=None):
-        if isinstance(docx_path, (bytes, bytearray)):
-            docx_bytes = bytes(docx_path)
-            docx_path = None
-        if docx_bytes is not None:
-            if not isinstance(docx_bytes, (bytes, bytearray)):
-                raise TypeError("docx_bytes must be bytes or bytearray")
-            if not docx_bytes:
-                raise ValueError("docx_bytes is empty")
+    def _resolve_source(self, source=None, source_bytes=None, source_name=None, expected_format=None):
+        if isinstance(source, (bytes, bytearray)):
+            source_bytes = bytes(source)
+            source = None
+        if source_bytes is not None:
+            if not isinstance(source_bytes, (bytes, bytearray)):
+                raise TypeError("source_bytes must be bytes or bytearray")
+            if not source_bytes:
+                raise ValueError("source_bytes is empty")
+            fmt = expected_format
+            if fmt is None and source_name is not None:
+                ext = Path(str(source_name)).suffix.lower()
+                if ext in (".docx", ".pdf"):
+                    fmt = ext[1:]
+            if fmt is None:
+                if bytes(source_bytes[:4]) == b"%PDF":
+                    fmt = "pdf"
+                else:
+                    fmt = "docx"
             name = source_name
             if name is None:
-                name = "in_memory_" + hashlib.sha256(docx_bytes).hexdigest()[:20] + ".docx"
-            return bytes(docx_bytes), str(name)
-        if not isinstance(docx_path, (str, Path)):
-            if docx_path is None:
-                raise ValueError("A DOCX path or byte stream is required")
-            raise TypeError("docx_path must be a string or Path")
-        if not str(docx_path).strip():
-            raise ValueError("docx_path is empty")
-        path = Path(docx_path)
+                name = "in_memory_" + hashlib.sha256(source_bytes).hexdigest()[:20] + "." + fmt
+            return bytes(source_bytes), str(name), fmt
+        if not isinstance(source, (str, Path)):
+            if source is None:
+                raise ValueError("A document path or byte stream is required")
+            raise TypeError("source must be a string or Path")
+        if not str(source).strip():
+            raise ValueError("source path is empty")
+        path = Path(source)
         if not path.is_file():
             raise FileNotFoundError(str(path))
-        if path.suffix.lower() != ".docx":
-            raise ValueError("DOCX adapter requires .docx input")
-        name = source_name or str(path.resolve())
-        return str(path), str(name)
+        ext = path.suffix.lower()
+        if ext not in (".docx", ".pdf"):
+            raise ValueError("Unsupported document format: " + ext)
+        fmt = ext[1:]
+        if expected_format is not None and fmt != expected_format:
+            raise ValueError(expected_format.upper() + " adapter requires ." + expected_format + " input")
+        if fmt == "docx" and source_name is None:
+            name = str(path.resolve())
+        else:
+            name = source_name or str(path)
+        return str(path), str(name), fmt
 
-    def chunk_document(self, docx_path=None, docx_bytes=None, source_name=None):
-        self.last_artifact = None
-        source, name = self._resolve_source(docx_path, docx_bytes, source_name)
+    def _extract_ir(self, source, name, fmt):
+        if fmt == "pdf":
+            return self.pdf_extractor.extract(source, name, self.profile)
         ir = self.extractor.extract(source, name)
         if self.profile == "accuracy" and self.image_mode == "vision":
             self._read_office_figures(ir)
-        return self._process_ir(ir)
+        return ir
+
+    def chunk_document(self, docx_path=None, docx_bytes=None, source_name=None, expected_format=None):
+        self.last_artifact = None
+        source, name, fmt = self._resolve_source(docx_path, docx_bytes, source_name, expected_format)
+        return self._process_ir(self._extract_ir(source, name, fmt))
 
     def chunk_pdf(self, pdf_path=None, pdf_bytes=None, source_name=None):
-        self.last_artifact = None
-        source = pdf_bytes
-        if source is None:
-            if pdf_path is None or not Path(pdf_path).is_file():
-                raise FileNotFoundError(str(pdf_path))
-            if Path(pdf_path).suffix.lower() != ".pdf":
-                raise ValueError("PDF adapter requires .pdf input")
-            source = Path(pdf_path)
-        if isinstance(source, (bytes, bytearray)) and not source:
-            raise ValueError("PDF byte stream is empty")
-        name = source_name or str(pdf_path)
-        if source_name is None and pdf_path is None:
-            name = "in_memory_" + hashlib.sha256(source).hexdigest()[:20] + ".pdf"
-        return self._process_ir(self.pdf_extractor.extract(source, name, self.profile))
+        return self.chunk_document(docx_path=pdf_path, docx_bytes=pdf_bytes, source_name=source_name, expected_format="pdf")
 
     def _read_office_figures(self, ir):
         """Use the same reviewed visual adapter for embedded Office figures."""
@@ -254,15 +263,10 @@ class UniversalDocxChunker:
         return chunks
 
     def chunk_docx(self, docx_path, **kwargs):
-        return self.chunk_document(docx_path=docx_path, **kwargs)
+        return self.chunk_document(docx_path=docx_path, expected_format="docx", **kwargs)
 
     def chunk_file(self, file_path, **kwargs):
-        adapters = {".docx": self.chunk_docx, ".pdf": self.chunk_pdf}
-        path = Path(file_path)
-        adapter = adapters.get(path.suffix.lower())
-        if adapter is None:
-            raise ValueError("Unsupported document format: " + path.suffix)
-        return adapter(path, **kwargs)
+        return self.chunk_document(docx_path=file_path, **kwargs)
 
     def close(self):
         if self._owns_cache:

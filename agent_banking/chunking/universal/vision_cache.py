@@ -7,6 +7,7 @@ import json
 import time
 import sqlite3
 import threading
+from copy import deepcopy
 
 _SCHEMA_LOCK = threading.Lock()
 
@@ -128,7 +129,7 @@ class PageVisionCache:
             cached_val = self._l1_cache.get(page_sha256)
             if cached_val is not None:
                 self._l1_hits += 1
-                return cached_val
+                return deepcopy(cached_val)
 
         # -------------------------------------------------------------
         # 2. Tier 2: L2 SQLite WAL Lookup (Latency: ~0.006 ms)
@@ -157,10 +158,10 @@ class PageVisionCache:
                         first_key = next(iter(self._l1_cache), None)
                         if first_key is not None:
                             self._l1_cache.pop(first_key, None)
-                    self._l1_cache[page_sha256] = layout_dict
+                    self._l1_cache[page_sha256] = deepcopy(layout_dict)
 
                 self._l2_hits += 1
-                return layout_dict
+                return deepcopy(layout_dict)
             else:
                 self._misses += 1
                 return None
@@ -200,7 +201,7 @@ class PageVisionCache:
                         first_key = next(iter(self._l1_cache), None)
                         if first_key is not None:
                             self._l1_cache.pop(first_key, None)
-                self._l1_cache[page_sha256] = layout_dict
+                self._l1_cache[page_sha256] = deepcopy(layout_dict)
 
             # Update Tier 2 SQLite Database
             if self._conn is None:

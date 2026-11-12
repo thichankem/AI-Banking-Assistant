@@ -21,10 +21,10 @@ class LayoutAwareChunker:
     def __init__(
         self,
         max_chunk_size=None,
-        min_section_size=120,
+        min_section_size=0,
         table_rows_per_chunk=4,
         target_chunk_tokens=400,
-        max_chunk_words=300,
+        max_chunk_words=350,
         min_chunk_words=30,
         config=None,
         **kwargs
@@ -72,19 +72,9 @@ class LayoutAwareChunker:
 
     def chunk_file(self, file_path, **kwargs):
         """
-        Automatically chunk document file:
-        Normalizes inputs via canonical format contract.
+        Unified document chunking entrypoint for both .docx and .pdf.
         """
-        path = Path(file_path)
-        ext = path.suffix.lower()
-
-        if ext == ".docx":
-            return self.chunk_docx(path, **kwargs)
-        elif ext == ".pdf":
-            return self.chunk_pdf(path, **kwargs)
-        else:
-            logger.warning(f"[LayoutAwareChunker] Skipping unsupported format: {ext} ({path.name})")
-            raise ValueError("Unsupported document format: " + ext)
+        return self.docx_chunker.chunk_file(file_path, **kwargs)
 
     def chunk_directory(
         self,
