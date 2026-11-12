@@ -9,7 +9,7 @@ import time
 import urllib.error
 import urllib.request
 
-from .cloud_config import load_environment
+from agent_banking.core.environment import load_environment
 from agent_banking.core.fallback import ModelFallbackError
 from agent_banking.core.models import model_primary, chain_fingerprint
 from .image_context import (IMAGE_POLICY, RESOLVED_IMAGE_STATUSES, source_text as context_source_text,

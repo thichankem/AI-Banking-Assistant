@@ -7,9 +7,8 @@ import hashlib
 import os
 
 from .schema_assembler import build_universal_chunk, infer_business_metadata, link_chunk_sequence
-from .token_budget import TokenBudget, TOKENIZER_SHA256
+from .token_budget import TokenBudget, TOKENIZER_SHA256, format_passage_fields
 from .image_context import IMAGE_POLICY, excluded_image
-from .passage import format_passage_fields
 from .semantic_boundaries import atoms_for, optimal_partition
 
 
@@ -124,6 +123,25 @@ def table_markdown(headers, rows):
                      + [markdown_row(row) for row in rows])
 
 
+def escape_html(text):
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def render_structured_html_table(headers, rows, title=""):
+    parts = ["<table>"]
+    if title:
+        parts.append("<caption>" + escape_html(title) + "</caption>")
+    if headers:
+        parts.append("<thead><tr>" + "".join("<th>" + escape_html(h) + "</th>" for h in headers) + "</tr></thead>")
+    if rows:
+        body_rows = []
+        for row in rows:
+            body_rows.append("<tr>" + "".join("<td>" + escape_html(cell) + "</td>" for cell in row) + "</tr>")
+        parts.append("<tbody>" + "".join(body_rows) + "</tbody>")
+    parts.append("</table>")
+    return "".join(parts)
+
+
 class ChunkPlanner:
     def __init__(self, target_tokens=400, max_tokens=512, max_words=350, table_rows=4, tokenizer=None,
                  max_chars=None, min_words=30, min_chars=0, max_parent_words=650):
@@ -169,7 +187,11 @@ class ChunkPlanner:
         self.document_context = self.budget.shorten(title, min(40, self.budget.maximum // 6))
         pending = []
         current_region = "body"
-        for block in ir["blocks"]:
+        blocks_list = ir["blocks"]
+        idx = 0
+        while idx < len(blocks_list):
+            block = blocks_list[idx]
+            idx += 1
             if is_furniture_block(block):
                 block["section_id"] = root_id
                 continue
@@ -216,12 +238,22 @@ class ChunkPlanner:
             elif block["type"] == "image":
                 if excluded_image(block, self.ir.get("profile")):
                     continue
+                trailing_blocks = []
+                if idx < len(blocks_list) and blocks_list[idx]["type"] == "caption" and not is_furniture_block(blocks_list[idx]):
+                    next_cap = blocks_list[idx]
+                    next_region = next_cap.get("provenance", {}).get("region", "body").split(":", 1)[0]
+                    if next_region == current_region:
+                        self.parents[current]["block_ids"].append(next_cap["id"])
+                        next_cap["section_id"] = current
+                        trailing_blocks.append(next_cap)
+                        idx += 1
                 pending_words = sum(len(item["text"].split()) for item in pending)
-                if pending and (pending_words < self.min_words or all(item["type"] in ("heading", "caption") for item in pending)):
-                    self._image(block, current, lead_in_blocks=pending)
+                bundle_prev = block.get("image", {}).get("bundle_preceding", False)
+                if pending and (bundle_prev or pending_words < self.min_words or all(item["type"] in ("heading", "caption") for item in pending)):
+                    self._image(block, current, lead_in_blocks=pending, trailing_blocks=trailing_blocks)
                 else:
                     self._flush(pending, current)
-                    self._image(block, current)
+                    self._image(block, current, trailing_blocks=trailing_blocks)
         if pending and sum(len(item["text"].split()) for item in pending) < self.min_words and self.chunks:
             self._try_append_tail_to_last_chunk(pending)
         self._flush(pending, current)
@@ -577,7 +609,10 @@ class ChunkPlanner:
         header_cells = [cell for cell in table["cells"] if cell["row"] < header_count]
         start_row = header_count
         ids = [block["id"]]
+        table_title = table.get("title", "") or block.get("caption", "")
         retrieval = self._retrieval(parent_id, block.get("context_quotes", []), "table")
+        if table_title and not retrieval.get("situated_context"):
+            retrieval["situated_context"] = self.budget.shorten(table_title, min(48, self.budget.maximum // 6))
         lead_text, lead_spans, lead_ids = build_lead_in(lead_in_blocks)
         lead_attached = not bool(lead_text)
         if not lead_text and lead_in_blocks is not None:
@@ -602,9 +637,10 @@ class ChunkPlanner:
             return chunk
 
         def make(selected, row_start):
-            data = {"table_id": table["table_id"], "headers": headers, "rows": selected,
+            data = {"table_id": table["table_id"], "title": table_title, "headers": headers, "rows": selected,
                     "row_start": row_start, "row_end": row_start + len(selected),
                     "header_row_count": header_count, "header_grid": header_grid, "header_cells": header_cells,
+                    "html": render_structured_html_table(headers, selected, table_title),
                     "cells": [cell for cell in table["cells"] if cell["row"] < row_start + len(selected)
                               and cell["row"] + cell.get("row_span", 1) > row_start]}
             chunk_ids = ids
@@ -648,10 +684,11 @@ class ChunkPlanner:
                     if not pieces:
                         pieces = [(0, 0, "")]
                     for begin, end, fragment in pieces:
-                        data = {"table_id": table["table_id"], "headers": [headers[column]],
+                        data = {"table_id": table["table_id"], "title": table_title, "headers": [headers[column]],
                                 "rows": [[fragment]], "row_start": index, "row_end": index + 1,
                                 "column": column, "cell_span": [begin, end], "row_key": row_key,
                                 "header_grid": header_grid,
+                                "html": render_structured_html_table([headers[column]], [[fragment]], table_title),
                                 "source_cells": [cell for cell in table["cells"] if cell["row"] <= index < cell["row"] + cell.get("row_span", 1)
                                                  and cell["column"] <= column < cell["column"] + cell.get("col_span", cell.get("column_span", 1))]}
                         chunk = self._prototype("table", prefix + fragment, parent_id, ids,
@@ -664,15 +701,16 @@ class ChunkPlanner:
                 self._flush(lead_in_blocks, parent_id)
                 lead_attached = True
             content = table_markdown(headers, [])
-            data = {"table_id": table["table_id"], "headers": headers, "rows": [],
+            data = {"table_id": table["table_id"], "title": table_title, "headers": headers, "rows": [],
                     "header_row_count": header_count, "row_start": 0, "row_end": 0,
-                    "header_grid": header_grid, "cells": table["cells"]}
+                    "header_grid": header_grid, "html": render_structured_html_table(headers, [], table_title),
+                    "cells": table["cells"]}
             for begin, end, fragment in self.budget.split(content, fits):
                 chunk = self._prototype("table", fragment, parent_id, ids, table_data=data, retrieval=retrieval)
                 chunk["business_metadata"]["provenance"]["header_span"] = [begin, end]
                 self._emit(chunk)
 
-    def _image(self, block, parent_id, lead_in_blocks=None):
+    def _image(self, block, parent_id, lead_in_blocks=None, trailing_blocks=None):
         if excluded_image(block, self.ir.get("profile")):
             return
         image = deepcopy(block["image"])
@@ -682,23 +720,53 @@ class ChunkPlanner:
         if not text.strip():
             raise ValueError("Supported image requires literal source text")
         retrieval = self._retrieval(parent_id, block.get("context_quotes", []))
-        lead_text, lead_spans, lead_ids = build_lead_in(lead_in_blocks)
-        if lead_text and self._measure(lead_text + "\n\n" + text, retrieval) is not None:
-            combined = lead_text + "\n\n" + text
-            chunk = self._prototype("multimodal", combined, parent_id, lead_ids + [block["id"]], images=[image], retrieval=retrieval)
-            chunk["business_metadata"]["provenance"].update({
-                "source_spans": deepcopy(lead_spans),
-                "image_text_span": [0, len(text)],
-                "method": "native_surrounding_text",
-                "context_evidence": image["context_evidence"],
-            })
-            chunk["business_metadata"]["retrieval"]["representation"] = "image_text_context"
-            self._emit(chunk)
-            if lead_in_blocks is not None:
-                lead_in_blocks.clear()
-            return
+        if image.get("title") and not retrieval.get("situated_context"):
+            retrieval["situated_context"] = self.budget.shorten(image["title"], min(48, self.budget.maximum // 6))
+        native_text = image.get("native_text", "").strip()
+        surrounding_blocks = list(lead_in_blocks or []) + list(trailing_blocks or [])
+        surrounding_text, surrounding_spans, surrounding_ids = build_lead_in(surrounding_blocks)
+        if surrounding_text:
+            combined = surrounding_text
+            if native_text:
+                combined = surrounding_text + "\n\n" + native_text
+            if self._measure(combined, retrieval) is not None:
+                lead_ids = [b["id"] for b in (lead_in_blocks or []) if b.get("text", "").strip()]
+                trail_ids = [b["id"] for b in (trailing_blocks or []) if b.get("text", "").strip()]
+                chunk = self._prototype("multimodal", combined, parent_id, lead_ids + [block["id"]] + trail_ids, images=[image], retrieval=retrieval)
+                chunk["business_metadata"]["provenance"].update({
+                    "source_spans": deepcopy(surrounding_spans),
+                    "image_text_span": [0, len(combined)],
+                    "method": "native_surrounding_text",
+                    "context_evidence": image["context_evidence"],
+                })
+                chunk["business_metadata"]["retrieval"]["representation"] = "image_text_context"
+                self._emit(chunk)
+                if lead_in_blocks is not None:
+                    lead_in_blocks.clear()
+                if trailing_blocks is not None:
+                    trailing_blocks.clear()
+                return
         if lead_in_blocks:
             self._flush(lead_in_blocks, parent_id)
+        if trailing_blocks:
+            trail_text, trail_spans, trail_ids = build_lead_in(trailing_blocks)
+            if trail_text:
+                combined_trail = trail_text
+                if native_text:
+                    combined_trail = trail_text + "\n\n" + native_text
+                if self._measure(combined_trail, retrieval) is not None:
+                    chunk = self._prototype("multimodal", combined_trail, parent_id, [block["id"]] + trail_ids, images=[image], retrieval=retrieval)
+                    chunk["business_metadata"]["provenance"].update({
+                        "source_spans": deepcopy(trail_spans),
+                        "image_text_span": [0, len(combined_trail)],
+                        "method": "native_surrounding_text",
+                        "context_evidence": image["context_evidence"],
+                    })
+                    chunk["business_metadata"]["retrieval"]["representation"] = "image_text_context"
+                    self._emit(chunk)
+                    trailing_blocks.clear()
+                    return
+            self._flush(trailing_blocks, parent_id)
         def fits(fragment):
             return self._measure(fragment, retrieval) is not None
         for start, end, fragment in self.budget.split(text, fits, align_words=True):

@@ -1,4 +1,5 @@
 """Versioned PDF/DOCX ingestion with verified caches and atomic publication."""
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -12,8 +13,41 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent_banking.chunking.unified_chunk.layout_aware_chunker import LayoutAwareChunker
+from agent_banking.chunking.universal.universal_chunker import LayoutAwareChunker
 from agent_banking.chunking.universal.schema_assembler import validate_chunk_sequence
+
+
+@contextmanager
+def publication_lock(output):
+    directory = Path(output)
+    directory.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(directory / ".publication.lock", os.O_CREAT | os.O_RDWR, 0o600)
+    locked = False
+    try:
+        if os.fstat(descriptor).st_size == 0:
+            os.write(descriptor, b"0")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        try:
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            locked = True
+        except OSError as error:
+            raise RuntimeError("Another chunking writer owns this output directory") from error
+        yield
+    finally:
+        if locked:
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
 
 
 
@@ -217,7 +251,6 @@ def _read_cached(output, record, source, digest, fingerprint):
 
 def run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=None,
                       profile=None, require_ready=None, clean_output=False, **chunker_options):
-    from agent_banking.chunking.universal.publication_lock import publication_lock
     output = Path(output_dir or Path(__file__).resolve().parent / "output")
     with publication_lock(output):
         return _run_auto_chunking(input_dir, output, force, max_files, profile, require_ready, clean_output, **chunker_options)

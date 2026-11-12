@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import time
 from importlib.metadata import version
 from pathlib import Path
 
@@ -54,7 +55,13 @@ class UniversalDocxChunker:
                  table_rows_per_chunk=4, asset_dir=None, workers=4,
                  use_llm=True, use_decision=True, tokenizer=None,
                  max_chunk_chars=None, min_chunk_words=30, min_section_chars=0, review_vision_client=None,
-                 semantic=True, image_mode="vision", max_pdf_pages=2000, max_page_pixels=40_000_000):
+                 semantic=True, image_mode="vision", max_pdf_pages=2000, max_page_pixels=40_000_000,
+                 max_chunk_size=None, min_section_size=None, config=None):
+        if max_chunk_chars is None and max_chunk_size is not None:
+            max_chunk_chars = max_chunk_size
+        if min_section_size is not None and min_section_chars == 0:
+            min_section_chars = min_section_size
+        self.config = config
         self.profile = profile or os.getenv("CHUNKING_PROFILE", "accuracy")
         if self.profile not in ("native", "accuracy"):
             raise ValueError("Chunking profile must be native or accuracy")
@@ -268,6 +275,44 @@ class UniversalDocxChunker:
     def chunk_file(self, file_path, **kwargs):
         return self.chunk_document(docx_path=file_path, **kwargs)
 
+    @property
+    def docx_chunker(self):
+        return self
+
+    def chunk_directory(self, dir_path, extensions=None, max_files=None):
+        target_dir = Path(dir_path)
+        if not target_dir.exists():
+            return []
+        allowed_exts = {extension.lower() for extension in (extensions or [".docx", ".pdf"])}
+        files = [p for p in target_dir.rglob("*") if p.is_file() and p.suffix.lower() in allowed_exts and not p.name.startswith("~$")]
+        files.sort()
+        if max_files is not None:
+            if max_files < 0:
+                raise ValueError("max_files cannot be negative")
+            files = files[:max_files]
+        all_chunks = []
+        for f in files:
+            chunks = self.chunk_file(f, source_name=f.relative_to(target_dir).as_posix())
+            all_chunks.extend(chunks)
+        return all_chunks
+
+    def chunk_dataset(self, dataset_dir, output_dir=None):
+        start_t = time.time()
+        dataset_path = Path(dataset_dir)
+        all_chunks = self.chunk_directory(dataset_path)
+        elapsed = round(time.time() - start_t, 2)
+        stats = {
+            "total_chunks": len(all_chunks),
+            "elapsed_seconds": elapsed,
+            "speed_chunks_per_sec": round(len(all_chunks) / max(elapsed, 0.001), 1),
+        }
+        if output_dir:
+            out_p = Path(output_dir)
+            out_p.mkdir(parents=True, exist_ok=True)
+            with open(out_p / "chunks.json", "w", encoding="utf-8") as f:
+                json.dump(all_chunks, f, ensure_ascii=False, indent=2)
+        return all_chunks, stats
+
     def close(self):
         if self._owns_cache:
             self.cache.close()
@@ -279,5 +324,7 @@ class UniversalDocxChunker:
         self.close()
 
 
-# Historical class name remains supported by all current callers.
+# Historical class names remain supported by all current callers.
 UniversalDocumentChunker = UniversalDocxChunker
+LayoutAwareChunker = UniversalDocxChunker
+DLAChunker = UniversalDocxChunker

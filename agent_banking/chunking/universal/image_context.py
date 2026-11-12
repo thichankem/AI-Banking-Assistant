@@ -114,6 +114,8 @@ def mark_unassessed_images(ir):
     ir["image_policy"] = IMAGE_POLICY
     for block in ir["blocks"]:
         if block["type"] == "image":
+            if block["image"].get("text_context_assessed") is True:
+                continue
             block["image"].update({"image_policy": IMAGE_POLICY, "visual_content_read": False,
                                    "text_context_assessed": False, "status": "skipped_context_not_assessed",
                                    "context_evidence": [], "description": ""})

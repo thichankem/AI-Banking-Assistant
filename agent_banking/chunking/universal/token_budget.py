@@ -6,7 +6,22 @@ import tempfile
 import threading
 import urllib.request
 
-from .passage import format_passage
+
+def format_passage(chunk):
+    metadata = chunk.get("business_metadata", {})
+    return format_passage_fields(chunk.get("content", ""), metadata.get("retrieval", {}))
+
+
+def format_passage_fields(content, retrieval):
+    context = str(retrieval.get("context", "")).strip()
+    derived = str(retrieval.get("situated_context", "")).strip()
+    parts = ["passage:"]
+    if context:
+        parts.append("[" + context + "]")
+    if derived:
+        parts.append("Ngữ cảnh: " + derived)
+    parts.append(str(content))
+    return "\n".join(parts)
 
 TOKENIZER_SHA256 = "62c24cdc13d4c9952d63718d6c9fa4c287974249e16b7ade6d5a85e7bbb75626"
 TOKENIZER_URL = os.getenv("TOKENIZER_URL", os.getenv("EMBEDDING_TOKENIZER_URL", ""))

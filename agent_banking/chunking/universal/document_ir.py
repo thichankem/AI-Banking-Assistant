@@ -505,14 +505,6 @@ class DocxExtractor:
         header_detection = "unmarked"
         if header_count:
             header_detection = "explicit_repeat_header"
-        elif self._has_grouped_header(cells, width):
-            header_count = 2
-            header_detection = "merged_bold_header_rows"
-        elif self._has_single_bold_header(cells, grid, width):
-            header_count = 1
-            header_detection = "single_bold_header_row"
-        # Ambiguous unmarked tables retain every row as data.
-        if header_count:
             headers = []
             for column in range(width):
                 labels = []
@@ -534,43 +526,6 @@ class DocxExtractor:
             self.ir["relations"].append({"from": block["id"], "to": cell["id"], "type": "contains_cell"})
         for child in nested:
             self._table(child, part, region + ":nested", block["id"])
-
-    @staticmethod
-    def _has_grouped_header(cells, width):
-        """Require visual and grid evidence for two unmarked header rows."""
-        groups, labels, first_record = (
-            [cell for cell in cells if cell["row"] == row and cell["text"]]
-            for row in range(3)
-        )
-        if not all(cell["all_text_bold"] and cell["row"] + cell["row_span"] <= 2
-                   for cell in groups + labels):
-            return False
-        if not any(not cell["all_text_bold"] for cell in first_record):
-            return False
-        # A whole-width merged title above a table provides no column mapping.
-        return any(
-            1 < group["col_span"] < width
-            and sum(group["column"] <= label["column"] < group["column"] + group["col_span"]
-                    for label in labels) >= 2
-            for group in groups
-        )
-
-    @staticmethod
-    def _has_single_bold_header(cells, grid, width):
-        """Detect a single unmarked bold header row followed by non-bold data rows."""
-        if len(grid) < 2 or width < 2:
-            return False
-        first_row = [cell for cell in cells if cell["row"] == 0]
-        second_row = [cell for cell in cells if cell["row"] == 1 and cell["text"]]
-        if len(first_row) != width or not second_row:
-            return False
-        if not all(
-            cell["text"] and cell["all_text_bold"] and cell["row_span"] == 1
-            and cell["col_span"] == 1 and len(cell["text"].split()) <= 18
-            for cell in first_row
-        ):
-            return False
-        return any(not cell["all_text_bold"] for cell in second_row)
 
     def _cell_content(self, node, paragraphs, nested, part, region):
         name = local_name(node)
