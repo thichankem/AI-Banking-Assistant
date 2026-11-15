@@ -390,7 +390,7 @@ class QdrantBankingStore:
         active = set(active_chunk_ids)
         preserved_names = set()
         if preserve_sources:
-            from agent_banking.chunking.universal.universal_chunker import document_source_name
+            from agent_banking.chunking.universal.extraction.sources import document_source_name
 
             preserved_names = {document_source_name(source).casefold() for source in preserve_sources}
 

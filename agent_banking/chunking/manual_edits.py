@@ -4,9 +4,9 @@ from copy import deepcopy
 import hashlib
 import json
 
-from .universal.chunk_planner import escape_html
-from .universal.language import project_vietnamese
-from .universal.schema_assembler import link_chunk_sequence, validate_chunk_sequence
+from .universal.planning.schema import link_chunk_sequence, validate_chunk_sequence
+from .universal.planning.table_rendering import escape_html
+from .universal.text.language import project_vietnamese
 
 
 def _unique_fields(pairs):
@@ -31,6 +31,7 @@ def _apply_manual_edits(path, chunks, artifact, budget):
     edits = value.get("replacements")
     if not isinstance(edits, dict) or not edits:
         raise ValueError("Manual edits need a nonempty replacements object keyed by chunk_id")
+    project_text = str if artifact["document"].get("search_language") == "all" else project_vietnamese
     edited = deepcopy(chunks)
     by_id = {chunk["chunk_id"]: chunk for chunk in edited}
     edited_blocks = set()
@@ -60,7 +61,7 @@ def _apply_manual_edits(path, chunks, artifact, budget):
         retrieval.pop("passage_content", None)
         retrieval.pop("passage_coverage", None)
         retrieval.pop("embedding_content", None)
-        projected = project_vietnamese(replacement).strip()
+        projected = project_text(replacement).strip()
         if projected != replacement.strip():
             retrieval["embedding_content"] = projected
         if not projected:
@@ -111,7 +112,7 @@ def _apply_manual_edits(path, chunks, artifact, budget):
             if remaining_evidence:
                 retrieval["context_evidence"] = remaining_evidence
                 retrieval["situated_context"] = budget.shorten(
-                    " ".join(project_vietnamese(item["text"][:1200]).strip()
+                    " ".join(project_text(item["text"][:1200]).strip()
                              for item in remaining_evidence).strip(),
                     min(48, budget.maximum // 6),
                 )

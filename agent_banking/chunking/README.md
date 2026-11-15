@@ -1,5 +1,18 @@
 # Chunking PDF và DOCX
 
+## Cấu trúc mã nguồn
+
+| Vị trí trong `universal/` | Trách nhiệm |
+| --- | --- |
+| `pipeline.py`, `fingerprint.py` | Điều phối xử lý tài liệu và tính fingerprint cho cache |
+| `extraction/docx/`, `extraction/pdf/` | Đọc nội dung, bố cục, bảng và tọa độ nguồn theo định dạng |
+| `enrichment/`, `enrichment/decisions/` | Bổ sung bằng chứng, kiểm tra cấu trúc và quyết định về heading, bảng, ảnh |
+| `planning/` | Lập chunk, dựng bảng, ghép ngữ cảnh và kiểm tra độ phủ |
+| `text/` | Nhận diện ngôn ngữ, tìm biên Unicode và tính ngân sách token |
+| `models/` | Gọi model văn bản, vision và lưu cache phản hồi |
+
+Điểm vào Python cho PDF và DOCX là `agent_banking.chunking.universal.pipeline.UniversalDocumentChunker`. Lệnh CLI chạy qua `python -m agent_banking.chunking.run_chunking`.
+
 ## PDF scan, ảnh và chú thích
 
 - Trình xử lý kiểm tra từng trang PDF trước khi trích xuất. Khi phát hiện trang scan, kể cả ảnh scan nhỏ trên trang thiếu chữ thân bài, nó render **từng trang của cả PDF** và gửi ảnh trang lần lượt để nhận chữ. PDF có lớp chữ đầy đủ dùng chữ và cấu trúc có sẵn trong file.

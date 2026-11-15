@@ -35,7 +35,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent_banking.core.settings import Config
 from agent_banking.embedding.embedder import BankingEmbedder
 from agent_banking.state_tracker import StateTracker
-from agent_banking.chunking.universal.schema_assembler import (
+from agent_banking.chunking.universal.planning.schema import (
     REQUIRED_UNIVERSAL_SCHEMA_KEYS,
     normalize_chunk_type,
     link_chunk_sequence,

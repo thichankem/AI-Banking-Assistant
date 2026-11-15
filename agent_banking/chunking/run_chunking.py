@@ -1,5 +1,6 @@
 """Run versioned PDF/DOCX ingestion and publish verified snapshots."""
 
+from collections import Counter
 import json
 from pathlib import Path
 import sys
@@ -16,7 +17,9 @@ from agent_banking.chunking.publication import (
     _publish_document_files,
     _read_cached,
     _validate_document,
+    publication_asset_path,
     publish_snapshot,
+    use_relative_asset_paths,
 )
 from agent_banking.chunking.publication_io import (
     _is_indirection,
@@ -30,7 +33,8 @@ from agent_banking.chunking.publication_io import (
     read_verified_json as read_verified_json,
     report,
 )
-from agent_banking.chunking.universal.universal_chunker import LayoutAwareChunker, discover_documents
+from agent_banking.chunking.universal.extraction.sources import discover_documents
+from agent_banking.chunking.universal.pipeline import LayoutAwareChunker
 
 
 def load_published_chunks(output_dir, require_ready=True, *, return_manifest=False):
@@ -59,7 +63,8 @@ def run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=No
     config = chunker_options.get("config")
     for option, setting in (("target_chunk_tokens", "CHUNK_SIZE_TOKENS"),
                             ("max_chunk_tokens", "CHUNK_MAX_TOKENS"),
-                            ("min_chunk_tokens", "CHUNK_MIN_TOKENS")):
+                            ("min_chunk_tokens", "CHUNK_MIN_TOKENS"),
+                            ("search_language", "CHUNK_SEARCH_LANGUAGE")):
         if option not in chunker_options:
             chunker_options[option] = getattr(config, setting, getattr(ChunkingConfig, setting))
     output = Path(output_dir or Path(__file__).resolve().parent / "output")
@@ -83,8 +88,10 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
     output = Path(output_dir or module / "output")
     if not incoming.is_dir():
         raise FileNotFoundError("Input directory not found: " + str(incoming))
-    files = discover_documents(incoming)
-    active_sources = {path.name for path in files}
+    discovered = discover_documents(incoming, reject_unsupported=True)
+    files = {path.relative_to(incoming).as_posix(): path for path in discovered}
+    active_sources = set(files)
+    basenames = Counter(path.name.casefold() for path in discovered)
     edits_dir = Path(manual_edits_dir) if manual_edits_dir is not None else output / "manual_edits"
     output.mkdir(parents=True, exist_ok=True)
     previous_files = set()
@@ -94,7 +101,7 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
         cleanup_root, previous_files = _publication_cleanup_candidates(output)
         force = True
     if max_files is not None:
-        files = files[:max_files]
+        files = {path.relative_to(incoming).as_posix(): path for path in discovered[:max_files]}
     state_path = output / ".state_tracker.json"
     records = {}
     if state_path.exists():
@@ -115,8 +122,7 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
         fingerprint = chunker.fingerprint()
         if require_ready is None:
             require_ready = True
-        def process(path, attempt):
-            source = path.name
+        def process(source, path, attempt):
             beginning = time.perf_counter()
             try:
                 digest = file_hash(path)
@@ -129,8 +135,9 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
                     chunks, artifact = cached
                     status = "SKIPPED_ALREADY_PROCESSED"
                 else:
-                    chunks = chunker.chunk_file(path)
+                    chunks = chunker.chunk_file(path, source_name=source)
                     artifact = chunker.last_artifact
+                    use_relative_asset_paths(output, chunks, artifact)
                     _validate_document(output, chunks, artifact, source, digest, fingerprint)
                     status = "SUCCESS"
                 if require_ready and not artifact["quality"].get("index_ready"):
@@ -141,19 +148,26 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
                     refreshed.add(source)
                 publication = records[source]
                 base_output_file = publication["output_file"]
-                edited = _apply_manual_edits(edits_dir / (source + ".json"), chunks, artifact, chunker.planner.budget)
+                edit_path = edits_dir / (source + ".json")
+                if "/" in source and not edit_path.is_file():
+                    legacy_edit = edits_dir / (path.name + ".json")
+                    if legacy_edit.is_file():
+                        if basenames[path.name.casefold()] != 1:
+                            raise ValueError("Ambiguous manual edit. Use the document's relative path: " + source)
+                        edit_path = legacy_edit
+                edited = _apply_manual_edits(edit_path, chunks, artifact, chunker.planner.budget)
                 if edited is not None:
                     chunks, artifact = edited
                     _validate_document(output, chunks, artifact, source, digest, fingerprint)
                     publication = _publish_document_files(output, chunks, artifact, digest, fingerprint)
                     status = "MANUALLY_EDITED"
                 for asset in artifact["document"]["assets"].values():
-                    active_asset_paths.add(Path(asset["path"]).resolve())
+                    active_asset_paths.add(publication_asset_path(output, asset["path"]))
                     if asset.get("visual_path"):
-                        active_asset_paths.add(Path(asset["visual_path"]).resolve())
+                        active_asset_paths.add(publication_asset_path(output, asset["visual_path"]))
                 aliases[artifact["document"]["document_id"]] = chunks
                 completed[source] = (chunks, {
-                    "file_name": source, "rel_path": source, "input_rel_path": path.relative_to(incoming).as_posix(),
+                    "file_name": path.name, "rel_path": source, "input_rel_path": source,
                     "status": status, "attempts": attempt, "quality": artifact["quality"],
                     "base_output_file": base_output_file,
                     "duration_sec": round(time.perf_counter() - beginning, 3), **publication,
@@ -164,30 +178,29 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
                     detail = f" ({artifact['quality']['pages_requiring_ocr']} page(s) require OCR)"
                 report(status + ": " + source + " -> " + str(len(chunks)) + " chunks" + detail)
             except Exception as error:
-                errors[source] = {"file_name": source, "rel_path": source,
-                                  "input_rel_path": path.relative_to(incoming).as_posix(),
+                errors[source] = {"file_name": path.name, "rel_path": source, "input_rel_path": source,
                                   "status": "FAILED", "attempts": attempt,
                                   "error_type": type(error).__name__, "error": str(error), "chunk_count": 0}
                 report(f"ATTEMPT {attempt} FAILED: {source} ({type(error).__name__})")
 
-        for path in files:
-            process(path, 1)
+        for source, path in files.items():
+            process(source, path, 1)
         for attempt, delay in enumerate(retry_delays, 2):
             if not errors:
                 break
             report(f"Retrying {len(errors)} failed document(s) in {delay}s (attempt {attempt})")
             time.sleep(delay)
-            for path in files:
-                if path.name in errors:
-                    process(path, attempt)
+            for source, path in files.items():
+                if source in errors:
+                    process(source, path, attempt)
         manifests = []
-        for path in files:
-            if path.name in completed:
-                chunks, record = completed[path.name]
+        for source in files:
+            if source in completed:
+                chunks, record = completed[source]
                 all_chunks.extend(chunks)
                 manifests.append(record)
             else:
-                manifests.append(errors[path.name])
+                manifests.append(errors[source])
         ids = [chunk["chunk_id"] for chunk in all_chunks]
         if len(ids) != len(set(ids)):
             raise ValueError("Cross-document chunk ID collision; index publication refused")
@@ -233,6 +246,8 @@ def main():
     parser.add_argument("--max-files", type=int, default=None, help="Process at most this many files and publish under output/diagnostics")
     parser.add_argument("--image-mode", choices=["text_context", "vision"], default="text_context",
                         help="Deprecated compatibility option. Standalone images are ignored in both modes.")
+    parser.add_argument("--search-language", choices=["vi", "all"], default=None,
+                        help="Search Vietnamese only (default) or retain all source languages for search")
     parser.add_argument("--manual-edits", type=Path, default=None, help="Directory containing manual per-document corrections")
     parser.add_argument("--input", type=Path, default=None, help="Input directory")
     parser.add_argument("--output", type=Path, default=None, help="Output directory")
@@ -240,6 +255,9 @@ def main():
 
     module_dir = Path(__file__).resolve().parent
     in_dir = args.input or module_dir / "input"
+    options = {}
+    if args.search_language is not None:
+        options["search_language"] = args.search_language
     run_auto_chunking(
         input_dir=in_dir,
         output_dir=args.output,
@@ -248,6 +266,7 @@ def main():
         max_files=args.max_files,
         image_mode=args.image_mode,
         manual_edits_dir=args.manual_edits,
+        **options,
     )
     output = args.output or module_dir / "output"
     if args.max_files is not None:

@@ -295,7 +295,7 @@ def run_auto_indexing(
     active_ids = {chunk.get("chunk_id") or f"chunk_{idx}" for idx, chunk in enumerate(raw_chunks)}
     removed_count = 0
     if snapshot:
-        from agent_banking.chunking.universal.universal_chunker import document_source_name
+        from agent_banking.chunking.universal.extraction.sources import document_source_name
 
         if scope is None:
             managed_sources = {item.get("source") for item in raw_chunks}

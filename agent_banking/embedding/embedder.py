@@ -231,7 +231,7 @@ class BankingEmbedder:
         if not isinstance(metadata, dict):
             metadata = {}
         if metadata.get("schema_version") == "2.0":
-            from agent_banking.chunking.universal.token_budget import format_passage_fields
+            from agent_banking.chunking.universal.text.token_budget import format_passage_fields
             retrieval = dict(metadata.get("retrieval", {}))
             retrieval.pop("passage_content", None)
             return format_passage_fields(chunk.get("content", ""), retrieval)
@@ -406,7 +406,7 @@ class BankingEmbedder:
         # 1. Attempt cloud endpoint if configured
         if not (self.embedding_url and self.api_key and self.model_name):
             raise RuntimeError("Cloud embedding model, endpoint and credential are required")
-        from agent_banking.chunking.universal.model_enrichment import cloud_json
+        from agent_banking.chunking.universal.models.text_client import cloud_json
 
         def validate(body):
             items = sorted(body.get("data", []), key=lambda item: item.get("index", -1))
@@ -438,7 +438,7 @@ class BankingEmbedder:
     def _validate_passages(self, texts):
         max_tokens = self._passage_limit()
         try:
-            from agent_banking.chunking.universal.token_budget import get_tokenizer
+            from agent_banking.chunking.universal.text.token_budget import get_tokenizer
             tokenizer = get_tokenizer()
         except (ImportError, OSError, RuntimeError):
             return
@@ -447,7 +447,8 @@ class BankingEmbedder:
             raise ValueError("Passage exceeds " + str(max_tokens) + " tokens; rechunk before embedding (max=" + str(max(counts)) + ")")
 
     def _passage_windows(self, passage):
-        from agent_banking.chunking.universal.token_budget import TokenBudget, get_tokenizer, safe_boundaries
+        from agent_banking.chunking.universal.text.boundaries import safe_boundaries
+        from agent_banking.chunking.universal.text.token_budget import TokenBudget, get_tokenizer
 
         limit = self._passage_limit()
         budget = TokenBudget(limit, limit, get_tokenizer())

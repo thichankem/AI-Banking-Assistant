@@ -2,13 +2,42 @@
 
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from .publication_io import atomic_bytes, atomic_json, content_hash, file_hash, read_verified_json
-from .universal.schema_assembler import validate_chunk_sequence
+from .universal.planning.schema import validate_chunk_sequence
 
 
 SUCCESS_STATUSES = {"SUCCESS", "SKIPPED_ALREADY_PROCESSED", "MANUALLY_EDITED"}
+ASSET_REFERENCES = (("path", "sha256"), ("visual_path", "visual_sha256"))
+
+
+def publication_asset_path(output, filename):
+    root = output.resolve()
+    reference = Path(filename)
+    windows_reference = PureWindowsPath(filename)
+    if reference.is_absolute() or windows_reference.is_absolute():
+        # Legacy publications stored absolute paths to their flat asset directory.
+        reference = Path("assets") / windows_reference.name
+    target = (root / reference).resolve()
+    if not target.is_relative_to(root / "assets"):
+        raise ValueError("Document asset must be inside the publication assets directory")
+    return target
+
+
+def use_relative_asset_paths(output, chunks, artifact):
+    root = output.resolve()
+    items = list(artifact["document"]["assets"].values())
+    items.extend(image for chunk in chunks for image in chunk["images"] if isinstance(image, dict))
+    for asset in items:
+        for path_key, _ in ASSET_REFERENCES:
+            if asset.get(path_key):
+                path = Path(asset[path_key])
+                if path.is_absolute():
+                    path = path.resolve()
+                    if not path.is_relative_to(root / "assets"):
+                        raise ValueError("Document asset must be inside the publication assets directory")
+                    asset[path_key] = path.relative_to(root).as_posix()
 
 
 def _publication_path(output, filename, directory):
@@ -102,13 +131,12 @@ def _validate_document(output, chunks, artifact, source, digest, fingerprint):
                 or metadata.get("document_version") != digest or metadata.get("pipeline_fingerprint") != fingerprint
                 or chunk["parent_id"] not in artifact["parents"]):
             raise ValueError("Chunk identity, parent or pipeline fingerprint does not match the document")
-    asset_root = output.resolve() / "assets"
     for asset in document["assets"].values():
-        for path_key, hash_key in (("path", "sha256"), ("visual_path", "visual_sha256")):
+        for path_key, hash_key in ASSET_REFERENCES:
             if path_key == "visual_path" and not asset.get(path_key):
                 continue
-            asset_path = Path(asset[path_key]).resolve()
-            if not asset_path.is_relative_to(asset_root) or file_hash(asset_path) != asset[hash_key]:
+            asset_path = publication_asset_path(output, asset[path_key])
+            if file_hash(asset_path) != asset[hash_key]:
                 raise ValueError("Document asset failed integrity checks")
 
 

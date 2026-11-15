@@ -37,8 +37,9 @@ if sys.platform == "win32":
 
 from agent_banking.core.settings import Config
 from .chunking.run_chunking import load_published_chunks
-from .chunking.universal.universal_chunker import DLAChunker, discover_documents
-from .chunking.universal.schema_assembler import link_chunk_sequence
+from .chunking.universal.extraction.sources import discover_documents
+from .chunking.universal.pipeline import DLAChunker
+from .chunking.universal.planning.schema import link_chunk_sequence
 from .embedding.embedder import BankingEmbedder
 from .vector_db.qdrant_store import (
     QdrantBankingStore, QdrantVectorStore, mark_publication_chunks, publication_scope,

@@ -1062,7 +1062,7 @@ class BankingAgentNodes:
             "7. Cuối câu trả lời, ghi rõ căn cứ pháp lý: [Điều X, Khoản Y hoặc Tên văn bản quy chuẩn]."
         )
 
-        draft = self._call_llm_quick(selected_system_prompt, prompt, max_tokens=3000)
+        draft = self._call_llm_quick(selected_system_prompt, prompt, max_tokens=5000)
 
         # Clean any leaked chain-of-thought prefix if present
         if draft.startswith("Chúng ta cần trả lời câu hỏi:"):
