@@ -2,7 +2,7 @@
   "name": "calculate_loan_amortization",
   "display_name": "Tính Lịch Trả Nợ Vay Dư Nợ Giảm Dần",
   "category": "CALCULATION",
-  "description": "Tính toán chi tiết lịch trả nợ vay ngân hàng Vietcombank theo phương pháp dư nợ giảm dần từng tháng, bao gồm số tiền trả tháng đầu, tiền gốc, tiền lãi và tổng số tiền phải trả.",
+  "description": "Tính toán chi tiết lịch trả nợ vay ngân hàng A-Bank theo phương pháp dư nợ giảm dần từng tháng, bao gồm số tiền trả tháng đầu, tiền gốc, tiền lãi và tổng số tiền phải trả.",
   "parameters": {
     "type": "object",
     "properties": {

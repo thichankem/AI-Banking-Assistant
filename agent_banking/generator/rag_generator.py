@@ -14,17 +14,16 @@ DESIGN PRINCIPLES:
 4. NO __INIT__.PY: Direct module imports.
 """
 
-import sys
+import os
 import json
 import time
-import dis
 import sqlite3
 import hashlib
 from pathlib import Path
 import unicodedata
 from agent_banking.core.chat import FallbackChatClient
 from agent_banking.core.models import model_primary
-from agent_banking.generator.config.settings import GeneratorConfig
+from agent_banking.generator.config.settings import ContextConfig, GeneratorConfig
 
 class ContextBundle:
     def __init__(self, markdown_context="", total_tokens=0, legal_citations=None, sources_used=None, chunks_included=0):
@@ -63,32 +62,7 @@ QUY TẮC BẮT BUỘC (100% TUÂN THỦ):
 4. Tuyệt đối không yêu cầu mật khẩu, mã PIN, mã OTP của khách hàng.
 5. Ngôn phong lịch thiệp, trang trọng (xưng "Ngân hàng" hoặc "Trợ lý AI", gọi "Quý khách"). Trả lời súc tích, rõ ràng."""
 
-class ProfileBundle(tuple):
-    """
-    Multi-purpose tuple supporting flexible unpacking of 3 elements (legacy) and 5 elements (v2.1.0).
-    0% Regex & Zero Ternary.
-    """
-    def __iter__(self):
-        try:
-            frame = sys._getframe(1)
-            code = frame.f_code
-            lasti = frame.f_lasti
-            instructions = list(dis.get_instructions(code))
-            for i, inst in enumerate(instructions):
-                if inst.offset >= lasti:
-                    for target in instructions[i : i + 6]:
-                        if target.opname == "UNPACK_SEQUENCE":
-                            if target.argval == 3:
-                                return iter(self[:3])
-                            elif target.argval == 5:
-                                return iter(self[:5])
-                    break
-        except Exception:
-            pass
-        return super().__iter__()
-
-
-from agent_banking.generator.config.prompts import (
+from agent_banking.generator.config.prompt_config import (
     ProfileBundle,
     PERSONA_PROFILES,
     TONE_PROFILES,
@@ -100,6 +74,122 @@ from agent_banking.generator.config.prompts import (
 )
 
 _load_prompt_profiles_from_json = load_prompt_profiles
+
+
+def _estimate_tokens(text):
+    if not text:
+        return 0
+    return max(int(len(text.split()) * 1.25), int(len(text) / 3.5))
+
+
+def _unwrap_chunk_item(item):
+    if isinstance(item, dict) and "chunk" in item and isinstance(item["chunk"], dict):
+        return item["chunk"], item
+    return item, item
+
+
+def _format_table_data_markdown(table_data):
+    if not isinstance(table_data, dict) or not table_data:
+        return ""
+    lines = []
+    title = str(table_data.get("title") or "").strip()
+    if title:
+        lines.append(f"**Bảng:** {title}")
+
+    headers = table_data.get("headers")
+    rows = table_data.get("rows")
+    if isinstance(headers, list) and headers:
+        clean_headers = []
+        for h in headers:
+            clean_headers.append(str(h).replace("\n", " ").strip())
+        lines.append("| " + " | ".join(clean_headers) + " |")
+        sep = []
+        for _ in clean_headers:
+            sep.append("---")
+        lines.append("| " + " | ".join(sep) + " |")
+
+    if isinstance(rows, list) and rows:
+        for row in rows:
+            if isinstance(row, list):
+                cells = []
+                for cell in row:
+                    cells.append(str(cell).replace("\n", " ").strip())
+                lines.append("| " + " | ".join(cells) + " |")
+            elif isinstance(row, dict):
+                vals = []
+                for k, v in row.items():
+                    vals.append(f"{k}: {v}")
+                lines.append("- " + "; ".join(vals))
+    elif not lines:
+        col_name = str(table_data.get("column") or "").strip()
+        row_key = str(table_data.get("row_key") or "").strip()
+        cell_span = table_data.get("cell_span")
+        detail_parts = []
+        if row_key:
+            detail_parts.append(f"Hàng: {row_key}")
+        if col_name:
+            detail_parts.append(f"Cột: {col_name}")
+        if isinstance(cell_span, list) and len(cell_span) == 2:
+            detail_parts.append(f"Phần: {cell_span[0]}-{cell_span[1]}")
+        if detail_parts:
+            lines.append("[Bảng dữ liệu] " + " | ".join(detail_parts))
+
+    return "\n".join(lines).strip()
+
+
+def _format_images_context(images, existing_text=""):
+    if not isinstance(images, list) or not images:
+        return ""
+    lines = []
+    norm_existing = existing_text.lower()
+    for idx, img in enumerate(images, start=1):
+        if not isinstance(img, dict):
+            continue
+        parts = []
+        for field_name, label in [
+            ("title", "Tiêu đề"),
+            ("caption", "Chú thích"),
+            ("description", "Mô tả"),
+            ("alt_text", "Alt"),
+            ("native_text", "Nội dung văn bản"),
+        ]:
+            val = str(img.get(field_name) or "").strip()
+            if val and val.lower() not in norm_existing:
+                parts.append(f"{label}: {val}")
+        native_vals = img.get("native_values")
+        if native_vals:
+            val_text = ""
+            if isinstance(native_vals, list):
+                cleaned_vals = []
+                for nv in native_vals:
+                    s = str(nv).strip()
+                    if s:
+                        cleaned_vals.append(s)
+                val_text = ", ".join(cleaned_vals)
+            elif isinstance(native_vals, dict):
+                kv_list = []
+                for k, v in native_vals.items():
+                    kv_list.append(f"{k}: {v}")
+                val_text = "; ".join(kv_list)
+            else:
+                val_text = str(native_vals).strip()
+            if val_text and val_text.lower() not in norm_existing:
+                parts.append(f"Giá trị: {val_text}")
+        if parts:
+            lines.append(f"- [Hình ảnh {idx}] " + " | ".join(parts))
+    return "\n".join(lines).strip()
+
+
+def _trim_text_to_token_budget(text, max_tokens):
+    if not text or max_tokens <= 0:
+        return text
+    if _estimate_tokens(text) <= max_tokens:
+        return text
+    max_words = max(20, int(max_tokens / 1.25))
+    words = text.split()
+    if len(words) <= max_words:
+        return text[:max(100, int(max_tokens * 3))] + "\n... [đã rút gọn theo giới hạn ngữ cảnh]"
+    return " ".join(words[:max_words]) + "\n... [đã rút gọn theo giới hạn ngữ cảnh]"
 
 
 def _extract_legal_citations_from_text(text, citations_list=None):
@@ -241,7 +331,8 @@ class RAGGenerator:
         enable_cache=True,
         cache_db_path=None,
         max_retries=None,
-        retry_delays=None
+        retry_delays=None,
+        config=None
     ):
         try:
             primary = model_primary("generator")
@@ -257,25 +348,41 @@ class RAGGenerator:
 
         if api_key is not None:
             self.api_key = api_key
+        elif config is not None and getattr(config, "LLM_API_KEY", None) is not None:
+            self.api_key = config.LLM_API_KEY
         else:
             self.api_key = cfg_key
 
         if base_url is not None and base_url != "":
             self.base_url = base_url
+        elif config is not None and getattr(config, "LLM_BASE_URL", None):
+            self.base_url = config.LLM_BASE_URL
         else:
             self.base_url = cfg_url
 
         if model is not None and model != "":
             self.model = model
+        elif config is not None and getattr(config, "LLM_MODEL", None):
+            self.model = config.LLM_MODEL
         else:
             self.model = cfg_model
 
         self.temperature = GeneratorConfig.LLM_TEMPERATURE
         if temperature is not None:
             self.temperature = temperature
+        elif config is not None and getattr(config, "LLM_TEMPERATURE", None) is not None:
+            self.temperature = config.LLM_TEMPERATURE
+
         self.max_tokens = GeneratorConfig.LLM_MAX_TOKENS
         if max_tokens is not None:
             self.max_tokens = max_tokens
+        elif config is not None and getattr(config, "LLM_MAX_TOKENS", None) is not None:
+            self.max_tokens = config.LLM_MAX_TOKENS
+
+        self.max_context_tokens = int(getattr(config, "MAX_CONTEXT_TOKENS", ContextConfig.MAX_CONTEXT_TOKENS))
+        self.default_persona = str(getattr(config, "DEFAULT_PERSONA", GeneratorConfig.DEFAULT_PERSONA))
+        self.default_tone = str(getattr(config, "DEFAULT_TONE", GeneratorConfig.DEFAULT_TONE))
+        self.default_format = str(getattr(config, "DEFAULT_FORMAT", GeneratorConfig.DEFAULT_FORMAT))
         self.enable_cache = enable_cache
 
         if retry_delays is not None:
@@ -283,12 +390,16 @@ class RAGGenerator:
         else:
             self.retry_delays = [1.0, 2.0, 4.0]
 
+        cfg_retries = getattr(GeneratorConfig, "GENERATOR_MAX_RETRIES", getattr(GeneratorConfig, "MAX_RETRIES", 3))
+        if config is not None:
+            cfg_retries = getattr(config, "GENERATOR_MAX_RETRIES", getattr(config, "MAX_RETRIES", cfg_retries))
+
         if max_retries is not None:
             self.max_retries = max_retries
         elif retry_delays is not None:
             self.max_retries = max(len(retry_delays), cfg_attempts)
         else:
-            self.max_retries = max(cfg_attempts, getattr(GeneratorConfig, "MAX_RETRIES", 3), 3)
+            self.max_retries = max(cfg_attempts, cfg_retries, 3)
 
         if cache_db_path is not None:
             self.cache_db_path = Path(cache_db_path)
@@ -309,68 +420,77 @@ class RAGGenerator:
             self.client = FallbackChatClient("generator", primary_spec, self.retry_delays)
 
     def _init_cache_db(self):
+        conn = None
         try:
-            with sqlite3.connect(str(self.cache_db_path), timeout=10.0) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS generator_response_cache (
-                        cache_key TEXT PRIMARY KEY,
-                        query TEXT,
-                        answer TEXT,
-                        legal_citations TEXT,
-                        sources_used TEXT,
-                        model_served TEXT,
-                        persona TEXT,
-                        tone TEXT,
-                        format_style TEXT,
-                        prompt_tokens INTEGER,
-                        completion_tokens INTEGER,
-                        total_tokens INTEGER,
-                        created_at REAL
-                    )
-                """)
-                conn.commit()
+            self.cache_db_path.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(str(self.cache_db_path), timeout=10.0)
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS generator_response_cache (
+                    cache_key TEXT PRIMARY KEY,
+                    query TEXT,
+                    answer TEXT,
+                    legal_citations TEXT,
+                    sources_used TEXT,
+                    model_served TEXT,
+                    persona TEXT,
+                    tone TEXT,
+                    format_style TEXT,
+                    prompt_tokens INTEGER,
+                    completion_tokens INTEGER,
+                    total_tokens INTEGER,
+                    created_at REAL
+                )
+            """)
+            conn.commit()
         except Exception as e:
             print(f"[RAG Generator] Lỗi khởi tạo SQLite cache: {e}")
+        finally:
+            if conn is not None:
+                conn.close()
 
     def _get_cached_response(self, cache_key):
         if not self.enable_cache:
             return None
+        conn = None
         try:
-            with sqlite3.connect(str(self.cache_db_path), timeout=5.0) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT query, answer, legal_citations, sources_used, model_served,
-                           persona, tone, format_style, prompt_tokens, completion_tokens,
-                           total_tokens
-                    FROM generator_response_cache
-                    WHERE cache_key = ?
-                """, (cache_key,))
-                row = cursor.fetchone()
-                if row:
-                    q, ans, leg_c_json, src_json, mdl, per, ton, fmt, p_tok, c_tok, t_tok = row
-                    return {
-                        "query": q,
-                        "answer": ans,
-                        "legal_citations": json.loads(leg_c_json),
-                        "citations": json.loads(leg_c_json),
-                        "sources_used": json.loads(src_json),
-                        "sources": json.loads(src_json),
-                        "model_served": mdl,
-                        "guardrails_applied": True,
-                        "cached": True,
-                        "status": "success",
-                        "persona": per,
-                        "tone": ton,
-                        "format_style": fmt,
-                        "usage": {
-                            "prompt_tokens": p_tok,
-                            "completion_tokens": c_tok,
-                            "total_tokens": t_tok
-                        }
+            conn = sqlite3.connect(str(self.cache_db_path), timeout=5.0)
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT query, answer, legal_citations, sources_used, model_served,
+                       persona, tone, format_style, prompt_tokens, completion_tokens,
+                       total_tokens
+                FROM generator_response_cache
+                WHERE cache_key = ?
+            """, (cache_key,))
+            row = cursor.fetchone()
+            if row:
+                q, ans, leg_c_json, src_json, mdl, per, ton, fmt, p_tok, c_tok, t_tok = row
+                return {
+                    "query": q,
+                    "answer": ans,
+                    "legal_citations": json.loads(leg_c_json),
+                    "citations": json.loads(leg_c_json),
+                    "sources_used": json.loads(src_json),
+                    "sources": json.loads(src_json),
+                    "model_served": mdl,
+                    "guardrails_applied": True,
+                    "cached": True,
+                    "status": "success",
+                    "persona": per,
+                    "tone": ton,
+                    "format_style": fmt,
+                    "usage": {
+                        "prompt_tokens": p_tok,
+                        "completion_tokens": c_tok,
+                        "total_tokens": t_tok
                     }
+                }
         except Exception:
             pass
+        finally:
+            if conn is not None:
+                conn.close()
         return None
 
     def _save_cached_response(self, cache_key, query, answer_text, legal_citations, sources_used,
@@ -378,110 +498,192 @@ class RAGGenerator:
                               prompt_tokens, completion_tokens, total_tokens):
         if not self.enable_cache:
             return
+        conn = None
         try:
-            with sqlite3.connect(str(self.cache_db_path), timeout=5.0) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT OR REPLACE INTO generator_response_cache (
-                        cache_key, query, answer, legal_citations, sources_used,
-                        model_served, persona, tone, format_style,
-                        prompt_tokens, completion_tokens, total_tokens, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    cache_key,
-                    query,
-                    answer_text,
-                    json.dumps(legal_citations, ensure_ascii=False),
-                    json.dumps(sources_used, ensure_ascii=False),
-                    model_used,
-                    used_persona,
-                    used_tone,
-                    used_format,
-                    prompt_tokens,
-                    completion_tokens,
-                    total_tokens,
-                    time.time()
-                ))
-                conn.commit()
+            conn = sqlite3.connect(str(self.cache_db_path), timeout=5.0)
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO generator_response_cache (
+                    cache_key, query, answer, legal_citations, sources_used,
+                    model_served, persona, tone, format_style,
+                    prompt_tokens, completion_tokens, total_tokens, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                cache_key,
+                query,
+                answer_text,
+                json.dumps(legal_citations, ensure_ascii=False),
+                json.dumps(sources_used, ensure_ascii=False),
+                model_used,
+                used_persona,
+                used_tone,
+                used_format,
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
+                time.time()
+            ))
+            conn.commit()
         except Exception as e:
             print(f"[RAG Generator] Lỗi ghi SQLite cache: {e}")
+        finally:
+            if conn is not None:
+                conn.close()
 
     _extract_legal_citations_from_text = staticmethod(_extract_legal_citations_from_text)
     _extract_citations_from_header = staticmethod(_extract_citations_from_header)
 
     @staticmethod
-    def format_chunks(chunks):
+    def format_chunks(chunks, max_tokens=None):
         """
-        Assemble chunk list into clear Markdown text with sources and legal citations.
+        Assemble 13-field universal chunks (plus wrapped/legacy formats) into clear Markdown text
+        with deduplicated parent windows, structured table_data, multimodal image context, and legal citations.
         """
         if not chunks:
             return ContextBundle()
 
+        if max_tokens is None:
+            token_budget = int(ContextConfig.MAX_CONTEXT_TOKENS)
+        else:
+            token_budget = int(max_tokens)
+
         blocks = []
         sources = []
         citations = []
-        content_keys = ["parent_content", "content", "document", "text", "page_content"]
+        seen_parent_windows = set()
+        fallback_content_keys = ["content", "document", "text", "page_content"]
+        running_tokens = 0
+        chunks_included = 0
 
         for idx, item in enumerate(chunks, start=1):
-            if isinstance(item, dict) and "chunk" in item:
-                chunk = item["chunk"]
-            else:
-                chunk = item
-
+            chunk, raw_item = _unwrap_chunk_item(item)
             if not isinstance(chunk, dict):
                 continue
 
-            source = chunk.get("source")
+            bmeta = chunk.get("business_metadata")
+            if not isinstance(bmeta, dict):
+                bmeta = {}
+
+            legacy_meta = chunk.get("metadata")
+            if not isinstance(legacy_meta, dict):
+                legacy_meta = {}
+
+            parent_id = str(chunk.get("parent_id") or "").strip()
+            chunk_type = str(chunk.get("chunk_type") or "text").strip()
+
+            source = str(chunk.get("source") or "").strip()
             if not source:
-                if "metadata" in chunk and isinstance(chunk["metadata"], dict):
-                    source = chunk["metadata"].get("source")
+                source = str(bmeta.get("document_name") or "").strip()
+            if not source:
+                source = str(legacy_meta.get("source") or "").strip()
             if not source:
                 source = "Tài liệu ngân hàng"
 
-            breadcrumb = chunk.get("breadcrumb", "")
-            if not breadcrumb:
-                if "metadata" in chunk and isinstance(chunk["metadata"], dict):
-                    breadcrumb = chunk["metadata"].get("breadcrumb", "")
+            breadcrumb = str(chunk.get("breadcrumb") or legacy_meta.get("breadcrumb") or "").strip()
+            section_title = str(chunk.get("section_title") or legacy_meta.get("section_title") or "").strip()
 
-            section_title = chunk.get("section_title", "")
-            if not section_title:
-                if "metadata" in chunk and isinstance(chunk["metadata"], dict):
-                    section_title = chunk["metadata"].get("section_title", "")
-
-            content = ""
-            for k in content_keys:
+            content_body = ""
+            for k in fallback_content_keys:
                 val = chunk.get(k)
                 if val:
-                    content = str(val).strip()
+                    content_body = str(val).strip()
                     break
 
-            if source and source not in sources:
-                sources.append(source)
+            parent_body = str(chunk.get("parent_content") or "").strip()
+            body = ""
+            if parent_body:
+                p_key = (parent_id, parent_body)
+                if p_key not in seen_parent_windows:
+                    seen_parent_windows.add(p_key)
+                    body = parent_body
+                    if content_body and content_body not in parent_body:
+                        body = parent_body + "\n\n" + content_body
+                else:
+                    if content_body:
+                        body = content_body
+                    else:
+                        body = parent_body
+            else:
+                body = content_body
 
-            # Extract legal citations from content, section_title, and breadcrumb
-            _extract_legal_citations_from_text(content, citations)
-            if section_title:
-                _extract_citations_from_header(section_title, citations)
-            if breadcrumb:
-                _extract_citations_from_header(breadcrumb, citations)
+            table_data = chunk.get("table_data")
+            table_md = _format_table_data_markdown(table_data)
+            if table_md:
+                # Only append structured Markdown table when not already verbatim in body.
+                if table_md not in body and "| --- |" not in body:
+                    if body:
+                        body = body + "\n\n" + table_md
+                    else:
+                        body = table_md
+
+            images = chunk.get("images")
+            img_ctx = _format_images_context(images, existing_text=body)
+            if img_ctx:
+                if body:
+                    body = body + "\n\n" + img_ctx
+                else:
+                    body = img_ctx
+
+            retrieval_meta = bmeta.get("retrieval")
+            if not isinstance(retrieval_meta, dict):
+                retrieval_meta = {}
+            situated_ctx = str(retrieval_meta.get("situated_context") or "").strip()
 
             meta_lines = [f"### [TRÍCH DẪN {idx}] Nguồn tài liệu: {source}"]
             if breadcrumb:
                 meta_lines.append(f"- **Phân cấp:** `{breadcrumb}`")
             if section_title:
                 meta_lines.append(f"- **Tiêu đề điều khoản:** `{section_title}`")
-            meta_lines.append(f"- **Nội dung xác thực:**\n{content}")
-            blocks.append("\n".join(meta_lines))
+
+            domain_name = str(bmeta.get("domain") or "").strip()
+            tag_parts = []
+            if chunk_type and chunk_type != "text":
+                tag_parts.append(f"Loại: {chunk_type}")
+            if domain_name:
+                tag_parts.append(f"Phân hệ: {domain_name}")
+            if tag_parts:
+                meta_lines.append("- **Phân loại:** `" + " | ".join(tag_parts) + "`")
+
+            if situated_ctx and situated_ctx not in body:
+                meta_lines.append(f"- **Ngữ cảnh:** {situated_ctx}")
+
+            meta_lines.append(f"- **Nội dung xác thực:**\n{body}")
+            block_text = "\n".join(meta_lines)
+
+            sep_tokens = 0
+            if blocks:
+                sep_tokens = 2
+            block_tokens = _estimate_tokens(block_text) + sep_tokens
+
+            if token_budget > 0:
+                if blocks and running_tokens + block_tokens > token_budget:
+                    break
+                if not blocks and block_tokens > token_budget:
+                    block_text = _trim_text_to_token_budget(block_text, token_budget)
+                    block_tokens = _estimate_tokens(block_text)
+
+            blocks.append(block_text)
+            running_tokens += block_tokens
+            chunks_included += 1
+
+            if source and source not in sources:
+                sources.append(source)
+
+            _extract_legal_citations_from_text(body, citations)
+            if section_title:
+                _extract_citations_from_header(section_title, citations)
+            if breadcrumb:
+                _extract_citations_from_header(breadcrumb, citations)
 
         context_text = "\n\n---\n\n".join(blocks)
-        total_tokens = max(int(len(context_text.split()) * 1.25), int(len(context_text) / 3.5))
+        total_tokens = _estimate_tokens(context_text)
 
         return ContextBundle(
             markdown_context=context_text,
             total_tokens=total_tokens,
             legal_citations=citations,
             sources_used=sources,
-            chunks_included=len(chunks)
+            chunks_included=chunks_included
         )
 
     def generate_answer(self, query, synthesized_context, persona_config=None):
@@ -496,7 +698,7 @@ class RAGGenerator:
             sources_used = synthesized_context.sources_used
             tokens_used = synthesized_context.total_tokens
         elif isinstance(synthesized_context, list):
-            bundle = self.format_chunks(synthesized_context)
+            bundle = self.format_chunks(synthesized_context, max_tokens=self.max_context_tokens)
             context_text = bundle.markdown_context
             legal_citations = bundle.legal_citations
             sources_used = bundle.sources_used
@@ -504,21 +706,29 @@ class RAGGenerator:
         elif isinstance(synthesized_context, str):
             context_text = synthesized_context
             legal_citations = []
-            self._extract_legal_citations_from_text(context_text, legal_citations)
+            _extract_legal_citations_from_text(context_text, legal_citations)
             sources_used = []
-            tokens_used = len(context_text) // 4
+            tokens_used = _estimate_tokens(context_text)
         else:
             context_text = str(synthesized_context)
             legal_citations = []
-            self._extract_legal_citations_from_text(context_text, legal_citations)
+            _extract_legal_citations_from_text(context_text, legal_citations)
             sources_used = []
-            tokens_used = len(context_text) // 4
+            tokens_used = _estimate_tokens(context_text)
 
         # Construct dynamic System Prompt based on Persona profile
         if isinstance(persona_config, dict) and persona_config:
-            p_key = persona_config.get("persona", "advisor")
-            t_key = persona_config.get("tone", "formal")
-            f_key = persona_config.get("format_style", "standard")
+            p_key = persona_config.get("persona")
+            if not p_key:
+                p_key = self.default_persona
+            t_key = persona_config.get("tone")
+            if not t_key:
+                t_key = self.default_tone
+            f_key = persona_config.get("format_style")
+            if not f_key:
+                f_key = persona_config.get("format_type")
+            if not f_key:
+                f_key = self.default_format
             custom_p = persona_config.get("custom_persona", "")
             if not custom_p:
                 custom_p = persona_config.get("custom_instructions", "")
@@ -527,10 +737,10 @@ class RAGGenerator:
             used_tone = t_key
             used_format = f_key
         else:
-            system_instruction = build_banking_system_prompt("advisor", "formal", "standard")
-            used_persona = "advisor"
-            used_tone = "formal"
-            used_format = "standard"
+            system_instruction = build_banking_system_prompt(self.default_persona, self.default_tone, self.default_format)
+            used_persona = self.default_persona
+            used_tone = self.default_tone
+            used_format = self.default_format
 
         # Compute deterministic cache key
         cache_str = f"{query}:{context_text}:{used_persona}:{used_tone}:{used_format}"

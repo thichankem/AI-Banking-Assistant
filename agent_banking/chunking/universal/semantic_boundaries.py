@@ -5,32 +5,23 @@ these offsets and can suggest additional cuts with verbatim source evidence.
 """
 import hashlib
 import json
-import math
 from collections import defaultdict
 
 from .model_enrichment import cloud_json, ordered_parallel
+from .language import classify_text_blocks
+from .partition import atoms_for as atoms_for, optimal_partition as optimal_partition
 from agent_banking.core.models import model_primary, chain_fingerprint
+from ..config.prompt_config import START_PROMPT, BOUNDARY_PROMPT
 
-BOUNDARY_VERSION = "semantic-lattice-v3-source-start-anchors"
+BOUNDARY_VERSION = "semantic-lattice-v4-combined-source-starts"
 ATOM_SCORE_VERSION = "semantic-lattice-v2-anchored-cuts"
 START_SCORE = 0.85
-from agent_banking.chunking.config.prompts import START_PROMPT, BOUNDARY_PROMPT
 
 
-def atoms_for(blocks, budget, stride=96):
-    atoms = []
-    for block in blocks:
-        text = block["text"]
-        offsets = budget.tokenizer.encode(text, add_special_tokens=False).offsets
-        ends = sorted({offsets[index][1] for index in range(stride - 1, len(offsets), stride)} | {len(text)})
-        start = 0
-        for end in ends:
-            if end <= start:
-                continue
-            atoms.append({"id": "a" + str(len(atoms)), "block_id": block["id"],
-                          "type": block["type"], "start": start, "end": end, "text": text[start:end]})
-            start = end
-    return atoms
+def _valid_score(score):
+    return type(score) in (float, int) and 0 <= score <= 1
+
+
 
 
 def source_starts(source, value):
@@ -86,7 +77,7 @@ class SemanticBoundaryScorer:
                     valid = source_starts(source, response)
                 except ValueError as error:
                     if attempt == 2:
-                        return []
+                        break
                     messages.extend([{"role": "assistant", "content": json.dumps(response, ensure_ascii=False)},
                         {"role": "user", "content": "Repair the exact source anchors: " + str(error) +
                             ". Return a complete starts array using only unique verbatim prefixes from the supplied text."}])
@@ -97,10 +88,29 @@ class SemanticBoundaryScorer:
         return anchors
 
     def annotate(self, ir):
-        blocks = [block for block in ir["blocks"] if block["type"] in ("heading", "paragraph", "caption")]
+        classify_text_blocks(ir["blocks"])
+        blocks = []
+        for block in ir["blocks"]:
+            if block["type"] not in ("heading", "paragraph", "caption") or block.get("foreign_language"):
+                continue
+            if not block.get("foreign_spans"):
+                blocks.append(block)
+                continue
+            text = block["text"]
+            begin = 0
+            for left, right, _ in [*block["foreign_spans"], (len(text), len(text), None)]:
+                if begin < left and text[begin:left].strip():
+                    blocks.append({**block, "source_start": begin, "text": text[begin:left]})
+                begin = right
         atoms = atoms_for(blocks, self.budget)
+        ir["semantic_boundaries"] = []
+        ir["semantic_rejected_proposals"] = 0
+        if not atoms:
+            ir["segmentation_method"] = BOUNDARY_VERSION
+            return ir
         endpoint = model_primary("chunking.text")
-        long_blocks = [block for block in blocks if self.budget.count(block["text"]) > self.budget.maximum]
+        long_blocks = [block for block in blocks if not block.get("foreign_spans")
+                       and self.budget.count(block["text"]) > self.budget.maximum]
         by_block = defaultdict(list)
         for atom in atoms:
             by_block[atom["block_id"]].append(atom)
@@ -110,7 +120,7 @@ class SemanticBoundaryScorer:
 
         def window(start):
             selected = atoms[max(0, start - 3):start + 27]
-            editable = [atom for atom in atoms[start:start + 24] if atom["block_id"] not in starts]
+            editable = atoms[start:start + 24]
             if not editable:
                 return {"boundaries": [], "proposals": []}
             state = {"atoms": selected, "editable_ids": [atom["id"] for atom in editable]}
@@ -130,7 +140,7 @@ class SemanticBoundaryScorer:
                                      + str(sorted(expected - supplied_ids)) + "; unexpected=" + str(sorted(supplied_ids - expected, key=str)))
                 for item in entries:
                     score = item.get("score")
-                    if isinstance(score, bool) or not isinstance(score, (float, int)) or not math.isfinite(score) or not 0 <= score <= 1:
+                    if not _valid_score(score):
                         raise ValueError("Boundary score must be finite in [0,1]")
                 proposals = value.get("proposals", [])
                 by_id = {atom["id"]: atom for atom in editable}
@@ -147,9 +157,9 @@ class SemanticBoundaryScorer:
                         continue
                     quote = proposal.get("end_quote")
                     score = proposal.get("score")
-                    if (isinstance(quote, str) and quote and by_id[identifier]["text"].count(quote) == 1
-                            and not isinstance(score, bool) and isinstance(score, (int, float))
-                            and math.isfinite(score) and 0 <= score <= 1):
+                    source = by_id[identifier]["text"]
+                    if (isinstance(quote, str) and quote and _valid_score(score)
+                            and 0 <= source.find(quote) == source.rfind(quote)):
                         accepted.append({"atom_id": identifier, "end_quote": quote, "score": score})
                 return {"boundaries": entries, "proposals": accepted, "rejected_proposals": len(proposals) - len(accepted)}
 
@@ -198,67 +208,3 @@ class SemanticBoundaryScorer:
                                                    "source_ending": proposal["end_quote"]})
         ir["segmentation_method"] = BOUNDARY_VERSION
         return ir
-
-
-def optimal_partition(text, candidates, fits, count, target, *, first_start=None, measure=None, penalty=None):
-    """Shortest path over ordered source offsets, with exact passage constraints."""
-    if not text:
-        return []
-    values = {0, len(text)} | set(candidates)
-    if any(isinstance(point, bool) or not isinstance(point, int) or not 0 <= point <= len(text) for point in values):
-        raise ValueError("Invalid source boundary offset")
-    points = sorted(values)
-    costs = [math.inf] * len(points)
-    previous = [None] * len(points)
-    costs[0] = 0
-    interior = [0.0]
-    for index, point in enumerate(points):
-        loss = 3 * candidates.get(point, 0.0) ** 4
-        if index > 0 and not text[points[index - 1]:point].strip():
-            loss = 0.0
-        interior.append(interior[-1] + loss)
-    for right in range(1, len(points)):
-        if first_start is None:
-            earliest = 0
-        else:
-            earliest = first_start(points[right])
-        for left in range(right - 1, -1, -1):
-            if points[left] < earliest:
-                break
-            if not math.isfinite(costs[left]) or costs[left] + 1 >= costs[right]:
-                continue
-            start, end = points[left], points[right]
-            part = text[start:end]
-            if measure is None:
-                if fits(part):
-                    size = count(part)
-                else:
-                    size = None
-            else:
-                size = measure(start, end, part)
-            if size is None:
-                # Token counts are not strictly monotone. Do not prune on a
-                # failed count; BPE merges can make a longer input shorter.
-                continue
-            score = candidates.get(points[right], 0.0)
-            cohesion_loss = interior[right] - interior[left + 1]
-            cost = costs[left] + 1 + 5 * (1 - score) + cohesion_loss + 0.35 * ((size - target) / target) ** 2
-            if right == len(points) - 1:
-                cost -= 5 * (1 - score)
-            if penalty is not None:
-                cost += penalty(part, score)
-            if cost < costs[right]:
-                costs[right] = cost
-                previous[right] = left
-    if previous[-1] is None:
-        raise ValueError("No feasible semantic segmentation under passage budget")
-    ranges = []
-    cursor = len(points) - 1
-    while cursor:
-        left = previous[cursor]
-        ranges.append((points[left], points[cursor], text[points[left]:points[cursor]]))
-        cursor = left
-    ranges.reverse()
-    if "".join(part for _, _, part in ranges) != text:
-        raise AssertionError("Semantic segmentation changed source")
-    return ranges

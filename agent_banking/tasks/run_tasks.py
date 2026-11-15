@@ -15,7 +15,6 @@ MANDATORY RULES:
 4. 0% REGEX LAW.
 """
 
-from __future__ import annotations
 import sys
 import json
 import time

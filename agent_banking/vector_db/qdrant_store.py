@@ -15,11 +15,15 @@ DESIGN INVARIANTS:
 """
 
 import gc
+import hashlib
 import math
+import os
 import shutil
 import uuid
 import warnings
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
@@ -36,6 +40,26 @@ from qdrant_client.models import (
 )
 
 
+def publication_scope(output_dir):
+    """Identify a snapshot stream without storing its local path in the index."""
+    path = os.path.normcase(str(Path(output_dir).resolve()))
+    return hashlib.sha256(path.encode("utf-8")).hexdigest()
+
+
+def mark_publication_chunks(chunks, scope):
+    return [{**chunk, "business_metadata": {**chunk["business_metadata"], "publication_scopes": [scope]}}
+            for chunk in chunks]
+
+
+def _publication_owners(payload):
+    metadata = payload.get("business_metadata")
+    if isinstance(metadata, dict):
+        owners = metadata.get("publication_scopes")
+        if isinstance(owners, list):
+            return {owner for owner in owners if isinstance(owner, str)}
+    return set()
+
+
 class QdrantBankingStore:
     """
     Vector database & Hybrid Search store running locally.
@@ -50,18 +74,26 @@ class QdrantBankingStore:
     ):
         self.collection_name = collection_name
         self.dimension = dimension
-        self.storage_path = storage_path
         self.use_memory = use_memory
+
+        if storage_path:
+            raw_path = Path(storage_path)
+            if raw_path.is_absolute():
+                self.storage_path = str(raw_path)
+            else:
+                self.storage_path = str((PROJECT_ROOT / raw_path).resolve())
+        else:
+            self.storage_path = str((PROJECT_ROOT / "agent_banking" / "vector_db" / "qdrant_db").resolve())
 
         # 1. Initialize Qdrant Client (local path or in-memory)
         if use_memory:
             self.client = QdrantClient(":memory:")
         else:
-            Path(storage_path).mkdir(parents=True, exist_ok=True)
+            Path(self.storage_path).mkdir(parents=True, exist_ok=True)
             try:
-                self.client = QdrantClient(path=storage_path)
+                self.client = QdrantClient(path=self.storage_path)
             except Exception as e:
-                print(f"⚠️ [Qdrant Storage Lock] Không thể mở độc quyền '{storage_path}' -> Chuyển sang In-Memory mode an toàn!")
+                print(f"⚠️ [Qdrant Storage Lock] Không thể mở độc quyền '{self.storage_path}' -> Chuyển sang In-Memory mode an toàn!")
                 self.client = QdrantClient(":memory:")
                 self.use_memory = True
 
@@ -77,6 +109,7 @@ class QdrantBankingStore:
         self._bm25_idf = {}
         self.k1 = 1.5
         self.b = 0.75
+        self._bm25_breadcrumb_boost = 1.5
 
         # Automatically reload BM25 from disk if collection pre-exists
         if not use_memory:
@@ -296,6 +329,16 @@ class QdrantBankingStore:
         total_points = len(points)
         for i in range(0, total_points, batch_size):
             batch_slice = points[i : i + batch_size]
+            existing_points = self.client.retrieve(
+                collection_name=self.collection_name, ids=[point.id for point in batch_slice],
+                with_payload=["business_metadata.publication_scopes"], with_vectors=False)
+            existing_owners = {record.id: _publication_owners(record.payload or {}) for record in existing_points}
+            for index, point in enumerate(batch_slice, start=i):
+                payload = new_payloads[index]
+                owners = existing_owners.get(point.id, set()) | _publication_owners(payload)
+                if owners:
+                    payload["business_metadata"] = {**payload["business_metadata"], "publication_scopes": sorted(owners)}
+                    point.payload = payload
             self.client.upsert(
                 collection_name=self.collection_name,
                 points=batch_slice
@@ -324,6 +367,85 @@ class QdrantBankingStore:
 
     upsert_chunks = add_chunks
 
+    def chunk_ids(self, *, scope=None):
+        identifiers = set()
+        offset = None
+        payload_fields = ["chunk_id"]
+        if scope is not None:
+            payload_fields.append("business_metadata.publication_scopes")
+        while True:
+            records, offset = self.client.scroll(collection_name=self.collection_name, offset=offset, limit=256,
+                                                  with_payload=payload_fields, with_vectors=False)
+            identifiers.update(record.payload.get("chunk_id") for record in records
+                               if record.payload and (scope is None or scope in _publication_owners(record.payload)))
+            if offset is None:
+                return identifiers
+
+    def prune_chunks(self, active_chunk_ids, sources=None, *, scope=None, preserve_sources=()):
+        """Remove obsolete versions after their replacements have been upserted.
+
+        With a publication scope, `sources` identifies legacy sources eligible
+        for migration. Other explicitly owned snapshots stay outside that scope.
+        """
+        active = set(active_chunk_ids)
+        preserved_names = set()
+        if preserve_sources:
+            from agent_banking.chunking.universal.universal_chunker import document_source_name
+
+            preserved_names = {document_source_name(source).casefold() for source in preserve_sources}
+
+        def stale(payload):
+            if payload.get("chunk_id") in active:
+                return False
+            source = payload.get("source")
+            if preserved_names and document_source_name(source).casefold() in preserved_names:
+                return False
+            if scope is None:
+                return sources is None or source in sources
+            owners = _publication_owners(payload)
+            if owners:
+                return scope in owners
+            return sources is not None and source in sources
+
+        obsolete = []
+        shared = {}
+        retained_points = {}
+        offset = None
+        payload_fields = ["chunk_id", "source"]
+        if scope is not None:
+            payload_fields.append("business_metadata.publication_scopes")
+        while True:
+            records, offset = self.client.scroll(collection_name=self.collection_name, offset=offset,
+                                                 limit=256, with_payload=payload_fields, with_vectors=False)
+            for record in records:
+                payload = record.payload or {}
+                if stale(payload):
+                    remaining_owners = tuple(sorted(_publication_owners(payload) - {scope}))
+                    if scope is not None and remaining_owners:
+                        shared.setdefault(remaining_owners, []).append(record.id)
+                        retained_points[payload["chunk_id"]] = list(remaining_owners)
+                    else:
+                        obsolete.append(record.id)
+            if offset is None:
+                break
+        for owners, identifiers in shared.items():
+            for start in range(0, len(identifiers), 256):
+                self.client.set_payload(
+                    collection_name=self.collection_name, payload={"publication_scopes": list(owners)},
+                    points=identifiers[start:start + 256], key="business_metadata", wait=True)
+        for start in range(0, len(obsolete), 256):
+            self.client.delete(collection_name=self.collection_name, points_selector=obsolete[start:start + 256], wait=True)
+        remaining = []
+        for item in self._bm25_corpus:
+            owners = retained_points.get(item.get("chunk_id"))
+            if owners:
+                item["business_metadata"]["publication_scopes"] = owners
+            if not stale(item):
+                remaining.append(item)
+        if len(remaining) != len(self._bm25_corpus):
+            self._build_bm25_index(remaining)
+        return len(obsolete)
+
     # -------------------------------------------------------------------------
     # 2. BUILD MULTI-FIELD BM25F INDEX & OPTIMIZED INVERTED INDEX
     # -------------------------------------------------------------------------
@@ -341,28 +463,80 @@ class QdrantBankingStore:
         return "".join(cleaned_chars).split()
 
     @staticmethod
+    def _flatten_table_value(value):
+        """Flatten nested rows/cells lists into readable strings without metadata noise."""
+        if value is None:
+            return []
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                return [text]
+            return []
+        if isinstance(value, (int, float, bool)):
+            return [str(value)]
+        if isinstance(value, dict):
+            for key in ("text", "value", "label", "name"):
+                if key in value and value[key] is not None:
+                    text = str(value[key]).strip()
+                    if text:
+                        return [text]
+            return []
+        if isinstance(value, (list, tuple)):
+            out = []
+            for item in value:
+                out.extend(QdrantBankingStore._flatten_table_value(item))
+            return out
+        return [str(value)]
+
+    @staticmethod
     def _extract_table_text(table_data):
-        """Trích xuất dữ liệu bảng thành chuỗi văn bản cho BM25F."""
+        """Trích xuất dữ liệu bảng thành chuỗi văn bản sạch cho BM25F."""
         if not table_data:
             return ""
         if isinstance(table_data, str):
             return table_data
         if isinstance(table_data, dict):
             parts = []
+            for meta_key in ("title", "caption", "column", "row_key"):
+                val = table_data.get(meta_key)
+                if val is not None and str(val).strip():
+                    parts.append(str(val).strip())
+
+            headers = table_data.get("headers")
+            if headers:
+                parts.extend(QdrantBankingStore._flatten_table_value(headers))
+            elif table_data.get("header_grid"):
+                parts.extend(QdrantBankingStore._flatten_table_value(table_data.get("header_grid")))
+
+            rows = table_data.get("rows")
+            if rows:
+                parts.extend(QdrantBankingStore._flatten_table_value(rows))
+            elif table_data.get("cells"):
+                parts.extend(QdrantBankingStore._flatten_table_value(table_data.get("cells")))
+
+            if parts:
+                return " ".join(parts)
+
+            skip_keys = (
+                "table_id",
+                "html",
+                "header_cells",
+                "header_row_count",
+                "row_start",
+                "row_end",
+                "row_provenance",
+                "cell_span",
+                "source_cells",
+                "id",
+            )
             for k, v in table_data.items():
+                if str(k) in skip_keys:
+                    continue
                 parts.append(str(k))
-                parts.append(str(v))
+                parts.extend(QdrantBankingStore._flatten_table_value(v))
             return " ".join(parts)
         if isinstance(table_data, list):
-            parts = []
-            for item in table_data:
-                if isinstance(item, dict):
-                    for k, v in item.items():
-                        parts.append(str(k))
-                        parts.append(str(v))
-                else:
-                    parts.append(str(item))
-            return " ".join(parts)
+            return " ".join(QdrantBankingStore._flatten_table_value(table_data))
         return str(table_data)
 
     @staticmethod
@@ -372,34 +546,58 @@ class QdrantBankingStore:
             return ""
         if isinstance(images, str):
             return images
-        if isinstance(images, dict):
-            cap = str(images.get("caption", ""))
-            desc = str(images.get("description", ""))
-            return f"{cap} {desc}".strip()
-        if isinstance(images, list):
-            parts = []
-            for img in images:
-                if isinstance(img, dict):
-                    cap = str(img.get("caption", ""))
-                    desc = str(img.get("description", ""))
-                    txt = f"{cap} {desc}".strip()
-                    if txt:
-                        parts.append(txt)
-                elif isinstance(img, str):
-                    parts.append(img)
-            return " ".join(parts)
-        return ""
 
-    def _build_bm25_index(self, chunks):
+        if isinstance(images, dict):
+            img_list = [images]
+        elif isinstance(images, list):
+            img_list = images
+        else:
+            return ""
+
+        parts = []
+        for img in img_list:
+            if isinstance(img, dict):
+                seen = set()
+                img_parts = []
+                for field in ("section_title", "title", "caption", "alt_text", "native_text", "description", "ocr_text"):
+                    raw_val = img.get(field)
+                    if raw_val is not None:
+                        val = str(raw_val).strip()
+                        if val and val not in seen:
+                            seen.add(val)
+                            img_parts.append(val)
+                evidence = img.get("context_evidence")
+                if isinstance(evidence, list):
+                    for ev in evidence:
+                        if isinstance(ev, dict):
+                            quote = ev.get("quote")
+                            if quote is not None:
+                                q_str = str(quote).strip()
+                                if q_str and q_str not in seen:
+                                    seen.add(q_str)
+                                    img_parts.append(q_str)
+                if img_parts:
+                    parts.append(" ".join(img_parts))
+            elif isinstance(img, str):
+                text = img.strip()
+                if text:
+                    parts.append(text)
+        return " ".join(parts)
+
+    def _build_bm25_index(self, chunks, breadcrumb_boost=None):
         """
         Xây dựng chỉ mục BM25F đa trường kèm cấu trúc Inverted Index tối ưu hóa.
         Các trường và trọng số:
         - content: 1.0
         - section_title: 2.0 (boost)
-        - breadcrumb: 1.5 (boost)
+        - breadcrumb: breadcrumb_boost (mặc định 1.5)
         - table_data: 1.0
         - images: 1.0
         """
+        if breadcrumb_boost is not None:
+            self._bm25_breadcrumb_boost = float(breadcrumb_boost)
+        bc_boost = self._bm25_breadcrumb_boost
+
         self._bm25_corpus = list(chunks)
         self._bm25_inverted_index = {}
         self._bm25_doc_len = []
@@ -416,6 +614,10 @@ class QdrantBankingStore:
             section_title_text = chunk.get("section_title") or ""
             breadcrumb_text = chunk.get("breadcrumb") or ""
             table_text = self._extract_table_text(chunk.get("table_data"))
+            retrieval = (chunk.get("business_metadata") or {}).get("retrieval", {})
+            if "embedding_content" in retrieval:
+                content_text = retrieval["embedding_content"]
+                table_text = ""
             images_text = self._extract_images_text(chunk.get("images"))
 
             c_tokens = self._tokenize(content_text)
@@ -430,7 +632,7 @@ class QdrantBankingStore:
             for t in st_tokens:
                 doc_tf[t] = doc_tf.get(t, 0.0) + 2.0
             for t in bc_tokens:
-                doc_tf[t] = doc_tf.get(t, 0.0) + 1.5
+                doc_tf[t] = doc_tf.get(t, 0.0) + bc_boost
             for t in td_tokens:
                 doc_tf[t] = doc_tf.get(t, 0.0) + 1.0
             for t in img_tokens:
@@ -439,7 +641,7 @@ class QdrantBankingStore:
             doc_len = (
                 len(c_tokens) * 1.0
                 + len(st_tokens) * 2.0
-                + len(bc_tokens) * 1.5
+                + len(bc_tokens) * bc_boost
                 + len(td_tokens) * 1.0
                 + len(img_tokens) * 1.0
             )
@@ -513,7 +715,8 @@ class QdrantBankingStore:
                     clean_k = key.strip()
                     if isinstance(val, (list, tuple, set)):
                         clean_v = [x for x in val if x is not None]
-                        conditions.append(FieldCondition(key=clean_k, match=MatchAny(any=clean_v)))
+                        if clean_v:
+                            conditions.append(FieldCondition(key=clean_k, match=MatchAny(any=clean_v)))
                     else:
                         conditions.append(FieldCondition(key=clean_k, match=MatchValue(value=val)))
 
@@ -565,6 +768,11 @@ class QdrantBankingStore:
         if not q_tokens:
             return []
 
+        if breadcrumb_boost is not None:
+            target_boost = float(breadcrumb_boost)
+            if abs(target_boost - self._bm25_breadcrumb_boost) > 1e-6:
+                self._build_bm25_index(self._bm25_corpus, breadcrumb_boost=target_boost)
+
         # Prepare metadata filter (ignore None values to sync with Qdrant Filter)
         parsed_filter = []
         if filter_dict and isinstance(filter_dict, dict):
@@ -574,7 +782,8 @@ class QdrantBankingStore:
                         clean_fk = fk.strip()
                         if isinstance(fv, (list, tuple, set)):
                             clean_fv = [x for x in fv if x is not None]
-                            parsed_filter.append((clean_fk, clean_fv, True))
+                            if clean_fv:
+                                parsed_filter.append((clean_fk, clean_fv, True))
                         else:
                             parsed_filter.append((clean_fk, fv, False))
 

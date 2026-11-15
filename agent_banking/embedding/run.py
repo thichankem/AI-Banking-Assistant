@@ -2,7 +2,6 @@
 Direct runner for Module 2: Embedding.
 Runs independently from input to output with deduplication mechanisms.
 """
-from __future__ import annotations
 import sys
 import argparse
 from pathlib import Path

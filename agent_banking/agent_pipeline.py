@@ -15,7 +15,6 @@ MANDATORY RULES:
 - NO TYPING LIBRARY: Use Python native types only.
 """
 
-from __future__ import annotations
 import sys
 import time
 from pathlib import Path
@@ -36,6 +35,34 @@ from agent_banking.core.settings import Config
 from agent_banking.pipeline import BankingRAGPipeline
 from agent_banking.langgraph_agent.graph import build_banking_agent_graph
 from agent_banking.tracing.tracer import BankingTracer
+
+
+_QUERY_PUNCTUATION = [
+    ".", ",", ";", ":", "!", "?", "(", ")", "[", "]", "\"", "'",
+    "\n", "\t", "*", "-", "_", "/", "\\", "|"
+]
+_QUERY_STOPWORDS = {
+    "cho", "tôi", "hỏi", "được", "không", "như", "thế", "nào",
+    "với", "các", "những", "có", "là", "và", "của", "tại", "bank"
+}
+
+
+def extract_query_keywords(query_text: str) -> list[str]:
+    """Extract normalized non-stopword query tokens without regex."""
+    cleaned_q = str(query_text).lower()
+    for ch in _QUERY_PUNCTUATION:
+        cleaned_q = cleaned_q.replace(ch, " ")
+    raw_tokens = cleaned_q.split(" ")
+    keywords = []
+    for token in raw_tokens:
+        stripped = token.strip()
+        if len(stripped) > 2 and stripped not in _QUERY_STOPWORDS:
+            keywords.append(stripped)
+    if len(keywords) == 0:
+        fallback = str(query_text).strip().lower()
+        if fallback:
+            keywords.append(fallback)
+    return keywords
 class BankingRAGEvaluator:
     """Evaluates RAG generation metrics (faithfulness, answer relevance, context precision)."""
 
@@ -88,13 +115,60 @@ class BankingAgentPipeline:
         self.tracer = BankingTracer(config=self.config)
         self.evaluator = BankingRAGEvaluator()
 
+    def build_initial_state(
+        self,
+        query: str,
+        session_id: str = "default_session",
+        persona: str = "advisor",
+        tone: str = "formal",
+        format_type: str = "standard",
+        custom_persona: str = ""
+    ) -> dict:
+        """Build the initial StateGraph payload shared by sync and streaming chat entrypoints."""
+        clean_query = str(query).strip()
+        max_retries = int(
+            getattr(self.config, "AGENT_MAX_RETRIES", getattr(self.config, "MAX_RETRIES", 3))
+        )
+        return {
+            "user_query": clean_query,
+            "query": clean_query,
+            "original_query": clean_query,
+            "session_id": session_id,
+            "persona": persona,
+            "tone": tone,
+            "format_type": format_type,
+            "format_style": format_type,
+            "custom_persona": custom_persona,
+            "intent": "ROUTING",
+            "sub_agent_role": "GENERAL_ADVISOR",
+            "input_guard": {"is_safe": True, "sanitized_query": clean_query},
+            "output_guard": {},
+            "retry_count": 0,
+            "max_retries": max_retries,
+            "hallucination_retries": 0,
+            "retrieved_chunks": [],
+            "retrieved_docs": [],
+            "tool_calls": [],
+            "tool_outputs": [],
+            "tool_name": "",
+            "tool_output": {},
+            "citations": [],
+            "sources": [],
+            "draft_answer": "",
+            "final_answer": "",
+            "audit_status": "PENDING",
+            "audit_feedback": "",
+            "execution_steps": []
+        }
+
     def chat(
         self,
         query: str,
         session_id: str = "default_session",
-        persona: str = "standard",
-        tone: str = "professional",
-        format_type: str = "standard"
+        persona: str = "advisor",
+        tone: str = "formal",
+        format_type: str = "standard",
+        custom_persona: str = ""
     ) -> dict:
         """
         Execute chat turn with LangGraph Agent and persistent session memory (Thread ID).
@@ -127,32 +201,14 @@ class BankingAgentPipeline:
         thread_config = {"configurable": {"thread_id": session_id}}
 
         # Initial state payload for StateGraph
-        initial_state = {
-            "user_query": clean_query,
-            "query": clean_query,
-            "original_query": clean_query,
-            "session_id": session_id,
-            "intent": "ROUTING",
-            "sub_agent_role": "GENERAL_ADVISOR",
-            "input_guard": {"is_safe": True, "sanitized_query": clean_query},
-            "output_guard": {},
-            "retry_count": 0,
-            "max_retries": self.config.MAX_RETRIES,
-            "hallucination_retries": 0,
-            "retrieved_chunks": [],
-            "retrieved_docs": [],
-            "tool_calls": [],
-            "tool_outputs": [],
-            "tool_name": "",
-            "tool_output": {},
-            "citations": [],
-            "sources": [],
-            "draft_answer": "",
-            "final_answer": "",
-            "audit_status": "PENDING",
-            "audit_feedback": "",
-            "execution_steps": []
-        }
+        initial_state = self.build_initial_state(
+            query=clean_query,
+            session_id=session_id,
+            persona=persona,
+            tone=tone,
+            format_type=format_type,
+            custom_persona=custom_persona
+        )
 
         # Execute through LangGraph StateGraph
         try:
@@ -227,20 +283,7 @@ class BankingAgentPipeline:
                 "overall_score": 0.6667
             }
         elif intent == "RAG_SEARCH":
-            cleaned_q = clean_query.lower()
-            punctuation_chars = [".", ",", ";", ":", "!", "?", "(", ")", "[", "]", "\"", "'", "\n", "\t", "*", "-", "_", "/", "\\", "|"]
-            for ch in punctuation_chars:
-                cleaned_q = cleaned_q.replace(ch, " ")
-            raw_tokens = cleaned_q.split(" ")
-            stopwords = {"cho", "tôi", "hỏi", "được", "không", "như", "thế", "nào", "với", "các", "những", "có", "là", "và", "của", "tại", "bank"}
-            query_keywords = []
-            for t in raw_tokens:
-                stripped_t = t.strip()
-                if len(stripped_t) > 2 and stripped_t not in stopwords:
-                    query_keywords.append(stripped_t)
-            if len(query_keywords) == 0:
-                query_keywords.append(clean_query.lower())
-
+            query_keywords = extract_query_keywords(clean_query)
             eval_metrics = self.evaluator.evaluate_single_case(
                 question=clean_query,
                 retrieved_chunks=docs,
@@ -338,38 +381,61 @@ class BankingAgentPipeline:
     async def astream_chat(
         self,
         query: str,
-        session_id: str = "default_session"
+        session_id: str = "default_session",
+        persona: str = "advisor",
+        tone: str = "formal",
+        format_type: str = "standard",
+        custom_persona: str = ""
     ):
         """
-        Stream all super-step events from graph execution.
+        Stream all super-step events from graph execution without blocking the event loop,
+        staying compatible with synchronous checkpointers such as SqliteSaver.
         """
-        clean_query = query.strip()
-        initial_state = {
-            "user_query": clean_query,
-            "query": clean_query,
-            "original_query": clean_query,
-            "session_id": session_id,
-            "intent": "ROUTING",
-            "sub_agent_role": "GENERAL_ADVISOR",
-            "input_guard": {"is_safe": True, "sanitized_query": clean_query},
-            "output_guard": {},
-            "retry_count": 0,
-            "max_retries": self.config.MAX_RETRIES,
-            "hallucination_retries": 0,
-            "retrieved_chunks": [],
-            "retrieved_docs": [],
-            "tool_calls": [],
-            "tool_outputs": [],
-            "tool_name": "",
-            "tool_output": {},
-            "citations": [],
-            "sources": [],
-            "draft_answer": "",
-            "final_answer": "",
-            "audit_status": "PENDING",
-            "audit_feedback": "",
-            "execution_steps": []
-        }
+        import asyncio
+        import threading
+
+        initial_state = self.build_initial_state(
+            query=query,
+            session_id=session_id,
+            persona=persona,
+            tone=tone,
+            format_type=format_type,
+            custom_persona=custom_persona
+        )
         thread_config = {"configurable": {"thread_id": session_id}}
-        async for event in self.graph.astream(initial_state, config=thread_config):
-            yield event
+
+        if not hasattr(self.graph, "stream"):
+            async for event in self.graph.astream(initial_state, config=thread_config):
+                yield event
+            return
+
+        loop = asyncio.get_running_loop()
+        queue = asyncio.Queue()
+        stop_event = threading.Event()
+        sentinel = object()
+
+        def _worker():
+            try:
+                for event in self.graph.stream(initial_state, config=thread_config):
+                    if stop_event.is_set():
+                        break
+                    loop.call_soon_threadsafe(queue.put_nowait, ("event", event))
+            except Exception as exc:
+                loop.call_soon_threadsafe(queue.put_nowait, ("error", exc))
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, ("done", sentinel))
+
+        worker = threading.Thread(target=_worker, daemon=True)
+        worker.start()
+
+        try:
+            while True:
+                kind, payload = await queue.get()
+                if kind == "event":
+                    yield payload
+                elif kind == "error":
+                    raise payload
+                else:
+                    break
+        finally:
+            stop_event.set()

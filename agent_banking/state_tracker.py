@@ -14,7 +14,6 @@ MANDATORY RULES:
 4. 0% REGEX LAW: Strictly string methods only (in, split, startswith, endswith, strip, lower, replace, find).
 """
 
-from __future__ import annotations
 import os
 import json
 import time
@@ -85,17 +84,28 @@ class StateTracker:
         serialized = json.dumps(data, sort_keys=True, ensure_ascii=False)
         return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
+    def _active_records(self) -> dict:
+        """Return the flat item map for both v1 and v2.0 state tracker schemas."""
+        if isinstance(self.records, dict) and self.records.get("schema_version") == "2.0":
+            nested = self.records.get("records")
+            if isinstance(nested, dict):
+                return nested
+        if isinstance(self.records, dict):
+            return self.records
+        return {}
+
     def is_processed(self, item_id: str, content_hash: str) -> bool:
         """Check whether item_id has already been processed with the given content_hash."""
-        if item_id in self.records:
-            recorded = self.records[item_id]
-            rec_hash = recorded.get("hash")
-            if rec_hash == content_hash:
-                return True
-            else:
-                return False
-        else:
-            return False
+        records = self._active_records()
+        if item_id in records:
+            recorded = records[item_id]
+            if isinstance(recorded, dict):
+                rec_hash = recorded.get("hash")
+                if not rec_hash:
+                    rec_hash = recorded.get("input_sha256")
+                if rec_hash == content_hash:
+                    return True
+        return False
 
     def are_all_items_processed(self, items_dict: dict) -> bool:
         """
@@ -117,14 +127,18 @@ class StateTracker:
             meta = {}
         meta["hash"] = content_hash
         meta["processed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        self.records[item_id] = meta
+        target = self._active_records()
+        if target is self.records:
+            self.records[item_id] = meta
+        else:
+            target[item_id] = meta
 
     def get_record(self, item_id: str) -> dict | None:
         """Retrieve recorded metadata for item_id."""
-        if item_id in self.records:
-            return self.records[item_id]
-        else:
-            return None
+        records = self._active_records()
+        if item_id in records:
+            return records[item_id]
+        return None
 
     def clear(self) -> None:
         """Clear all records (used when force re-running)."""

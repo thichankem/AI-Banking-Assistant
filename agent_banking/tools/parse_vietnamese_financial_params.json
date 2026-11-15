@@ -16,9 +16,14 @@
   "returns": {
     "type": "object",
     "properties": {
-      "principal": {"type": "number"},
+      "amount_vnd": {"type": "number"},
+      "single_tx_amount_vnd": {"type": "number"},
+      "daily_cumulative_amount_vnd": {"type": "number"},
       "term_months": {"type": "integer"},
-      "annual_rate_percent": {"type": "number"}
+      "annual_rate_percent": {"type": "number"},
+      "is_first_time_new_device": {"type": "boolean"},
+      "has_verified_chip_cccd": {"type": "boolean"},
+      "requires_biometric": {"type": "boolean"}
     }
   },
   "handler": {

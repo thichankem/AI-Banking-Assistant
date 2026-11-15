@@ -20,10 +20,10 @@ MANDATORY RULES:
 4. 0% REGEX LAW: Strictly string methods only (in, split, startswith, endswith, strip, lower, replace, find).
 """
 
-from __future__ import annotations
 import sys
 import json
 import time
+import hashlib
 import argparse
 from pathlib import Path
 
@@ -40,8 +40,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent_banking.core.settings import Config
-from agent_banking.state_tracker import StateTracker
-from agent_banking.chunking.run_chunking import run_auto_chunking
+from agent_banking.chunking.run_chunking import atomic_json, run_auto_chunking
 from agent_banking.embedding.run_embedding import run_auto_embedding
 from agent_banking.vector_db.run_vector_db import run_auto_indexing
 from agent_banking.query_parser.run_query_parser import run_auto_query_parser
@@ -107,46 +106,157 @@ class NodePipeline:
             res[n] = {"input": in_p, "output": out_p}
         return res
 
-    def run_node(self, node_name: str, force: bool = False) -> dict:
+    @staticmethod
+    def _resolve_node_input(input_dir: Path, candidates: list[str]) -> Path:
+        """Resolve an existing candidate input file inside input_dir, or default primary path."""
+        for name in candidates:
+            candidate = input_dir / name
+            if candidate.exists():
+                return candidate
+        return input_dir / candidates[0]
+
+    @staticmethod
+    def _handover_json(src_file: Path, dst_file: Path, fallback_data=None) -> None:
+        """Write upstream JSON output to downstream input file only when payload changed."""
+        try:
+            if src_file.exists():
+                data = json.loads(src_file.read_text(encoding="utf-8"))
+            elif fallback_data is not None:
+                data = fallback_data
+            else:
+                return
+            serialized = json.dumps(data, ensure_ascii=False, indent=2)
+            new_digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+            old_digest = ""
+            if dst_file.exists():
+                old_digest = hashlib.sha256(dst_file.read_bytes()).hexdigest()
+            if old_digest != new_digest:
+                dst_file.write_text(serialized, encoding="utf-8")
+        except Exception:
+            pass
+
+    def _run_aux_node(self, runner, input_dir: Path, output_dir: Path, candidates: list[str], force: bool):
+        """Invoke an auxiliary node runner, passing input_file if a local fixture exists."""
+        aux_in = self._resolve_node_input(input_dir, candidates)
+        if aux_in.exists():
+            return runner(input_file=aux_in, output_dir=output_dir, force=force)
+        return runner(output_dir=output_dir, force=force)
+
+    def run_node(self, node_name: str, force: bool = False, max_files: int | None = None) -> dict:
         """Run an isolated single node from input to output with deduplication."""
         f = self.get_node_folders()
         clean_name = node_name.strip().lower()
 
         if clean_name in ("1", "chunking"):
-            chunks = run_auto_chunking(f["chunking"]["input"], f["chunking"]["output"], force=force)
+            chunks = run_auto_chunking(
+                f["chunking"]["input"],
+                f["chunking"]["output"],
+                force=force,
+                max_files=max_files
+            )
             return {"node": "chunking", "count": len(chunks)}
         elif clean_name in ("2", "embedding"):
-            embeds = run_auto_embedding(output_dir=f["embedding"]["output"], force=force)
+            published = f["chunking"]["output"] / "chunking_manifest.json"
+            if published.is_file():
+                embed_in = published
+            else:
+                embed_in = self._resolve_node_input(
+                    f["embedding"]["input"],
+                    ["chunks.json", "chunking_manifest.json", "all_chunks.json"]
+                )
+            embeds = run_auto_embedding(
+                input_file=embed_in,
+                output_dir=f["embedding"]["output"],
+                force=force
+            )
             return {"node": "embedding", "count": len(embeds)}
         elif clean_name in ("3", "vector_db", "indexing"):
-            vdb = run_auto_indexing(output_dir=f["vector_db"]["output"], force=force)
+            vdb_in = self._resolve_node_input(f["vector_db"]["input"], ["embedded_chunks.json"])
+            vdb = run_auto_indexing(
+                input_file=vdb_in,
+                output_dir=f["vector_db"]["output"],
+                force=force
+            )
             return {"node": "vector_db", "manifest": vdb}
         elif clean_name in ("4", "query_parser"):
-            qp = run_auto_query_parser(output_dir=f["query_parser"]["output"], force=force)
+            qp_in = self._resolve_node_input(
+                f["query_parser"]["input"],
+                ["queries.json", "latest_query.json", "queries.txt"]
+            )
+            qp = run_auto_query_parser(
+                input_file=qp_in,
+                output_dir=f["query_parser"]["output"],
+                force=force
+            )
             return {"node": "query_parser", "count": len(qp)}
         elif clean_name in ("5", "retrieval"):
-            ret = run_auto_retrieval(output_dir=f["retrieval"]["output"], force=force)
+            ret_in = self._resolve_node_input(f["retrieval"]["input"], ["parsed_queries.json"])
+            ret = run_auto_retrieval(
+                input_file=ret_in,
+                output_dir=f["retrieval"]["output"],
+                force=force
+            )
             return {"node": "retrieval", "count": len(ret)}
         elif clean_name in ("6", "reranking"):
-            rerank = run_auto_reranking(output_dir=f["reranking"]["output"], force=force)
+            rr_in = self._resolve_node_input(f["reranking"]["input"], ["candidates.json"])
+            rerank = run_auto_reranking(
+                input_file=rr_in,
+                output_dir=f["reranking"]["output"],
+                force=force
+            )
             return {"node": "reranking", "count": len(rerank)}
         elif clean_name in ("7", "generator"):
-            gen = run_auto_generator(output_dir=f["generator"]["output"], force=force)
+            gen_in = self._resolve_node_input(f["generator"]["input"], ["top_chunks.json"])
+            gen = run_auto_generator(
+                input_file=gen_in,
+                output_dir=f["generator"]["output"],
+                force=force
+            )
             return {"node": "generator", "count": len(gen)}
         elif clean_name in ("8", "guardrails"):
-            guards = run_auto_guardrails(output_dir=f["guardrails"]["output"], force=force)
+            guards = self._run_aux_node(
+                run_auto_guardrails,
+                f["guardrails"]["input"],
+                f["guardrails"]["output"],
+                ["sample_queries.json", "queries.json"],
+                force
+            )
             return {"node": "guardrails", "count": len(guards)}
         elif clean_name in ("9", "tracing"):
-            traces = run_auto_tracing(output_dir=f["tracing"]["output"], force=force)
+            traces = self._run_aux_node(
+                run_auto_tracing,
+                f["tracing"]["input"],
+                f["tracing"]["output"],
+                ["sample_trace_inputs.json"],
+                force
+            )
             return {"node": "tracing", "count": len(traces)}
         elif clean_name in ("10", "tasks"):
-            tasks = run_auto_tasks(output_dir=f["tasks"]["output"], force=force)
+            tasks = self._run_aux_node(
+                run_auto_tasks,
+                f["tasks"]["input"],
+                f["tasks"]["output"],
+                ["sample_task_inputs.json"],
+                force
+            )
             return {"node": "tasks", "count": len(tasks)}
         elif clean_name in ("11", "skills"):
-            skills = run_auto_skills(output_dir=f["skills"]["output"], force=force)
+            skills = self._run_aux_node(
+                run_auto_skills,
+                f["skills"]["input"],
+                f["skills"]["output"],
+                ["sample_skill_inputs.json"],
+                force
+            )
             return {"node": "skills", "count": len(skills)}
         elif clean_name in ("12", "tools"):
-            tools = run_auto_tools(output_dir=f["tools"]["output"], force=force)
+            tools = self._run_aux_node(
+                run_auto_tools,
+                f["tools"]["input"],
+                f["tools"]["output"],
+                ["sample_tool_inputs.json"],
+                force
+            )
             return {"node": "tools", "count": len(tools)}
         else:
             print(f"[NodePipeline] Unrecognized node: '{node_name}'. Valid options: chunking, embedding, vector_db, query_parser, retrieval, reranking, generator, guardrails, tracing, tasks, skills, tools")
@@ -173,108 +283,45 @@ class NodePipeline:
         # ---------------------------------------------------------------------
         # 1. Node 1: Chunking
         # ---------------------------------------------------------------------
-        chunk_file_src = f["chunking"]["output"] / "all_chunks.json"
-        tracker_c = StateTracker(f["chunking"]["output"] / ".state_tracker.json")
-        docx_files = []
-        for ext in (".docx", ".DOCX"):
-            docx_files.extend(list(f["chunking"]["input"].rglob(f"*{ext}")))
-        docx_files = sorted(list(set(docx_files)))
+        chunk_out_dir = f["chunking"]["output"]
+        if max_files is not None:
+            chunk_out_dir = chunk_out_dir / "diagnostics" / ("accuracy-first-" + str(max_files))
 
-        is_chunking_done = False
-        if not force and chunk_file_src.exists() and docx_files:
-            c_hash_map = {}
-            for fp in docx_files:
-                rel = str(fp.relative_to(f["chunking"]["input"])).replace("\\", "/")
-                c_hash_map[rel] = tracker_c.compute_file_hash(fp)
-            if tracker_c.are_all_items_processed(c_hash_map):
-                is_chunking_done = True
-
-        if is_chunking_done:
-            print("\n[PIPELINE: NODE 1 - CHUNKING SKIPPED] All .docx files were previously chunked in all_chunks.json. Skipping node.")
-            try:
-                with open(chunk_file_src, "r", encoding="utf-8") as fp:
-                    chunks = json.load(fp)
-            except Exception:
-                chunks = run_auto_chunking(input_dir=f["chunking"]["input"], output_dir=f["chunking"]["output"], force=force, max_files=max_files)
-        else:
-            chunks = run_auto_chunking(
-                input_dir=f["chunking"]["input"],
-                output_dir=f["chunking"]["output"],
-                force=force,
-                max_files=max_files
-            )
-
-        # Handover all_chunks.json to Node 2: Embedding Input
-        if chunk_file_src.exists():
-            embed_in = f["embedding"]["input"] / "chunks.json"
-            try:
-                with open(chunk_file_src, "r", encoding="utf-8") as s_fp:
-                    data = json.load(s_fp)
-                with open(embed_in, "w", encoding="utf-8") as d_fp:
-                    json.dump(data, d_fp, ensure_ascii=False, indent=2)
-            except Exception:
-                pass
+        chunks = run_auto_chunking(input_dir=f["chunking"]["input"], output_dir=f["chunking"]["output"],
+                                   force=force, max_files=max_files)
+        if max_files is not None:
+            chunk_manifest = json.loads((chunk_out_dir / "chunking_manifest.json").read_text(encoding="utf-8"))
+            failed_files = [record["file_name"] for record in chunk_manifest["records"] if record["status"] == "FAILED"]
+            return {"status": "DIAGNOSTICS", "total_chunks": len(chunks), "failed_files": failed_files,
+                    "chunking_output": str(chunk_out_dir)}
+        atomic_json(f["embedding"]["input"] / "chunks.json", chunks)
 
         # ---------------------------------------------------------------------
         # 2. Node 2: Embedding
         # ---------------------------------------------------------------------
-        embed_src = f["embedding"]["output"] / "embedded_chunks.json"
-        is_embedding_done = False
-        if not force and embed_src.exists() and len(chunks) > 0:
-            try:
-                with open(embed_src, "r", encoding="utf-8") as fp:
-                    embedded_chunks = json.load(fp)
-                if len(embedded_chunks) >= len(chunks):
-                    is_embedding_done = True
-            except Exception:
-                is_embedding_done = False
-
-        if is_embedding_done:
-            print(f"\n[PIPELINE: NODE 2 - EMBEDDING SKIPPED] All {len(chunks)} chunks already have embeddings in output/embedded_chunks.json. Skipping node.")
-        else:
-            embedded_chunks = run_auto_embedding(
-                output_dir=f["embedding"]["output"],
-                force=force
-            )
+        embedded_chunks, chunk_manifest = run_auto_embedding(
+            input_file=chunk_out_dir, output_dir=f["embedding"]["output"], force=force, return_manifest=True)
+        failed_files = [record["file_name"] for record in chunk_manifest["records"] if record["status"] == "FAILED"]
 
         # Handover embedded_chunks.json to Node 3: Vector DB Input
-        if embed_src.exists():
-            vdb_in = f["vector_db"]["input"] / "embedded_chunks.json"
-            try:
-                with open(embed_src, "r", encoding="utf-8") as s_fp:
-                    data = json.load(s_fp)
-                with open(vdb_in, "w", encoding="utf-8") as d_fp:
-                    json.dump(data, d_fp, ensure_ascii=False, indent=2)
-            except Exception:
-                pass
+        vdb_in = f["vector_db"]["input"] / "embedded_chunks.json"
+        atomic_json(vdb_in, embedded_chunks)
 
         # ---------------------------------------------------------------------
         # 3. Node 3: Vector DB & BM25 Indexing
         # ---------------------------------------------------------------------
-        manifest_vdb_src = f["vector_db"]["output"] / "indexing_manifest.json"
-        is_vdb_done = False
-        if not force and manifest_vdb_src.exists() and len(embedded_chunks) > 0:
-            try:
-                with open(manifest_vdb_src, "r", encoding="utf-8") as fp:
-                    indexing_manifest = json.load(fp)
-                pts = indexing_manifest.get("total_points_in_collection", 0)
-                if pts >= len(embedded_chunks):
-                    is_vdb_done = True
-            except Exception:
-                is_vdb_done = False
-
-        if is_vdb_done:
-            pts_cnt = indexing_manifest.get("total_points_in_collection", len(embedded_chunks))
-            print(f"\n[PIPELINE: NODE 3 - VECTOR DB SKIPPED] Vector DB & BM25 collection already indexed ({pts_cnt} points). Skipping node.")
-        else:
-            indexing_manifest = run_auto_indexing(
-                output_dir=f["vector_db"]["output"],
-                force=force
-            )
+        indexing_manifest = run_auto_indexing(
+            embedded_chunks=embedded_chunks, output_dir=f["vector_db"]["output"], force=force and not failed_files, snapshot=True,
+            publication_dir=chunk_out_dir, publication_manifest=chunk_manifest)
+        corpus_changed = bool(indexing_manifest["new_count"] or indexing_manifest["removed_count"])
 
         # ---------------------------------------------------------------------
         # 4. Node 4: Query Parser
         # ---------------------------------------------------------------------
+        qp_in_file = self._resolve_node_input(
+            f["query_parser"]["input"],
+            ["queries.json", "latest_query.json", "queries.txt"]
+        )
         qp_src = f["query_parser"]["output"] / "parsed_queries.json"
         is_qp_done = False
         if not force and qp_src.exists():
@@ -290,27 +337,21 @@ class NodePipeline:
             print(f"\n[PIPELINE: NODE 4 - QUERY PARSER SKIPPED] All {len(parsed_queries)} queries were already parsed in output. Skipping node.")
         else:
             parsed_queries = run_auto_query_parser(
+                input_file=qp_in_file,
                 output_dir=f["query_parser"]["output"],
                 force=force
             )
 
         # Handover parsed_queries.json to Node 5: Retrieval Input
-        if qp_src.exists():
-            ret_in = f["retrieval"]["input"] / "parsed_queries.json"
-            try:
-                with open(qp_src, "r", encoding="utf-8") as s_fp:
-                    data = json.load(s_fp)
-                with open(ret_in, "w", encoding="utf-8") as d_fp:
-                    json.dump(data, d_fp, ensure_ascii=False, indent=2)
-            except Exception:
-                pass
+        ret_in = f["retrieval"]["input"] / "parsed_queries.json"
+        self._handover_json(qp_src, ret_in, fallback_data=parsed_queries)
 
         # ---------------------------------------------------------------------
         # 5. Node 5: Hybrid Retrieval
         # ---------------------------------------------------------------------
         ret_src = f["retrieval"]["output"] / "retrieval_candidates.json"
         is_ret_done = False
-        if not force and ret_src.exists():
+        if not force and not corpus_changed and is_qp_done and ret_src.exists():
             try:
                 with open(ret_src, "r", encoding="utf-8") as fp:
                     candidates = json.load(fp)
@@ -323,28 +364,22 @@ class NodePipeline:
             print(f"\n[PIPELINE: NODE 5 - RETRIEVAL SKIPPED] All {len(candidates)} search candidates are present in output. Skipping node.")
         else:
             candidates = run_auto_retrieval(
+                input_file=ret_in,
                 output_dir=f["retrieval"]["output"],
                 top_k=self.config.HYBRID_TOP_K,
-                force=force
+                force=force or corpus_changed
             )
 
         # Handover retrieval_candidates.json to Node 6: Reranking Input
-        if ret_src.exists():
-            rerank_in = f["reranking"]["input"] / "candidates.json"
-            try:
-                with open(ret_src, "r", encoding="utf-8") as s_fp:
-                    data = json.load(s_fp)
-                with open(rerank_in, "w", encoding="utf-8") as d_fp:
-                    json.dump(data, d_fp, ensure_ascii=False, indent=2)
-            except Exception:
-                pass
+        rerank_in = f["reranking"]["input"] / "candidates.json"
+        self._handover_json(ret_src, rerank_in, fallback_data=candidates)
 
         # ---------------------------------------------------------------------
         # 6. Node 6: Cross-Encoder Reranking
         # ---------------------------------------------------------------------
         rerank_src = f["reranking"]["output"] / "reranked_chunks.json"
         is_rr_done = False
-        if not force and rerank_src.exists():
+        if not force and is_ret_done and rerank_src.exists():
             try:
                 with open(rerank_src, "r", encoding="utf-8") as fp:
                     reranked = json.load(fp)
@@ -357,28 +392,22 @@ class NodePipeline:
             print(f"\n[PIPELINE: NODE 6 - RERANKING SKIPPED] All {len(reranked)} reranked results are present in output. Skipping node.")
         else:
             reranked = run_auto_reranking(
+                input_file=rerank_in,
                 output_dir=f["reranking"]["output"],
                 top_k=self.config.RERANK_TOP_K,
-                force=force
+                force=force or corpus_changed
             )
 
         # Handover reranked_chunks.json to Node 7: Generator Input
-        if rerank_src.exists():
-            gen_in = f["generator"]["input"] / "top_chunks.json"
-            try:
-                with open(rerank_src, "r", encoding="utf-8") as s_fp:
-                    data = json.load(s_fp)
-                with open(gen_in, "w", encoding="utf-8") as d_fp:
-                    json.dump(data, d_fp, ensure_ascii=False, indent=2)
-            except Exception:
-                pass
+        gen_in = f["generator"]["input"] / "top_chunks.json"
+        self._handover_json(rerank_src, gen_in, fallback_data=reranked)
 
         # ---------------------------------------------------------------------
         # 7. Node 7: Context Synthesizer & LLM Generator
         # ---------------------------------------------------------------------
         gen_ans_src = f["generator"]["output"] / "answers.json"
         is_gen_done = False
-        if not force and gen_ans_src.exists():
+        if not force and is_rr_done and gen_ans_src.exists():
             try:
                 with open(gen_ans_src, "r", encoding="utf-8") as fp:
                     answers = json.load(fp)
@@ -391,18 +420,49 @@ class NodePipeline:
             print(f"\n[PIPELINE: NODE 7 - GENERATOR SKIPPED] All {len(answers)} generated answers are present in output. Skipping node.")
         else:
             answers = run_auto_generator(
+                input_file=gen_in,
                 output_dir=f["generator"]["output"],
-                force=force
+                force=force or corpus_changed
             )
 
         # ---------------------------------------------------------------------
         # 8-12. Auxiliary Nodes: Guardrails, Tracing, Tasks, Skills, Tools
         # ---------------------------------------------------------------------
-        guards = run_auto_guardrails(output_dir=f["guardrails"]["output"], force=force)
-        traces = run_auto_tracing(output_dir=f["tracing"]["output"], force=force)
-        tasks = run_auto_tasks(output_dir=f["tasks"]["output"], force=force)
-        skills = run_auto_skills(output_dir=f["skills"]["output"], force=force)
-        tools = run_auto_tools(output_dir=f["tools"]["output"], force=force)
+        guards = self._run_aux_node(
+            run_auto_guardrails,
+            f["guardrails"]["input"],
+            f["guardrails"]["output"],
+            ["sample_queries.json", "queries.json"],
+            force
+        )
+        traces = self._run_aux_node(
+            run_auto_tracing,
+            f["tracing"]["input"],
+            f["tracing"]["output"],
+            ["sample_trace_inputs.json"],
+            force
+        )
+        tasks = self._run_aux_node(
+            run_auto_tasks,
+            f["tasks"]["input"],
+            f["tasks"]["output"],
+            ["sample_task_inputs.json"],
+            force
+        )
+        skills = self._run_aux_node(
+            run_auto_skills,
+            f["skills"]["input"],
+            f["skills"]["output"],
+            ["sample_skill_inputs.json"],
+            force
+        )
+        tools = self._run_aux_node(
+            run_auto_tools,
+            f["tools"]["input"],
+            f["tools"]["output"],
+            ["sample_tool_inputs.json"],
+            force
+        )
 
         total_elapsed = round(time.time() - start_all, 2)
         print("\n" + "=" * 80)
@@ -411,7 +471,8 @@ class NodePipeline:
         print("=" * 80 + "\n")
 
         return {
-            "status": "SUCCESS",
+            "status": "PARTIAL_SUCCESS" if failed_files else "SUCCESS",
+            "failed_files": failed_files,
             "total_chunks": len(chunks),
             "embedded_chunks": len(embedded_chunks),
             "indexed_points": indexing_manifest.get("total_points_in_collection", 0),
@@ -496,7 +557,7 @@ def main():
     if args.watch:
         pipeline.watch_inputs()
     elif args.node:
-        pipeline.run_node(args.node, force=args.force)
+        pipeline.run_node(args.node, force=args.force, max_files=args.max_files)
     elif args.auto:
         pipeline.run_full_pipeline(force=args.force, max_files=args.max_files)
     else:

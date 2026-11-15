@@ -24,38 +24,29 @@ def render_docx_pages(docx_source, dpi=150):
         raise ValueError("dpi must be greater than 0")
     if docx_source is None:
         raise ValueError("docx_source cannot be None")
-    doc = None
-    if isinstance(docx_source, str):
-        if not os.path.exists(docx_source):
-            raise FileNotFoundError("DOCX file not found: " + docx_source)
-        doc = fitz.open(docx_source)
-    elif isinstance(docx_source, (bytes, bytearray)):
+    if isinstance(docx_source, (bytes, bytearray)):
         if len(docx_source) == 0:
             raise ValueError("docx_source stream is empty")
         doc = fitz.open(stream=docx_source, filetype="docx")
-    elif hasattr(docx_source, "__fspath__"):
-        path_str = str(docx_source)
+    elif isinstance(docx_source, (str, os.PathLike)):
+        path_str = os.fsdecode(docx_source)
         if not os.path.exists(path_str):
             raise FileNotFoundError("DOCX file not found: " + path_str)
         doc = fitz.open(path_str)
     else:
         raise TypeError("docx_source must be a str, Path, or bytes stream")
+    with doc:
+        return _render_pages(doc, dpi)
+
+
+def _render_pages(document, dpi):
     pages = []
-    try:
-        for page_index in range(len(doc)):
-            page = doc[page_index]
-            pix = page.get_pixmap(dpi=dpi)
-            image_bytes = pix.tobytes("png")
-            pages.append({
-                "page_index": page_index,
-                "image_bytes": image_bytes,
-                "sha256": hashlib.sha256(image_bytes).hexdigest(),
-                "width": pix.width,
-                "height": pix.height,
-            })
-    finally:
-        if doc is not None:
-            doc.close()
+    for page_index, page in enumerate(document):
+        pixmap = page.get_pixmap(dpi=dpi, alpha=False)
+        image = pixmap.tobytes("png")
+        pages.append({"page_index": page_index, "image_bytes": image,
+                      "sha256": hashlib.sha256(image).hexdigest(),
+                      "width": pixmap.width, "height": pixmap.height})
     return pages
 
 
@@ -98,15 +89,8 @@ try {
                                 creationflags=subprocess.CREATE_NO_WINDOW)
         if result.returncode or not outgoing.is_file():
             raise RuntimeError("Microsoft Word could not render the native Office figure")
-        pages = []
         with fitz.open(str(outgoing)) as document:
-            for index, page in enumerate(document):
-                pixmap = page.get_pixmap(dpi=dpi, alpha=False)
-                image = pixmap.tobytes("png")
-                pages.append({"page_index": index, "image_bytes": image,
-                              "sha256": hashlib.sha256(image).hexdigest(),
-                              "width": pixmap.width, "height": pixmap.height})
-        return pages
+            return _render_pages(document, dpi)
 
 
 def drawing_preview(document_bytes, document_element, reference, allow_blank=False):
@@ -117,6 +101,8 @@ def drawing_preview(document_bytes, document_element, reference, allow_blank=Fal
         raise ValueError("Office figure has no drawing anchor")
     root = deepcopy(document_element)
     body = root.find(qn("w:body"))
+    if body is None:
+        raise ValueError("OOXML document has no body for the drawing fragment")
     for child in list(body):
         if child.tag != qn("w:sectPr"):
             body.remove(child)
@@ -133,7 +119,7 @@ def drawing_preview(document_bytes, document_element, reference, allow_blank=Fal
     output = io.BytesIO()
     with zipfile.ZipFile(io.BytesIO(document_bytes)) as original, zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as fragment:
         for item in original.infolist():
-            data = original.read(item.filename)
+            data = original.read(item)
             if item.filename == "word/document.xml":
                 data = replacement
             fragment.writestr(item, data)

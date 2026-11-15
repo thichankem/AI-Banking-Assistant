@@ -65,6 +65,11 @@ def main():
         default=None,
         help="Custom path to output directory"
     )
+    parser.add_argument(
+        "--use-memory",
+        action="store_true",
+        help="Run Qdrant in in-memory mode"
+    )
 
     args = parser.parse_args()
 
@@ -77,11 +82,12 @@ def main():
         custom_output = Path(args.output)
 
     run_retrieval(
-        input_path=custom_input,
+        query=args.query,
+        input_file=custom_input,
         output_dir=custom_output,
-        force=args.force,
         top_k=args.top_k,
-        single_query=args.query
+        force=args.force,
+        use_memory=args.use_memory
     )
 
 

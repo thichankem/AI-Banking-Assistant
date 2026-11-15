@@ -9,7 +9,6 @@ Inherits full node library from BaseBankingTask:
 RULES: 0% Regex, Zero Ternary, No Typing Library, No __init__.py.
 """
 
-from __future__ import annotations
 from agent_banking.tasks.base_task import BaseBankingTask, TaskResult
 from agent_banking.skills.skill_registry import SkillRegistry
 from agent_banking.core.settings import Config
@@ -72,8 +71,14 @@ class GeneralChatTask(BaseBankingTask):
             system_prompt=sys_prompt,
             user_prompt=user_prompt,
             temperature=0.3,
-            max_tokens=300
+            max_tokens=512
         )
+        if not final_answer or final_answer == user_prompt:
+            final_answer = (
+                "Kính chào Quý khách! Em là Trợ lý AI của Ngân hàng A-Bank. "
+                "Em sẵn sàng hỗ trợ Quý khách tra cứu quy chế, biểu phí, thẻ, bảo hiểm A-Life, "
+                "lịch trả nợ vay và kiểm tra sinh trắc học QĐ 2345 ạ."
+            )
 
         # 4. Inherited Format Output Node
         steps.append("Node 4: Format Output")

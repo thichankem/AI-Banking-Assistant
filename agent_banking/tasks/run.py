@@ -2,7 +2,6 @@
 Direct Runner for Module 10: Tasks.
 Runs independently from input/ to output/ with deduplication.
 """
-from __future__ import annotations
 import sys
 import argparse
 from pathlib import Path
@@ -19,6 +18,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     module_dir = Path(__file__).resolve().parent
-    in_file = module_dir / "input" / "sample_task_requests.json"
+    in_file = module_dir / "input" / "sample_task_inputs.json"
     out_dir = module_dir / "output"
     run_auto_tasks(input_file=in_file, output_dir=out_dir, force=args.force)

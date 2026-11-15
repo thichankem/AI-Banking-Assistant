@@ -13,7 +13,6 @@ RULES:
 5. KEEP IT SIMPLE: Clear, direct, readable code.
 """
 
-from __future__ import annotations
 import json
 from pathlib import Path
 from dataclasses import dataclass
@@ -157,7 +156,7 @@ class TaskRouter:
                     {"role": "user", "content": query}
                 ],
                 temperature=0.1,
-                max_tokens=30
+                max_tokens=256
             )
             raw = resp.choices[0].message.content
             if not raw:
@@ -178,7 +177,8 @@ class TaskRouter:
                 return RoutingDecision("TASK_GENERAL_CHAT", "General Banking Chat", [], 0.90, "LLM routed: General Chat")
 
             return RoutingDecision("TASK_POLICY_INQUIRY", "Banking Policy & Tariff Inquiry", ["rag_knowledge_retrieval"], 0.85, "LLM routed: Policy RAG")
-        except ModelFallbackError:
-            raise
+        except ModelFallbackError as e:
+            print(f"[TaskRouter] ModelFallbackError, falling back to Policy RAG: {e}")
+            return RoutingDecision("TASK_POLICY_INQUIRY", "Banking Policy & Tariff Inquiry", ["rag_knowledge_retrieval"], 0.80, "Fallback (ModelFallbackError): Policy RAG")
         except Exception:
             return RoutingDecision("TASK_POLICY_INQUIRY", "Banking Policy & Tariff Inquiry", ["rag_knowledge_retrieval"], 0.80, "Fallback: Policy RAG")

@@ -81,6 +81,148 @@ def _check_endpoint_reachable(endpoint_url, timeout=0.5):
         return False
 
 
+def _to_float_score(value, default=0.0):
+    """Safely convert an optional numeric score to float without failing on None."""
+    if value is None:
+        return float(default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _pick_float_score(doc, keys, default=0.0):
+    """Return the first non-None score across candidate keys in a record dict."""
+    for key in keys:
+        val = doc.get(key)
+        if val is not None:
+            return _to_float_score(val, default=default)
+    return float(default)
+
+
+def _extract_chunk_trace_fields(raw_item, index=0):
+    """Extract normalized 13-field universal chunk metadata for tracing spans."""
+    if isinstance(raw_item, dict):
+        if "chunk" in raw_item and isinstance(raw_item.get("chunk"), dict):
+            c_obj = raw_item["chunk"]
+        else:
+            c_obj = raw_item
+        c_id = c_obj.get("chunk_id")
+        if not c_id:
+            c_id = raw_item.get("chunk_id")
+        if not c_id:
+            c_id = f"chunk_{index + 1}"
+        parent_id = str(c_obj.get("parent_id") or "")
+        c_source = str(c_obj.get("source") or "")
+        c_type = str(c_obj.get("chunk_type") or "text")
+        c_bc = str(c_obj.get("breadcrumb") or "")
+        c_title = str(c_obj.get("section_title") or "")
+        c_raw = ""
+        for fk in ["content", "parent_content", "original_text", "text"]:
+            val = c_obj.get(fk)
+            if val:
+                c_raw = str(val)
+                break
+        bmeta = c_obj.get("business_metadata")
+        if not isinstance(bmeta, dict):
+            bmeta = {}
+        ret_meta = bmeta.get("retrieval")
+        if not isinstance(ret_meta, dict):
+            ret_meta = {}
+        qual_meta = bmeta.get("quality")
+        if not isinstance(qual_meta, dict):
+            qual_meta = {}
+        c_tok = ret_meta.get("token_count")
+        if c_tok is None:
+            c_tok = c_obj.get("token_count", 0)
+        table_data = c_obj.get("table_data")
+        images = c_obj.get("images")
+        c_vec = c_obj.get("vector")
+        if c_vec is None:
+            c_vec = raw_item.get("vector")
+    else:
+        c_id = getattr(raw_item, "chunk_id", f"chunk_{index + 1}")
+        parent_id = str(getattr(raw_item, "parent_id", "") or "")
+        c_source = str(getattr(raw_item, "source", "") or "")
+        c_type = str(getattr(raw_item, "chunk_type", "text") or "text")
+        c_bc = str(getattr(raw_item, "breadcrumb", "") or "")
+        c_title = str(getattr(raw_item, "section_title", "") or "")
+        c_raw = ""
+        for fk in ["content", "parent_content", "original_text", "text"]:
+            val = getattr(raw_item, fk, None)
+            if val:
+                c_raw = str(val)
+                break
+        bmeta = getattr(raw_item, "business_metadata", {})
+        if not isinstance(bmeta, dict):
+            bmeta = {}
+        ret_meta = bmeta.get("retrieval")
+        if not isinstance(ret_meta, dict):
+            ret_meta = {}
+        qual_meta = bmeta.get("quality")
+        if not isinstance(qual_meta, dict):
+            qual_meta = {}
+        c_tok = ret_meta.get("token_count")
+        if c_tok is None:
+            c_tok = getattr(raw_item, "token_count", 0)
+        table_data = getattr(raw_item, "table_data", None)
+        images = getattr(raw_item, "images", None)
+        c_vec = getattr(raw_item, "vector", None)
+
+    ctx_str = str(ret_meta.get("context") or "").strip()
+    sit_str = str(ret_meta.get("situated_context") or "").strip()
+    if ctx_str or sit_str:
+        p_parts = ["passage:"]
+        if ctx_str:
+            p_parts.append("[" + ctx_str + "]")
+        if sit_str:
+            p_parts.append("Ngữ cảnh: " + sit_str)
+        p_parts.append(c_raw)
+        formatted_passage = "\n".join(p_parts)
+    elif c_bc:
+        formatted_passage = f"passage: [Ngữ cảnh: {c_bc}]\n{c_raw}"
+    else:
+        formatted_passage = f"passage: {c_raw}"
+
+    has_table = isinstance(table_data, dict) and bool(table_data)
+    if isinstance(images, list):
+        image_count = len(images)
+    else:
+        image_count = 0
+
+    return {
+        "chunk_id": str(c_id),
+        "parent_id": parent_id,
+        "source": c_source,
+        "chunk_type": c_type,
+        "breadcrumb": c_bc,
+        "section_title": c_title,
+        "content": c_raw,
+        "token_count": c_tok,
+        "schema_version": str(bmeta.get("schema_version") or ""),
+        "domain": str(bmeta.get("domain") or ""),
+        "index_ready": qual_meta.get("index_ready"),
+        "has_table": has_table,
+        "image_count": image_count,
+        "passage": formatted_passage,
+        "vector": c_vec,
+    }
+
+
+def _read_synthesized_field(synthesized, attr_name, dict_keys, default):
+    """Read ContextBundle attributes or dict keys uniformly."""
+    if isinstance(synthesized, dict):
+        for k in dict_keys:
+            if k in synthesized and synthesized[k] is not None:
+                return synthesized[k]
+        return default
+    for k in dict_keys:
+        val = getattr(synthesized, k, None)
+        if val is not None:
+            return val
+    return getattr(synthesized, attr_name, default)
+
+
 class ActiveTrace:
     """
     Quản lý vòng đời và dữ liệu của một phiên truy vết (Trace) cho một câu hỏi khách hàng.
@@ -181,20 +323,14 @@ class ActiveTrace:
         extracted_chunks_list = []
         total_characters = 0
         total_tokens = 0
+        chunk_type_counts = {}
 
         for i, c in enumerate(raw_chunks):
-            if isinstance(c, dict):
-                c_id = c.get("chunk_id", f"chunk_{i + 1}")
-                c_bc = c.get("breadcrumb", "")
-                c_title = c.get("section_title", "")
-                c_tok = c.get("token_count", 0)
-                c_raw = c.get("content", "") or c.get("original_text", "") or c.get("text", "")
-            else:
-                c_id = getattr(c, "chunk_id", f"chunk_{i + 1}")
-                c_bc = getattr(c, "breadcrumb", "")
-                c_title = getattr(c, "section_title", "")
-                c_tok = getattr(c, "token_count", 0)
-                c_raw = getattr(c, "content", "") or getattr(c, "original_text", "") or getattr(c, "text", "")
+            c_meta = _extract_chunk_trace_fields(c, index=i)
+            c_raw = c_meta["content"]
+            c_tok = c_meta["token_count"]
+            c_type = c_meta["chunk_type"]
+            chunk_type_counts[c_type] = chunk_type_counts.get(c_type, 0) + 1
 
             char_cnt = len(c_raw)
             total_characters += char_cnt
@@ -203,9 +339,16 @@ class ActiveTrace:
 
             extracted_chunks_list.append({
                 "chunk_index": i + 1,
-                "chunk_id": str(c_id),
-                "breadcrumb": c_bc,
-                "section_title": c_title,
+                "chunk_id": c_meta["chunk_id"],
+                "parent_id": c_meta["parent_id"],
+                "chunk_type": c_type,
+                "domain": c_meta["domain"],
+                "schema_version": c_meta["schema_version"],
+                "index_ready": c_meta["index_ready"],
+                "has_table": c_meta["has_table"],
+                "image_count": c_meta["image_count"],
+                "breadcrumb": c_meta["breadcrumb"],
+                "section_title": c_meta["section_title"],
                 "token_count": c_tok,
                 "char_count": char_cnt,
                 "content": c_raw,
@@ -230,6 +373,7 @@ class ActiveTrace:
             "file_path": str(file_path),
             "num_chunks": final_count,
             "total_tokens": total_tokens,
+            "chunk_type_counts": chunk_type_counts,
             "details": dt_dict
         }
         self.spans.append(span_data)
@@ -349,25 +493,17 @@ class ActiveTrace:
 
             if chunks:
                 for i, c in enumerate(chunks):
-                    if isinstance(c, dict):
-                        c_id = c.get("chunk_id", f"chunk_{i + 1}")
-                        c_bc = c.get("breadcrumb", "")
-                        c_raw = c.get("content", "") or c.get("original_text", "") or c.get("text", "")
-                        c_vec = c.get("vector")
-                    else:
-                        c_id = getattr(c, "chunk_id", f"chunk_{i + 1}")
-                        c_bc = getattr(c, "breadcrumb", "")
-                        c_raw = getattr(c, "content", "") or getattr(c, "original_text", "") or getattr(c, "text", "")
-                        c_vec = getattr(c, "vector", None)
-
-                    if c_bc:
-                        formatted_passage = f"passage: [Ngữ cảnh: {c_bc}]\n{c_raw}"
-                    else:
-                        formatted_passage = f"passage: {c_raw}"
+                    c_meta = _extract_chunk_trace_fields(c, index=i)
+                    c_id = c_meta["chunk_id"]
+                    c_bc = c_meta["breadcrumb"]
+                    c_raw = c_meta["content"]
+                    c_vec = c_meta["vector"]
+                    formatted_passage = c_meta["passage"]
 
                     input_chunks_summary.append({
                         "chunk_index": i + 1,
                         "chunk_id": str(c_id),
+                        "chunk_type": c_meta["chunk_type"],
                         "breadcrumb": c_bc,
                         "formatted_input_for_model": formatted_passage
                     })
@@ -512,12 +648,12 @@ class ActiveTrace:
         for i, doc in enumerate(candidates):
             if isinstance(doc, dict):
                 c_item = doc.get("chunk", doc)
-                c_score = doc.get("rrf_score", doc.get("score", 0.0))
-                dense_sc = doc.get("dense_score", 0.0)
-                bm25_sc = doc.get("bm25_score", 0.0)
+                c_score = _pick_float_score(doc, ("rrf_score", "score"))
+                dense_sc = _pick_float_score(doc, ("dense_score",))
+                bm25_sc = _pick_float_score(doc, ("bm25_score",))
             elif isinstance(doc, tuple) and len(doc) >= 2:
                 c_item = doc[0]
-                c_score = doc[1]
+                c_score = _to_float_score(doc[1])
                 dense_sc = 0.0
                 bm25_sc = 0.0
             else:
@@ -526,14 +662,20 @@ class ActiveTrace:
                 dense_sc = 0.0
                 bm25_sc = 0.0
 
-            doc_text = c_item.get("content") or c_item.get("original_text") or c_item.get("text") or ""
-            title = c_item.get("section_title") or c_item.get("breadcrumb") or ""
-            cid = c_item.get("chunk_id", f"c_{i}")
-            c_source = c_item.get("source", "")
+            c_meta = _extract_chunk_trace_fields(c_item, index=i)
+            doc_text = c_meta["content"]
+            title = c_meta["section_title"] or c_meta["breadcrumb"]
+            cid = c_meta["chunk_id"]
+            c_source = c_meta["source"]
 
             c_info = {
                 "rank": i + 1,
-                "chunk_id": str(cid),
+                "chunk_id": cid,
+                "parent_id": c_meta["parent_id"],
+                "chunk_type": c_meta["chunk_type"],
+                "domain": c_meta["domain"],
+                "has_table": c_meta["has_table"],
+                "image_count": c_meta["image_count"],
                 "rrf_score": round(float(c_score), 4),
                 "dense_score": round(float(dense_sc), 4),
                 "bm25_score": round(float(bm25_sc), 2),
@@ -619,22 +761,27 @@ class ActiveTrace:
         for i, doc in enumerate(reranked):
             if isinstance(doc, dict):
                 chunk = doc.get("chunk", doc)
-                score = doc.get("rerank_score", doc.get("relevance_score", doc.get("score", 0.0)))
+                score = _pick_float_score(doc, ("rerank_score", "relevance_score", "score"))
             elif isinstance(doc, tuple) and len(doc) >= 2:
                 chunk = doc[0]
-                score = doc[1]
+                score = _to_float_score(doc[1])
             else:
                 chunk = doc
                 score = 0.0
 
-            doc_text = chunk.get("content") or chunk.get("original_text") or chunk.get("text") or ""
-            title = chunk.get("breadcrumb") or chunk.get("section_title") or ""
-            article = chunk.get("section_title") or ""
-            cid = chunk.get("chunk_id", f"c_{i}")
+            c_meta = _extract_chunk_trace_fields(chunk, index=i)
+            doc_text = c_meta["content"]
+            title = c_meta["breadcrumb"] or c_meta["section_title"]
+            article = c_meta["section_title"]
+            cid = c_meta["chunk_id"]
 
             rerank_summary.append({
                 "rank": i + 1,
                 "chunk_id": cid,
+                "chunk_type": c_meta["chunk_type"],
+                "domain": c_meta["domain"],
+                "has_table": c_meta["has_table"],
+                "image_count": c_meta["image_count"],
                 "rerank_score": round(float(score), 4),
                 "article": article,
                 "title": title,
@@ -668,18 +815,19 @@ class ActiveTrace:
                     for i, doc in enumerate(candidates):
                         if isinstance(doc, dict):
                             c_item = doc.get("chunk", doc)
-                            c_score = doc.get("rrf_score", doc.get("score", 0.0))
+                            c_score = _pick_float_score(doc, ("rrf_score", "score"))
                         elif isinstance(doc, tuple) and len(doc) >= 2:
                             c_item = doc[0]
-                            c_score = doc[1]
+                            c_score = _to_float_score(doc[1])
                         else:
                             c_item = doc
                             c_score = 0.0
 
-                        c_id = c_item.get("chunk_id", f"c_{i}")
-                        c_title = c_item.get("breadcrumb") or c_item.get("section_title") or ""
-                        c_text = c_item.get("content") or c_item.get("original_text") or c_item.get("text") or ""
-                        c_source = c_item.get("source", "")
+                        c_meta = _extract_chunk_trace_fields(c_item, index=i)
+                        c_id = c_meta["chunk_id"]
+                        c_title = c_meta["breadcrumb"] or c_meta["section_title"]
+                        c_text = c_meta["content"]
+                        c_source = c_meta["source"]
 
                         input_candidates_summary.append({
                             "input_rank": i + 1,
@@ -703,18 +851,19 @@ class ActiveTrace:
                     for i, doc in enumerate(reranked):
                         if isinstance(doc, dict):
                             c_item = doc.get("chunk", doc)
-                            c_score = doc.get("rerank_score", doc.get("relevance_score", doc.get("score", 0.0)))
+                            c_score = _pick_float_score(doc, ("rerank_score", "relevance_score", "score"))
                         elif isinstance(doc, tuple) and len(doc) >= 2:
                             c_item = doc[0]
-                            c_score = doc[1]
+                            c_score = _to_float_score(doc[1])
                         else:
                             c_item = doc
                             c_score = 0.0
 
-                        c_text = c_item.get("content") or c_item.get("original_text") or c_item.get("text") or ""
-                        c_id = c_item.get("chunk_id", f"chunk_{i}")
-                        c_title = c_item.get("breadcrumb") or c_item.get("section_title") or ""
-                        c_source = c_item.get("source", "")
+                        c_meta = _extract_chunk_trace_fields(c_item, index=i)
+                        c_text = c_meta["content"]
+                        c_id = c_meta["chunk_id"]
+                        c_title = c_meta["breadcrumb"] or c_meta["section_title"]
+                        c_source = c_meta["source"]
 
                         if i == 0:
                             best_score = round(float(c_score), 4)
@@ -791,11 +940,21 @@ class ActiveTrace:
 
     def record_synthesis(self, synthesized, duration_ms):
         """Bước 4: Ghi nhận vết Context Synthesizer (Markdown Context, Legal Citations)"""
-        citations = getattr(synthesized, "legal_citations", [])
-        sources = getattr(synthesized, "sources_used", [])
-        tokens_est = getattr(synthesized, "total_tokens", getattr(synthesized, "total_tokens_estimated", 0))
-        formatted_context = getattr(synthesized, "markdown_context", getattr(synthesized, "formatted_context", str(synthesized)))
-        chunks_used = getattr(synthesized, "chunks_included", len(sources))
+        citations = _read_synthesized_field(synthesized, "legal_citations", ["legal_citations", "citations"], [])
+        sources = _read_synthesized_field(synthesized, "sources_used", ["sources_used", "sources"], [])
+        tokens_est = _read_synthesized_field(
+            synthesized,
+            "total_tokens",
+            ["total_tokens", "total_tokens_estimated", "tokens"],
+            0
+        )
+        formatted_context = _read_synthesized_field(
+            synthesized,
+            "markdown_context",
+            ["markdown_context", "formatted_context", "context"],
+            str(synthesized)
+        )
+        chunks_used = _read_synthesized_field(synthesized, "chunks_included", ["chunks_included"], len(sources))
 
         span_data = {
             "name": "Step 4: Context Synthesizer",
@@ -1068,7 +1227,7 @@ class BankingTracer:
 
         # Trace output directory (under tracing module)
         if hasattr(self.config, "TRACE_DIR"):
-            self.trace_dir = self.config.TRACE_DIR
+            self.trace_dir = Path(self.config.TRACE_DIR)
         else:
             self.trace_dir = Path(__file__).resolve().parent / "traces"
         self.trace_dir.mkdir(parents=True, exist_ok=True)
@@ -1146,20 +1305,14 @@ class BankingTracer:
         extracted_chunks_list = []
         total_characters = 0
         total_tokens = 0
+        chunk_type_counts = {}
 
         for i, c in enumerate(raw_chunks):
-            if isinstance(c, dict):
-                c_id = c.get("chunk_id", f"chunk_{i + 1}")
-                c_bc = c.get("breadcrumb", "")
-                c_title = c.get("section_title", "")
-                c_tok = c.get("token_count", 0)
-                c_raw = c.get("content", "") or c.get("original_text", "") or c.get("text", "")
-            else:
-                c_id = getattr(c, "chunk_id", f"chunk_{i + 1}")
-                c_bc = getattr(c, "breadcrumb", "")
-                c_title = getattr(c, "section_title", "")
-                c_tok = getattr(c, "token_count", 0)
-                c_raw = getattr(c, "content", "") or getattr(c, "original_text", "") or getattr(c, "text", "")
+            c_meta = _extract_chunk_trace_fields(c, index=i)
+            c_raw = c_meta["content"]
+            c_tok = c_meta["token_count"]
+            c_type = c_meta["chunk_type"]
+            chunk_type_counts[c_type] = chunk_type_counts.get(c_type, 0) + 1
 
             char_cnt = len(c_raw)
             total_characters += char_cnt
@@ -1168,9 +1321,16 @@ class BankingTracer:
 
             extracted_chunks_list.append({
                 "chunk_index": i + 1,
-                "chunk_id": str(c_id),
-                "breadcrumb": c_bc,
-                "section_title": c_title,
+                "chunk_id": c_meta["chunk_id"],
+                "parent_id": c_meta["parent_id"],
+                "chunk_type": c_type,
+                "domain": c_meta["domain"],
+                "schema_version": c_meta["schema_version"],
+                "index_ready": c_meta["index_ready"],
+                "has_table": c_meta["has_table"],
+                "image_count": c_meta["image_count"],
+                "breadcrumb": c_meta["breadcrumb"],
+                "section_title": c_meta["section_title"],
                 "token_count": c_tok,
                 "char_count": char_cnt,
                 "content": c_raw,
@@ -1194,6 +1354,7 @@ class BankingTracer:
             "file_path": str(file_path),
             "num_chunks": final_count,
             "total_tokens": total_tokens,
+            "chunk_type_counts": chunk_type_counts,
             "total_latency_ms": duration_ms,
             "timestamp": time.time(),
             "spans": [{
@@ -1201,6 +1362,7 @@ class BankingTracer:
                 "duration_ms": duration_ms,
                 "file_path": str(file_path),
                 "num_chunks": final_count,
+                "chunk_type_counts": chunk_type_counts,
                 "details": dt_dict
             }]
         }
@@ -1270,32 +1432,24 @@ class BankingTracer:
         if model_name:
             chosen_model = model_name
         else:
-            chosen_model = getattr(self.tracer.config, "EMBEDDING_MODEL_1024", getattr(self.tracer.config, "EMBEDDING_MODEL", "embedding-1024"))
+            chosen_model = getattr(self.config, "EMBEDDING_MODEL_1024", getattr(self.config, "EMBEDDING_MODEL", "embedding-1024"))
 
         input_chunks_summary = []
         embedded_chunks_details = []
 
         if chunks:
             for i, c in enumerate(chunks):
-                if isinstance(c, dict):
-                    c_id = c.get("chunk_id", f"chunk_{i + 1}")
-                    c_bc = c.get("breadcrumb", "")
-                    c_raw = c.get("content", "") or c.get("original_text", "") or c.get("text", "")
-                    c_vec = c.get("vector")
-                else:
-                    c_id = getattr(c, "chunk_id", f"chunk_{i + 1}")
-                    c_bc = getattr(c, "breadcrumb", "")
-                    c_raw = getattr(c, "content", "") or getattr(c, "original_text", "") or getattr(c, "text", "")
-                    c_vec = getattr(c, "vector", None)
-
-                if c_bc:
-                    formatted_passage = f"passage: [Ngữ cảnh: {c_bc}]\n{c_raw}"
-                else:
-                    formatted_passage = f"passage: {c_raw}"
+                c_meta = _extract_chunk_trace_fields(c, index=i)
+                c_id = c_meta["chunk_id"]
+                c_bc = c_meta["breadcrumb"]
+                c_raw = c_meta["content"]
+                c_vec = c_meta["vector"]
+                formatted_passage = c_meta["passage"]
 
                 input_chunks_summary.append({
                     "chunk_index": i + 1,
                     "chunk_id": str(c_id),
+                    "chunk_type": c_meta["chunk_type"],
                     "breadcrumb": c_bc,
                     "formatted_input_for_model": formatted_passage
                 })
@@ -1442,7 +1596,16 @@ class BankingTracer:
 
         citations = record.get("legal_citations", [])
         if citations:
-            c_str = f"Căn cứ: {', '.join(citations[:3])}"
+            cit_items = []
+            for c_item in citations[:3]:
+                if isinstance(c_item, dict):
+                    sec_val = c_item.get("section", "")
+                    if not sec_val:
+                        sec_val = c_item.get("source", str(c_item))
+                    cit_items.append(str(sec_val))
+                else:
+                    cit_items.append(str(c_item))
+            c_str = f"Căn cứ: {', '.join(cit_items)}"
             c_line = f"│  📜 {c_str}"
             if len(c_line) < 70:
                 print(c_line + " " * (70 - len(c_line)) + "│")

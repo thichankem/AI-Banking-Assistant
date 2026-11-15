@@ -2,18 +2,19 @@
   "name": "deflect_competitor_comparison",
   "display_name": "Điều Hướng So Sánh Đối Thủ Cạnh Tranh",
   "category": "GUARDRAIL",
-  "description": "Điều hướng câu hỏi so sánh trực tiếp với ngân hàng đối thủ (Techcombank, MB, VPBank...) về lợi thế và chính sách vượt trội của Vietcombank.",
+  "description": "Điều hướng câu hỏi so sánh trực tiếp với ngân hàng đối thủ (Techcombank, MB, VPBank...) về lợi thế và chính sách vượt trội của A-Bank.",
   "parameters": {
     "type": "object",
     "properties": {
       "competitor_name": {
         "type": "string",
+        "default": "",
         "description": "Tên ngân hàng đối thủ khách hàng nhắc đến"
       },
-      "product_type": {
+      "query": {
         "type": "string",
-        "default": "the_va_tai_khoan",
-        "description": "Loại sản phẩm cần đối sánh"
+        "default": "",
+        "description": "Câu hỏi hoặc nội dung đối sánh ban đầu của khách hàng"
       }
     },
     "required": ["competitor_name"]
@@ -22,7 +23,10 @@
     "type": "object",
     "properties": {
       "status": {"type": "string"},
-      "deflection_message": {"type": "string"}
+      "strategy": {"type": "string"},
+      "directive": {"type": "string"},
+      "competitor_mentioned": {"type": "string"},
+      "original_query": {"type": "string"}
     }
   },
   "handler": {

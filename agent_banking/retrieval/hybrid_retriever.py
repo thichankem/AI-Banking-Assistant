@@ -62,7 +62,9 @@ class HybridRetriever:
         dense_weight=0.5,
         bm25_weight=None,
         top_k=5,
-        embedder=None
+        embedder=None,
+        candidate_k=None,
+        breadcrumb_boost=1.5
     ):
         actual_embedder = None
         actual_store = None
@@ -97,6 +99,12 @@ class HybridRetriever:
         else:
             self.top_k = 5
 
+        if candidate_k is not None:
+            self.candidate_k = int(candidate_k)
+        else:
+            self.candidate_k = None
+
+        self.breadcrumb_boost = float(breadcrumb_boost)
         self.last_query_vector = None
 
     @staticmethod
@@ -170,23 +178,15 @@ class HybridRetriever:
 
         prev_chunk_id = raw_dict.get("prev_chunk_id")
         if prev_chunk_id is not None:
-            str_prev = str(prev_chunk_id).strip()
-            if len(str_prev) > 0:
-                clean_prev_chunk_id = str_prev
-            else:
-                clean_prev_chunk_id = None
+            clean_prev_chunk_id = str(prev_chunk_id).strip()
         else:
-            clean_prev_chunk_id = None
+            clean_prev_chunk_id = ""
 
         next_chunk_id = raw_dict.get("next_chunk_id")
         if next_chunk_id is not None:
-            str_next = str(next_chunk_id).strip()
-            if len(str_next) > 0:
-                clean_next_chunk_id = str_next
-            else:
-                clean_next_chunk_id = None
+            clean_next_chunk_id = str(next_chunk_id).strip()
         else:
-            clean_next_chunk_id = None
+            clean_next_chunk_id = ""
 
         table_data = raw_dict.get("table_data")
         if table_data is not None:
@@ -233,12 +233,19 @@ class HybridRetriever:
         for k, v in filters.items():
             if v is not None:
                 clean_k = str(k).strip()
+                if not clean_k:
+                    continue
                 if clean_k == "domain":
                     if "business_metadata.domain" not in filters:
                         clean_k = "business_metadata.domain"
                 elif clean_k == "category":
                     if "business_metadata.category" not in filters:
                         clean_k = "business_metadata.category"
+                if isinstance(v, (list, tuple, set)):
+                    clean_v = [x for x in v if x is not None]
+                    if not clean_v:
+                        continue
+                    v = clean_v
                 normalized[clean_k] = v
 
         if len(normalized) == 0:
@@ -251,7 +258,7 @@ class HybridRetriever:
         top_k=None,
         candidate_k=None,
         filter_dict=None,
-        breadcrumb_boost=1.5
+        breadcrumb_boost=None
     ):
         """
         Execute Hybrid Retrieval and fuse rankings using Reciprocal Rank Fusion (RRF k=60).
@@ -277,6 +284,8 @@ class HybridRetriever:
 
         if candidate_k is not None:
             effective_candidate_k = int(candidate_k)
+        elif self.candidate_k is not None:
+            effective_candidate_k = int(self.candidate_k)
         else:
             candidate_calc = effective_top_k * 3
             if candidate_calc > 15:
@@ -286,6 +295,11 @@ class HybridRetriever:
 
         if effective_candidate_k < effective_top_k:
             effective_candidate_k = effective_top_k
+
+        if breadcrumb_boost is not None:
+            effective_breadcrumb_boost = float(breadcrumb_boost)
+        else:
+            effective_breadcrumb_boost = self.breadcrumb_boost
 
         # 2. Process Universal Query Contract and extract optimal query string
         raw_query_text = ""
@@ -415,7 +429,7 @@ class HybridRetriever:
                     query_text=bm25_query_text,
                     top_k=effective_candidate_k,
                     filter_dict=norm_filter,
-                    breadcrumb_boost=breadcrumb_boost
+                    breadcrumb_boost=effective_breadcrumb_boost
                 )
             except TypeError:
                 bm25_results = self.vector_store.search_bm25(
@@ -449,7 +463,7 @@ class HybridRetriever:
                         query_text=bm25_query_text,
                         top_k=effective_candidate_k,
                         filter_dict=None,
-                        breadcrumb_boost=breadcrumb_boost
+                        breadcrumb_boost=effective_breadcrumb_boost
                     )
                 except TypeError:
                     bm25_results = self.vector_store.search_bm25(

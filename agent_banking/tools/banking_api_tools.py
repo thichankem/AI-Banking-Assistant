@@ -21,7 +21,6 @@ RULES:
 - NO TYPING LIBRARY: Native Python types.
 """
 
-from __future__ import annotations
 import time
 import datetime
 
@@ -271,7 +270,8 @@ def create_support_ticket(
         "issue_type": issue_type.strip(),
         "description": description.strip(),
         "priority": clean_priority,
-        "emergency_hotline": "1900 54 54 13 (Phục vụ 24/7)",
+        "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "emergency_hotline": "1900 6688 (Phục vụ 24/7)",
         "message": (
             f"Hệ thống đã tạo thành công phiếu yêu cầu hỗ trợ mã [{ticket_id}]. "
             "Chuyên viên chăm sóc khách hàng sẽ liên hệ xác minh trong vòng 15-30 phút. "
@@ -510,7 +510,7 @@ def transfer_to_agent(
         customer_notice = (
             "Hiện tại đang ngoài khung giờ hỗ trợ trực tuyến của Chuyên viên (7h00 - 23h00 hàng ngày). "
             "Để được xử lý khẩn cấp (như khóa thẻ, tra soát giao dịch), Quý khách vui lòng liên hệ ngay "
-            "Tổng đài Trung tâm Hỗ trợ Khách hàng 24/7 qua số hotline: 1900 54 54 13."
+            "Tổng đài Trung tâm Hỗ trợ Khách hàng A-Bank 24/7 qua số hotline: 1900 6688."
         )
 
     return {
@@ -520,7 +520,7 @@ def transfer_to_agent(
         "business_process": business_process,
         "customer_segment": customer_segment,
         "target_queue": queue_name,
-        "hotline": "1900 54 54 13",
+        "hotline": "1900 6688",
         "customer_notice": customer_notice
     }
 

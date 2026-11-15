@@ -15,7 +15,6 @@ MANDATORY INVARIANTS:
 4. 0% REGEX LAW.
 """
 
-from __future__ import annotations
 import sys
 import json
 import time
@@ -92,7 +91,7 @@ def run_auto_guardrails(
             print(f"⚠️ Khong tim thay tap tin input queries trong: {in_dir}")
             return []
 
-        with open(target_in_file, "r", encoding="utf-8") as fp:
+        with open(target_in_file, "r", encoding="utf-8-sig") as fp:
             raw_items = json.load(fp)
 
     if not raw_items:
@@ -147,7 +146,7 @@ def run_auto_guardrails(
     new_count = 0
     start_t = time.time()
 
-    # 3. Phn loi cu hi thnh nhm ti s dng (SKIP) v nhm cn chy mi (NEW)
+    # 3. Classify queries into cached reuse (SKIP) and pending evaluation (NEW)
     items_to_process = []
     for idx, item in enumerate(raw_items):
         if isinstance(item, str):
@@ -171,7 +170,7 @@ def run_auto_guardrails(
         else:
             items_to_process.append((idx, q_id, q_text, q_hash, desc))
 
-    # 4. Thc thi kim nh cho cc cu hi mi
+    # 4. Execute guardrail verification on pending queries
     if items_to_process:
         should_use_pool = False
         if use_threading:

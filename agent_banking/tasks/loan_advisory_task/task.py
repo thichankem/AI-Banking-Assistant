@@ -11,7 +11,6 @@ Inherits full node library from BaseBankingTask:
 RULES: 0% Regex, Zero Ternary, No Typing Library, No __init__.py.
 """
 
-from __future__ import annotations
 from agent_banking.tasks.base_task import BaseBankingTask, TaskResult
 from agent_banking.skills.skill_registry import SkillRegistry
 from agent_banking.core.settings import Config
@@ -44,18 +43,53 @@ class LoanAdvisoryTask(BaseBankingTask):
         # 3. Inherited Parameter Extractor & Banking Tool Nodes
         steps.append("Node 3: Parameter Extractor & Banking Tool (Calculate amortization)")
         extracted = self.node_parameter_extractor(user_query)
-        principal = context.get("principal", extracted.get("principal", 500000000.0))
+        principal = context.get(
+            "principal_vnd",
+            context.get("principal", context.get("amount_vnd", extracted.get("amount_vnd", 500000000.0)))
+        )
+        if float(principal or 0.0) <= 0.0:
+            principal = 500000000.0
         term_months = context.get("term_months", extracted.get("term_months", 12))
+        if int(term_months or 0) <= 0:
+            term_months = 12
         annual_rate = context.get("annual_rate_percent", extracted.get("annual_rate_percent", 7.5))
+        if float(annual_rate or 0.0) <= 0.0:
+            annual_rate = 7.5
 
         calc_result = self.node_banking_tool("loan_amortization", {
-            "principal": principal,
-            "term_months": term_months,
-            "annual_rate_percent": annual_rate
+            "principal_vnd": float(principal),
+            "term_months": int(term_months),
+            "annual_rate_percent": float(annual_rate)
         })
         calc_data = calc_result.get("calculation_data", {})
         schedule_md = calc_data.get("schedule_markdown", "")
+        if not schedule_md:
+            sched_rows = calc_data.get("schedule_sample", [])
+            if sched_rows:
+                md_lines = [
+                    "| Kỳ | Dư nợ đầu kỳ (VND) | Gốc (VND) | Lãi (VND) | Tổng trả (VND) |",
+                    "| :--- | :--- | :--- | :--- | :--- |"
+                ]
+                for row in sched_rows:
+                    md_lines.append(
+                        f"| Tháng {row.get('month')} | {row.get('opening_balance_vnd', 0):,.0f} | "
+                        f"{row.get('principal_payment_vnd', 0):,.0f} | {row.get('interest_payment_vnd', 0):,.0f} | "
+                        f"{row.get('total_monthly_payment_vnd', 0):,.0f} |"
+                    )
+                schedule_md = "\n".join(md_lines)
+            else:
+                schedule_md = f"Số tiền vay: {float(principal):,.0f} VND | Kỳ hạn: {int(term_months)} tháng | Lãi suất: {float(annual_rate)}%/năm"
+
         summary = calc_data.get("summary", {})
+        if not summary and calc_data:
+            summary = {
+                "principal_vnd": calc_data.get("principal_vnd", float(principal)),
+                "annual_rate_percent": calc_data.get("annual_rate_percent", float(annual_rate)),
+                "term_months": calc_data.get("term_months", int(term_months)),
+                "first_month_payment_vnd": calc_data.get("first_month_payment_vnd", 0.0),
+                "total_interest_vnd": calc_data.get("total_interest_vnd", 0.0),
+                "total_payable_vnd": calc_data.get("total_payable_vnd", 0.0),
+            }
 
         # 4. Inherited Knowledge Retrieval Node (RAG)
         steps.append("Node 4: Knowledge Retrieval (RAG lending policy lookup)")

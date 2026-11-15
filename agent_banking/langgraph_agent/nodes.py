@@ -20,9 +20,9 @@ RULES:
 - INFINITE LOOP PROTECTION: Strict retry_count and hallucination_retries bounds.
 """
 
-from __future__ import annotations
 from agent_banking.core.chat import FallbackChatClient
 from agent_banking.core.fallback import ModelFallbackError
+from agent_banking.generator.config.prompts import build_banking_system_prompt
 
 from agent_banking.core.settings import Config
 from agent_banking.langgraph_agent.state import AgentState
@@ -53,7 +53,7 @@ from agent_banking.tools.banking_api_tools import (
 
 
 def _clean_think_tags(text: str) -> str:
-    """Clean reasoning tags <think>...</think> from LLM output (0% Regex)."""
+    """Clean reasoning tags <think>...</think> and un-tagged chain-of-thought leaks (0% Regex)."""
     cleaned = text
     while True:
         start_idx = cleaned.find("<think>")
@@ -65,7 +65,184 @@ def _clean_think_tags(text: str) -> str:
             break
         else:
             cleaned = cleaned[:start_idx] + cleaned[end_idx + len("</think>"):]
+    
+    cleaned = cleaned.strip()
+    cot_markers = [
+        "Chúng ta cần trả lời câu hỏi:",
+        "Phân tích yêu cầu câu hỏi:",
+        "Dựa trên các tài liệu được cung cấp, chúng ta thấy:"
+    ]
+    for cot in cot_markers:
+        if cleaned.startswith(cot):
+            formal_starts = ["\nKính gửi", "\nKính thưa", "\nCăn cứ", "\nTheo quy định", "\nTrả lời:", "\n### ", "\n## ", "\n1. "]
+            best_idx = -1
+            for fs in formal_starts:
+                idx = cleaned.find(fs)
+                if idx != -1:
+                    if best_idx == -1 or idx < best_idx:
+                        best_idx = idx
+            if best_idx != -1:
+                cleaned = cleaned[best_idx:].strip()
+                break
     return cleaned.strip()
+
+
+def _unwrap_doc_dict(doc) -> dict:
+    """Return canonical chunk dict whether wrapped in {'chunk': ...} or already flat."""
+    if isinstance(doc, dict) and isinstance(doc.get("chunk"), dict):
+        return doc["chunk"]
+    if isinstance(doc, dict):
+        return doc
+    return {}
+
+
+def _render_table_data_text(table_data) -> str:
+    """Render canonical chunk table_data (str, dict, or list) into concise Markdown."""
+    if not table_data:
+        return ""
+    if isinstance(table_data, str):
+        return table_data.strip()
+
+    tables = []
+    if isinstance(table_data, dict):
+        tables = [table_data]
+    elif isinstance(table_data, list):
+        if table_data and isinstance(table_data[0], dict):
+            tables = table_data
+        else:
+            row_lines = []
+            for row in table_data[:20]:
+                if isinstance(row, list):
+                    cells = [str(c).strip() for c in row]
+                    row_lines.append("| " + " | ".join(cells) + " |")
+                elif row:
+                    row_lines.append(str(row).strip())
+            return "\n".join(row_lines)
+
+    rendered = []
+    for tbl in tables[:3]:
+        if not isinstance(tbl, dict):
+            continue
+        headers = tbl.get("headers") or tbl.get("header") or []
+        rows = tbl.get("rows") or tbl.get("cells") or []
+        lines = []
+        if isinstance(headers, list) and headers:
+            h_cells = [str(h).strip() for h in headers]
+            lines.append("| " + " | ".join(h_cells) + " |")
+            lines.append("| " + " | ".join(["---"] * len(h_cells)) + " |")
+        if isinstance(rows, list):
+            for row in rows[:20]:
+                if isinstance(row, list):
+                    r_cells = [str(c).strip() for c in row]
+                    lines.append("| " + " | ".join(r_cells) + " |")
+                elif isinstance(row, dict):
+                    r_vals = [str(v).strip() for v in row.values()]
+                    lines.append("| " + " | ".join(r_vals) + " |")
+        if lines:
+            rendered.append("\n".join(lines))
+        else:
+            fallback_str = str(tbl.get("markdown") or tbl.get("summary") or tbl.get("caption") or "").strip()
+            if fallback_str:
+                rendered.append(fallback_str)
+    return "\n\n".join(rendered)
+
+
+def _render_images_text(images) -> str:
+    """Extract readable image captions, descriptions, or OCR text from multimodal chunks."""
+    if not isinstance(images, list) or not images:
+        return ""
+    parts = []
+    for img in images[:5]:
+        if isinstance(img, str):
+            txt = img.strip()
+            if txt:
+                parts.append(txt)
+            continue
+        if not isinstance(img, dict):
+            continue
+        labels = []
+        for key in ("caption", "description", "native_text", "ocr_text", "alt_text", "title"):
+            val = str(img.get(key) or "").strip()
+            if val and val not in labels:
+                labels.append(val)
+        if labels:
+            parts.append(" - ".join(labels))
+    return "; ".join(parts)
+
+
+def _format_retrieved_doc_context(doc, max_chars=None) -> str:
+    """Format a 13-key universal chunk (or wrapper dict) for grading or grounded generation."""
+    d = _unwrap_doc_dict(doc)
+    if not d:
+        return ""
+
+    source_name = str(d.get("source") or "")
+    breadcrumb = str(d.get("breadcrumb") or "")
+    section_title = str(d.get("section_title") or "")
+    chunk_type = str(d.get("chunk_type") or "text")
+    meta = d.get("business_metadata")
+    if not isinstance(meta, dict):
+        meta = {}
+
+    doc_name = str(meta.get("document_name") or "")
+    domain = str(meta.get("domain") or "")
+    category = str(meta.get("category") or "")
+    retrieval_meta = meta.get("retrieval")
+    if not isinstance(retrieval_meta, dict):
+        retrieval_meta = {}
+    situated = str(retrieval_meta.get("situated_context") or "").strip()
+
+    display_source = doc_name
+    if not display_source:
+        display_source = source_name
+
+    header_parts = []
+    if display_source:
+        header_parts.append(display_source)
+    if breadcrumb and breadcrumb != display_source:
+        header_parts.append(breadcrumb)
+    if section_title and section_title not in breadcrumb:
+        header_parts.append(section_title)
+
+    meta_tags = []
+    if chunk_type and chunk_type != "text":
+        meta_tags.append(chunk_type)
+    if domain:
+        meta_tags.append(domain)
+    if category:
+        meta_tags.append(category)
+
+    body_parts = []
+    if situated:
+        body_parts.append(f"[Ngữ cảnh]: {situated}")
+
+    content = str(d.get("content") or "").strip()
+    if content:
+        body_parts.append(content)
+
+    table_text = _render_table_data_text(d.get("table_data"))
+    if table_text and table_text not in content:
+        body_parts.append(f"[Bảng dữ liệu]:\n{table_text}")
+
+    image_text = _render_images_text(d.get("images"))
+    if image_text and image_text not in content:
+        body_parts.append(f"[Hình ảnh/Minh họa]: {image_text}")
+
+    body_text = "\n".join(body_parts).strip()
+    if max_chars is not None and len(body_text) > max_chars:
+        body_text = body_text[:max_chars]
+
+    header_line = ""
+    if header_parts:
+        header_line = "### Nguồn: " + " | ".join(header_parts)
+        if meta_tags:
+            header_line = header_line + " (" + ", ".join(meta_tags) + ")"
+
+    if header_line and body_text:
+        return f"{header_line}\n{body_text}"
+    if header_line:
+        return header_line
+    return body_text
 
 
 class BankingAgentNodes:
@@ -116,10 +293,13 @@ class BankingAgentNodes:
             return is_ok, msg
         return True, ""
 
-    def _call_llm_quick(self, system_prompt: str, user_prompt: str, max_tokens: int = 200) -> str:
+    def _call_llm_quick(self, system_prompt: str, user_prompt: str, max_tokens: int = 1536) -> str:
         """Call internal LLM endpoint for Router/Grader/Rewriter."""
         if not self.client:
             return ""
+        eff_max_tokens = max_tokens
+        if eff_max_tokens < 1536:
+            eff_max_tokens = 1536
         try:
             resp = self.client.chat.completions.create(
                 model=self.config.LLM_MODEL,
@@ -128,12 +308,18 @@ class BankingAgentNodes:
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.1,
-                max_tokens=max_tokens
+                max_tokens=eff_max_tokens
             )
             raw_content = resp.choices[0].message.content
             if raw_content is None:
+                if hasattr(resp.choices[0].message, "reasoning_content"):
+                    raw_content = resp.choices[0].message.reasoning_content
+            if raw_content is None:
                 return ""
             return _clean_think_tags(raw_content).strip()
+        except ModelFallbackError as e:
+            print(f"[Agent Nodes] LLM Quick Call ModelFallbackError: {e}")
+            return ""
         except Exception as e:
             print(f"[Agent Nodes] LLM Quick Call Error: {type(e).__name__}")
             return ""
@@ -166,9 +352,11 @@ class BankingAgentNodes:
                             blocked_by_decision = True
                             reason_text = "Prompt Injection / Adversarial attack detected by decision engine"
 
-        max_retries_cfg = 2
+        max_retries_cfg = 3
 
-        if hasattr(self.config, "MAX_RETRIES"):
+        if hasattr(self.config, "AGENT_MAX_RETRIES"):
+            max_retries_cfg = int(self.config.AGENT_MAX_RETRIES)
+        elif hasattr(self.config, "MAX_RETRIES"):
             max_retries_cfg = int(self.config.MAX_RETRIES)
 
         # Case: Safety violation
@@ -179,11 +367,13 @@ class BankingAgentNodes:
             step_msg = "Node 0: input_guardrail (Blocked by Security Guardrail)"
             if blocked_by_decision:
                 step_msg = "Node 0: input_guardrail [Decision Engine] (Blocked: Prompt Injection)"
-            return {
+            res_state = dict(state)
+            res_state.update({
                 "user_query": user_query,
                 "query": user_query,
                 "original_query": user_query,
                 "rewritten_query": user_query,
+                "parsed_query": {},
                 "is_safe": False,
                 "guardrail_reason": reason_text,
                 "input_guard": {
@@ -213,14 +403,17 @@ class BankingAgentNodes:
                 "citations": [],
                 "sources": [],
                 "execution_steps": [step_msg]
-            }
+            })
+            return res_state
 
         # Case: Safe input, reset state for turn
-        return {
+        res_state = dict(state)
+        res_state.update({
             "user_query": user_query,
             "query": user_query,
             "original_query": user_query,
             "rewritten_query": user_query,
+            "parsed_query": {},
             "is_safe": True,
             "guardrail_reason": "",
             "input_guard": {
@@ -249,7 +442,8 @@ class BankingAgentNodes:
             "citations": [],
             "sources": [],
             "execution_steps": ["Node 0: input_guardrail (State Reset & Security Check)"]
-        }
+        })
+        return res_state
 
     # =========================================================================
     # NODE 1: SUPERVISOR ROUTER
@@ -288,13 +482,15 @@ class BankingAgentNodes:
 
         # 1. Check for casual chat (CHIT_CHAT)
         chit_chat_keywords = [
-            "xin chào", "chào bạn", "hello", "hi vcb", "cảm ơn",
+            "xin chào", "chào bạn", "hello", "hi a-bank", "chào a-bank", "cảm ơn",
             "cam on", "bạn tên gì", "bạn là ai", "tạm biệt", "chúc bạn"
         ]
         banking_substantive_kws = [
             "thẻ", "the", "vay", "lãi", "lai", "tỷ giá", "ty gia", "tiết kiệm", "tiet kiem",
             "sinh trắc", "sinh trac", "2345", "ekyc", "hạn mức", "han muc", "phí", "phi",
-            "tài khoản", "tai khoan", "chuyển tiền", "chuyen tien", "digibank", "otp"
+            "tài khoản", "tai khoan", "chuyển tiền", "chuyen tien", "a-bank plus", "a-smart",
+            "otp", "bảo hiểm", "bao hiem", "a-life", "hợp đồng", "hop dong",
+            "tra soát", "tra soat", "sla", "báo cáo", "bao cao"
         ]
 
         has_chit_chat_kw = any(kw in query_lower for kw in chit_chat_keywords)
@@ -323,7 +519,8 @@ class BankingAgentNodes:
         ]
         compliance_markers = [
             "sinh trắc học", "2345", "thông tư 50", "ekyc", "cccd gắn chip",
-            "vneid", "nfc", "quét khuôn mặt", "hạn mức chuyển tiền", "facepay"
+            "vneid", "nfc", "quét khuôn mặt", "hạn mức chuyển tiền", "facepay",
+            "bảo hiểm", "a-life", "tra soát", "sla", "quy chế", "tuân thủ"
         ]
 
         if any(marker in query_lower for marker in credit_card_markers):
@@ -337,6 +534,13 @@ class BankingAgentNodes:
         target_tool = None
         detected_intent = "RAG_SEARCH"
 
+        is_card_or_knowledge_query = False
+        card_terms = ["thẻ", "the", "credit", "debit", "platinum", "napas", "visa", "mastercard", "jcb", "rút tiền", "phí", "quy định", "hạn mức", "điều khoản", "bảo hiểm", "a-life", "tra soát", "báo cáo", "tài chính"]
+        for cterm in card_terms:
+            if cterm in query_lower:
+                is_card_or_knowledge_query = True
+                break
+
         if "khấu hao" in query_lower or "dư nợ giảm dần" in query_lower or "lịch trả nợ" in query_lower:
             detected_intent = "BANKING_ACTION"
             sub_agent = "LOAN_MORTGAGE_AGENT"
@@ -345,20 +549,20 @@ class BankingAgentNodes:
             detected_intent = "BANKING_ACTION"
             sub_agent = "LOAN_MORTGAGE_AGENT"
             target_tool = "calculate_loan_amortization"
-        elif ("sinh trắc học" in query_lower or "2345" in query_lower or "quét khuôn mặt" in query_lower) and ("chuyển" in query_lower or "triệu" in query_lower or "bắt buộc" in query_lower or "hạn mức" in query_lower or "thiết bị" in query_lower):
+        elif ("sinh trắc học" in query_lower or "2345" in query_lower or "quét khuôn mặt" in query_lower) and ("chuyển" in query_lower or "triệu" in query_lower or "bắt buộc" in query_lower or "thiết bị" in query_lower):
             detected_intent = "BANKING_ACTION"
             sub_agent = "COMPLIANCE_AUDIT_AGENT"
             target_tool = "check_biometric_compliance_qd2345"
-        elif "tỷ giá" in query_lower or "ty gia" in query_lower or "usd" in query_lower or "ngoại tệ" in query_lower:
+        elif not is_card_or_knowledge_query and ("tỷ giá hôm nay" in query_lower or "tra cứu tỷ giá" in query_lower or "bảng tỷ giá" in query_lower or "giá usd" in query_lower):
             detected_intent = "BANKING_ACTION"
             target_tool = "get_foreign_exchange_rates"
-        elif "tính lãi" in query_lower or "tinh lai" in query_lower or ("gửi" in query_lower and "tiết kiệm" in query_lower and "triệu" in query_lower):
+        elif not is_card_or_knowledge_query and ("tính lãi" in query_lower or "tinh lai" in query_lower or ("gửi" in query_lower and "tiết kiệm" in query_lower and "triệu" in query_lower and "lãi bao nhiêu" in query_lower)):
             detected_intent = "BANKING_ACTION"
             target_tool = "calculate_savings_profit"
-        elif "lãi suất" in query_lower or "lai suat" in query_lower:
+        elif not is_card_or_knowledge_query and ("biểu lãi suất tiền gửi" in query_lower or "bảng lãi suất tiết kiệm" in query_lower or "lãi suất tiền gửi hôm nay" in query_lower):
             detected_intent = "BANKING_ACTION"
             target_tool = "get_interest_rates"
-        elif "khiếu nại" in query_lower or "khieu nai" in query_lower or "tạo ticket" in query_lower or "mất thẻ" in query_lower:
+        elif "khiếu nại" in query_lower or "khieu nai" in query_lower or "tạo ticket" in query_lower or "báo mất thẻ" in query_lower or "khóa thẻ khẩn cấp" in query_lower:
             detected_intent = "BANKING_ACTION"
             target_tool = "create_support_ticket"
 
@@ -387,7 +591,7 @@ class BankingAgentNodes:
         steps = list(state.get("execution_steps", []))
         steps.append("Node 2: retrieve (Hybrid RRF k=60 + reranker)")
 
-        res = self.rag_tool.execute(query=query, top_k=3)
+        res = self.rag_tool.execute(query=query, top_k=6)
         docs = res.get("documents", [])
         sources = res.get("sources", [])
         citations = res.get("citations", [])
@@ -430,7 +634,11 @@ class BankingAgentNodes:
             return res_state
 
         query = str(state.get("query") or state.get("user_query") or "")
-        context_parts = [str(d.get("content", ""))[:300] for d in docs]
+        context_parts = []
+        for d in docs:
+            formatted = _format_retrieved_doc_context(d, max_chars=400)
+            if formatted:
+                context_parts.append(formatted)
         context_str = "\n---\n".join(context_parts)
 
         # 1. Fast relevance grading via Decision Model
@@ -454,11 +662,11 @@ class BankingAgentNodes:
         # 2. LLM Fallback
         grader_prompt = DOCUMENT_GRADER_PROMPT.format(query=query, documents=context_str)
 
-        verdict = self._call_llm_quick(DOCUMENT_GRADER_SYSTEM_MESSAGE, grader_prompt, max_tokens=256).lower()
+        verdict = self._call_llm_quick(DOCUMENT_GRADER_SYSTEM_MESSAGE, grader_prompt, max_tokens=1536).lower()
 
-        quality = "IRRELEVANT"
-        if "yes" in verdict or verdict.strip() == "y":
-            quality = "RELEVANT"
+        quality = "RELEVANT"
+        if "no" in verdict and "yes" not in verdict:
+            quality = "IRRELEVANT"
 
         steps.append("Node 3: grade_documents -> " + quality)
         res_state = dict(state)
@@ -482,7 +690,7 @@ class BankingAgentNodes:
         curr_q = str(state.get("query") or state.get("user_query") or "")
 
         rewrite_user = QUERY_REWRITER_PROMPT.format(original_query=orig_q, current_query=curr_q)
-        new_query = self._call_llm_quick(QUERY_REWRITER_SYSTEM_MESSAGE, rewrite_user, max_tokens=60).strip().strip('"\'')
+        new_query = self._call_llm_quick(QUERY_REWRITER_SYSTEM_MESSAGE, rewrite_user, max_tokens=256).strip().strip('"\'')
 
         if len(new_query) < 3:
             new_query = f"Quy định về {orig_q}"
@@ -512,9 +720,26 @@ class BankingAgentNodes:
         params = parse_vietnamese_financial_params(raw_query)
         tool_outputs = []
         executed_tool_name = target
+        known_tools = {
+            "calculate_loan_amortization",
+            "check_biometric_compliance_qd2345",
+            "get_interest_rates",
+            "get_foreign_exchange_rates",
+            "calculate_savings_profit",
+            "create_support_ticket",
+        }
+        has_explicit_target = target in known_tools
 
         # 1. Loan Amortization
-        if target == "calculate_loan_amortization" or sub_agent == "LOAN_MORTGAGE_AGENT" or "khấu hao" in query or "dư nợ giảm dần" in query or ("vay" in query and ("tháng bao nhiêu" in query or "trả góp" in query or "lịch trả nợ" in query)):
+        if target == "calculate_loan_amortization" or (
+            not has_explicit_target
+            and (
+                sub_agent == "LOAN_MORTGAGE_AGENT"
+                or "khấu hao" in query
+                or "dư nợ giảm dần" in query
+                or ("vay" in query and ("tháng bao nhiêu" in query or "trả góp" in query or "lịch trả nợ" in query))
+            )
+        ):
             executed_tool_name = "calculate_loan_amortization"
             principal = params["amount_vnd"]
             if principal <= 0.0:
@@ -540,7 +765,16 @@ class BankingAgentNodes:
             tool_outputs.append({"tool": "calculate_loan_amortization", "result": res})
 
         # 2. Biometric Compliance Evaluation
-        elif target == "check_biometric_compliance_qd2345" or sub_agent == "COMPLIANCE_AUDIT_AGENT" or "2345" in query or "sinh trắc học" in query or "quét khuôn mặt" in query or "khuôn mặt" in query:
+        elif target == "check_biometric_compliance_qd2345" or (
+            not has_explicit_target
+            and (
+                sub_agent == "COMPLIANCE_AUDIT_AGENT"
+                or "2345" in query
+                or "sinh trắc học" in query
+                or "quét khuôn mặt" in query
+                or "khuôn mặt" in query
+            )
+        ):
             executed_tool_name = "check_biometric_compliance_qd2345"
             tool_input = {
                 "single_tx_amount_vnd": params["single_tx_amount_vnd"],
@@ -562,13 +796,13 @@ class BankingAgentNodes:
             tool_outputs.append({"tool": "check_biometric_compliance_qd2345", "result": res})
 
         # 3. Deposit Interest Rates
-        elif target == "get_interest_rates" or ("lãi suất" in query and "vay" not in query and "khấu hao" not in query):
+        elif target == "get_interest_rates" or (not has_explicit_target and "lãi suất" in query and "vay" not in query and "khấu hao" not in query):
             executed_tool_name = "get_interest_rates"
             res = get_interest_rates(deposit_type="vnd")
             tool_outputs.append({"tool": "get_interest_rates", "result": res})
 
         # 4. Foreign Exchange Rates
-        elif target == "get_foreign_exchange_rates" or "tỷ giá" in query or "usd" in query or "ngoại tệ" in query:
+        elif target == "get_foreign_exchange_rates" or (not has_explicit_target and ("tỷ giá" in query or "usd" in query or "ngoại tệ" in query)):
             executed_tool_name = "get_foreign_exchange_rates"
             currency = "USD"
             for c in ["EUR", "JPY", "GBP", "SGD", "AUD", "CAD", "CNY"]:
@@ -579,7 +813,7 @@ class BankingAgentNodes:
             tool_outputs.append({"tool": "get_foreign_exchange_rates", "result": res})
 
         # 5. Calculate Savings Profit
-        elif target == "calculate_savings_profit" or "tính lãi" in query or "gửi tiết kiệm" in query:
+        elif target == "calculate_savings_profit" or (not has_explicit_target and ("tính lãi" in query or "gửi tiết kiệm" in query)):
             executed_tool_name = "calculate_savings_profit"
             amount = params["amount_vnd"]
             if amount <= 0.0:
@@ -600,11 +834,25 @@ class BankingAgentNodes:
         # 6. Urgent Support Ticket
         else:
             executed_tool_name = "create_support_ticket"
+            issue_type = "Yêu cầu hỗ trợ nghiệp vụ"
+            priority = "NORMAL"
+            if "nuốt thẻ" in query or "nuot the" in query:
+                issue_type = "nuot_the_atm"
+                priority = "HIGH"
+            elif "mất thẻ" in query or "mat the" in query or "khóa thẻ" in query or "khoa the" in query:
+                issue_type = "mat_the_khoa_the"
+                priority = "HIGH"
+            elif "lừa đảo" in query or "lua dao" in query or "gian lận" in query or "gian lan" in query:
+                issue_type = "gian_lan_lua_dao"
+                priority = "HIGH"
+            elif "tra soát" in query or "tra soat" in query or "khiếu nại" in query or "khieu nai" in query:
+                issue_type = "tra_soat_giao_dich"
+
             tool_input = {
                 "customer_name": "Quý khách hàng",
-                "issue_type": "Yêu cầu hỗ trợ nghiệp vụ",
+                "issue_type": issue_type,
                 "description": raw_query,
-                "priority": "NORMAL"
+                "priority": priority
             }
             guard_check = self.guardrail_manager.guard_tool_call("create_support_ticket", tool_input)
             if not guard_check.get("is_safe", True):
@@ -643,7 +891,29 @@ class BankingAgentNodes:
         steps = list(state.get("execution_steps", []))
         intent = state.get("intent", "RAG_SEARCH")
         sub_agent_role = state.get("sub_agent_role", "GENERAL_ADVISOR")
-        selected_system_prompt = SUB_AGENT_SYSTEM_PROMPTS.get(sub_agent_role, BANKING_AGENT_SYSTEM_PROMPT)
+
+        persona_key = str(state.get("persona") or "advisor").strip().lower()
+        if not persona_key:
+            persona_key = "advisor"
+        tone_key = str(state.get("tone") or "formal").strip().lower()
+        if not tone_key:
+            tone_key = "formal"
+        format_key = str(state.get("format_type") or state.get("format_style") or "standard").strip().lower()
+        if not format_key:
+            format_key = "standard"
+        custom_persona = str(state.get("custom_persona") or "")
+
+        specialist_prompt = SUB_AGENT_SYSTEM_PROMPTS.get(sub_agent_role, BANKING_AGENT_SYSTEM_PROMPT)
+        style_prompt = build_banking_system_prompt(
+            persona_key=persona_key,
+            tone_key=tone_key,
+            format_key=format_key,
+            custom_persona=custom_persona
+        )
+        if style_prompt:
+            selected_system_prompt = f"{specialist_prompt}\n\n{style_prompt}".strip()
+        else:
+            selected_system_prompt = specialist_prompt
 
         query = str(state.get("original_query") or state.get("user_query") or state.get("query") or "")
         docs = state.get("retrieved_chunks") or state.get("retrieved_docs") or []
@@ -739,9 +1009,10 @@ class BankingAgentNodes:
         # Branch 2: CHIT_CHAT
         if intent == "CHIT_CHAT":
             draft = (
-                "Kính chào Quý khách! Tôi là Trợ lý AI Ngân hàng Vietcombank.\n\n"
+                "Kính chào Quý khách! Tôi là Trợ lý AI Ngân hàng A-Bank.\n\n"
                 "Tôi có thể hỗ trợ Quý khách giải đáp các quy chế mở tài khoản eKYC, hạn mức giao dịch chuyển tiền, "
-                "thông tin biểu phí, điều khoản sản phẩm thẻ, tính lịch trả nợ vay mua nhà/xe, kiểm tra sinh trắc học theo QĐ 2345 hoặc tra cứu tỷ giá ngoại tệ hôm nay. "
+                "thông tin biểu phí, điều khoản sản phẩm thẻ, hợp đồng bảo hiểm A-Life, quy trình tra soát SLA, tính lịch trả nợ vay, "
+                "kiểm tra sinh trắc học theo QĐ 2345 hoặc tra cứu tỷ giá ngoại tệ hôm nay. "
                 "Quý khách cần hỗ trợ thông tin gì ạ?"
             )
             steps.append("Node 6: generate (Banking Specialist Persona - Chit Chat)")
@@ -761,35 +1032,64 @@ class BankingAgentNodes:
             res_state.update({"draft_answer": fallback, "final_answer": fallback, "execution_steps": steps})
             return res_state
 
-        # Assemble context from top chunks
+        # Assemble context from top chunks (universal 13-key schema: text, table, multimodal)
         context_parts = []
         for d in docs:
-            bread = d.get("breadcrumb", "")
-            content = d.get("content", "")
-            if bread:
-                context_parts.append(f"### Nguồn: {bread}\n{content}")
-            else:
-                context_parts.append(str(content))
+            formatted = _format_retrieved_doc_context(d)
+            if formatted:
+                context_parts.append(formatted)
         context_str = "\n\n".join(context_parts)
 
         feedback_instruction = ""
         if hallucination_retries > 0 and audit_feedback:
             feedback_instruction = f"\n\n[LƯU Ý ĐẶC BIỆT TỪ HỆ THỐNG AUDIT KIỂM ĐỊNH - LẦN THỬ LẠI {hallucination_retries}]: {audit_feedback}\n"
 
+        if GENERATE_USER_PROMPT_TEMPLATE and "{context}" in GENERATE_USER_PROMPT_TEMPLATE and "{query}" in GENERATE_USER_PROMPT_TEMPLATE:
+            user_prompt_body = GENERATE_USER_PROMPT_TEMPLATE.format(context=context_str, query=query)
+        else:
+            user_prompt_body = f"TÀI LIỆU CĂN CỨ TỪ HỆ THỐNG:\n{context_str}\n\nCÂU HỎI CỦA KHÁCH HÀNG: {query}"
+
         prompt = (
-            f"{selected_system_prompt}\n\n"
-            f"TÀI LIỆU CĂN CỨ TỪ HỆ THỐNG:\n{context_str}\n\n"
-            f"CÂU HỎI CỦA KHÁCH HÀNG: {query}"
+            f"{user_prompt_body}\n\n"
             f"{feedback_instruction}\n\n"
-            f"YÊU CẦU BẮT BUỘC: Trả lời rõ ràng, chính xác, tuyệt đối không bịa đặt số liệu và BẮT BUỘC trích dẫn điều khoản cụ thể [Điều X, Khoản Y] hoặc tên tài liệu nguồn."
+            "YÊU CẦU BẮT BUỘC VỀ CHẤT LƯỢNG CÂU TRẢ LỜI CHO GIÁM KHẢO NGÂN HÀNG:\n"
+            "1. Đọc kỹ toàn bộ TÀI LIỆU CĂN CỨ (gồm cả văn bản, bảng dữ liệu [Bảng dữ liệu] và chú thích hình ảnh [Hình ảnh/Minh họa]) và trả lời TRỰC DIỆN, TOÀN DIỆN tất cả các vế của câu hỏi.\n"
+            "2. Bắt đầu ngay bằng lời chào và giải đáp nghiệp vụ chuyên nghiệp (ví dụ: 'Kính gửi Quý khách...').\n"
+            "3. TUYỆT ĐỐI KHÔNG viết các đoạn lập luận nháp nội bộ như 'Chúng ta cần trả lời...', 'Tài liệu cung cấp...', 'Chúng ta phân tích...'. Chỉ cung cấp câu trả lời hoàn chỉnh tới khách hàng.\n"
+            "4. ĐỘ CHÍNH XÁC VÀ ĐẦY ĐỦ TUYỆT ĐỐI: Trích xuất CHÍNH XÁC mọi số liệu, tỷ lệ %, số tiền hạn mức (VNĐ/USD), các mốc thời hạn (ngày, tháng, năm), điều kiện doanh số chi tiêu hoặc số dư tối thiểu, các bước quy trình từ bước 1 đến bước cuối.\n"
+            "5. TRẢ LỜI ĐẦY ĐỦ MỌI ĐỐI TƯỢNG ĐƯỢC HỎI: Nếu câu hỏi hỏi nhiều vế (ví dụ: cả thẻ chính và thẻ phụ, cả mức phí và điều kiện miễn phí, từng kỳ hạn trả góp, từng phân khúc khách hàng...), bắt buộc phải liệt kê rành mạch từng vế với đầy đủ số liệu tương ứng.\n"
+            "6. THÁI ĐỘ NGHIỆP VỤ CHUẨN MỰC: Tuyệt đối không từ chối hoặc nói 'tài liệu không có' nếu trong tài liệu đã có bảng biểu, sơ đồ hoặc điều khoản liên quan. Hãy tổng hợp thông tin sát nhất từ tài liệu để giải đáp thấu đáo và chính xác.\n"
+            "7. Cuối câu trả lời, ghi rõ căn cứ pháp lý: [Điều X, Khoản Y hoặc Tên văn bản quy chuẩn]."
         )
 
-        draft = self._call_llm_quick(selected_system_prompt, prompt, max_tokens=800)
+        draft = self._call_llm_quick(selected_system_prompt, prompt, max_tokens=3000)
+
+        # Clean any leaked chain-of-thought prefix if present
+        if draft.startswith("Chúng ta cần trả lời câu hỏi:"):
+            # Find the actual answer starting with Kính gửi / Căn cứ / Theo quy định
+            cut_markers = ["\nKính gửi", "\nKính thưa", "\nCăn cứ", "\nTheo quy định", "\nTrả lời:"]
+            best_cut = -1
+            for marker in cut_markers:
+                idx = draft.find(marker)
+                if idx != -1:
+                    if best_cut == -1 or idx < best_cut:
+                        best_cut = idx
+            if best_cut != -1:
+                draft = draft[best_cut:].strip()
+
+        first_doc = _unwrap_doc_dict(docs[0])
+        first_meta = first_doc.get("business_metadata")
+        if not isinstance(first_meta, dict):
+            first_meta = {}
+        first_source = (
+            str(first_meta.get("document_name") or "").strip()
+            or str(first_doc.get("breadcrumb") or "").strip()
+            or str(first_doc.get("source") or "").strip()
+            or "Tài liệu ngân hàng"
+        )
 
         if not draft:
-            first_doc = docs[0]
-            first_content = str(first_doc.get("content", ""))[:400]
-            first_source = first_doc.get("breadcrumb", first_doc.get("source", "Tài liệu ngân hàng"))
+            first_content = _format_retrieved_doc_context(docs[0], max_chars=400)
             draft = (
                 f"Căn cứ theo quy định:\n\n{first_content}...\n\n"
                 f"*(Nguồn tham chiếu: [Điều khoản quy định] - {first_source})*"
@@ -797,7 +1097,6 @@ class BankingAgentNodes:
 
         draft_lower = draft.lower()
         if "[điều" not in draft_lower and "[khoản" not in draft_lower and "[nguồn" not in draft_lower:
-            first_source = docs[0].get("breadcrumb", docs[0].get("source", "Quy chế ngân hàng"))
             draft = draft + f"\n\n*(Căn cứ pháp lý: [Điều khoản Quy định] - {first_source})*"
 
         steps.append(f"Node 6: generate ({sub_agent_role} - Banking Specialist Persona - RAG Grounded)")

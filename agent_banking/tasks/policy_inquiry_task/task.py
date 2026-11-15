@@ -12,7 +12,6 @@ Inherits full node library from BaseBankingTask:
 RULES: 0% Regex, Zero Ternary, No Typing Library, No __init__.py.
 """
 
-from __future__ import annotations
 from agent_banking.tasks.base_task import BaseBankingTask, TaskResult
 from agent_banking.skills.skill_registry import SkillRegistry
 from agent_banking.core.settings import Config
@@ -64,6 +63,11 @@ class PolicyInquiryTask(BaseBankingTask):
             query=effective_query
         )
         answer = self.node_llm_generate(sys_prompt, user_prompt, temperature=0.1)
+        if not answer or answer == user_prompt:
+            if context_str:
+                answer = f"Căn cứ theo quy chế hiện hành của Ngân hàng A-Bank:\n\n{context_str}"
+            else:
+                answer = "Kính gửi Quý khách, hiện hệ thống chưa tìm thấy nội dung chi tiết phù hợp. Quý khách vui lòng liên hệ tổng đài A-Bank để được hỗ trợ."
 
         # 6. Inherited Audit Answer Node
         steps.append("Node 6: Hallucination Audit")

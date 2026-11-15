@@ -16,9 +16,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Reranking Node (Input -> Output)")
     parser.add_argument("--force", action="store_true", help="Re-run everything from scratch")
     parser.add_argument("--top-k", type=int, default=3, help="Number of reranked candidates to retain")
+    parser.add_argument("--input", type=str, default=None, help="Optional custom input candidates.json path")
+    parser.add_argument("--output", type=str, default=None, help="Optional custom output directory path")
     args = parser.parse_args()
 
-    module_dir = Path(__file__).resolve().parent
-    in_file = module_dir / "input" / "candidates.json"
-    out_dir = module_dir / "output"
-    run_auto_reranking(input_file=in_file, output_dir=out_dir, top_k=args.top_k, force=args.force)
+    run_auto_reranking(
+        input_file=args.input,
+        output_dir=args.output,
+        top_k=args.top_k,
+        force=args.force
+    )

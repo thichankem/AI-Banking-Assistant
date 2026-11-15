@@ -2,7 +2,6 @@
 Direct runner for Guardrails Module.
 Executes input-to-output processing with state deduplication.
 """
-from __future__ import annotations
 import sys
 import argparse
 from pathlib import Path

@@ -21,7 +21,6 @@ RULES:
 5. KEEP IT SIMPLE: Clean and readable code.
 """
 
-from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from agent_banking.core.chat import FallbackChatClient
@@ -201,7 +200,10 @@ class BaseBankingTask:
 
         sys_prompt = QUERY_REWRITE_SYSTEM_PROMPT
         user_prompt = f"LỊCH SỬ CHAT:\n{history_str}\n\nCÂU HỎI HIỆN TẠI: {user_query}"
-        rewritten = self.node_llm_generate(sys_prompt, user_prompt, temperature=0.1, max_tokens=120)
+        try:
+            rewritten = self.node_llm_generate(sys_prompt, user_prompt, temperature=0.1, max_tokens=256)
+        except ModelFallbackError:
+            return user_query.strip()
         clean_rewritten = rewritten.strip()
         if clean_rewritten and len(clean_rewritten) < 300:
             return clean_rewritten
@@ -275,7 +277,7 @@ class BaseBankingTask:
             return []
         filtered = []
         for ch in chunks:
-            score = ch.get("rerank_score", ch.get("score", 0.0))
+            score = ch.get("rerank_score", ch.get("relevance_score", ch.get("score", 0.0)))
             if score >= min_score:
                 filtered.append(ch)
         if not filtered:
@@ -355,10 +357,12 @@ class BaseBankingTask:
                 else:
                     raw = ""
             return _clean_think(raw)
-        except ModelFallbackError:
-            raise
+        except ModelFallbackError as e:
+            print(f"[Task LLM] ModelFallbackError, triggering fallback: {e}")
+            return ""
         except Exception as e:
-            return f"Generation error: {e}"
+            print(f"[Task LLM] Generation error, triggering fallback: {e}")
+            return ""
 
     def node_audit_answer(self, draft_answer: str, chunks: list[dict]) -> dict:
         """

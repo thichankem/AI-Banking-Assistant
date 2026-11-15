@@ -8,7 +8,6 @@ Inherits full node library from BaseBankingTask:
 RULES: 0% Regex, Zero Ternary, No Typing Library, No __init__.py.
 """
 
-from __future__ import annotations
 from agent_banking.tasks.base_task import BaseBankingTask, TaskResult
 from agent_banking.skills.skill_registry import SkillRegistry
 from agent_banking.core.settings import Config
@@ -48,7 +47,7 @@ class IncidentSupportTask(BaseBankingTask):
             issue_type = "nghi_ngo_gian_lan"
             urgency = "CRITICAL"
 
-        contact = context.get("user_contact", "KHACH_HANG_HOTLINE")
+        contact = context.get("user_contact", context.get("phone_number", context.get("customer_phone", "KHACH_HANG_HOTLINE")))
         card_num = context.get("card_number", "")
 
         # 2. Immediate action guidance
@@ -76,7 +75,7 @@ class IncidentSupportTask(BaseBankingTask):
             "urgency": urgency
         })
         ticket_data = ticket_res.get("ticket_info", {})
-        ticket_id = ticket_data.get("ticket_id", "TCK-VCB-HOTLINE")
+        ticket_id = ticket_data.get("ticket_id", "TCK-ABANK-HOTLINE")
         created_at = ticket_data.get("created_at", "Hôm nay")
 
         # 4. Inherited Format Output Node
@@ -89,7 +88,7 @@ class IncidentSupportTask(BaseBankingTask):
             f"- Loại sự cố: `{issue_type}`",
             f"- Mức độ ưu tiên: `{urgency}`",
             f"- Thời gian ghi nhận: `{created_at}`",
-            "- Tổng đài hỗ trợ 24/7: **1900 54 54 13**",
+            "- Tổng đài hỗ trợ A-Bank 24/7: **1900 6688**",
             "\nQuý khách an tâm, ngân hàng sẽ bảo vệ tối đa quyền lợi hợp pháp của Quý khách."
         ]
         return self.node_format_output(

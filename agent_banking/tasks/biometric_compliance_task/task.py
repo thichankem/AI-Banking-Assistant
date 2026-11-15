@@ -11,7 +11,6 @@ Inherits full node library from BaseBankingTask:
 RULES: 0% Regex, Zero Ternary, No Typing Library, No __init__.py.
 """
 
-from __future__ import annotations
 from agent_banking.tasks.base_task import BaseBankingTask, TaskResult
 from agent_banking.skills.skill_registry import SkillRegistry
 from agent_banking.core.settings import Config
@@ -44,18 +43,32 @@ class BiometricComplianceTask(BaseBankingTask):
         # 3. Inherited Parameter Extractor & Banking Tool Nodes
         steps.append("Node 3: Parameter Extractor & Banking Tool (Evaluate Decision 2345)")
         extracted = self.node_parameter_extractor(user_query)
-        amount = context.get("transaction_amount", extracted.get("principal", 0.0))
-        daily_amount = context.get("daily_accumulated_amount", 0.0)
-        is_new_device = context.get("is_new_device", False)
+        amount = context.get(
+            "single_tx_amount_vnd",
+            context.get("transaction_amount", extracted.get("single_tx_amount_vnd", extracted.get("principal", 0.0)))
+        )
+        daily_amount = context.get(
+            "daily_cumulative_amount_vnd",
+            context.get("daily_accumulated_amount", extracted.get("daily_cumulative_amount_vnd", 0.0))
+        )
+        is_new_device = context.get(
+            "is_first_time_new_device",
+            context.get("is_new_device", extracted.get("is_first_time_new_device", False))
+        )
+        has_chip_cccd = context.get(
+            "has_verified_chip_cccd",
+            context.get("has_cccd_chip_nfc", extracted.get("has_verified_chip_cccd", True))
+        )
 
         q_lower = user_query.lower()
         if "thiết bị mới" in q_lower or "đổi điện thoại" in q_lower or "máy mới" in q_lower:
             is_new_device = True
 
         comp_data = self.node_banking_tool("compliance_qd2345", {
-            "transaction_amount": amount,
-            "daily_accumulated_amount": daily_amount,
-            "is_new_device": is_new_device
+            "single_tx_amount_vnd": float(amount),
+            "daily_cumulative_amount_vnd": float(daily_amount),
+            "is_first_time_new_device": bool(is_new_device),
+            "has_verified_chip_cccd": bool(has_chip_cccd)
         })
         action_required = comp_data.get("action_required", "STANDARD_OTP")
         legal_basis = comp_data.get("legal_basis", "Quyết định 2345/QĐ-NHNN")

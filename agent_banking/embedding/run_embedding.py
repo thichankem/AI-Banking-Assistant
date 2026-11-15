@@ -16,7 +16,6 @@ MANDATORY RULES (GEMINI.md & AGENTS.md):
 4. 0% REGEX LAW: String methods only.
 """
 
-from __future__ import annotations
 import sys
 import json
 import time
@@ -68,7 +67,12 @@ def normalize_universal_chunk(chunk, vector=None):
     if not source:
         source = "unknown.docx"
     else:
-        source = str(source).strip()
+        # Published snapshots use the exact source name for indexing ownership.
+        metadata = chunk.get("business_metadata")
+        if isinstance(metadata, dict) and metadata.get("pipeline_fingerprint"):
+            source = str(source)
+        else:
+            source = str(source).strip()
 
     raw_c_type = chunk.get("chunk_type")
     c_type = normalize_chunk_type(raw_c_type)
@@ -169,11 +173,27 @@ def normalize_universal_chunk(chunk, vector=None):
     return normalized
 
 
+def normalize_searchable_chunks(raw_chunks):
+    normalized = []
+    for idx, raw_chunk in enumerate(raw_chunks):
+        chunk = normalize_universal_chunk(raw_chunk)
+        retrieval = chunk["business_metadata"].get("retrieval", {})
+        if retrieval.get("role") == "attachment_only":
+            continue
+        if not chunk.get("chunk_id"):
+            chunk["chunk_id"] = f"chunk_{idx}"
+        normalized.append(chunk)
+    link_chunk_sequence(normalized)
+    return normalized
+
+
 def run_auto_embedding(
     input_file=None,
     output_dir=None,
     force=False,
-    batch_size=32
+    batch_size=32,
+    *,
+    return_manifest=False
 ):
     """
     Tự động tạo vector nhúng từ input sang output kèm cơ chế chống trùng lặp.
@@ -198,7 +218,19 @@ def run_auto_embedding(
     target_in_file = None
     published_input = False
     if input_file is not None:
-        target_in_file = Path(input_file)
+        candidate_path = Path(input_file)
+        if candidate_path.is_dir():
+            manifest_in_dir = candidate_path / "chunking_manifest.json"
+            all_in_dir = candidate_path / "all_chunks.json"
+            if manifest_in_dir.exists():
+                target_in_file = manifest_in_dir
+                published_input = True
+            elif all_in_dir.exists():
+                target_in_file = all_in_dir
+            else:
+                target_in_file = candidate_path / "chunks.json"
+        else:
+            target_in_file = candidate_path
     else:
         chunking_out = PROJECT_ROOT / "agent_banking" / "chunking" / "output" / "all_chunks.json"
         publication = chunking_out.parent / "chunking_manifest.json"
@@ -211,36 +243,41 @@ def run_auto_embedding(
             default_in = in_dir / "chunks.json"
             if default_in.exists():
                 target_in_file = default_in
-            else:
-                rag_chunking_out = PROJECT_ROOT / "rag_banking" / "chunking" / "output" / "all_chunks.json"
-                if rag_chunking_out.exists():
-                    target_in_file = rag_chunking_out
 
     if target_in_file is None or not target_in_file.exists():
+        if return_manifest:
+            raise FileNotFoundError(f"Chunking publication not found: {target_in_file}")
         print(f"[Warning] Input chunks file not found: {target_in_file}")
-        print("Please provide 'all_chunks.json' or 'chunks.json' to the system.")
+        print("Please provide 'all_chunks.json', 'chunking_manifest.json', or 'chunks.json' to the system.")
         return []
 
     print(f"\n{'='*75}")
     print(f"[MODULE 2: EMBEDDING] Input: {target_in_file.name} -> Output: {out_path}")
     print(f"{'='*75}")
 
-    if target_in_file.name == "all_chunks.json" and (target_in_file.parent / "chunking_manifest.json").exists():
+    if target_in_file.name == "chunking_manifest.json":
         published_input = True
+    elif target_in_file.name == "all_chunks.json" and (target_in_file.parent / "chunking_manifest.json").exists():
+        published_input = True
+    publication_manifest = None
     if published_input:
         from agent_banking.chunking.run_chunking import load_published_chunks
-        raw_chunks = load_published_chunks(target_in_file.parent)
+        if return_manifest:
+            raw_chunks, publication_manifest = load_published_chunks(target_in_file.parent, return_manifest=True)
+        else:
+            raw_chunks = load_published_chunks(target_in_file.parent)
     else:
+        if return_manifest:
+            raise ValueError("A verified chunking publication is required")
         with open(target_in_file, "r", encoding="utf-8") as fp:
             raw_chunks = json.load(fp)
 
-    if not raw_chunks:
-        print("[Warning] Chunk list is empty.")
-        return []
+    if not isinstance(raw_chunks, list):
+        raise ValueError("Embedding input must contain a list of chunks")
 
-    # Sync file to in_dir if not present
+    # Sync file to in_dir if not present (auto mode only)
     in_copy = in_dir / "chunks.json"
-    if target_in_file != in_copy:
+    if input_file is None and output_dir is None and target_in_file != in_copy:
         try:
             with open(in_copy, "w", encoding="utf-8") as fp:
                 json.dump(raw_chunks, fp, ensure_ascii=False, indent=2)
@@ -251,19 +288,11 @@ def run_auto_embedding(
         dimension=cfg.EMBEDDING_DIM,
         model_name=cfg.EMBEDDING_MODEL_1024,
         embedding_url=cfg.EMBEDDING_URL,
-        api_key=cfg.LLM_API_KEY,
         cache_db_path=str(cfg.STORAGE_DIR / "embedding_cache.db")
     )
 
     # Normalize all raw_chunks to 13 Universal Schema fields and link sequence
-    normalized_chunks = []
-    for idx, raw_c in enumerate(raw_chunks):
-        norm_c = normalize_universal_chunk(raw_c)
-        if not norm_c.get("chunk_id"):
-            norm_c["chunk_id"] = f"chunk_{idx}"
-        normalized_chunks.append(norm_c)
-
-    link_chunk_sequence(normalized_chunks)
+    normalized_chunks = normalize_searchable_chunks(raw_chunks)
 
     # 2. Read existing output file if available for vector reuse
     existing_vectors = {}
@@ -283,28 +312,6 @@ def run_auto_embedding(
                                 if len(v) == embedder.dimension:
                                     existing_vectors[cid] = v
 
-                # Fast-path check if all chunks already have vectors in output and StateTracker
-                if len(existing_vectors) >= len(normalized_chunks):
-                    if len(normalized_chunks) > 0:
-                        chunk_hash_map = {}
-                        for c in normalized_chunks:
-                            cid = c.get("chunk_id")
-                            vp = embedder.format_virtual_passage(c)
-                            chunk_hash_map[cid] = embedder._get_hash(vp)
-                        if tracker.are_all_items_processed(chunk_hash_map):
-                            print(f"  [SKIP ALL] All {len(normalized_chunks)} chunks already embedded. Skipping in 0.0s.")
-                            # Ensure 100% of returned chunks conform to 13 fields + vector
-                            clean_prev_list = []
-                            for p_chunk in prev_list:
-                                p_vec = p_chunk.get("vector")
-                                if not p_vec:
-                                    p_vec = p_chunk.get("embedding")
-                                clean_prev_list.append(normalize_universal_chunk(p_chunk, p_vec))
-                            link_chunk_sequence(clean_prev_list)
-                            with open(prev_out_file, "w", encoding="utf-8") as fp:
-                                json.dump(clean_prev_list, fp, ensure_ascii=False, indent=2)
-                            print(f"[Embedding Complete] {len(clean_prev_list)} vectors ready in: {prev_out_file} (Skipped: {len(normalized_chunks)}, New: 0) in 0.0s")
-                            return clean_prev_list
             except Exception:
                 existing_vectors = {}
 
@@ -366,15 +373,15 @@ def run_auto_embedding(
         if cid in chunks_result_map:
             final_embedded_chunks.append(chunks_result_map[cid])
         else:
-            final_embedded_chunks.append(normalize_universal_chunk(c, [0.0] * embedder.dimension))
+            raise ValueError("Missing embedding for current chunk: " + cid)
 
     tracker.save()
     total_elapsed = round(time.time() - start_t, 2)
 
     # 5. Export results
     out_file = out_path / "embedded_chunks.json"
-    with open(out_file, "w", encoding="utf-8") as fp:
-        json.dump(final_embedded_chunks, fp, ensure_ascii=False, indent=2)
+    from agent_banking.chunking.run_chunking import atomic_json
+    atomic_json(out_file, final_embedded_chunks)
 
     # 10 sample vectors for inspection
     sample_vectors = []
@@ -415,6 +422,8 @@ def run_auto_embedding(
         json.dump(manifest_data, fp, ensure_ascii=False, indent=2)
 
     print(f"[Embedding Complete] {len(final_embedded_chunks)} vectors saved to: {out_file} (New: {new_embedded_count}, Skipped: {skipped_count}) in {total_elapsed}s")
+    if return_manifest:
+        return final_embedded_chunks, publication_manifest
     return final_embedded_chunks
 
 

@@ -2,7 +2,7 @@
   "name": "calculate_savings_profit",
   "display_name": "Tính Lãi Tiền Gửi Tiết Kiệm",
   "category": "CALCULATION",
-  "description": "Tính toán số tiền lãi tiết kiệm thực nhận và tổng số tiền nhận được khi đáo hạn theo biểu lãi suất niêm yết của Vietcombank.",
+  "description": "Tính toán số tiền lãi tiết kiệm thực nhận và tổng số tiền nhận được khi đáo hạn theo biểu lãi suất niêm yết của A-Bank.",
   "parameters": {
     "type": "object",
     "properties": {

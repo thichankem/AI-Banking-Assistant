@@ -16,9 +16,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Vector DB Node (Input -> Output)")
     parser.add_argument("--force", action="store_true", help="Force rebuild from scratch")
     parser.add_argument("--use-memory", action="store_true", help="Use in-memory storage for Qdrant")
+    parser.add_argument("--input", type=str, default=None, help="Optional custom embedded_chunks.json input path")
+    parser.add_argument("--output", type=str, default=None, help="Optional custom output directory path")
     args = parser.parse_args()
 
-    module_dir = Path(__file__).resolve().parent
-    in_file = module_dir / "input" / "embedded_chunks.json"
-    out_dir = module_dir / "output"
-    run_auto_indexing(input_file=in_file, output_dir=out_dir, force=args.force, use_memory=args.use_memory)
+    run_auto_indexing(
+        input_file=args.input,
+        output_dir=args.output,
+        force=args.force,
+        use_memory=args.use_memory
+    )

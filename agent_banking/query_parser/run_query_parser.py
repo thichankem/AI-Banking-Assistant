@@ -15,7 +15,6 @@ MANDATORY RULES (GEMINI.md & AGENTS.md):
 4. 0% REGEX LAW: String methods only.
 """
 
-from __future__ import annotations
 import sys
 import json
 import time
@@ -116,11 +115,12 @@ def run_auto_query_parser(
             "Bị nuốt thẻ ATM tại cây ATM thì liên hệ tổng đài số nào?",
             "Chuyển tiền NAPAS 247 hạn mức một lần chuyển là bao nhiêu?",
             "Theo Quyết định 2345/QĐ-NHNN, chuyển trên 10 triệu đồng có bắt buộc quét sinh trắc học FaceID không?",
-            "Lãi suất tiền gửi tiết kiệm trực tuyến tại VCB Digibank hiện tại là bao nhiêu?"
+            "Lãi suất tiền gửi tiết kiệm trực tuyến tại A-Bank Plus hiện tại là bao nhiêu?"
         ]
-        default_file = in_dir / "queries.json"
-        with open(default_file, "w", encoding="utf-8") as fp:
-            json.dump(query_list, fp, ensure_ascii=False, indent=2)
+        if input_file is None and output_dir is None:
+            default_file = in_dir / "queries.json"
+            with open(default_file, "w", encoding="utf-8") as fp:
+                json.dump(query_list, fp, ensure_ascii=False, indent=2)
 
     print(f"\n{'='*75}")
     print(f"▶ [MODULE 4: QUERY PARSER] Input: {len(query_list)} queries -> Output: {out_path}")

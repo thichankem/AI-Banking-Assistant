@@ -1,7 +1,7 @@
 {
   "task_id": "TASK_GENERAL_CHAT",
   "task_name": "Tư vấn Tổng quan & Chăm sóc Khách hàng",
-  "description": "Giao tiếp chào hỏi xã giao, cảm ơn, tạm biệt và giới thiệu phạm vi năng lực hỗ trợ của Trợ lý AI Vietcombank.",
+  "description": "Giao tiếp chào hỏi xã giao, cảm ơn, tạm biệt và giới thiệu phạm vi năng lực hỗ trợ của Trợ lý AI A-Bank.",
   "category": "CHAT",
   "priority": 5,
   "intent_keywords": [

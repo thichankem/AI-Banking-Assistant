@@ -15,7 +15,6 @@ MANDATORY INVARIANTS:
 4. 0% REGEX LAW.
 """
 
-from __future__ import annotations
 import sys
 import json
 import time
@@ -38,10 +37,10 @@ from agent_banking.state_tracker import StateTracker
 
 
 def run_auto_tracing(
-    input_file: str | Path | None = None,
-    output_dir: str | Path | None = None,
-    force: bool = False
-) -> list[dict]:
+    input_file=None,
+    output_dir=None,
+    force=False
+):
     """
     Tu dong xu ly tracing tu input sang output kem co che chong trung lap.
     """
@@ -77,7 +76,7 @@ def run_auto_tracing(
     print(f"▶ [MODULE 9: TRACING] Input: {target_in_file.name} -> Output: {out_path}")
     print(f"{'='*75}")
 
-    with open(target_in_file, "r", encoding="utf-8") as fp:
+    with open(target_in_file, "r", encoding="utf-8-sig") as fp:
         raw_traces = json.load(fp)
 
     if not raw_traces:
@@ -110,7 +109,7 @@ def run_auto_tracing(
             prev_results = {}
 
     tracer = BankingTracer(config=cfg)
-    trace_outputs: list[dict] = []
+    trace_outputs = []
     skipped_count = 0
     new_count = 0
     start_t = time.time()

@@ -2,7 +2,6 @@
 Direct runner for Tracing Module.
 Executes input-to-output tracing pipeline with deduplication.
 """
-from __future__ import annotations
 import sys
 import argparse
 from pathlib import Path

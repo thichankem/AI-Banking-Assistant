@@ -13,7 +13,6 @@ MANDATORY RULES:
 5. KEEP IT SIMPLE: Clear, direct, readable code.
 """
 
-from __future__ import annotations
 import json
 import time
 from pathlib import Path
@@ -23,6 +22,50 @@ from agent_banking.core.fallback import ModelFallbackError
 
 from agent_banking.core.settings import Config
 from agent_banking.skills.config.prompts import GRADE_DOCUMENTS_PROMPT_TEMPLATE, AUDIT_ANSWER_PROMPT_TEMPLATE
+
+
+def _unwrap_chunk(doc) -> tuple:
+    """Return (outer_dict, inner_chunk_dict) for wrapped or flat chunk payloads."""
+    if isinstance(doc, dict):
+        inner = doc.get("chunk")
+        if isinstance(inner, dict):
+            return doc, inner
+        return doc, doc
+    return {}, {"content": str(doc)}
+
+
+def _format_doc_preview(doc) -> str:
+    """Format canonical 13-key chunk (including table_data and images) for grading/audit."""
+    _, chunk = _unwrap_chunk(doc)
+    parts = []
+    bread = str(chunk.get("breadcrumb") or "")
+    sec = str(chunk.get("section_title") or "")
+    if bread:
+        parts.append(f"[{bread}]")
+    elif sec:
+        parts.append(f"[{sec}]")
+    content = str(chunk.get("content", chunk.get("text", "")) or "")
+    if content:
+        parts.append(content)
+    table_data = chunk.get("table_data")
+    if isinstance(table_data, dict):
+        t_title = str(table_data.get("title") or "")
+        headers = table_data.get("headers") or []
+        if t_title:
+            parts.append(f"Bảng: {t_title}")
+        if headers:
+            parts.append(" | ".join([str(h) for h in headers]))
+        for row in (table_data.get("rows") or [])[:4]:
+            if isinstance(row, list):
+                parts.append(" | ".join([str(cell) for cell in row]))
+    images = chunk.get("images") or []
+    if isinstance(images, list):
+        for img in images[:2]:
+            if isinstance(img, dict):
+                cap = str(img.get("caption") or img.get("description") or img.get("native_text") or "")
+                if cap:
+                    parts.append(f"Hình ảnh: {cap}")
+    return "\n".join(parts)
 
 
 def _clean_think_tags(text: str) -> str:
@@ -131,10 +174,10 @@ class BaseSkill:
         # 1. Biometric Compliance Execution (Decision 2345)
         if exec_type == "tool_call":
             from agent_banking.tools.banking_api_tools import check_biometric_compliance_qd2345
-            amount = params.get("transaction_amount", params.get("single_tx_amount_vnd", 0.0))
-            daily_amount = params.get("daily_accumulated_amount", params.get("daily_cumulative_amount_vnd", 0.0))
-            is_new_device = params.get("is_new_device", params.get("is_first_time_new_device", False))
-            has_cccd = params.get("has_cccd_chip_nfc", params.get("has_verified_chip_cccd", True))
+            amount = params.get("single_tx_amount_vnd", params.get("transaction_amount", 0.0))
+            daily_amount = params.get("daily_cumulative_amount_vnd", params.get("daily_accumulated_amount", 0.0))
+            is_new_device = params.get("is_first_time_new_device", params.get("is_new_device", False))
+            has_cccd = params.get("has_verified_chip_cccd", params.get("has_cccd_chip_nfc", True))
 
             audit_result = check_biometric_compliance_qd2345(
                 single_tx_amount_vnd=float(amount),
@@ -178,9 +221,15 @@ class BaseSkill:
                     operation = "interest_rates"
 
             if operation == "loan_amortization":
-                principal = params.get("principal", params.get("principal_vnd", extracted.get("principal", 500000000.0)))
+                principal = params.get("principal_vnd", params.get("principal", params.get("amount_vnd", extracted.get("amount_vnd", 500000000.0))))
+                if float(principal or 0.0) <= 0.0:
+                    principal = 500000000.0
                 annual_rate = params.get("annual_rate_percent", extracted.get("annual_rate_percent", 7.5))
+                if float(annual_rate or 0.0) <= 0.0:
+                    annual_rate = 7.5
                 term_months = params.get("term_months", extracted.get("term_months", 12))
+                if int(term_months or 0) <= 0:
+                    term_months = 12
                 result = calculate_loan_amortization(
                     principal_vnd=float(principal),
                     annual_rate_percent=float(annual_rate),
@@ -189,8 +238,12 @@ class BaseSkill:
                 return {"operation": "loan_amortization", "calculation_data": result}
 
             if operation == "savings_profit":
-                principal = params.get("principal", params.get("amount_vnd", extracted.get("principal", 100000000.0)))
+                principal = params.get("amount_vnd", params.get("principal", params.get("principal_vnd", extracted.get("amount_vnd", 100000000.0))))
+                if float(principal or 0.0) <= 0.0:
+                    principal = 100000000.0
                 term_months = params.get("term_months", extracted.get("term_months", 6))
+                if int(term_months or 0) <= 0:
+                    term_months = 6
                 result = calculate_savings_profit(
                     amount_vnd=float(principal),
                     term_months=int(term_months)
@@ -210,7 +263,7 @@ class BaseSkill:
         if exec_type == "incident_dispatcher":
             from agent_banking.tools.banking_api_tools import create_support_ticket
             issue_type = params.get("issue_type", params.get("incident_type", "tra_soat_giao_dich"))
-            contact = params.get("user_contact", params.get("phone_number", "KHACH_HANG_HOTLINE"))
+            contact = params.get("user_contact", params.get("phone_number", params.get("customer_phone", "KHACH_HANG_HOTLINE")))
             card_num = params.get("card_number", "")
             details = params.get("details", params.get("atm_location", "Tiếp nhận từ trợ lý AI."))
             urgency = params.get("urgency", "HIGH")
@@ -248,7 +301,7 @@ class BaseSkill:
             return {
                 "ticket_info": ticket_data,
                 "immediate_action_guide": guide,
-                "hotline_support": exec_cfg.get("hotline", "1900 54 54 13 (24/7)")
+                "hotline_support": exec_cfg.get("hotline", "1900 6688 (24/7)")
             }
 
         # 4. RAG Knowledge Retrieval Execution
@@ -291,15 +344,29 @@ class BaseSkill:
             citations = []
             sources = []
             for ch in reranked_chunks:
-                doc_name = ch.get("document_name", "")
-                if doc_name and doc_name not in sources:
-                    sources.append(doc_name)
+                outer, chunk = _unwrap_chunk(ch)
+                source = str(chunk.get("source") or "")
+                bm = chunk.get("business_metadata")
+                if isinstance(bm, dict):
+                    doc_name = str(bm.get("document_name") or source or "")
+                else:
+                    doc_name = source
+                src_label = source or doc_name
+                if src_label and src_label not in sources:
+                    sources.append(src_label)
 
-                score = ch.get("rerank_score", ch.get("score", 0.0))
+                breadcrumb = str(chunk.get("breadcrumb") or "")
+                section_title = str(chunk.get("section_title") or "")
+                score = float(outer.get("rerank_score", outer.get("relevance_score", outer.get("score", 0.0))))
                 citations.append({
+                    "chunk_id": str(chunk.get("chunk_id") or outer.get("chunk_id") or ""),
+                    "source": src_label,
                     "document_name": doc_name,
-                    "breadcrumbs": ch.get("breadcrumbs", ""),
-                    "section": ch.get("section", ""),
+                    "breadcrumb": breadcrumb,
+                    "breadcrumbs": breadcrumb,
+                    "section_title": section_title,
+                    "section": section_title,
+                    "chunk_type": str(chunk.get("chunk_type") or "text"),
                     "score": round(score, 4)
                 })
 
@@ -308,22 +375,22 @@ class BaseSkill:
                 "formatted_context": context_text,
                 "citations": citations,
                 "sources": sources,
-                "query_used": raw_query
+                "query_used": raw_query,
+                "normalized_query": getattr(parsed_query, "normalized_query", raw_query)
             }
 
         # 5. Document Grader & Hallucination Audit Execution
         if exec_type == "fact_checker_engine":
             check_type = params.get("check_type", "audit_answer")
+            raw_docs = params.get("documents", params.get("retrieved_context", ""))
+            if isinstance(raw_docs, list):
+                doc_texts = [_format_doc_preview(d) for d in raw_docs[:3]]
+                doc_str = "\n---\n".join(doc_texts)
+            else:
+                doc_str = str(raw_docs)
 
             if check_type == "grade_documents":
                 query = params.get("query", "")
-                raw_docs = params.get("documents", params.get("retrieved_context", ""))
-                if isinstance(raw_docs, list):
-                    doc_texts = [d.get("content", d.get("text", "")) for d in raw_docs[:3]]
-                    doc_str = "\n---\n".join(doc_texts)
-                else:
-                    doc_str = str(raw_docs)
-
                 prompt = GRADE_DOCUMENTS_PROMPT_TEMPLATE.format(
                     query=query,
                     documents=doc_str
@@ -337,13 +404,6 @@ class BaseSkill:
                 }
 
             draft = params.get("draft_answer", params.get("answer", ""))
-            raw_docs = params.get("documents", params.get("retrieved_context", ""))
-            if isinstance(raw_docs, list):
-                doc_texts = [d.get("content", d.get("text", "")) for d in raw_docs[:3]]
-                doc_str = "\n---\n".join(doc_texts)
-            else:
-                doc_str = str(raw_docs)
-
             has_citation = "[" in draft and "]" in draft
             prompt = AUDIT_ANSWER_PROMPT_TEMPLATE.format(
                 documents=doc_str,
@@ -377,11 +437,14 @@ class BaseSkill:
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.1,
-                max_tokens=40
+                max_tokens=256
             )
             raw = resp.choices[0].message.content
             if not raw:
                 return "yes"
             return _clean_think_tags(raw).lower()
+        except ModelFallbackError as e:
+            print(f"[Skill Checker] ModelFallbackError, falling back safely: {e}")
+            return "yes"
         except Exception:
             return "yes"

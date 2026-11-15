@@ -17,7 +17,9 @@
     "type": "object",
     "properties": {
       "status": {"type": "string"},
-      "escalate": {"type": "boolean"},
+      "previous_count": {"type": "integer"},
+      "complain_count": {"type": "integer"},
+      "escalate_to_human": {"type": "boolean"},
       "message": {"type": "string"}
     }
   },

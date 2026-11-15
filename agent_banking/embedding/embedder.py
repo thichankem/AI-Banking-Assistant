@@ -20,7 +20,6 @@ import math
 import struct
 import sqlite3
 import hashlib
-import random
 from pathlib import Path
 from agent_banking.core.models import model_primary
 
@@ -111,7 +110,7 @@ class BankingEmbedder:
             clean_text = str(virtual_passage).strip()
         else:
             clean_text = ""
-        key_material = f"cloud_verified_v2:{self.embedding_url}:{self.model_name}:{self.dimension}:{clean_text}"
+        key_material = f"cloud_verified_v3:{self.embedding_url}:{self.model_name}:{self.dimension}:{self._passage_limit()}:{clean_text}"
         return hashlib.sha256(key_material.encode("utf-8")).hexdigest()
 
     def _get_cached_vector(self, virtual_passage):
@@ -203,11 +202,12 @@ class BankingEmbedder:
         descriptions = []
         for img in images:
             if isinstance(img, dict):
-                raw_cap = img.get("caption")
-                if not raw_cap:
-                    raw_cap = img.get("description")
-                if not raw_cap:
-                    raw_cap = img.get("ocr_text")
+                raw_cap = None
+                for key in ("caption", "description", "native_text", "alt_text", "title", "ocr_text"):
+                    candidate = img.get(key)
+                    if candidate is not None and str(candidate).strip():
+                        raw_cap = candidate
+                        break
                 if raw_cap is not None:
                     cap = str(raw_cap).strip()
                     if cap and cap not in descriptions:
@@ -231,8 +231,10 @@ class BankingEmbedder:
         if not isinstance(metadata, dict):
             metadata = {}
         if metadata.get("schema_version") == "2.0":
-            from agent_banking.chunking.universal.passage import format_passage
-            return format_passage(chunk)
+            from agent_banking.chunking.universal.token_budget import format_passage_fields
+            retrieval = dict(metadata.get("retrieval", {}))
+            retrieval.pop("passage_content", None)
+            return format_passage_fields(chunk.get("content", ""), retrieval)
 
         # Retrieve raw content from content or original_text
         raw_content = chunk.get("content")
@@ -402,55 +404,61 @@ class BankingEmbedder:
         self._validate_passages(texts)
 
         # 1. Attempt cloud endpoint if configured
-        if self.embedding_url and self.api_key and self.model_name:
-            try:
-                from agent_banking.chunking.universal.model_enrichment import cloud_json
+        if not (self.embedding_url and self.api_key and self.model_name):
+            raise RuntimeError("Cloud embedding model, endpoint and credential are required")
+        from agent_banking.chunking.universal.model_enrichment import cloud_json
 
-                def validate(body):
-                    items = sorted(body.get("data", []), key=lambda item: item.get("index", -1))
-                    if [item.get("index") for item in items] != list(range(len(texts))):
-                        raise ValueError("Incomplete or misindexed embedding response")
-                    results = []
-                    for item in items:
-                        vector = item.get("embedding", [])
-                        if len(vector) != self.dimension or not all(isinstance(value, (int, float)) and math.isfinite(value) for value in vector):
-                            raise ValueError("Embedding response has invalid dimension or nonfinite values")
-                        squared_norm = sum(value * value for value in vector)
-                        if not math.isfinite(squared_norm) or squared_norm <= 1e-12:
-                            raise ValueError("Embedding API returned an invalid or zero vector norm")
-                        results.append(self._l2_normalize(vector))
-                    return results
+        def validate(body):
+            items = sorted(body.get("data", []), key=lambda item: item.get("index", -1))
+            if [item.get("index") for item in items] != list(range(len(texts))):
+                raise ValueError("Incomplete or misindexed embedding response")
+            results = []
+            for item in items:
+                vector = item.get("embedding", [])
+                if len(vector) != self.dimension or not all(isinstance(value, (int, float)) and math.isfinite(value) for value in vector):
+                    raise ValueError("Embedding response has invalid dimension or nonfinite values")
+                squared_norm = sum(value * value for value in vector)
+                if not math.isfinite(squared_norm) or squared_norm <= 1e-12:
+                    raise ValueError("Embedding API returned an invalid or zero vector norm")
+                results.append(self._l2_normalize(vector))
+            return results
 
-                body = cloud_json(self.embedding_url, self.api_key,
-                                  {"model": self.model_name, "input": texts, "dimensions": self.dimension,
-                                   "encoding_format": "float", "input_text_truncate": "none", "input_type": input_type},
-                                  model_module="embedding", validate=validate, dimension=self.dimension)
-                return validate(body)
-            except Exception:
-                pass
+        body = cloud_json(self.embedding_url, self.api_key,
+                          {"model": self.model_name, "input": texts, "dimensions": self.dimension,
+                           "encoding_format": "float", "input_text_truncate": "none", "input_type": input_type},
+                          model_module="embedding", validate=validate, dimension=self.dimension)
+        return validate(body)
 
-        # 2. Deterministic Local Fallback (seeded from text SHA-256)
-        return self._local_fallback(texts)
-
-    def _local_fallback(self, texts):
-        results = []
-        for text in texts:
-            seed = int.from_bytes(hashlib.sha256(str(text).encode("utf-8")).digest()[:8], "big")
-            rng = random.Random(seed)
-            vec = [rng.gauss(0, 1) for _ in range(self.dimension)]
-            results.append(self._l2_normalize(vec))
-        return results
+    def _passage_limit(self):
+        limit = int(os.getenv("MAX_PASSAGE_TOKENS", "512"))
+        if not 32 <= limit <= 1024:
+            raise ValueError("MAX_PASSAGE_TOKENS must be between 32 and 1024")
+        return limit
 
     def _validate_passages(self, texts):
-        max_tokens = int(os.getenv("MAX_PASSAGE_TOKENS", "512"))
+        max_tokens = self._passage_limit()
         try:
             from agent_banking.chunking.universal.token_budget import get_tokenizer
             tokenizer = get_tokenizer()
-            counts = [len(tokenizer.encode(str(text)).ids) for text in texts]
-            if any(count > max_tokens for count in counts):
-                raise ValueError("Passage exceeds " + str(max_tokens) + " tokens; rechunk before embedding (max=" + str(max(counts)) + ")")
-        except ImportError:
-            pass
+        except (ImportError, OSError, RuntimeError):
+            return
+        counts = [len(tokenizer.encode(str(text)).ids) for text in texts]
+        if any(count > max_tokens for count in counts):
+            raise ValueError("Passage exceeds " + str(max_tokens) + " tokens; rechunk before embedding (max=" + str(max(counts)) + ")")
+
+    def _passage_windows(self, passage):
+        from agent_banking.chunking.universal.token_budget import TokenBudget, get_tokenizer, safe_boundaries
+
+        limit = self._passage_limit()
+        budget = TokenBudget(limit, limit, get_tokenizer())
+        if budget.count(passage) <= limit:
+            return [(passage, 1)]
+        prefix = "passage:\n"
+        text = passage.removeprefix("passage:").lstrip("\n")
+        # Embedding windows can split math notation while the original chunk keeps it intact.
+        spans = budget.split(text, lambda fragment: budget.count(prefix + fragment) <= limit,
+                             align_words=True, boundaries=safe_boundaries(text, protect_markup=False))
+        return [(prefix + fragment, budget.count(fragment)) for _, _, fragment in spans if fragment.strip()]
 
     # -------------------------------------------------------------------------
     # 5. PUBLIC APPLICATION INTERFACE
@@ -471,10 +479,7 @@ class BankingEmbedder:
             chunk_mock = {"content": text, "chunk_type": "text"}
             virtual_passage = self.format_virtual_passage(chunk_mock)
 
-        try:
-            self._validate_passages([virtual_passage])
-        except ValueError:
-            return self._local_fallback([virtual_passage])[0]
+        self._validate_passages([virtual_passage])
         cached = self._get_cached_vector(virtual_passage)
         if cached:
             return cached
@@ -497,6 +502,8 @@ class BankingEmbedder:
         """
         if not chunks:
             return []
+        if type(batch_size) is not int or batch_size < 1:
+            raise ValueError("batch_size must be a positive integer")
 
         self.last_cache_hits = 0
         self.last_cache_misses = 0
@@ -508,14 +515,13 @@ class BankingEmbedder:
             metadata = c.get("business_metadata")
             if not isinstance(metadata, dict):
                 metadata = {}
-            if metadata.get("quality", {}).get("index_ready") is False:
+            quality = metadata.get("quality")
+            if isinstance(quality, dict) and quality.get("index_ready") is False:
                 if os.getenv("STRICT_QUALITY_CHECK", "").lower() in ("1", "true", "yes"):
                     raise ValueError("Chunk has unresolved source/image-context assessment; embedding refused")
             vp = self.format_virtual_passage(c)
             passages.append(vp)
             hashes.append(self._get_hash(vp))
-
-        self._validate_passages(passages)
 
         # Step 2: Query batch from SQLite cache
         cached_map = self._get_cached_vectors_batch(hashes)
@@ -536,18 +542,30 @@ class BankingEmbedder:
 
         # Step 3: Call API for chunks not present in cache
         if to_fetch_passages:
-            cache_to_save = []
-            for i in range(0, len(to_fetch_passages), batch_size):
-                sub_passages = to_fetch_passages[i:i + batch_size]
-                sub_indices = to_fetch_indices[i:i + batch_size]
-                sub_hashes = to_fetch_hashes[i:i + batch_size]
+            from itertools import groupby
 
-                vectors = self._call_api(sub_passages, input_type="passage")
-                for orig_idx, vec, h in zip(sub_indices, vectors, sub_hashes):
-                    chunks[orig_idx]["vector"] = vec
-                    cache_to_save.append((h, vec))
-
-            self._save_cache_batch(cache_to_save)
+            indexed = zip(to_fetch_indices, to_fetch_passages, to_fetch_hashes)
+            for _, group in groupby(indexed, key=lambda item: chunks[item[0]].get("source")):
+                entries = list(group)
+                windows = [(index, text, weight) for index, passage, _ in entries
+                           for text, weight in self._passage_windows(passage)]
+                combined = {index: [0.0] * self.dimension for index, _, _ in entries}
+                for i in range(0, len(windows), batch_size):
+                    batch = windows[i:i + batch_size]
+                    vectors = self._call_api([text for _, text, _ in batch], input_type="passage")
+                    if len(vectors) != len(batch):
+                        raise ValueError("Embedding response omitted one or more passage windows")
+                    for (index, _, weight), vector in zip(batch, vectors):
+                        for dimension, value in enumerate(vector):
+                            combined[index][dimension] += value * weight
+                cache_to_save = []
+                for index, _, digest in entries:
+                    vector = self._l2_normalize(combined[index])
+                    if not any(vector):
+                        raise ValueError("Cannot embed a passage without searchable text")
+                    chunks[index]["vector"] = vector
+                    cache_to_save.append((digest, vector))
+                self._save_cache_batch(cache_to_save)
 
         return chunks
 

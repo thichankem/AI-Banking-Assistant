@@ -3,7 +3,7 @@
   "display_name": "Truy xuất Tri thức Quy chế Ngân hàng (Agentic RAG)",
   "version": "2.0.0",
   "category": "RAG",
-  "description": "Tìm kiếm văn bản pháp lý, quy chế mở tài khoản, hạn mức giao dịch, biểu phí bằng chỉ mục kép Hybrid và Cross-Encoder.",
+  "description": "Tìm kiếm văn bản pháp lý, quy chế mở tài khoản, hạn mức giao dịch, biểu phí, hướng dẫn app A-Bank Plus, bảo hiểm A-Life, báo cáo tài chính và SLA bằng chỉ mục kép Hybrid và Cross-Encoder.",
   "capabilities": [
     "hybrid_vector_bm25_search",
     "rrf_rank_fusion_k60",
@@ -18,7 +18,11 @@
     "điều khoản",
     "ekyc",
     "mở tài khoản",
-    "vcb digibank",
+    "a-bank plus",
+    "a-life",
+    "bảo hiểm",
+    "sla",
+    "báo cáo thường niên",
     "thủ tục phát hành",
     "chính sách thẻ"
   ],

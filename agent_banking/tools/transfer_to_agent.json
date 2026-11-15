@@ -6,15 +6,15 @@
   "parameters": {
     "type": "object",
     "properties": {
-      "department": {
+      "business_process": {
         "type": "string",
-        "default": "CSKH_CHUNG",
-        "description": "Bộ phận tiếp nhận yêu cầu"
+        "default": "request_human_agent",
+        "description": "Nghiệp vụ hoặc lý do chuyển tiếp chuyên viên tư vấn"
       },
-      "reason": {
+      "customer_segment": {
         "type": "string",
-        "default": "Khách hàng yêu cầu hỗ trợ trực tiếp",
-        "description": "Lý do chuyển tiếp nhân viên"
+        "default": "individual",
+        "description": "Phân khúc khách hàng ('individual' hoặc 'corporate')"
       }
     }
   },
@@ -22,9 +22,13 @@
     "type": "object",
     "properties": {
       "status": {"type": "string"},
-      "department": {"type": "string"},
-      "agent_status": {"type": "string"},
-      "instructions": {"type": "string"}
+      "handoff_status": {"type": "string"},
+      "is_working_hour": {"type": "boolean"},
+      "business_process": {"type": "string"},
+      "customer_segment": {"type": "string"},
+      "target_queue": {"type": "string"},
+      "hotline": {"type": "string"},
+      "customer_notice": {"type": "string"}
     }
   },
   "handler": {

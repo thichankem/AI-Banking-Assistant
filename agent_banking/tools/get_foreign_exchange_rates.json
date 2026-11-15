@@ -2,7 +2,7 @@
   "name": "get_foreign_exchange_rates",
   "display_name": "Tra Cứu Bảng Tỷ Giá Ngoại Tệ",
   "category": "CALCULATION",
-  "description": "Tra cứu tỷ giá mua tiền mặt, mua chuyển khoản và bán của các ngoại tệ phổ biến (USD, EUR, JPY, GBP, SGD, AUD, CAD, CNY) tại Vietcombank.",
+  "description": "Tra cứu tỷ giá mua tiền mặt, mua chuyển khoản và bán của các ngoại tệ phổ biến (USD, EUR, JPY, GBP, SGD, AUD, CAD, CNY) tại A-Bank.",
   "parameters": {
     "type": "object",
     "properties": {

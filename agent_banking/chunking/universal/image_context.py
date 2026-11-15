@@ -18,7 +18,7 @@ def source_text(block):
 
 def region_key(block):
     region = block.get("provenance", {}).get("region", "body")
-    if region.startswith("body"):
+    if not isinstance(region, str) or region.startswith("body"):
         return "body"
     return region
 
@@ -33,13 +33,16 @@ def surrounding_sources(ir, image_index, radius=8):
     image = blocks[image_index]
     region = region_key(image)
     candidates = []
-    positions = list(range(max(0, image_index - radius), min(len(blocks), image_index + radius + 1)))
+    caption_ids = {relation["from"] for relation in ir["relations"]
+                   if relation["to"] == image["id"] and relation["type"] == "caption_of"}
+    positions = set(range(max(0, image_index - radius), min(len(blocks), image_index + radius + 1)))
+    if caption_ids:
+        positions.update(index for index, block in enumerate(blocks) if block["id"] in caption_ids)
     for index in range(image_index - 1, -1, -1):
         if region_key(blocks[index]) == region and blocks[index]["type"] == "heading":
-            if index not in positions:
-                positions.insert(0, index)
+            positions.add(index)
             break
-    for index in positions:
+    for index in sorted(positions):
         block = blocks[index]
         text = source_text(block)
         if not text.strip() or region_key(block) != region:
@@ -47,9 +50,9 @@ def surrounding_sources(ir, image_index, radius=8):
         candidates.append({"source_id": "s" + str(len(candidates)), "block_id": block["id"],
                            "type": block["type"], "distance": index - image_index,
                            "text": text, "location": block["provenance"],
-                           "explicit_caption_for_image": any(relation["from"] == block["id"] and relation["to"] == image["id"]
-                                                             and relation["type"] == "caption_of" for relation in ir["relations"])})
-    for field in ("caption", "alt_text", "title"):
+                           "explicit_caption_for_image": block["id"] in caption_ids})
+    title_field = "source_title" if image["image"].get("title_source") == "decision_model" else "title"
+    for field in ("caption", "alt_text", title_field):
         text = image["image"].get(field, "")
         if isinstance(text, str) and text.strip() and not any(item["text"] == text for item in candidates):
             candidates.append({"source_id": "s" + str(len(candidates)), "block_id": image["id"],
@@ -72,7 +75,8 @@ def validate_context_selection(result, candidates):
     for item in evidence:
         if not isinstance(item, dict):
             raise ValueError("Image evidence must be an object")
-        source = sources.get(item.get("source_id"))
+        source_id = item.get("source_id")
+        source = sources.get(source_id) if isinstance(source_id, str) else None
         quote = item.get("quote")
         if source is None or not isinstance(quote, str) or not quote.strip() or quote not in source["text"]:
             raise ValueError("Image evidence must quote a supplied source verbatim")
@@ -110,22 +114,9 @@ def apply_context_selection(block, candidates, result, model):
         block["text"] = "\n\n".join(value for value in (info.get("native_text", ""), info["description"]) if value)
 
 
-def mark_unassessed_images(ir):
-    ir["image_policy"] = IMAGE_POLICY
-    for block in ir["blocks"]:
-        if block["type"] == "image":
-            if block["image"].get("text_context_assessed") is True:
-                continue
-            block["image"].update({"image_policy": IMAGE_POLICY, "visual_content_read": False,
-                                   "text_context_assessed": False, "status": "skipped_context_not_assessed",
-                                   "context_evidence": [], "description": ""})
-            block["text"] = ""
-
-
-def excluded_image(block, profile):
+def excluded_image(block):
     info = block["image"]
-    if info.get("image_policy") != IMAGE_POLICY:
-        return False
-    if info.get("status") == "skipped_no_text_support" and info.get("text_context_assessed") is True and not info.get("context_evidence"):
-        return True
-    return profile == "native" and info.get("status") == "skipped_context_not_assessed"
+    return (info.get("image_policy") == IMAGE_POLICY
+            and info.get("status") == "skipped_no_text_support"
+            and info.get("text_context_assessed") is True
+            and not info.get("context_evidence"))

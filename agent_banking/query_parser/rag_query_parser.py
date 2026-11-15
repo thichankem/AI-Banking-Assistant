@@ -999,7 +999,6 @@ class BankingQueryParser:
         if is_emergency_scam:
             intent = "bao_mat_bao_cao_gian_lan"
             domain = "an_toan_bao_mat"
-            suggested_filters["priority"] = "urgent"
             if "khóa" in lower_q or "khoa" in lower_q:
                 sub_intent = "xu_ly_su_co_khan_cap"
             elif "lừa đảo" in lower_q or "bị lừa" in lower_q or "lua dao" in lower_q:
@@ -1011,7 +1010,6 @@ class BankingQueryParser:
         elif any(k in lower_q for k in ("sinh trắc học", "sinh trac hoc", "khuôn mặt", "faceid", "cccd", "gắn chip", "quét nfc", "ekyc", "định danh điện tử", "2345")):
             intent = "sinh_trac_hoc_ekyc"
             domain = "an_toan_bao_mat"
-            suggested_filters["domain"] = "sinh_trac_hoc"
             if "cài đặt" in lower_q or "hướng dẫn" in lower_q or "cách" in lower_q:
                 sub_intent = "huong_dan_cai_dat"
             elif "hạn mức" in lower_q or "bao nhiêu" in lower_q:
@@ -1039,7 +1037,6 @@ class BankingQueryParser:
         elif any(k in lower_q for k in ("sao kê", "sao ke", "in sao kê", "sao kê điện tử", "lịch sử giao dịch", "lich su giao dich", "biên lai")) and not any(k in lower_q for k in ("mở tài khoản", "mo tai khoan")):
             intent = "tra_cuu_sao_ke"
             domain = "dich_vu_tai_khoan"
-            suggested_filters["domain"] = "sao_ke"
             if "điện tử" in lower_q or "dien tu" in lower_q or "online" in lower_q:
                 sub_intent = "sao_ke_dien_tu"
             elif "tra soát" in lower_q or "tra soat" in lower_q:

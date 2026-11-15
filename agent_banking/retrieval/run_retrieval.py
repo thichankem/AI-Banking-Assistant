@@ -103,16 +103,37 @@ def init_retrieval_engine(config=None, use_memory=False, top_k=5):
         dimension=cfg.EMBEDDING_DIM,
         model_name=cfg.EMBEDDING_MODEL_1024,
         embedding_url=cfg.EMBEDDING_URL,
-        api_key=cfg.LLM_API_KEY,
         cache_db_path=str(cfg.STORAGE_DIR / "embedding_cache.db")
     )
+
+    raw_storage = getattr(cfg, "QDRANT_STORAGE_PATH", "agent_banking/vector_db/qdrant_db")
+    storage_candidate = Path(str(raw_storage))
+    if storage_candidate.is_absolute():
+        resolved_storage = str(storage_candidate)
+    else:
+        resolved_storage = str((PROJECT_ROOT / storage_candidate).resolve())
 
     store = QdrantBankingStore(
         collection_name=cfg.QDRANT_COLLECTION,
         dimension=cfg.EMBEDDING_DIM,
-        storage_path=str(cfg.STORAGE_DIR / "qdrant_db"),
+        storage_path=resolved_storage,
         use_memory=use_memory
     )
+
+    bm25_k1 = getattr(cfg, "BM25_K1", None)
+    bm25_b = getattr(cfg, "BM25_B", None)
+    bc_boost = getattr(cfg, "BREADCRUMB_BOOST", 1.5)
+    bm25_changed = False
+    if bm25_k1 is not None and abs(float(bm25_k1) - store.k1) > 1e-6:
+        store.k1 = float(bm25_k1)
+        bm25_changed = True
+    if bm25_b is not None and abs(float(bm25_b) - store.b) > 1e-6:
+        store.b = float(bm25_b)
+        bm25_changed = True
+    if bc_boost is not None and abs(float(bc_boost) - store._bm25_breadcrumb_boost) > 1e-6:
+        bm25_changed = True
+    if bm25_changed and store._bm25_corpus:
+        store._build_bm25_index(store._bm25_corpus, breadcrumb_boost=float(bc_boost))
 
     rrf_k_val = 60
     if hasattr(cfg, "RRF_K"):
@@ -122,12 +143,15 @@ def init_retrieval_engine(config=None, use_memory=False, top_k=5):
     if hasattr(cfg, "DENSE_WEIGHT"):
         dense_weight_val = cfg.DENSE_WEIGHT
 
+    candidate_k_val = getattr(cfg, "HYBRID_CANDIDATE_K", None)
     retriever = HybridRetriever(
         vector_store=store,
         embedding_model=embedder,
         top_k=top_k,
         rrf_k=rrf_k_val,
-        dense_weight=dense_weight_val
+        dense_weight=dense_weight_val,
+        candidate_k=candidate_k_val,
+        breadcrumb_boost=float(bc_boost)
     )
     return retriever
 
@@ -466,7 +490,8 @@ def run_single_query(
         avg_bm25=bm25_lat
     )
 
-    sync_downstream_candidates(out_file)
+    if output_dir is None:
+        sync_downstream_candidates(out_file)
 
     return candidates
 
@@ -494,7 +519,8 @@ def run_batch_retrieval(
     out_path.mkdir(parents=True, exist_ok=True)
 
     # 1. Tu dong dong bo thuong nguon (Upstream Auto-Sync)
-    sync_upstream_parsed_queries()
+    if input_file is None and output_dir is None:
+        sync_upstream_parsed_queries()
 
     state_file = out_path / ".state_tracker.json"
     tracker = StateTracker(state_file)
@@ -590,7 +616,8 @@ def run_batch_retrieval(
                         avg_bm25=0.0
                     )
 
-                    sync_downstream_candidates(prev_file)
+                    if output_dir is None:
+                        sync_downstream_candidates(prev_file)
                     print(f"✅ [Retrieval Hoan Tat] Da xuat {len(prev_list)} ket qua vao: {prev_file} trong 0.0s")
                     return prev_list
         except Exception:
@@ -815,7 +842,8 @@ def run_batch_retrieval(
         avg_bm25=avg_bm25
     )
 
-    sync_downstream_candidates(out_file)
+    if output_dir is None:
+        sync_downstream_candidates(out_file)
 
     print(f"✅ [Hybrid Retrieval Hoan Tat] Da xuat ket qua cho {len(retrieval_results)} queries vao: {out_file.name} (Moi: {new_count}, Bo qua: {skipped_count}) trong {total_elapsed}s")
     return retrieval_results

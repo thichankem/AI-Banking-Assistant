@@ -370,10 +370,168 @@ class IndirectInjectionGuardrail:
             "sanitized_text": sanitized
         }
 
+    def _scan_and_sanitize_table_data(self, table_data):
+        """Scan table_data text fields (title, headers, rows, split keys) and return (threats, cleaned_table, infected)."""
+        if not isinstance(table_data, dict) or not table_data:
+            return [], table_data, False
+
+        threats = []
+        infected = False
+        cleaned = dict(table_data)
+
+        for str_key in ["title", "column", "row_key", "html"]:
+            if str_key in cleaned and isinstance(cleaned[str_key], str) and cleaned[str_key]:
+                res = self.scan_text(cleaned[str_key])
+                if res["is_safe"] is False:
+                    infected = True
+                    threats.extend(res["threats"])
+                    cleaned[str_key] = res["sanitized_text"]
+
+        if isinstance(cleaned.get("headers"), list):
+            new_headers = []
+            for h in cleaned["headers"]:
+                if isinstance(h, str) and h:
+                    res = self.scan_text(h)
+                    if res["is_safe"] is False:
+                        infected = True
+                        threats.extend(res["threats"])
+                        new_headers.append(res["sanitized_text"])
+                    else:
+                        new_headers.append(h)
+                else:
+                    new_headers.append(h)
+            cleaned["headers"] = new_headers
+
+        if isinstance(cleaned.get("rows"), list):
+            new_rows = []
+            for row in cleaned["rows"]:
+                if isinstance(row, list):
+                    new_cells = []
+                    for cell in row:
+                        if isinstance(cell, str) and cell:
+                            res = self.scan_text(cell)
+                            if res["is_safe"] is False:
+                                infected = True
+                                threats.extend(res["threats"])
+                                new_cells.append(res["sanitized_text"])
+                            else:
+                                new_cells.append(cell)
+                        else:
+                            new_cells.append(cell)
+                    new_rows.append(new_cells)
+                elif isinstance(row, dict):
+                    new_row_dict = dict(row)
+                    for rk, rv in new_row_dict.items():
+                        if isinstance(rv, str) and rv:
+                            res = self.scan_text(rv)
+                            if res["is_safe"] is False:
+                                infected = True
+                                threats.extend(res["threats"])
+                                new_row_dict[rk] = res["sanitized_text"]
+                    new_rows.append(new_row_dict)
+                else:
+                    new_rows.append(row)
+            cleaned["rows"] = new_rows
+
+        return threats, cleaned, infected
+
+    def _scan_and_sanitize_images(self, images):
+        """Scan multimodal image context dicts without exposing external/injection payloads."""
+        if not isinstance(images, list) or not images:
+            return [], images, False
+
+        threats = []
+        infected = False
+        cleaned_list = []
+
+        for img in images:
+            if not isinstance(img, dict):
+                cleaned_list.append(img)
+                continue
+            cleaned_img = dict(img)
+            for str_key in ["title", "caption", "description", "alt_text", "native_text", "context_reason", "section_title"]:
+                if str_key in cleaned_img and isinstance(cleaned_img[str_key], str) and cleaned_img[str_key]:
+                    res = self.scan_text(cleaned_img[str_key])
+                    if res["is_safe"] is False:
+                        infected = True
+                        threats.extend(res["threats"])
+                        cleaned_img[str_key] = res["sanitized_text"]
+            for url_key in ["path", "visual_path", "url"]:
+                if url_key in cleaned_img and isinstance(cleaned_img[url_key], str):
+                    u_low = cleaned_img[url_key].strip().lower()
+                    if u_low.startswith("http://") or u_low.startswith("https://") or "javascript:" in u_low or "data:text/html" in u_low:
+                        infected = True
+                        threats.append(f"EXTERNAL_OR_DANGEROUS_IMAGE_URL:{u_low[:60]}")
+                        cleaned_img[url_key] = ""
+            cleaned_list.append(cleaned_img)
+
+        return threats, cleaned_list, infected
+
+    def _scan_single_chunk_dict(self, target_dict):
+        """Scan all text-bearing fields of a chunk dict without injecting extra top-level schema keys."""
+        if not isinstance(target_dict, dict):
+            return "safe", target_dict, []
+
+        all_threats = []
+        cleaned = dict(target_dict)
+
+        for field_key in ["content", "parent_content", "section_title", "breadcrumb", "original_text", "text"]:
+            val = cleaned.get(field_key)
+            if isinstance(val, str) and val:
+                res = self.scan_text(val)
+                if res["is_safe"] is False:
+                    all_threats.extend(res["threats"])
+                    cleaned[field_key] = res["sanitized_text"]
+
+        if "table_data" in cleaned and isinstance(cleaned["table_data"], dict):
+            t_threats, t_clean, t_inf = self._scan_and_sanitize_table_data(cleaned["table_data"])
+            if t_inf:
+                all_threats.extend(t_threats)
+                cleaned["table_data"] = t_clean
+
+        if "images" in cleaned and isinstance(cleaned["images"], list):
+            i_threats, i_clean, i_inf = self._scan_and_sanitize_images(cleaned["images"])
+            if i_inf:
+                all_threats.extend(i_threats)
+                cleaned["images"] = i_clean
+
+        bmeta = cleaned.get("business_metadata")
+        if isinstance(bmeta, dict) and isinstance(bmeta.get("retrieval"), dict):
+            ret_copy = dict(bmeta["retrieval"])
+            ret_changed = False
+            for rk in ["context", "situated_context"]:
+                rv = ret_copy.get(rk)
+                if isinstance(rv, str) and rv:
+                    res = self.scan_text(rv)
+                    if res["is_safe"] is False:
+                        all_threats.extend(res["threats"])
+                        ret_copy[rk] = res["sanitized_text"]
+                        ret_changed = True
+            if ret_changed:
+                bmeta_copy = dict(bmeta)
+                bmeta_copy["retrieval"] = ret_copy
+                cleaned["business_metadata"] = bmeta_copy
+
+        if not all_threats:
+            return "safe", target_dict, []
+
+        is_critical = False
+        if len(all_threats) >= 2:
+            is_critical = True
+        for t in all_threats:
+            if "DATA_EXFILTRATION" in t or "DANGEROUS_HTML" in t or "DANGEROUS_DATA_URI" in t:
+                is_critical = True
+                break
+
+        if is_critical is True:
+            return "blocked", None, all_threats
+        return "sanitized", cleaned, all_threats
+
     def scan_chunks(self, chunks):
         """
-        Scan all retrieved RAG chunks.
-        Supports both flat chunk structure and nested chunk.get("chunk", chunk).
+        Scan all retrieved RAG chunks across 13-field universal schema fields
+        (content, parent_content, section_title, breadcrumb, table_data, images, business_metadata)
+        plus wrapped {"chunk": ...} and legacy dicts, preserving strict 13-key schema keys.
         """
         if not chunks:
             return [], 0, []
@@ -383,62 +541,42 @@ class IndirectInjectionGuardrail:
         threat_details = []
 
         for chunk in chunks:
-            target_dict = chunk
-            if isinstance(chunk, dict):
-                if "chunk" in chunk:
-                    if isinstance(chunk["chunk"], dict):
-                        target_dict = chunk["chunk"]
-
-            raw_text = ""
-            if "content" in target_dict:
-                if target_dict["content"] is not None:
-                    raw_text = str(target_dict["content"])
-            if raw_text == "":
-                if "original_text" in target_dict:
-                    if target_dict["original_text"] is not None:
-                        raw_text = str(target_dict["original_text"])
-            if raw_text == "":
-                if "text" in target_dict:
-                    if target_dict["text"] is not None:
-                        raw_text = str(target_dict["text"])
-
-            scan_res = self.scan_text(raw_text)
-
-            if scan_res["is_safe"] is True:
-                safe_chunks.append(chunk)
-            else:
-                threats = scan_res["threats"]
-                threat_details.extend(threats)
-
-                is_critical = False
-                if len(threats) >= 2:
-                    is_critical = True
-                for t in threats:
-                    if "DATA_EXFILTRATION" in t or "DANGEROUS_HTML" in t or "DANGEROUS_DATA_URI" in t:
-                        is_critical = True
-                        break
-
-                if is_critical is True:
-                    blocked_count += 1
-                    continue
+            if isinstance(chunk, str):
+                res = self.scan_text(chunk)
+                if res["is_safe"] is True:
+                    safe_chunks.append(chunk)
                 else:
-                    cleaned_chunk = dict(chunk)
-                    if isinstance(chunk, dict):
-                        if "chunk" in chunk and isinstance(chunk["chunk"], dict):
-                            inner = dict(chunk["chunk"])
-                            if "content" in inner:
-                                inner["content"] = scan_res["sanitized_text"]
-                            if "original_text" in inner:
-                                inner["original_text"] = scan_res["sanitized_text"]
-                            inner["guardrail_sanitized"] = True
-                            cleaned_chunk["chunk"] = inner
+                    threat_details.extend(res["threats"])
+                    if len(res["threats"]) >= 2:
+                        blocked_count += 1
+                    else:
+                        safe_chunks.append(res["sanitized_text"])
+                continue
 
-                    if "content" in cleaned_chunk:
-                        cleaned_chunk["content"] = scan_res["sanitized_text"]
-                    if "original_text" in cleaned_chunk:
-                        cleaned_chunk["original_text"] = scan_res["sanitized_text"]
-                    cleaned_chunk["guardrail_sanitized"] = True
+            if not isinstance(chunk, dict):
+                safe_chunks.append(chunk)
+                continue
+
+            if "chunk" in chunk and isinstance(chunk["chunk"], dict):
+                status, cleaned_inner, c_threats = self._scan_single_chunk_dict(chunk["chunk"])
+                threat_details.extend(c_threats)
+                if status == "blocked":
+                    blocked_count += 1
+                elif status == "sanitized":
+                    cleaned_outer = dict(chunk)
+                    cleaned_outer["chunk"] = cleaned_inner
+                    safe_chunks.append(cleaned_outer)
+                else:
+                    safe_chunks.append(chunk)
+            else:
+                status, cleaned_chunk, c_threats = self._scan_single_chunk_dict(chunk)
+                threat_details.extend(c_threats)
+                if status == "blocked":
+                    blocked_count += 1
+                elif status == "sanitized":
                     safe_chunks.append(cleaned_chunk)
+                else:
+                    safe_chunks.append(chunk)
 
         return safe_chunks, blocked_count, threat_details
 

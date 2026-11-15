@@ -10,7 +10,7 @@ def _load_yaml_settings():
     yaml_path = Path(__file__).resolve().parent / "settings" / "config.yaml"
     if yaml_path.exists():
         try:
-            with open(yaml_path, "r", encoding="utf-8") as f:
+            with open(yaml_path, "r", encoding="utf-8-sig") as f:
                 return yaml.safe_load(f) or {}
         except Exception:
             pass
@@ -21,7 +21,7 @@ _cfg = _load_yaml_settings()
 
 
 class ContextConfig:
-    MAX_CONTEXT_TOKENS = _cfg.get("max_context_tokens", 2000)
+    MAX_CONTEXT_TOKENS = int(_cfg.get("max_context_tokens", 2000))
 
 
 class GeneratorConfig:
@@ -31,3 +31,7 @@ class GeneratorConfig:
     LLM_TEMPERATURE = float(_cfg.get("llm_temperature", 0.2))
     LLM_MAX_TOKENS = int(_cfg.get("llm_max_tokens", 2500))
     MAX_RETRIES = int(os.getenv("MAX_RETRIES", str(_cfg.get("max_retries", 2))))
+    GENERATOR_MAX_RETRIES = MAX_RETRIES
+    DEFAULT_PERSONA = str(_cfg.get("default_persona", "advisor"))
+    DEFAULT_TONE = str(_cfg.get("default_tone", "formal"))
+    DEFAULT_FORMAT = str(_cfg.get("default_format", "standard"))

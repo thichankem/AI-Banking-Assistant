@@ -13,7 +13,6 @@ MANDATORY RULES:
 5. KEEP IT SIMPLE: Clear, direct, readable code.
 """
 
-from __future__ import annotations
 import json
 from pathlib import Path
 

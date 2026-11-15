@@ -374,6 +374,7 @@ problem.md
 docs/
 doc/
 *.md
+!agent_banking/chunking/README.md
 *.markdown
 *.rst
 *.adoc

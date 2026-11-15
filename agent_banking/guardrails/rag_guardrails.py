@@ -26,6 +26,146 @@ from agent_banking.core.settings import Config
 from agent_banking.guardrails.indirect_injection_guardrail import strip_vietnamese_accents, condense_spaced_text
 
 
+def _unwrap_guardrail_chunk(raw_item):
+    """Unwrap {'chunk': <13-key dict>, ...} or flat chunk dict cleanly."""
+    if isinstance(raw_item, dict) and "chunk" in raw_item:
+        nested = raw_item.get("chunk")
+        if isinstance(nested, dict):
+            return nested, raw_item
+    return raw_item, raw_item
+
+
+def _extract_table_text_parts(table_data):
+    """Collect searchable text from v2.0 table_data dicts."""
+    if not isinstance(table_data, dict) or not table_data:
+        return []
+    parts = []
+    for key in ["title", "column", "row_key", "table_id"]:
+        val = str(table_data.get(key) or "").strip()
+        if val and key != "table_id":
+            parts.append(val)
+    headers = table_data.get("headers")
+    if isinstance(headers, list):
+        for h in headers:
+            hs = str(h).strip()
+            if hs:
+                parts.append(hs)
+    rows = table_data.get("rows")
+    if isinstance(rows, list):
+        for row in rows:
+            if isinstance(row, list):
+                for cell in row:
+                    cs = str(cell).strip()
+                    if cs:
+                        parts.append(cs)
+            elif isinstance(row, dict):
+                for rk, rv in row.items():
+                    parts.append(f"{rk} {rv}")
+    for cell_list_key in ["header_cells", "cells"]:
+        cl = table_data.get(cell_list_key)
+        if isinstance(cl, list):
+            for c_item in cl:
+                if isinstance(c_item, dict):
+                    txt = str(c_item.get("text") or c_item.get("value") or "").strip()
+                    if txt:
+                        parts.append(txt)
+                elif c_item is not None:
+                    cs = str(c_item).strip()
+                    if cs:
+                        parts.append(cs)
+    return parts
+
+
+def _extract_images_text_parts(images):
+    """Collect searchable text from v2.0 multimodal images list."""
+    if not isinstance(images, list) or not images:
+        return []
+    parts = []
+    for img in images:
+        if not isinstance(img, dict):
+            continue
+        for key in ["title", "caption", "description", "alt_text", "native_text", "section_title"]:
+            val = str(img.get(key) or "").strip()
+            if val:
+                parts.append(val)
+        nvals = img.get("native_values")
+        if isinstance(nvals, list):
+            for nv in nvals:
+                nvs = str(nv).strip()
+                if nvs:
+                    parts.append(nvs)
+        elif isinstance(nvals, dict):
+            for nk, nv in nvals.items():
+                parts.append(f"{nk} {nv}")
+        elif nvals is not None:
+            nvs = str(nvals).strip()
+            if nvs:
+                parts.append(nvs)
+    return parts
+
+
+def _collect_chunk_text(raw_item, include_parent=True, include_source=True):
+    """Gather all relevant text across the 13-field universal chunk schema for guardrails."""
+    if isinstance(raw_item, str):
+        return raw_item
+    if not isinstance(raw_item, dict):
+        return ""
+    if "chunk" in raw_item and isinstance(raw_item.get("chunk"), str):
+        return raw_item.get("chunk", "")
+
+    chunk_data, _ = _unwrap_guardrail_chunk(raw_item)
+    if not isinstance(chunk_data, dict):
+        return ""
+
+    parts = []
+    if include_source:
+        src = str(chunk_data.get("source") or "").strip()
+        if src:
+            parts.append(src)
+    for key in ["section_title", "breadcrumb", "content"]:
+        val = str(chunk_data.get(key) or "").strip()
+        if val:
+            parts.append(val)
+    if not chunk_data.get("content"):
+        for fallback_key in ["document", "text"]:
+            val = str(chunk_data.get(fallback_key) or "").strip()
+            if val:
+                parts.append(val)
+                break
+    if include_parent:
+        parent_val = str(chunk_data.get("parent_content") or "").strip()
+        if parent_val:
+            parts.append(parent_val)
+
+    parts.extend(_extract_table_text_parts(chunk_data.get("table_data")))
+    parts.extend(_extract_images_text_parts(chunk_data.get("images")))
+
+    bmeta = chunk_data.get("business_metadata")
+    if isinstance(bmeta, dict):
+        for mk in ["document_name", "domain", "category"]:
+            mv = str(bmeta.get(mk) or "").strip()
+            if mv:
+                parts.append(mv)
+        ret = bmeta.get("retrieval")
+        if isinstance(ret, dict):
+            for rk in ["context", "situated_context"]:
+                rv = str(ret.get(rk) or "").strip()
+                if rv:
+                    parts.append(rv)
+
+    return " ".join(parts)
+
+
+def _collect_chunks_grounding_text(retrieved_chunks):
+    """Combine searchable text across all retrieved chunks cleanly."""
+    all_parts = []
+    for c in retrieved_chunks:
+        txt = _collect_chunk_text(c, include_parent=True, include_source=True)
+        if txt:
+            all_parts.append(txt)
+    return " ".join(all_parts)
+
+
 
 # =====================================================================
 # 1. GUARDRAIL RESULT DATA STRUCTURES
@@ -219,7 +359,7 @@ FRAUD_CATEGORIES = {
         "xóa dấu vết dòng tiền", "đơn hàng khống", "đối phó khi ngân hàng gửi thông báo phong tỏa"
     ],
     "BANK_RUMORS_AND_CRISIS": [
-        "ngân hàng phá sản", "vietcombank phá sản", "ngân hàng vỡ nợ", "vietcombank vỡ nợ",
+        "ngân hàng phá sản", "a-bank phá sản", "ngân hàng vỡ nợ", "a-bank vỡ nợ",
         "sắp sập tiệm", "sắp giải thể", "sắp đóng cửa", "rút tiền hàng loạt", "bank run",
         "lộ dữ liệu khách hàng", "lộ database", "mất tiền gửi", "quỵt tiền",
         "core banking bị hacker", "bị mất giá nghiêm trọng và sắp bị tịch thu",
@@ -229,7 +369,7 @@ FRAUD_CATEGORIES = {
     ],
     "INTERNAL_SECURITY_PROBING": [
         "system prompt", "prompt hệ thống", "chỉ thị hệ thống", "chỉ dẫn hệ thống",
-        "lương nhân viên vietcombank", "lương nhân viên vcb", "lương nhân viên ngân hàng",
+        "lương nhân viên a-bank", "lương nhân viên ngân hàng",
         "bảng lương ban giám đốc", "lương tổng giám đốc",
         "mật khẩu core banking", "database password", "sơ đồ mạng nội bộ",
         "tài liệu mật nội bộ", "chính sách nội bộ bí mật", "thông tin nhân sự mật",
@@ -260,7 +400,7 @@ REFUSAL_MESSAGES = {
     "PROMPT_INJECTION_DETECTED": (
         "Hệ thống AI xin thông báo: Yêu cầu của Quý khách chứa nội dung hoặc cấu trúc "
         "không phù hợp với quy chuẩn an toàn của hệ thống ngân hàng. Quý khách vui lòng đặt câu hỏi "
-        "rõ ràng về sản phẩm dịch vụ ngân hàng hoặc liên hệ Hotline 1900 54 54 13 để được hỗ trợ."
+        "rõ ràng về sản phẩm dịch vụ ngân hàng hoặc liên hệ Hotline CSKH 24/7 của Ngân hàng để được hỗ trợ."
     ),
     "EKYC_BIOMETRIC_FRAUD": (
         "Hệ thống AI xin thông báo: Hệ thống từ chối hỗ trợ các yêu cầu có dấu hiệu can thiệp, "
@@ -747,7 +887,7 @@ class BankingGuardrailManager:
         # Location and payment exception at coffee shops
         banking_context_words = [
             "chi nhánh", "phòng giao dịch", "atm", "cây atm", "địa chỉ", "ngân hàng",
-            "vietcombank", "vcb", "thanh toán", "quét mã", "qr", "chuyển tiền",
+            "a-bank", "ngân hàng số", "thanh toán", "quét mã", "qr", "chuyển tiền",
             "chuyển khoản", "trừ tiền", "hoàn tiền", "pos", "thẻ", "phí", "tỷ giá"
         ]
         has_banking_context = False
@@ -965,21 +1105,67 @@ class BankingGuardrailManager:
     def guard_rag_relevance(self, query, top_chunks, min_score=0.25, use_decision_model=None):
         """
         Đánh giá độ liên quan của tài liệu RAG trước khi gửi vào LLM.
+        Kiểm tra business_metadata.quality.index_ready (nếu có) và ngưỡng relevance/rerank.
         Nếu không có tài liệu liên quan -> Ngắt luồng fail-fast, ngăn LLM bịa đặt.
-        Tích hợp DecisionClient.grade_document_relevance để thẩm định độ liên quan tối đa.
         """
         if not top_chunks:
             msg = (
                 "Hệ thống AI xin thông báo: Rất tiếc, trong hệ thống tài liệu quy định và chính sách ngân hàng "
                 "hiện tại không tìm thấy thông tin phù hợp với câu hỏi của Quý khách. Quý khách vui lòng liên hệ "
-                "Tổng đài CSKH 1900 54 54 13 hoặc đến quầy giao dịch gần nhất để được tư vấn chính xác."
+                "Tổng đài CSKH 24/7 hoặc đến quầy giao dịch gần nhất để được tư vấn chính xác."
             )
             return False, msg, {"max_score": 0.0, "reason": "EMPTY_CHUNKS"}
 
+        ready_chunks = []
+        unready_chunk_ids = []
+        require_index_ready = getattr(Config, "REQUIRE_INDEX_READY", True)
+
+        for idx, raw_item in enumerate(top_chunks, start=1):
+            chunk_dict, _ = _unwrap_guardrail_chunk(raw_item)
+            is_explicit_unready = False
+            if isinstance(chunk_dict, dict):
+                bmeta = chunk_dict.get("business_metadata")
+                if isinstance(bmeta, dict):
+                    quality = bmeta.get("quality")
+                    if isinstance(quality, dict) and "index_ready" in quality:
+                        if quality.get("index_ready") is False:
+                            is_explicit_unready = True
+                            cid = str(chunk_dict.get("chunk_id") or f"chunk_{idx}")
+                            unready_chunk_ids.append(cid)
+            if not is_explicit_unready:
+                ready_chunks.append(raw_item)
+
+        if require_index_ready and len(unready_chunk_ids) == len(top_chunks) and len(top_chunks) > 0:
+            msg = (
+                "Hệ thống AI xin thông báo: Rất tiếc, các đoạn tài liệu truy xuất hiện chưa đạt chuẩn chỉ mục "
+                "(index_ready=false) để sử dụng làm căn cứ trả lời. Quý khách vui lòng liên hệ "
+                "Tổng đài CSKH 24/7 để được Chuyên viên Ngân hàng hỗ trợ trực tiếp."
+            )
+            return False, msg, {
+                "max_score": 0.0,
+                "min_score": min_score,
+                "reason": "CHUNKS_NOT_INDEX_READY",
+                "unready_chunk_ids": unready_chunk_ids,
+            }
+
+        if ready_chunks:
+            eval_chunks = ready_chunks
+        else:
+            eval_chunks = top_chunks
+
         max_score = 0.0
-        for c in top_chunks:
+        for c in eval_chunks:
             if isinstance(c, dict):
-                score = float(c.get("rerank_score", c.get("relevance_score", 0.0)))
+                raw_score = None
+                for sk in ("rerank_score", "relevance_score", "score"):
+                    cand_val = c.get(sk)
+                    if cand_val is not None:
+                        raw_score = cand_val
+                        break
+                if raw_score is None:
+                    score = 0.0
+                else:
+                    score = float(raw_score)
                 if score > max_score:
                     max_score = score
 
@@ -987,9 +1173,14 @@ class BankingGuardrailManager:
             msg = (
                 "Hệ thống AI xin thông báo: Rất tiếc, các tài liệu thông tin ngân hàng hiện có không chứa dữ liệu "
                 "xác thực để giải đáp chính xác cho nội dung này. Để bảo đảm tính chuẩn xác và an toàn thông tin, "
-                "Quý khách vui lòng liên hệ Hotline 1900 54 54 13 để được Chuyên viên Ngân hàng hỗ trợ trực tiếp."
+                "Quý khách vui lòng liên hệ Hotline CSKH 24/7 để được Chuyên viên Ngân hàng hỗ trợ trực tiếp."
             )
-            return False, msg, {"max_score": max_score, "min_score": min_score, "reason": "LOW_RELEVANCE"}
+            return False, msg, {
+                "max_score": max_score,
+                "min_score": min_score,
+                "reason": "LOW_RELEVANCE",
+                "excluded_unready_count": len(unready_chunk_ids),
+            }
 
         should_use_decision = self.use_decision_model
         if use_decision_model is not None:
@@ -999,15 +1190,8 @@ class BankingGuardrailManager:
             if self.decision_client is not None:
                 try:
                     if self.decision_client.is_available():
-                        first_chunk = top_chunks[0]
-                        doc_text = ""
-                        if isinstance(first_chunk, str):
-                            doc_text = first_chunk
-                        elif isinstance(first_chunk, dict):
-                            if "chunk" in first_chunk and isinstance(first_chunk["chunk"], dict):
-                                doc_text = str(first_chunk["chunk"].get("content", ""))
-                            else:
-                                doc_text = str(first_chunk.get("content", first_chunk.get("text", "")))
+                        first_chunk = eval_chunks[0]
+                        doc_text = _collect_chunk_text(first_chunk, include_parent=False, include_source=False).strip()
 
                         if doc_text:
                             grade = self.decision_client.grade_document_relevance(query, doc_text)
@@ -1016,7 +1200,7 @@ class BankingGuardrailManager:
                                     msg = (
                                         "Hệ thống AI xin thông báo: Rất tiếc, các tài liệu thông tin ngân hàng hiện có không chứa dữ liệu "
                                         "xác thực để giải đáp chính xác cho nội dung này. Để bảo đảm tính chuẩn xác và an toàn thông tin, "
-                                        "Quý khách vui lòng liên hệ Hotline 1900 54 54 13 để được Chuyên viên Ngân hàng hỗ trợ trực tiếp."
+                                        "Quý khách vui lòng liên hệ Hotline CSKH 24/7 để được Chuyên viên Ngân hàng hỗ trợ trực tiếp."
                                     )
                                     return False, msg, {
                                         "max_score": max_score,
@@ -1027,13 +1211,18 @@ class BankingGuardrailManager:
                                 return True, "", {
                                     "max_score": max_score,
                                     "min_score": min_score,
-                                    "decision_grade": grade
+                                    "decision_grade": grade,
+                                    "excluded_unready_count": len(unready_chunk_ids),
                                 }
                 except Exception as e:
                     # Fail-safe: safe fallback to score threshold verification
                     print(f"⚠️ [Banking Guardrail] DecisionClient grade fallback: {e}")
 
-        return True, "", {"max_score": max_score, "min_score": min_score}
+        return True, "", {
+            "max_score": max_score,
+            "min_score": min_score,
+            "excluded_unready_count": len(unready_chunk_ids),
+        }
 
     def guard_retrieved_chunks(self, chunks):
         """Rà soát tài liệu trích xuất từ RAG khỏi indirect prompt injection"""
@@ -1057,45 +1246,56 @@ class BankingGuardrailManager:
         sanitized = unicodedata.normalize("NFC", answer).strip()
         flags = []
 
-        # 1. Remove thought blocks <think>...</think> (supports unclosed and nested)
-        while "<think>" in sanitized:
-            start_idx = sanitized.find("<think>")
-            open_tag = "<think>"
-            close_tag = "</think>"
-            curr_pos = start_idx + len(open_tag)
-            depth = 1
-            while depth > 0 and curr_pos < len(sanitized):
-                next_open = sanitized.find(open_tag, curr_pos)
-                next_close = sanitized.find(close_tag, curr_pos)
+        # 1. Remove XML/HTML thinking blocks and markdown thought blocks
+        for tag in ["think", "thought", "thinking", "scratchpad", "reasoning"]:
+            open_tag = f"<{tag}>"
+            close_tag = f"</{tag}>"
+            while open_tag in sanitized:
+                start_idx = sanitized.find(open_tag)
+                curr_pos = start_idx + len(open_tag)
+                depth = 1
+                while depth > 0 and curr_pos < len(sanitized):
+                    next_open = sanitized.find(open_tag, curr_pos)
+                    next_close = sanitized.find(close_tag, curr_pos)
 
-                if next_close == -1:
-                    break
+                    if next_close == -1:
+                        break
 
-                if next_open != -1 and next_open < next_close:
-                    depth += 1
-                    curr_pos = next_open + len(open_tag)
-                else:
-                    depth -= 1
-                    curr_pos = next_close + len(close_tag)
-
-            if depth > 0:
-                if start_idx > 0:
-                    sanitized = sanitized[:start_idx].strip()
-                else:
-                    remainder = sanitized[len("<think>"):].strip()
-                    if "\n\n" in remainder:
-                        sanitized = remainder.split("\n\n")[-1].strip()
-                    elif "..." in remainder:
-                        parts = remainder.split("...")
-                        sanitized = parts[-1].strip()
+                    if next_open != -1 and next_open < next_close:
+                        depth += 1
+                        curr_pos = next_open + len(open_tag)
                     else:
-                        sanitized = remainder
-                break
-            else:
-                sanitized = sanitized[:start_idx] + sanitized[curr_pos:]
+                        depth -= 1
+                        curr_pos = next_close + len(close_tag)
 
-        if "</think>" in sanitized:
-            sanitized = sanitized.replace("</think>", "")
+                if depth > 0:
+                    if start_idx > 0:
+                        sanitized = sanitized[:start_idx].strip()
+                    else:
+                        remainder = sanitized[len(open_tag):].strip()
+                        if "\n\n" in remainder:
+                            sanitized = remainder.split("\n\n")[-1].strip()
+                        elif "..." in remainder:
+                            parts = remainder.split("...")
+                            sanitized = parts[-1].strip()
+                        else:
+                            sanitized = remainder
+                    break
+                else:
+                    sanitized = sanitized[:start_idx] + sanitized[curr_pos:]
+
+            if close_tag in sanitized:
+                sanitized = sanitized.replace(close_tag, "")
+
+        for mb in ["```thought", "```thinking", "```scratchpad", "```reasoning"]:
+            while mb in sanitized:
+                s_idx = sanitized.find(mb)
+                e_idx = sanitized.find("```", s_idx + len(mb))
+                if e_idx != -1:
+                    sanitized = sanitized[:s_idx] + sanitized[e_idx + 3:]
+                else:
+                    sanitized = sanitized[:s_idx]
+                    break
 
         # 2. Filter out System Prompt leak markers
         for sig in PROMPT_LEAK_SIGNATURES:
@@ -1192,23 +1392,7 @@ class BankingGuardrailManager:
             return True, []
 
         flags = []
-        all_chunks_text = ""
-        for c in retrieved_chunks:
-            if isinstance(c, str):
-                all_chunks_text = all_chunks_text + " " + c.lower()
-            elif isinstance(c, dict):
-                chunk_data = c
-                if "chunk" in c:
-                    nested = c.get("chunk")
-                    if isinstance(nested, dict):
-                        chunk_data = nested
-                    elif isinstance(nested, str):
-                        all_chunks_text = all_chunks_text + " " + nested.lower()
-                        continue
-                content = str(chunk_data.get("content", ""))
-                bc = str(chunk_data.get("breadcrumb", ""))
-                all_chunks_text = all_chunks_text + " " + content + " " + bc
-
+        all_chunks_text = _collect_chunks_grounding_text(retrieved_chunks)
         all_chunks_lower = all_chunks_text.lower()
 
         # 1. Verify legal references and citations
@@ -1289,11 +1473,11 @@ class BankingGuardrailManager:
         return is_faithful, flags
 
     def verify_citation_grounding(self, answer, retrieved_chunks):
-        """Đối soát trích dẫn điều khoản pháp lý trong câu trả lời (0% Regex)"""
+        """Đối soát trích dẫn điều khoản pháp lý trong câu trả lời (0% Regex, Zero Ternary)."""
         if not answer:
-            return {"is_grounded": True, "verified_citations": [], "unverified_citations": []}
+            return {"is_grounded": True, "verified_citations": [], "unverified_citations": [], "unsupported_citations": []}
         if not retrieved_chunks:
-            return {"is_grounded": True, "verified_citations": [], "unverified_citations": []}
+            return {"is_grounded": True, "verified_citations": [], "unverified_citations": [], "unsupported_citations": []}
 
         answer_lower = answer.lower()
         found_citations = []
@@ -1309,53 +1493,87 @@ class BankingGuardrailManager:
             tag = answer_lower[lb:rb+1]
             inner = tag[1:-1].strip()
             is_citation = False
-            if "điều" in tag or "khoản" in tag or "mục" in tag or "nguồn:" in tag or "quyết định" in tag or "thông tư" in tag:
+            if "điều" in tag or "khoản" in tag or "mục" in tag or "nguồn:" in tag or "quyết định" in tag or "thông tư" in tag or "bảng" in tag or "hình" in tag:
                 is_citation = True
-            elif inner.isdigit() and len(inner) <= 3:
-                is_citation = True
+            else:
+                if inner.isdigit():
+                    if len(inner) <= 3:
+                        is_citation = True
 
             if is_citation:
                 found_citations.append(tag)
             start_idx = rb + 1
 
-        all_chunk_text = ""
-        for c in retrieved_chunks:
-            if isinstance(c, str):
-                all_chunk_text = all_chunk_text + " " + c.lower()
-            elif isinstance(c, dict):
-                chunk_data = c
-                if "chunk" in c:
-                    nested = c.get("chunk")
-                    if isinstance(nested, dict):
-                        chunk_data = nested
-                    elif isinstance(nested, str):
-                        all_chunk_text = all_chunk_text + " " + nested.lower()
-                        continue
-                c_content = str(chunk_data.get("content", "")).lower()
-                c_bc = str(chunk_data.get("breadcrumb", "")).lower()
-                all_chunk_text = all_chunk_text + " " + c_content + " " + c_bc
+        all_chunk_text = _collect_chunks_grounding_text(retrieved_chunks).lower()
 
         verified = []
         unverified = []
 
         for cit in found_citations:
             clean_cit = cit.replace("[", "").replace("]", "").strip()
-            parts = clean_cit.split(",")
-            all_parts_found = True
-            for part in parts:
-                p_clean = part.strip()
-                if p_clean and p_clean not in all_chunk_text:
-                    all_parts_found = False
-                    break
+            if not clean_cit:
+                continue
+            if clean_cit.isdigit():
+                idx_num = int(clean_cit)
+                if idx_num <= len(retrieved_chunks) and idx_num > 0:
+                    verified.append(cit)
+                else:
+                    unverified.append(cit)
+                continue
 
-            if all_parts_found is True:
+            tokenized = clean_cit
+            for sep in [",", ";", "-", "–", "—", "|", ":", "/", ".", "(", ")"]:
+                tokenized = tokenized.replace(sep, " ")
+            tokens = tokenized.split()
+
+            is_cit_verified = False
+
+            anchor_words = ["điều", "bảng", "hình", "khoản", "mục", "phụ"]
+            for i in range(len(tokens) - 1):
+                if tokens[i] in anchor_words:
+                    term = tokens[i] + " " + tokens[i+1]
+                    if term in all_chunk_text:
+                        is_cit_verified = True
+                        break
+
+            if not is_cit_verified:
+                code_prefixes = ["the", "bh", "td", "bc", "vh", "nv", "pl", "qd", "tt"]
+                for i in range(len(tokens) - 1):
+                    if tokens[i] in code_prefixes:
+                        code = tokens[i] + " " + tokens[i+1]
+                        if code in all_chunk_text:
+                            is_cit_verified = True
+                            break
+
+            if not is_cit_verified:
+                words = [w for w in tokens if len(w) > 2]
+                for i in range(len(words) - 2):
+                    phrase = " ".join(words[i:i+3])
+                    if phrase in all_chunk_text:
+                        is_cit_verified = True
+                        break
+
+            if not is_cit_verified:
+                core_kw = ["napas", "visa", "mastercard", "contactless", "pos", "atm", "core", "quy định", "hợp đồng"]
+                for w in tokens:
+                    if w in core_kw:
+                        if w in all_chunk_text:
+                            is_cit_verified = True
+                            break
+
+            if is_cit_verified:
                 verified.append(cit)
             else:
                 unverified.append(cit)
 
         is_grounded = True
-        if len(unverified) > 0:
-            is_grounded = False
+        if len(found_citations) > 0:
+            if len(verified) == 0:
+                is_grounded = False
+            else:
+                is_grounded = True
+        else:
+            is_grounded = True
 
         return {
             "is_grounded": is_grounded,

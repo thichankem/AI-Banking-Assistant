@@ -4,12 +4,17 @@ import os
 from pathlib import Path
 import yaml
 
+from agent_banking.core.environment import load_environment
+
+
+load_environment()
+
 
 def _load_yaml_settings():
     yaml_path = Path(__file__).resolve().parent / "settings" / "config.yaml"
     if yaml_path.exists():
         try:
-            with open(yaml_path, "r", encoding="utf-8") as f:
+            with open(yaml_path, "r", encoding="utf-8-sig") as f:
                 return yaml.safe_load(f) or {}
         except Exception:
             pass
@@ -24,3 +29,4 @@ class TracingConfig:
     ENABLE_PHOENIX = os.getenv("ENABLE_PHOENIX", str(_cfg.get("enable_phoenix", True))).lower() == "true"
     PHOENIX_COLLECTOR_ENDPOINT = os.getenv("PHOENIX_COLLECTOR_ENDPOINT", str(_cfg.get("phoenix_collector_endpoint", "")))
     PHOENIX_PROJECT_NAME = os.getenv("PHOENIX_PROJECT_NAME", str(_cfg.get("phoenix_project_name", "")))
+    TRACE_DIR = Path(__file__).resolve().parent.parent / "traces"

@@ -17,8 +17,6 @@ MANDATORY RULES:
 - NO TYPING LIBRARY: Use Python native types only.
 """
 
-from __future__ import annotations
-
 import os
 import sys
 import time
@@ -47,6 +45,7 @@ import uvicorn
 from agent_banking.core.settings import Config
 from agent_banking.pipeline import BankingRAGPipeline
 from agent_banking.node_pipeline import NodePipeline
+from agent_banking.agent_pipeline import extract_query_keywords
 from agent_banking.generator.rag_generator import (
     PERSONA_PROFILES,
     TONE_PROFILES,
@@ -183,27 +182,24 @@ def get_config():
 
 @app.get("/api/decision/status")
 def get_decision_status(ping: bool = False):
-    """Check decision model connection status."""
+    """Check decision model configuration status."""
+    decision_model = getattr(config, "DECISION_MODEL", "default-decision-model")
+    decision_base_url = getattr(config, "DECISION_BASE_URL", "")
+    has_api_key = bool(getattr(config, "DECISION_API_KEY", ""))
+    decision_timeout = float(getattr(config, "DECISION_TIMEOUT", 8.0))
     return {
         "status": "disabled",
-        "model": getattr(config, "DECISION_MODEL", "decision-model"),
-        "base_url": getattr(config, "DECISION_BASE_URL", ""),
+        "model": decision_model,
+        "base_url": decision_base_url,
         "enabled": False,
-        "has_api_key": False,
-        "timeout": 8.0,
-        "note": "Decision module is optional and currently disabled"
+        "has_api_key": has_api_key,
+        "timeout": decision_timeout,
+        "note": "Runtime agent/guardrail decision module disabled; chunking uses chunking.decision when configured"
     }
 
 
-# -----------------------------------------------------------------------------
-# 3. DIRECT CHAT QUERY ACROSS 7 RAG NODES
-# -----------------------------------------------------------------------------
-@app.post("/api/chat")
-def handle_chat(req: ChatRequest):
-    query_text = req.message.strip()
-    if not query_text:
-        raise HTTPException(status_code=400, detail="Query message cannot be empty.")
-
+def _resolve_chat_style(req: ChatRequest) -> dict:
+    """Normalize persona, tone, format_style, and custom_persona fields from ChatRequest."""
     persona_val = "advisor"
     if req.persona:
         persona_val = req.persona
@@ -220,12 +216,24 @@ def handle_chat(req: ChatRequest):
     if req.custom_persona:
         custom_persona_val = req.custom_persona
 
-    persona_config = {
+    return {
         "persona": persona_val,
         "tone": tone_val,
         "format_style": format_style_val,
         "custom_persona": custom_persona_val
     }
+
+
+# -----------------------------------------------------------------------------
+# 3. DIRECT CHAT QUERY ACROSS 7 RAG NODES
+# -----------------------------------------------------------------------------
+@app.post("/api/chat")
+def handle_chat(req: ChatRequest):
+    query_text = req.message.strip()
+    if not query_text:
+        raise HTTPException(status_code=400, detail="Query message cannot be empty.")
+
+    persona_config = _resolve_chat_style(req)
 
     try:
         result = node_pipe.run_single_query_with_node_trace(query_text, persona_config=persona_config)
@@ -261,26 +269,17 @@ def handle_agent_chat(req: ChatRequest):
     if req.session_id:
         session_id = req.session_id
 
-    persona_val = "advisor"
-    if req.persona:
-        persona_val = req.persona
-
-    tone_val = "formal"
-    if req.tone:
-        tone_val = req.tone
-
-    format_style_val = "standard"
-    if req.format_style:
-        format_style_val = req.format_style
+    style = _resolve_chat_style(req)
 
     try:
         agent = get_agent_pipeline()
         result = agent.chat(
             query=query_text,
             session_id=session_id,
-            persona=persona_val,
-            tone=tone_val,
-            format_type=format_style_val
+            persona=style["persona"],
+            tone=style["tone"],
+            format_type=style["format_style"],
+            custom_persona=style["custom_persona"]
         )
         return result
     except Exception as e:
@@ -301,19 +300,9 @@ async def stream_agent_chat(req: ChatRequest):
         if req.session_id != "":
             session_id = req.session_id
 
-    async def event_generator():
-        config_thread = {
-            "configurable": {
-                "thread_id": session_id
-            }
-        }
-        initial_input = {
-            "user_query": query_text,
-            "query": query_text,
-            "original_query": query_text,
-            "session_id": session_id
-        }
+    style = _resolve_chat_style(req)
 
+    async def event_generator():
         final_response_text = ""
         sub_agent_used = "GENERAL_ADVISOR"
         audit_status_used = "PASS"
@@ -321,7 +310,14 @@ async def stream_agent_chat(req: ChatRequest):
 
         try:
             agent = get_agent_pipeline()
-            for step_event in agent.graph.stream(initial_input, config=config_thread):
+            async for step_event in agent.astream_chat(
+                query=query_text,
+                session_id=session_id,
+                persona=style["persona"],
+                tone=style["tone"],
+                format_type=style["format_style"],
+                custom_persona=style["custom_persona"]
+            ):
                 for node_name, node_state in step_event.items():
                     if "sub_agent_role" in node_state:
                         sub_agent_used = str(node_state["sub_agent_role"])
@@ -388,19 +384,7 @@ async def stream_agent_chat(req: ChatRequest):
             }
             if hasattr(agent, "evaluator"):
                 if agent.evaluator is not None and len(last_retrieved_chunks) > 0:
-                    cleaned_q = query_text.lower()
-                    punctuation_chars = [".", ",", ";", ":", "!", "?", "(", ")", "[", "]", "\"", "'", "\n", "\t", "*", "-", "_", "/", "\\", "|"]
-                    for ch in punctuation_chars:
-                        cleaned_q = cleaned_q.replace(ch, " ")
-                    raw_tokens = cleaned_q.split(" ")
-                    stopwords = {"cho", "tôi", "hỏi", "được", "không", "như", "thế", "nào", "với", "các", "những", "có", "là", "và", "của", "tại", "bank"}
-                    kws = []
-                    for t in raw_tokens:
-                        stripped_t = t.strip()
-                        if len(stripped_t) > 2 and stripped_t not in stopwords:
-                            kws.append(stripped_t)
-                    if len(kws) == 0:
-                        kws.append(query_text.lower())
+                    kws = extract_query_keywords(query_text)
                     eval_metrics = agent.evaluator.evaluate_single_case(
                         question=query_text,
                         retrieved_chunks=last_retrieved_chunks,
@@ -492,7 +476,11 @@ def get_node_file_content(node_name: str, io_type: str, file_name: str):
         raise HTTPException(status_code=400, detail="Directory type must be 'input' or 'output'")
 
     target_dir = folders[node_name][io_type]
-    target_file = target_dir / file_name
+    base_resolved = target_dir.resolve()
+    target_file = (target_dir / file_name).resolve()
+
+    if not target_file.is_relative_to(base_resolved):
+        raise HTTPException(status_code=403, detail="Access denied: invalid file path")
 
     if not target_file.exists() or not target_file.is_file():
         raise HTTPException(status_code=404, detail=f"File not found: {file_name}")

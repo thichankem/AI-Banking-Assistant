@@ -30,9 +30,18 @@ class FallbackChatClient:
             if not response.choices:
                 raise ValueError("Empty chat choices")
             message = response.choices[0].message
-            if not isinstance(message.content, str) or not message.content.strip():
-                raise ValueError("Empty chat answer")
-            if response.choices[0].finish_reason not in (None, "stop"):
+            content_str = message.content
+            if not isinstance(content_str, str) or not content_str.strip():
+                has_reasoning = False
+                if hasattr(message, "reasoning_content"):
+                    if isinstance(message.reasoning_content, str):
+                        if message.reasoning_content.strip():
+                            has_reasoning = True
+                if has_reasoning:
+                    message.content = message.reasoning_content
+                else:
+                    raise ValueError("Empty chat answer")
+            if response.choices[0].finish_reason not in (None, "stop", "length"):
                 raise ValueError("Incomplete chat answer")
             if validate is not None:
                 validate(response)

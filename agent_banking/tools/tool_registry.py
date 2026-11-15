@@ -13,7 +13,6 @@ MANDATORY RULES:
 5. KEEP IT SIMPLE: Clear, direct, readable code.
 """
 
-from __future__ import annotations
 import json
 import time
 from pathlib import Path
@@ -118,10 +117,10 @@ class BankingToolRegistry:
                 result = get_foreign_exchange_rates(currency=curr)
             elif name == "check_biometric_compliance_qd2345":
                 from agent_banking.tools.banking_api_tools import check_biometric_compliance_qd2345
-                stx = float(params.get("single_tx_amount_vnd", 0.0))
-                dtx = float(params.get("daily_cumulative_amount_vnd", 0.0))
-                ndev = bool(params.get("is_first_time_new_device", False))
-                chip = bool(params.get("has_verified_chip_cccd", True))
+                stx = float(params.get("single_tx_amount_vnd", params.get("transaction_amount", 0.0)))
+                dtx = float(params.get("daily_cumulative_amount_vnd", params.get("daily_accumulated_amount", 0.0)))
+                ndev = bool(params.get("is_first_time_new_device", params.get("is_new_device", False)))
+                chip = bool(params.get("has_verified_chip_cccd", params.get("has_cccd_chip_nfc", True)))
                 result = check_biometric_compliance_qd2345(
                     single_tx_amount_vnd=stx,
                     daily_cumulative_amount_vnd=dtx,
@@ -130,9 +129,9 @@ class BankingToolRegistry:
                 )
             elif name == "create_support_ticket":
                 from agent_banking.tools.banking_api_tools import create_support_ticket
-                cname = params.get("customer_name", "KHACH_HANG_HOTLINE")
+                cname = params.get("customer_name", params.get("user_contact", "KHACH_HANG_HOTLINE"))
                 itype = params.get("issue_type", "nuot_the_atm")
-                desc = params.get("description", "Sự cố tiếp nhận qua AI Agent")
+                desc = params.get("description", params.get("details", "Sự cố tiếp nhận qua AI Agent"))
                 prio = params.get("priority", "NORMAL")
                 result = create_support_ticket(customer_name=cname, issue_type=itype, description=desc, priority=prio)
             elif name == "parse_vietnamese_financial_params":
@@ -145,19 +144,20 @@ class BankingToolRegistry:
                 result = check_complain_count(complain_count=cnt)
             elif name == "transfer_to_agent":
                 from agent_banking.tools.banking_api_tools import transfer_to_agent
-                dep = params.get("department", "CSKH_CHUNG")
-                reason = params.get("reason", "Khách hàng yêu cầu hỗ trợ")
-                result = transfer_to_agent(department=dep, reason=reason)
+                bproc = str(params.get("business_process", params.get("reason", "request_human_agent")))
+                cseg = str(params.get("customer_segment", params.get("department", "individual")))
+                result = transfer_to_agent(business_process=bproc, customer_segment=cseg)
             elif name == "rate_agent_csat":
                 from agent_banking.tools.banking_api_tools import rate_agent_csat
-                rate = int(params.get("rating", 5))
-                fb = params.get("feedback", "")
-                result = rate_agent_csat(rating=rate, feedback=fb)
+                rate = int(params.get("rating_score", params.get("rating", 5)))
+                msg = str(params.get("user_message", params.get("feedback", "")))
+                chan = str(params.get("channel", "web"))
+                result = rate_agent_csat(rating_score=rate, user_message=msg, channel=chan)
             elif name == "deflect_competitor_comparison":
                 from agent_banking.tools.banking_api_tools import deflect_competitor_comparison
-                comp = params.get("competitor_name", "")
-                prod = params.get("product_type", "the_va_tai_khoan")
-                result = deflect_competitor_comparison(competitor_name=comp, product_type=prod)
+                comp = str(params.get("competitor_name", ""))
+                q_arg = str(params.get("query", params.get("product_type", "")))
+                result = deflect_competitor_comparison(competitor_name=comp, query=q_arg)
             else:
                 result = {"status": "ERROR", "message": f"Handler not implemented for tool '{name}'"}
 

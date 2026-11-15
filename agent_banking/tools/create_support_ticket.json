@@ -35,9 +35,11 @@
       "ticket_id": {"type": "string"},
       "customer_name": {"type": "string"},
       "issue_type": {"type": "string"},
+      "description": {"type": "string"},
       "priority": {"type": "string"},
-      "sla_resolution_hours": {"type": "integer"},
-      "created_at": {"type": "string"}
+      "created_at": {"type": "string"},
+      "emergency_hotline": {"type": "string"},
+      "message": {"type": "string"}
     }
   },
   "handler": {

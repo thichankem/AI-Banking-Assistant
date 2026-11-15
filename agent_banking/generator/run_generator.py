@@ -15,7 +15,6 @@ MANDATORY RULES:
 4. 0% REGEX LAW (string operations only).
 """
 
-from __future__ import annotations
 import sys
 import json
 import time
@@ -40,7 +39,7 @@ from agent_banking.state_tracker import StateTracker
 def _compute_chunk_signature(chunk):
     """
     Extract content signature or identifier for a chunk (0% Regex, Zero Ternary).
-    Falls back to first 100 characters of content, document, parent_content, or text.
+    Supports 13-field universal chunks and wrapped reranker outputs.
     """
     if isinstance(chunk, dict):
         if "chunk" in chunk and isinstance(chunk["chunk"], dict):
@@ -50,16 +49,26 @@ def _compute_chunk_signature(chunk):
 
         cid = c_target.get("chunk_id")
         if not cid:
+            cid = chunk.get("chunk_id")
+        if not cid:
             cid = c_target.get("id")
         if cid:
             return str(cid)
 
-        for key in ["content", "document", "parent_content", "text"]:
+        for key in ["content", "parent_content", "document", "text"]:
             val = c_target.get(key)
             if val:
                 val_str = str(val).strip()
                 if val_str:
                     return val_str[:100]
+
+        table_data = c_target.get("table_data")
+        if isinstance(table_data, dict) and table_data:
+            return str(table_data.get("table_id") or table_data.get("title") or "")[:100]
+
+        images = c_target.get("images")
+        if isinstance(images, list) and images and isinstance(images[0], dict):
+            return str(images[0].get("image_id") or images[0].get("caption") or "")[:100]
     elif isinstance(chunk, str):
         return chunk.strip()[:100]
     return ""
@@ -78,10 +87,10 @@ def _compute_query_chunks_hash(tracker, query, top_chunks):
 
 
 def run_auto_generator(
-    input_file: str | Path | None = None,
-    output_dir: str | Path | None = None,
-    force: bool = False
-) -> list[dict]:
+    input_file=None,
+    output_dir=None,
+    force=False
+):
     """
     Automatically formats context and generates answers with deduplication state tracking.
     """
@@ -112,10 +121,6 @@ def run_auto_generator(
             rerank_out = PROJECT_ROOT / "agent_banking" / "reranking" / "output" / "reranked_chunks.json"
             if rerank_out.exists():
                 target_in_file = rerank_out
-            else:
-                rag_rerank_out = PROJECT_ROOT / "rag_banking" / "reranking" / "output" / "reranked_chunks.json"
-                if rag_rerank_out.exists():
-                    target_in_file = rag_rerank_out
 
     if target_in_file is None or not target_in_file.exists():
         print(f"⚠️ Top chunks file not found in: {in_dir}")
@@ -126,8 +131,10 @@ def run_auto_generator(
     print(f"▶ [MODULE 7: GENERATOR & LLM] Input: {target_in_file.name} -> Output: {out_path}")
     print(f"{'='*75}")
 
-    with open(target_in_file, "r", encoding="utf-8") as fp:
+    with open(target_in_file, "r", encoding="utf-8-sig") as fp:
         raw_reranked = json.load(fp)
+    if isinstance(raw_reranked, dict):
+        raw_reranked = raw_reranked.get("results", raw_reranked.get("queries", []))
 
     if not raw_reranked:
         print("⚠️ Top chunks list is empty.")
@@ -165,18 +172,9 @@ def run_auto_generator(
         except Exception:
             prev_answers = {}
 
-    try:
-        generator = RAGGenerator(config=cfg)
-    except TypeError:
-        generator = RAGGenerator(
-            api_key=getattr(cfg, "LLM_API_KEY", None),
-            base_url=getattr(cfg, "LLM_BASE_URL", None),
-            model=getattr(cfg, "LLM_MODEL", None),
-            temperature=getattr(cfg, "LLM_TEMPERATURE", 0.2),
-            max_tokens=getattr(cfg, "LLM_MAX_TOKENS", 2500)
-        )
-    final_answers: list[dict] = []
-    markdown_reports: list[str] = [
+    generator = RAGGenerator(config=cfg)
+    final_answers = []
+    markdown_reports = [
         "# 📋 BÁO CÁO KẾT QUẢ SINH CÂU TRẢ LỜI (MODULE 7 - LLM SERVING)\n",
         f"> Thời gian: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
     ]
@@ -222,7 +220,10 @@ def run_auto_generator(
             print(f"  [{q_id:02d}] [SKIP] '{q[:40]}...' (Previously generated)")
         else:
             t0 = time.time()
-            synthesized_context = generator.format_chunks(top_chunks)
+            synthesized_context = generator.format_chunks(
+                top_chunks,
+                max_tokens=getattr(cfg, "MAX_CONTEXT_TOKENS", None)
+            )
             serving_result = generator.generate_answer(q, synthesized_context)
             dt_ms = round((time.time() - t0) * 1000, 1)
 

@@ -1,14 +1,14 @@
 {
   "name": "search_banking_knowledge",
-  "display_name": "Tra Cứu Tri Thức Quy Chế & Biểu Phí Vietcombank (Agentic RAG)",
+  "display_name": "Tra Cứu Tri Thức Quy Chế & Biểu Phí A-Bank (Agentic RAG)",
   "category": "KNOWLEDGE",
-  "description": "Tra cứu tài liệu quy chế, quy trình mở tài khoản eKYC, hạn mức giao dịch, biểu phí dịch vụ và điều khoản sử dụng thẻ Vietcombank bằng công nghệ Hybrid Vector + BM25 và Cross-Encoder Reranker.",
+  "description": "Tra cứu tài liệu quy chế ngân hàng, sản phẩm thẻ, pháp lý tuân thủ, hướng dẫn app A-Bank Plus, bảo hiểm A-Life, tín dụng, báo cáo tài chính và SLA bằng công nghệ Hybrid Vector + BM25 và Cross-Encoder Reranker.",
   "parameters": {
     "type": "object",
     "properties": {
       "query": {
         "type": "string",
-        "description": "Nội dung câu hỏi hoặc từ khóa cần tra cứu trong kho tài liệu Vietcombank"
+        "description": "Nội dung câu hỏi hoặc từ khóa cần tra cứu trong kho tài liệu A-Bank"
       },
       "top_k": {
         "type": "integer",

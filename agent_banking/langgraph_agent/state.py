@@ -52,9 +52,14 @@ MAIN FIELDS IN AGENTSTATE:
 
 8. Observability & Steps:
    - execution_steps (list[str]): Trace of executed graph nodes.
-"""
 
-from __future__ import annotations
+9. Response Styling & Query Metadata (Optional Request Overrides):
+   - parsed_query (dict): Normalized query metadata returned by retrieval.
+   - persona (str): Optional persona profile key (default "advisor").
+   - tone (str): Optional tone profile key (default "formal").
+   - format_type (str): Optional format profile key (default "standard"; also accepts alias format_style).
+   - custom_persona (str): Optional custom persona prompt when persona == "custom".
+"""
 
 # Native Python dictionary state schema for LangGraph StateGraph
 AgentState = dict

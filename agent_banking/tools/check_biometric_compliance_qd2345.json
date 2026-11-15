@@ -24,7 +24,7 @@
       "has_verified_chip_cccd": {
         "type": "boolean",
         "default": true,
-        "description": "Khách hàng đã hoàn thành đối soát CCCD gắn chip qua NFC trên VCB Digibank hay chưa"
+        "description": "Khách hàng đã hoàn thành đối soát CCCD gắn chip qua NFC trên A-Bank Plus hay chưa"
       }
     },
     "required": ["single_tx_amount_vnd"]
@@ -33,11 +33,14 @@
     "type": "object",
     "properties": {
       "status": {"type": "string"},
-      "requires_biometric": {"type": "boolean"},
-      "mandatory_action": {"type": "string"},
-      "trigger_reasons": {"type": "array"},
       "regulation_reference": {"type": "string"},
-      "audit_timestamp": {"type": "string"}
+      "single_tx_amount_vnd": {"type": "number"},
+      "daily_cumulative_amount_vnd": {"type": "number"},
+      "requires_biometric": {"type": "boolean"},
+      "has_verified_chip_cccd": {"type": "boolean"},
+      "can_proceed_immediately": {"type": "boolean"},
+      "trigger_reasons": {"type": "array"},
+      "mandatory_action": {"type": "string"}
     }
   },
   "handler": {

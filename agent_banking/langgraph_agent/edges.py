@@ -14,7 +14,6 @@ RULES:
 - INFINITE LOOP PROTECTION: Strict control over retry limits.
 """
 
-from __future__ import annotations
 from agent_banking.langgraph_agent.state import AgentState
 
 

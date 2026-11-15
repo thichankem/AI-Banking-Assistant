@@ -10,7 +10,6 @@ Builds and compiles the state transition graph (StateGraph) with:
 - 0% REGEX & ZERO TERNARY 100% compliance.
 """
 
-from __future__ import annotations
 import os
 import sqlite3
 

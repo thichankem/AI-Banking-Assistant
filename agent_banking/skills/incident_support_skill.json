@@ -79,6 +79,6 @@
     "type": "incident_dispatcher",
     "module": "agent_banking.tools.banking_api_tools",
     "function": "create_support_ticket",
-    "hotline": "1900 54 54 13 (24/7)"
+    "hotline": "1900 6688 (24/7)"
   }
 }

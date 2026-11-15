@@ -6,26 +6,33 @@
   "parameters": {
     "type": "object",
     "properties": {
-      "rating": {
+      "rating_score": {
         "type": "integer",
         "description": "Điểm đánh giá từ 1 đến 5",
         "minimum": 1,
         "maximum": 5
       },
-      "feedback": {
+      "user_message": {
         "type": "string",
         "default": "",
         "description": "Ý kiến đóng góp thêm của khách hàng"
+      },
+      "channel": {
+        "type": "string",
+        "default": "web",
+        "description": "Kênh tương tác của khách hàng"
       }
     },
-    "required": ["rating"]
+    "required": ["rating_score"]
   },
   "returns": {
     "type": "object",
     "properties": {
       "status": {"type": "string"},
-      "rating": {"type": "integer"},
-      "message": {"type": "string"}
+      "rating_score": {"type": "integer"},
+      "comment": {"type": "string"},
+      "channel": {"type": "string"},
+      "final_answer": {"type": "string"}
     }
   },
   "handler": {

@@ -22,8 +22,6 @@ DESIGN PRINCIPLES:
 3. NO __INIT__.PY: Direct module imports.
 """
 
-from __future__ import annotations
-
 import sys
 import time
 import json
@@ -38,9 +36,13 @@ if sys.platform == "win32":
         pass
 
 from agent_banking.core.settings import Config
-from .chunking.unified_chunk.layout_aware_chunker import DLAChunker
+from .chunking.run_chunking import load_published_chunks
+from .chunking.universal.universal_chunker import DLAChunker, discover_documents
+from .chunking.universal.schema_assembler import link_chunk_sequence
 from .embedding.embedder import BankingEmbedder
-from .vector_db.qdrant_store import QdrantBankingStore, QdrantVectorStore
+from .vector_db.qdrant_store import (
+    QdrantBankingStore, QdrantVectorStore, mark_publication_chunks, publication_scope,
+)
 from .query_parser.rag_query_parser import BankingQueryParser, ParsedQuery
 from .retrieval.hybrid_retriever import HybridRetriever
 from .reranking.rag_reranker import BankingReranker
@@ -68,7 +70,10 @@ class BankingRAGPipeline:
         # 1. Initialize DLA Chunker (Canonical document chunking)
         print("[1/5] Initializing Layout-Aware Document Chunker...")
         self.dla_chunker = DLAChunker(
-            max_chunk_size=self.config.CHUNK_MAX_SIZE
+            target_chunk_tokens=int(getattr(self.config, "CHUNK_SIZE_TOKENS", 512)),
+            max_chunk_tokens=int(getattr(self.config, "CHUNK_MAX_TOKENS", 1024)),
+            min_chunk_tokens=int(getattr(self.config, "CHUNK_MIN_TOKENS", 128)),
+            config=self.config
         )
         self.chunker = self.dla_chunker
 
@@ -78,7 +83,6 @@ class BankingRAGPipeline:
             dimension=self.config.EMBEDDING_DIM,
             model_name=self.config.EMBEDDING_MODEL_1024,
             embedding_url=self.config.EMBEDDING_URL,
-            api_key=self.config.LLM_API_KEY,
             cache_db_path=str(self.config.STORAGE_DIR / "embedding_cache.db")
         )
         self.embedding_model = self.embedder
@@ -89,10 +93,15 @@ class BankingRAGPipeline:
         else:
             store_mode = "Disk"
         print(f"[3/5] Initializing Vector & BM25 Store ({store_mode})...")
+        raw_qdrant_path = Path(getattr(self.config, "QDRANT_STORAGE_PATH", self.config.STORAGE_DIR / "qdrant_db"))
+        if raw_qdrant_path.is_absolute():
+            qdrant_storage_path = raw_qdrant_path
+        else:
+            qdrant_storage_path = self.config.ROOT_DIR / raw_qdrant_path
         self.vector_store = QdrantBankingStore(
             collection_name=self.config.QDRANT_COLLECTION,
             dimension=self.config.EMBEDDING_DIM,
-            storage_path=str(self.config.STORAGE_DIR / "qdrant_db"),
+            storage_path=str(qdrant_storage_path),
             use_memory=use_memory
         )
 
@@ -108,9 +117,7 @@ class BankingRAGPipeline:
 
         print(f"[4.1/5] Initializing Reranker ({self.config.RERANKER_MODEL})...")
         self.reranker = BankingReranker(
-            model_name=self.config.RERANKER_MODEL,
-            api_key=self.config.LLM_API_KEY,
-            base_url=self.config.LLM_BASE_URL
+            model_name=self.config.RERANKER_MODEL
         )
 
         # 5. Initialize LLM Serving with System Guardrails
@@ -135,6 +142,8 @@ class BankingRAGPipeline:
         1. Generate dense vector embeddings (using SQLite cache).
         2. Ingest concurrently into HNSW Vector Store and Okapi BM25 index.
         """
+        chunks = [chunk for chunk in chunks
+                  if chunk.get("business_metadata", {}).get("retrieval", {}).get("role") != "attachment_only"]
         if not chunks:
             return 0
 
@@ -160,21 +169,58 @@ class BankingRAGPipeline:
         self.indexed_chunks.extend(chunks)
         return len(chunks)
 
+    def ingest_published_chunks(self, output_dir=None, require_ready=True, batch_size=32):
+        """
+        Synchronize a verified chunking publication with Vector DB and BM25.
+        Retain the indexed versions of sources that failed this publication.
+        """
+        if output_dir is not None:
+            target_out = Path(output_dir)
+        else:
+            default_out = Path(__file__).resolve().parent / "chunking" / "output"
+            target_out = Path(getattr(self.config, "CHUNKING_OUTPUT_DIR", default_out))
+
+        chunks, manifest = load_published_chunks(target_out, require_ready=require_ready, return_manifest=True)
+        print(f"[*] Loaded {len(chunks)} verified published chunks from {target_out}")
+        scope = publication_scope(target_out)
+        searchable = mark_publication_chunks([
+            chunk for chunk in chunks
+            if chunk.get("business_metadata", {}).get("retrieval", {}).get("role") != "attachment_only"
+        ], scope)
+        link_chunk_sequence(searchable)
+        count = self.ingest_chunks(searchable, batch_size=batch_size)
+        sources = {record["rel_path"] for record in manifest["records"] if record["status"] != "FAILED"}
+        failed_sources = {record["rel_path"] for record in manifest["records"] if record["status"] == "FAILED"}
+        active = {chunk["chunk_id"] for chunk in searchable}
+        self.vector_store.prune_chunks(active, sources, scope=scope, preserve_sources=failed_sources)
+        return count
+
     def ingest_chunk_files(self, chunks_dir, file_pattern="*.json"):
         """
-        Ingest all chunk JSON files in the specified directory into Vector DB.
+        Ingest chunk JSON files in the specified directory into Vector DB.
+        If chunks_dir contains a published v2.0 chunking_manifest.json and default
+        pattern is used, delegates to load_published_chunks for integrity verification.
         """
         c_dir = Path(chunks_dir)
         if not c_dir.exists():
             raise FileNotFoundError(f"Chunks directory not found: {c_dir}")
 
+        if file_pattern == "*.json" and (c_dir / "chunking_manifest.json").exists():
+            return self.ingest_published_chunks(c_dir)
+
         json_files = sorted(list(c_dir.glob(file_pattern)))
-        print(f"[*] Found {len(json_files)} chunk JSON files in {c_dir}")
+        print(f"[*] Found {len(json_files)} JSON files in {c_dir}")
 
         total_ingested = 0
         for idx, jf in enumerate(json_files, start=1):
             with open(jf, "r", encoding="utf-8") as f:
-                file_chunks = json.load(f)
+                loaded = json.load(f)
+            if isinstance(loaded, list):
+                file_chunks = loaded
+            elif isinstance(loaded, dict) and isinstance(loaded.get("chunks"), list):
+                file_chunks = loaded["chunks"]
+            else:
+                continue
             print(f"  [{idx}/{len(json_files)}] {jf.name}: {len(file_chunks)} chunks")
             self.ingest_chunks(file_chunks)
             total_ingested += len(file_chunks)
@@ -191,7 +237,7 @@ class BankingRAGPipeline:
         filenames=None
     ):
         """
-        Ingestion & Dual-Indexing phase from documents (.docx):
+        Ingestion & Dual-Indexing phase from documents (.docx / .pdf):
         1. Layout-aware chunking via Breadcrumbs (DLA Chunker).
         2. Parallel dual indexing into Dense Vector Store and Okapi BM25.
         """
@@ -208,24 +254,25 @@ class BankingRAGPipeline:
         if extensions:
             target_exts = extensions
         else:
-            target_exts = [".docx"]
+            target_exts = [".docx", ".pdf"]
 
         # Layout-Aware DLA Chunking
         t0 = time.time()
         if filenames:
             print(f" -> [Ingestion] Chunking {len(filenames)} specified files...")
             chunks = []
+            available = {path.name.casefold(): path for path in discover_documents(target_dir, target_exts)}
+            selected = set()
             for fname in filenames:
-                if (target_dir / fname).exists():
-                    fpaths = [target_dir / fname]
-                else:
-                    fpaths = list(target_dir.rglob(fname))
-                if fpaths:
-                    fpath = fpaths[0]
-                    c_list = self.dla_chunker.chunk_file(fpath)
-                    chunks.extend(c_list)
+                name = str(fname).replace("\\", "/").rsplit("/", 1)[-1].casefold()
+                if name in selected:
+                    continue
+                if name not in available:
+                    raise FileNotFoundError(str(fname))
+                selected.add(name)
+                chunks.extend(self.dla_chunker.chunk_file(available[name]))
         else:
-            print(" -> [Ingestion] Chunking via Layout-Aware Chunker (DOCX)...")
+            print(" -> [Ingestion] Chunking via Layout-Aware Chunker (DOCX/PDF)...")
             chunks = self.dla_chunker.chunk_directory(
                 target_dir,
                 extensions=target_exts,
@@ -311,7 +358,7 @@ class BankingRAGPipeline:
         Step 4: Context Synthesizer
         Package context in Markdown format with legal reference citations [Article X, Clause Y].
         """
-        return self.generator.format_chunks(top_chunks)
+        return self.generator.format_chunks(top_chunks, max_tokens=max_tokens)
 
     def step5_llm_serving(
         self,
@@ -334,7 +381,8 @@ class BankingRAGPipeline:
         self,
         query,
         filter_dict=None,
-        persona_config=None
+        persona_config=None,
+        top_k=None
     ):
         """
         Execute full 5-step Enterprise Banking RAG pipeline:
@@ -416,10 +464,14 @@ class BankingRAGPipeline:
 
             # Step 3: Reranking
             t3 = time.time()
+            if top_k is not None:
+                rerank_k = top_k
+            else:
+                rerank_k = self.config.RERANK_TOP_K
             top3_chunks = self.step3_reranking(
                 parsed_query,
                 candidates_top5,
-                top_k=self.config.RERANK_TOP_K
+                top_k=rerank_k
             )
             t3_ms = round((time.time() - t3) * 1000, 1)
             trace.record_rerank(query=sanitized_query, candidates=candidates_top5, reranked=top3_chunks, duration_ms=t3_ms)
@@ -475,6 +527,46 @@ class BankingRAGPipeline:
             safe_chunks, blocked_cnt, threats = self.guardrails.guard_retrieved_chunks(top3_chunks)
             if blocked_cnt > 0:
                 print(f"[Indirect Injection Guardrail] Removed {blocked_cnt} unsafe chunk(s) from context.")
+                trace.record_guardrail_check(
+                    layer="indirect_injection",
+                    is_safe=len(safe_chunks) > 0,
+                    details=threats
+                )
+            if not safe_chunks:
+                blocked_msg = "Xin lỗi, thông tin truy xuất được không đạt kiểm định an toàn ngữ cảnh để trả lời câu hỏi này."
+                trace.record_guardrail_block(
+                    reason="INDIRECT_PROMPT_INJECTION",
+                    details=threats
+                )
+                trace.finish(
+                    answer=blocked_msg,
+                    citations=[],
+                    sources=[],
+                    is_blocked=True,
+                    guardrail_trigger="INDIRECT_PROMPT_INJECTION"
+                )
+                return {
+                    "query": query,
+                    "sanitized_query": sanitized_query,
+                    "answer": blocked_msg,
+                    "is_blocked": True,
+                    "guardrail_trigger": "INDIRECT_PROMPT_INJECTION",
+                    "guardrail_details": threats,
+                    "step1_parsed_query": parsed_query,
+                    "step2_candidates_top5": candidates_top5,
+                    "step3_top3_chunks": [],
+                    "retrieved_chunks": candidates_top5,
+                    "step4_synthesized_context": None,
+                    "step5_serving_result": {"answer": blocked_msg, "blocked": True},
+                    "legal_citations": [],
+                    "sources_used": [],
+                    "latency": {
+                        "step1_query_parser_ms": t1_ms,
+                        "step2_hybrid_retrieval_ms": t2_ms,
+                        "step3_reranking_ms": t3_ms,
+                        "total_pipeline_ms": round((time.time() - t_start) * 1000, 1)
+                    }
+                }
             top3_chunks = safe_chunks
 
             synthesized_context = self.step4_context_synthesizer(
@@ -557,9 +649,11 @@ class BankingRAGPipeline:
 
     def ask(self, query, top_k=None):
         """Convenience method for application querying."""
-        return self.run_pipeline(query)
+        return self.run_pipeline(query, top_k=top_k)
 
     def close(self):
         """Release connection resources."""
+        if hasattr(self, "dla_chunker") and hasattr(self.dla_chunker, "close"):
+            self.dla_chunker.close()
         if hasattr(self.vector_store, "close"):
             self.vector_store.close()

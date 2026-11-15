@@ -155,10 +155,6 @@ def run_auto_reranking(
             ret_out = PROJECT_ROOT / "agent_banking" / "retrieval" / "output" / "retrieval_candidates.json"
             if ret_out.exists():
                 target_in_file = ret_out
-            else:
-                rag_ret_out = PROJECT_ROOT / "rag_banking" / "retrieval" / "output" / "retrieval_candidates.json"
-                if rag_ret_out.exists():
-                    target_in_file = rag_ret_out
 
     if target_in_file is None or not target_in_file.exists():
         print(f"[Warning] candidates.json not found in: {in_dir}")
@@ -182,9 +178,9 @@ def run_auto_reranking(
         else:
             raw_retrieval = [raw_retrieval]
 
-    # Sync file to in_dir
+    # Sync file to in_dir (auto mode only)
     in_copy = in_dir / "candidates.json"
-    if target_in_file != in_copy:
+    if input_file is None and output_dir is None and target_in_file != in_copy:
         try:
             with open(in_copy, "w", encoding="utf-8") as fp:
                 json.dump(raw_retrieval, fp, ensure_ascii=False, indent=2)
@@ -236,16 +232,15 @@ def run_auto_reranking(
                                 skipped_queries=len(raw_retrieval),
                                 duration_ms=duration_ms
                             )
-                            sync_downstream_generator(prev_file)
+                            if output_dir is None:
+                                sync_downstream_generator(prev_file)
                             print(f"[Reranking Complete] Exported {len(prev_list)} results to: {prev_file} in 0.0s")
                             return prev_list
             except Exception:
                 prev_results = {}
 
     reranker = BankingReranker(
-        model_name=cfg.RERANKER_MODEL,
-        api_key=cfg.LLM_API_KEY,
-        base_url=cfg.LLM_BASE_URL
+        model_name=cfg.RERANKER_MODEL
     )
 
     reranked_results = []
@@ -340,7 +335,8 @@ def run_auto_reranking(
         duration_ms=total_duration_ms
     )
 
-    sync_downstream_generator(out_file)
+    if output_dir is None:
+        sync_downstream_generator(out_file)
 
     print(f"[Reranking Complete] Exported results for {len(reranked_results)} queries to: {out_file} (New: {new_count}, Skipped: {skipped_count}) in {total_elapsed}s")
     return reranked_results

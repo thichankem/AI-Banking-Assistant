@@ -2,7 +2,7 @@
   "name": "get_interest_rates",
   "display_name": "Tra Cứu Bảng Lãi Suất Tiền Gửi Niêm Yết",
   "category": "CALCULATION",
-  "description": "Tra cứu toàn bộ biểu lãi suất tiền gửi tiết kiệm có kỳ hạn và không kỳ hạn niêm yết chính thức của Vietcombank cho cá nhân.",
+  "description": "Tra cứu toàn bộ biểu lãi suất tiền gửi tiết kiệm có kỳ hạn và không kỳ hạn niêm yết chính thức của A-Bank cho cá nhân.",
   "parameters": {
     "type": "object",
     "properties": {
