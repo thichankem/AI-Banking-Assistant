@@ -1,6 +1,7 @@
 """Verify per-occurrence source preservation before publishing chunks."""
 from ..enrichment.image_context import IMAGE_POLICY, excluded_image
 from .source_spans import is_furniture_block, normalize
+from .table_rendering import table_fragment_data
 
 
 def validate_coverage(planner):
@@ -147,15 +148,23 @@ def validate_exact_locations(planner):
         parts = tables.get(block["id"], [])
         if not parts:
             raise RuntimeError("Missing table occurrence")
+        header_count = original["header_row_count"]
         for part in parts:
-            if part.get("header_grid") != original["grid"][:original["header_row_count"]]:
+            if part.get("header_grid") != original["grid"][:header_count]:
                 raise RuntimeError("Table header grid changed")
-            if part["row_end"] != part["row_start"] + len(part["rows"]):
+            row_start, row_end = part["row_start"], part["row_end"]
+            if not (header_count <= row_start <= row_end <= len(original["grid"]) and row_end - row_start == len(part["rows"])):
                 raise RuntimeError("Invalid table row range")
-            for row_index, row in enumerate(part["rows"], part["row_start"]):
+            for row_index, row in enumerate(part["rows"], row_start):
                 if row_index in coordinates:
                     raise RuntimeError("Overlapping table row occurrence")
                 coordinates[row_index] = row
-        expected = dict(enumerate(original["rows"], original["header_row_count"]))
+            source_rows = original["grid"][row_start:row_end]
+            source_data = table_fragment_data(block, source_rows, row_start)
+            changed = sorted(key for key in source_data.keys() | part.keys()
+                             if key != "rows" and (key not in source_data or key not in part or source_data[key] != part[key]))
+            if changed:
+                raise RuntimeError("Table fragment metadata changed: " + ", ".join(changed))
+        expected = dict(enumerate(original["rows"], header_count))
         if coordinates != expected:
             raise RuntimeError("Missing or changed table row occurrence")

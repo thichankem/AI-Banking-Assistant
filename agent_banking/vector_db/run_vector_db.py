@@ -38,6 +38,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent_banking.core.settings import Config
+from agent_banking.chunking.universal.extraction.sources import legacy_source_resolver, source_key
+from agent_banking.chunking.universal.planning.schema import require_index_ready
 from agent_banking.vector_db.qdrant_store import QdrantBankingStore, mark_publication_chunks, publication_scope
 from agent_banking.state_tracker import StateTracker
 
@@ -122,6 +124,7 @@ def run_auto_indexing(
 
     if not isinstance(raw_chunks, list):
         raise ValueError("Indexing input must be a list of embedded chunks")
+    require_index_ready(raw_chunks)
     scope = None
     published_sources = set()
     if publication_manifest is not None or publication_dir is not None:
@@ -239,7 +242,8 @@ def run_auto_indexing(
     start_t = time.time()
     chunks_to_index = []
     skipped_count = 0
-    existing_ids = store.chunk_ids(scope=scope) if snapshot and not force else set()
+    existing_ids = store.chunk_ids(scope=scope, index_keys=True) if snapshot and not force else set()
+    active_index_keys = set()
 
     for idx, c in enumerate(raw_chunks):
         cid = c.get("chunk_id")
@@ -254,9 +258,11 @@ def run_auto_indexing(
                     or not any(vector)):
                 store.close()
                 raise ValueError("Invalid vector for published chunk: " + cid)
+            index_key = store.index_key(c, cid)
+            active_index_keys.add(index_key)
         is_done = tracker.is_processed(cid, c_hash)
         if snapshot and is_done:
-            is_done = cid in existing_ids
+            is_done = index_key in existing_ids
         if is_done:
             if not force:
                 if not use_memory:
@@ -295,20 +301,21 @@ def run_auto_indexing(
     active_ids = {chunk.get("chunk_id") or f"chunk_{idx}" for idx, chunk in enumerate(raw_chunks)}
     removed_count = 0
     if snapshot:
-        from agent_banking.chunking.universal.extraction.sources import document_source_name
-
         if scope is None:
             managed_sources = {item.get("source") for item in raw_chunks}
             managed_sources.update(value.get("source") for value in previous_records.values() if isinstance(value, dict))
         else:
             managed_sources = published_sources
-        preserve = {document_source_name(source).casefold() for source in preserve_sources}
+        preserve = {source_key(source) for source in preserve_sources}
+        active_sources = {source_key(source) for source in managed_sources if isinstance(source, str)} - preserve
+        resolve_legacy = legacy_source_resolver(active_sources | preserve)
         known_sources = managed_sources | {value.get("source") for value in tracker._active_records().values()
                                            if isinstance(value, dict)}
         retained_sources = {source for source in known_sources if isinstance(source, str)
-                            and document_source_name(source).casefold() in preserve}
+                            and (source_key(source) in preserve or resolve_legacy(source) in preserve)}
         removed_count = store.prune_chunks(active_ids, managed_sources - retained_sources,
-                                          scope=scope, preserve_sources=preserve_sources)
+                                          scope=scope, preserve_sources=preserve_sources,
+                                          active_index_keys=active_index_keys)
         kept_records = {}
         for key, value in tracker._active_records().items():
             if key in active_ids:
@@ -321,7 +328,7 @@ def run_auto_indexing(
             outside_scope = False
             if scope is not None:
                 if owner is None:
-                    outside_scope = source not in published_sources
+                    outside_scope = resolve_legacy(source) not in active_sources
                 else:
                     outside_scope = owner != scope
             if source in retained_sources or outside_scope:

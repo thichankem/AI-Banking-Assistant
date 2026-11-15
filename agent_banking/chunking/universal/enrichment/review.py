@@ -6,9 +6,12 @@ from agent_banking.chunking.config.prompt_config import STRUCTURE_SYSTEM_PROMPT
 from .image_context import IMAGE_POLICY, RESOLVED_IMAGE_STATUSES, source_text as context_source_text
 from ..models.text_client import ordered_parallel, validate_decisions
 from .evidence import evidence_preview
+from .model_warnings import optional_model_call, record_model_warning
 
 
 ROUTES = ("VALIDATE", "REVIEW_SOURCE", "REPAIR_EXTRACTION")
+_HEADING_REVIEW_BATCH = 5
+_REVIEW_WINDOW_BYTES = 3500
 
 
 def review_headings(enricher, ir, cloud_json):
@@ -16,15 +19,14 @@ def review_headings(enricher, ir, cloud_json):
     changed = [proposal for proposal in ir.get("structure_proposals", [])
                if proposal["native_level"] != proposal["proposed_level"]]
     reviews = []
-    if changed:
-        endpoint = model_primary("chunking.decision")
-    for start in range(0, len(changed), 10):
-        batch = changed[start:start + 10]
+    endpoint = optional_model_call(ir, "heading_review", lambda: model_primary("chunking.decision")) if changed else None
+    for start in range(0, len(changed), _HEADING_REVIEW_BATCH):
+        batch = changed[start:start + _HEADING_REVIEW_BATCH]
         evidence = []
         questions = {}
         for index, proposal in enumerate(batch):
             block = by_id[proposal["block_id"]]
-            evidence.append({**proposal, "text": block["text"][:500],
+            evidence.append({**proposal, "text": evidence_preview(block["text"], 250),
                              "native_region": block["provenance"].get("region", "body")})
             for key in ("heading_format", "heading_evidence"):
                 if key in block:
@@ -35,12 +37,12 @@ def review_headings(enricher, ir, cloud_json):
         def operation():
             return cloud_json(endpoint.url.rstrip("/") + "/systemone", endpoint.api_key,
                               {"model": endpoint.model, "state": {"candidates": evidence}, "questions": questions}, timeout=60)
-        result = enricher._cached("heading_review", endpoint.model, {"state": evidence, "questions": questions}, operation,
-                              lambda result: validate_decisions(result, questions))
+        result = None
+        if endpoint is not None:
+            result = enricher._optional_cached(ir, "heading_review", endpoint.model, {"state": evidence, "questions": questions},
+                                               operation, lambda result: validate_decisions(result, questions))
         for index, proposal in enumerate(batch):
-            answer = result.get("answers", {}).get("heading_" + str(index), {}).get("choice")
-            if answer not in ("ACCEPT_PROPOSAL", "KEEP_NATIVE"):
-                raise ValueError("Missing decision for a heading ambiguity")
+            answer = (result or {}).get("answers", {}).get("heading_" + str(index), {}).get("choice", "KEEP_NATIVE")
             if answer == "KEEP_NATIVE":
                 block = by_id[proposal["block_id"]]
                 block["level"] = proposal["native_level"]
@@ -54,21 +56,21 @@ def review_headings(enricher, ir, cloud_json):
 def _source_observations(ir):
     by_id = {block["id"]: block for block in ir["blocks"]}
     for warning in ir.get("source_review", []):
-        summary = {"code": evidence_preview(str(warning.get("code", "")), 100),
-                   "reason": evidence_preview(str(warning.get("reason", "")), 400)}
+        summary = {"code": evidence_preview(str(warning.get("code", "")), 80),
+                   "reason": evidence_preview(str(warning.get("reason", "")), 200)}
         evidence = []
         for identifier in dict.fromkeys(warning.get("block_ids", [])):
             block = by_id.get(identifier)
             if block is not None:
                 text = context_source_text(block)
                 evidence.append({"id": identifier, "type": block["type"],
-                                 "native_text": evidence_preview(text, 900), "total_source_characters": len(text)})
-        if len(evidence) <= 4:
+                                 "native_text": evidence_preview(text, 450), "total_source_characters": len(text)})
+        if len(evidence) <= 3:
             yield {"unverified_model_observation": summary, "native_evidence": evidence}
         else:
-            for start in range(1, len(evidence), 3):
+            for start in range(1, len(evidence), 2):
                 yield {"unverified_model_observation": summary,
-                       "native_evidence": evidence[:1] + evidence[start:start + 3]}
+                       "native_evidence": evidence[:1] + evidence[start:start + 2]}
 
 
 def _review_state(ir):
@@ -79,16 +81,24 @@ def _review_state(ir):
              "deterministic_coverage": {key: coverage[key] for key in (
                  "status", "source_units", "covered_units", "accounted_units", "oversized_passages"
              ) if key in coverage},
-             "structural_errors": [warning["code"] for warning in ir["warnings"][:12]],
+             "structural_errors": [evidence_preview(warning["code"], 80) for warning in ir["warnings"][:6]],
              "heading_changes_reviewed": len(ir.get("heading_decisions", []))}
     return state
 
 
 def _observation_windows(ir, state):
+    def size(observations):
+        return len(json.dumps({**state, "source_observations": observations}, ensure_ascii=False).encode("utf-8"))
+
     windows = []
     pending = []
     for observation in _source_observations(ir):
-        if pending and len(json.dumps({**state, "source_observations": pending + [observation]}, ensure_ascii=False)) > 7000:
+        if size([observation]) > _REVIEW_WINDOW_BYTES:
+            observation = {**observation, "native_evidence": [
+                {**item, "native_text": evidence_preview(item["native_text"], 120)}
+                for item in observation["native_evidence"]
+            ]}
+        if pending and size(pending + [observation]) > _REVIEW_WINDOW_BYTES:
             windows.append(pending)
             pending = []
         pending.append(observation)
@@ -102,7 +112,10 @@ def _route(result):
 
 
 def review_extraction(enricher, ir, cloud_json):
-    endpoint = model_primary("chunking.decision")
+    endpoint = optional_model_call(ir, "review_route", lambda: model_primary("chunking.decision"))
+    if endpoint is None:
+        ir["decision_review"] = {"status": "unavailable"}
+        return
     model = endpoint.model
     state = _review_state(ir)
     questions = {"review_route": {"type": "choice", "instructions": "Images are assessed solely through native surrounding text. skipped_no_text_support is a deliberate successful policy decision, not an extraction error. No vision/OCR is required. Compare native evidence with unverified model observations. A model warning alone is not proof of missing extraction. "
@@ -110,10 +123,14 @@ def review_extraction(enricher, ir, cloud_json):
                                    "Use REPAIR_EXTRACTION only for concrete missing source coverage, unresolved image text-context assessments or native extraction errors. Never fabricate text.",
                                    "criteria": {"VALIDATE": "Deterministic native coverage/token checks pass and no substantive source ambiguity is supported", "REVIEW_SOURCE": "Preserved source content or fallible structural observations need review, while extraction coverage remains intact", "REPAIR_EXTRACTION": "Concrete missing coverage, unresolved native errors or unresolved image text-context assessments require repair before indexing"}}}
     if ir.get("page_reviews"):
-        state["completed_visual_review_count"] = len(ir["page_reviews"])
+        state["completed_visual_review_count"] = sum(
+            page.get("content") != "unavailable" for page in ir["page_reviews"]
+        )
+        failed_pages = ir.get("statistics", {}).get("ocr_failed_page_numbers", [])
+        state["ocr_failed_page_count"] = len(failed_pages)
+        state["ocr_failed_page_numbers"] = failed_pages[:20]
         questions["review_route"]["instructions"] = (
-            "This document contains completed cloud visual transcriptions with page/figure provenance. "
-            "The reviewed_visual_source policy applies; do not request text-only image assessment. "
+            "This PDF uses cloud visual transcriptions with page provenance. Do not request text-only image assessment. "
             "Compare exact IR coverage, visual review records and unverified source observations. "
             "REPAIR_EXTRACTION requires concrete missing source coverage or unresolved visual content. "
             "A contradictory source claim requires REVIEW_SOURCE, never invented repair.")
@@ -125,14 +142,21 @@ def review_extraction(enricher, ir, cloud_json):
         def operation():
             return cloud_json(endpoint.url.rstrip("/") + "/systemone", endpoint.api_key,
                               {"model": model, "state": evidence, "questions": questions}, timeout=60)
-        return enricher._cached("review_route", model, {"state": evidence, "questions": questions}, operation,
-                            lambda result: validate_decisions(result, questions))
+        return enricher._optional_cached(ir, "review_route", model, {"state": evidence, "questions": questions}, operation,
+                                        lambda result: validate_decisions(result, questions))
     results = ordered_parallel(route, windows, enricher.workers)
     final = []
     for value, window in zip(results, windows):
+        if value is None:
+            continue
         if _route(value) == "REPAIR_EXTRACTION" and enricher.use_llm and ir.get("deterministic_coverage"):
-            value = enricher._adjudicate_repair(ir, value, state, window)
+            adjudicated = optional_model_call(ir, "extraction_adjudication", lambda: enricher._adjudicate_repair(ir, value, state, window))
+            if adjudicated is not None:
+                value = adjudicated
         final.append(value)
+    if not final:
+        ir["decision_review"] = {"status": "unavailable"}
+        return
     choice = max((_route(value) for value in final), key=ROUTES.index)
     result = final[0]
     if len(final) > 1:
@@ -140,7 +164,8 @@ def review_extraction(enricher, ir, cloud_json):
                   "answers": {"review_route": {"choice": choice}}, "window_reviews": final}
     ir["decision_review"] = result
     if choice == "REPAIR_EXTRACTION":
-        raise RuntimeError("Decision model identified unresolved extraction; index publication refused")
+        result["status"] = "advisory"
+        record_model_warning(ir, "review_route", "cloud_requested_repair")
 
 
 def adjudicate_repair(enricher, ir, initial, state, observations, cloud_json):
@@ -161,12 +186,12 @@ def adjudicate_repair(enricher, ir, initial, state, observations, cloud_json):
             status = info["status"]
             group = images_by_status.setdefault(status, {"total": 0, "examples": []})
             group["total"] += 1
-            if len(group["examples"]) < 4:
+            if len(group["examples"]) < 2:
                 group["examples"].append({"block_id": block["id"],
-                                          "reason": evidence_preview(info.get("context_reason", ""), 240)})
+                                          "reason": evidence_preview(info.get("context_reason", ""), 120)})
     evidence = {**state, "source_observations": observations, "image_context_decisions": images_by_status,
                 "initial_decision": {"choice": _route(initial), "reason": evidence_preview(
-                    str(initial["answers"]["review_route"].get("reason", "")), 600
+                    str(initial["answers"]["review_route"].get("reason", "")), 300
                 )},
                 "task": 'Resolve a disagreement between a routing classifier and passed deterministic extraction gates. '
                         'Return {"route":"REVIEW_SOURCE","reason":"...","extraction_evidence":[]}. '
@@ -200,7 +225,8 @@ def adjudicate_repair(enricher, ir, initial, state, observations, cloud_json):
         for attempt in range(3):
             value = cloud_json(text_endpoint.url.rstrip("/") + "/chat/completions", text_endpoint.api_key,
                                {"model": text_endpoint.model, "messages": messages, "temperature": 0.1,
-                                "chat_template_kwargs": {"enable_thinking": False}, "max_tokens": 16384})
+                                "chat_template_kwargs": {"enable_thinking": False}, "max_tokens": 8192},
+                               max_output_tokens=8192)
             try:
                 validate(value)
                 return value
@@ -217,10 +243,10 @@ def adjudicate_repair(enricher, ir, initial, state, observations, cloud_json):
             "Unresolved regions require repair. Preserved, conflicting source content requires source review."
         )
     confirmation_state = {"coverage": state["deterministic_coverage"],
-                          "adjudication": {"route": audit["route"], "reason": evidence_preview(audit["reason"], 600),
+                          "adjudication": {"route": audit["route"], "reason": evidence_preview(audit["reason"], 300),
                                            "extraction_evidence": [
-                                               {"block_id": entry["block_id"], "reason": evidence_preview(entry["reason"], 240)}
-                                               for entry in audit["extraction_evidence"][:8]
+                                               {"block_id": entry["block_id"], "reason": evidence_preview(entry["reason"], 120)}
+                                               for entry in audit["extraction_evidence"][:4]
                                            ]},
                           "image_statuses": state["image_statuses"]}
     decision_endpoint = model_primary("chunking.decision")

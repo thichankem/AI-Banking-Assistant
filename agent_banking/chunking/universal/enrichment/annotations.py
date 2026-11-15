@@ -94,11 +94,50 @@ def validate_annotations(result, window, native_text, *, quarantine_context=Fals
     return result
 
 
+def filter_optional_annotations(result, window, native_text):
+    """Keep grounded annotations even if the model also returned bad references."""
+    if not isinstance(result, dict) or any(not isinstance(result.get(key), list) for key in ANNOTATION_ARRAYS):
+        raise ValueError("Structure response requires all annotation arrays")
+    empty = dict.fromkeys(ANNOTATION_ARRAYS, [])
+    clean = {**result, **empty}
+    rejected = []
+    levels = {}
+    for key in ANNOTATION_ARRAYS:
+        items = result[key]
+        candidates = [items] if key == "reading_order" and items else items
+        accepted = []
+        for item in candidates:
+            entry = item if key == "reading_order" else [item]
+            try:
+                validate_annotations({**empty, key: entry}, window, native_text)
+            except ValueError as error:
+                rejected.append({"kind": key, "proposal": item, "reason": str(error)})
+                continue
+            if key == "heading_levels":
+                levels.setdefault(item["block_id"], set()).add(item["level"])
+            accepted.append(item)
+        clean[key] = accepted[0] if key == "reading_order" and accepted else accepted
+    headings = []
+    for item in clean["heading_levels"]:
+        if len(levels[item["block_id"]]) == 1:
+            headings.append(item)
+        else:
+            rejected.append({"kind": "heading_levels", "proposal": item, "reason": "conflicting levels"})
+    clean["heading_levels"] = headings
+    if rejected:
+        clean["_rejected_annotations"] = rejected
+    return validate_annotations(clean, window, native_text)
+
+
 def apply_annotations(ir, results, native_ids, by_id):
     proposed = {}
     warnings = {}
     related = {(item["from"], item["to"], item["type"]) for item in ir["relations"]}
     for start, result in results:
+        if result.get("_rejected_annotations"):
+            ir.setdefault("annotation_rejections", []).append({
+                "window_start": start, "role": "structure", "proposals": result["_rejected_annotations"],
+            })
         if result.get("_rejected_optional_contexts"):
             ir.setdefault("annotation_rejections", []).append({
                 "window_start": start,

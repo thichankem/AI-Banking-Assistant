@@ -423,6 +423,8 @@ test*.py
 *_test.py
 *_tests.py
 run_*tests.py
+!/agent_banking/chunking/tests/
+!/agent_banking/chunking/tests/test_*.py
 audit_*.py
 *_audit.py
 verify_upgrade.py

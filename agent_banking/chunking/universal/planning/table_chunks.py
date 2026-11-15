@@ -4,7 +4,7 @@ from copy import deepcopy
 from ..text.language import project_search_text, source_foreign_spans, without_foreign_spans
 from .source_spans import build_lead_in, has_visible_text
 from .text_chunks import flush_text
-from .table_rendering import markdown_row, render_structured_html_table, table_markdown
+from .table_rendering import markdown_row, table_fragment_data, table_markdown
 from ..text.token_budget import format_passage_fields
 
 
@@ -15,7 +15,6 @@ def plan_table(planner, block, parent_id, lead_in_blocks=None):
     pending = []
     header_count = table["header_row_count"]
     header_grid = table["grid"][:header_count]
-    header_cells = [cell for cell in table["cells"] if cell["row"] < header_count]
     row_provenance = table.get("row_provenance", [])
     foreign_cells = {}
     projected_cells = {}
@@ -32,7 +31,8 @@ def plan_table(planner, block, parent_id, lead_in_blocks=None):
 
     projected_grid = [projected(row, index) for index, row in enumerate(header_grid)]
     projected_headers = headers
-    if any(row_index < header_count for row_index, _ in foreign_cells):
+    has_foreign_headers = any(row_index < header_count for row_index, _ in foreign_cells)
+    if has_foreign_headers:
         projected_headers = []
         for column in range(len(headers)):
             labels = dict.fromkeys(row[column].strip() for row in projected_grid if row[column].strip())
@@ -56,10 +56,10 @@ def plan_table(planner, block, parent_id, lead_in_blocks=None):
     def fits(content, target=False):
         return planner._measure(content, retrieval, target) is not None
 
-    def with_lead(md_text):
+    def with_lead(text):
         if not lead_attached and lead_text:
-            return lead_text + "\n\n" + md_text
-        return md_text
+            return lead_text + "\n\n" + text
+        return text
 
     def attach_lead_metadata(chunk):
         nonlocal lead_attached
@@ -72,23 +72,10 @@ def plan_table(planner, block, parent_id, lead_in_blocks=None):
         return chunk
 
     def table_chunk(content, data, block_ids):
-        source_rows = row_provenance[data["row_start"]:data["row_end"]]
-        if not rows:
-            source_rows = row_provenance[:header_count]
+        source_rows = data.get("row_provenance", [])
         header_sources = row_provenance[:header_count]
         for occurrence in table.get("header_occurrences", []):
             header_sources = [*header_sources, *occurrence["row_provenance"]]
-        if source_rows:
-            data["row_provenance"] = source_rows
-        if table.get("parent_cell"):
-            data["parent_cell"] = table["parent_cell"]
-        if table.get("title_source_block_id"):
-            data["title_source_block_id"] = table["title_source_block_id"]
-        if table.get("row_grid_offsets"):
-            data["row_grid_offsets"] = table["row_grid_offsets"][data["row_start"]:data["row_end"]]
-            data["header_grid_offsets"] = table["row_grid_offsets"][:header_count]
-        if table.get("header_occurrences"):
-            data["header_occurrences"] = table["header_occurrences"]
         chunk = planner._prototype("table", content, parent_id, block_ids, table_data=data, retrieval=retrieval)
         if source_rows or header_sources:
             locations = []
@@ -104,25 +91,24 @@ def plan_table(planner, block, parent_id, lead_in_blocks=None):
                                 for row in header_grid for value in row)
     header_has_formula = any("\n$$" in value or "$$\n" in value for row in header_grid for value in row)
 
+    def render(selected, row_start, data=None):
+        if (needs_header_geometry or header_has_formula
+                or any("\n$$" in value or "$$\n" in value for row in selected for value in row)):
+            if data is None:
+                data = table_fragment_data(block, selected, row_start)
+            return data["html"]
+        return table_markdown(headers, selected)
+
+    def project_rows(selected, row_start):
+        return [projected(row, index) for index, row in enumerate(selected, start=row_start)]
+
     def make(selected, row_start):
-        selected_cells = [cell for cell in table["cells"] if cell["row"] < row_start + len(selected)
-                          and cell["row"] + cell.get("row_span", 1) > row_start
-                          and cell["row"] >= header_count]
-        data = {"table_id": table["table_id"], "title": table_title, "headers": headers, "rows": selected,
-                "row_start": row_start, "row_end": row_start + len(selected),
-                "header_row_count": header_count, "header_grid": header_grid, "header_cells": header_cells,
-                "html": render_structured_html_table(headers, selected, table_title, cells=[*header_cells, *selected_cells],
-                                                     header_grid=header_grid, row_start=row_start),
-                "cells": selected_cells}
+        data = table_fragment_data(block, selected, row_start)
         chunk_ids = ids
         if not lead_attached and lead_text:
             chunk_ids = lead_ids + ids
-        rendered = table_markdown(headers, selected)
-        if (needs_header_geometry or header_has_formula
-                or any("\n$$" in value or "$$\n" in value for row in selected for value in row)):
-            rendered = data["html"]
-        chunk = table_chunk(with_lead(rendered), data, chunk_ids)
-        filtered_rows = [projected(row, index) for index, row in enumerate(selected, start=row_start)]
+        chunk = table_chunk(with_lead(render(selected, row_start, data)), data, chunk_ids)
+        filtered_rows = project_rows(selected, row_start)
         elements = []
         for row_index, values in [*enumerate(header_grid), *enumerate(selected, row_start)]:
             for column, value in enumerate(values):
@@ -154,29 +140,38 @@ def plan_table(planner, block, parent_id, lead_in_blocks=None):
         return attach_lead_metadata(chunk)
 
     header_overflow = not fits(table_markdown(projected_headers, []))
-    def group_text(selected, row_start):
-        selected = [projected(row, index) for index, row in enumerate(selected, start=row_start)]
-        content = "\n".join(markdown_row(row) for row in selected) if header_overflow else table_markdown(projected_headers, selected)
-        return with_lead(content)
+
+    def group_passage(selected, row_start):
+        filtered_rows = project_rows(selected, row_start)
+        if header_overflow:
+            # When the header alone cannot fit, cap the independently
+            # searchable rows without splitting the authored header.
+            return with_lead("\n".join(markdown_row(row) for row in filtered_rows)), retrieval
+        rendered = with_lead(render(selected, row_start))
+        if has_foreign_headers or filtered_rows != selected:
+            embedding_content = with_lead(table_markdown(projected_headers, filtered_rows))
+            return rendered, {**retrieval, "embedding_content": embedding_content}
+        return rendered, retrieval
 
     for index, row in enumerate(rows, start=header_count):
         if pending:
             final_row = index == header_count + len(rows) - 1
-            pending_text = group_text(pending, start_row)
-            under_minimum = planner.budget.count(format_passage_fields(pending_text, retrieval)) < planner.min_tokens
+            pending_text, pending_retrieval = group_passage(pending, start_row)
+            under_minimum = planner.budget.count(format_passage_fields(pending_text, pending_retrieval)) < planner.min_tokens
             use_target = not (final_row or under_minimum)
-            if len(pending) < planner.table_rows and fits(group_text(pending + [row], start_row), target=use_target):
-                pending.append(row)
-                continue
+            if len(pending) < planner.table_rows:
+                candidate, candidate_retrieval = group_passage(pending + [row], start_row)
+                if planner._measure(candidate, candidate_retrieval, target=use_target) is not None:
+                    pending.append(row)
+                    continue
             planner._emit(make(pending, start_row))
             pending = []
         start_row = index
-        if not lead_attached and lead_text and not fits(group_text([row], index)):
-            flush_text(planner, lead_in_blocks, parent_id)
-            lead_text = ""
-            lead_spans = []
-            lead_ids = []
-            lead_attached = True
+        if not lead_attached and lead_text:
+            candidate, candidate_retrieval = group_passage([row], index)
+            if planner._measure(candidate, candidate_retrieval) is None:
+                flush_text(planner, lead_in_blocks, parent_id)
+                lead_attached = True
         pending.append(row)
     if pending:
         planner._emit(make(pending, start_row))

@@ -7,6 +7,7 @@ import hashlib
 import json
 from collections import defaultdict
 
+from ..enrichment.model_warnings import optional_model_call, record_model_warning
 from ..models.text_client import cloud_json, ordered_parallel
 from ..text.language import classify_text_blocks
 from .partitioning import atoms_for as atoms_for, optimal_partition as optimal_partition
@@ -16,6 +17,9 @@ from agent_banking.chunking.config.prompt_config import START_PROMPT, BOUNDARY_P
 BOUNDARY_VERSION = "semantic-lattice-v4-combined-source-starts"
 ATOM_SCORE_VERSION = "semantic-lattice-v2-anchored-cuts"
 START_SCORE = 0.85
+UNAVAILABLE_METHOD = "token_lattice_model_unavailable"
+ATOMS_PER_WINDOW = 12
+CONTEXT_ATOMS = 3
 
 
 def _valid_score(score):
@@ -52,12 +56,12 @@ class SemanticBoundaryScorer:
         self.budget = budget
         self.workers = max(1, workers)
 
-    def _start_proposals(self, block, block_atoms, endpoint):
+    def _start_proposals(self, block, block_atoms, endpoint, ir):
         text = block["text"]
         anchors = []
-        for start in range(0, len(block_atoms), 24):
+        for start in range(0, len(block_atoms), ATOMS_PER_WINDOW):
             first = block_atoms[start]["start"]
-            last = block_atoms[min(start + 23, len(block_atoms) - 1)]["end"]
+            last = block_atoms[min(start + ATOMS_PER_WINDOW, len(block_atoms)) - 1]["end"]
             source = text[first:last]
             key = hashlib.sha256(json.dumps({"version": BOUNDARY_VERSION, "prompt": START_PROMPT,
                 "chain": chain_fingerprint("chunking.text"), "source": source}, sort_keys=True).encode()).hexdigest()
@@ -70,17 +74,21 @@ class SemanticBoundaryScorer:
                     pass
             messages = [{"role": "system", "content": START_PROMPT}, {"role": "user", "content": source}]
             for attempt in range(3):
-                response = cloud_json(endpoint.url.rstrip("/") + "/chat/completions", endpoint.api_key,
+                response = optional_model_call(ir, "semantic_source_starts", lambda: cloud_json(
+                    endpoint.url.rstrip("/") + "/chat/completions", endpoint.api_key,
                     {"model": endpoint.model, "messages": messages, "temperature": 0,
-                     "chat_template_kwargs": {"enable_thinking": False}, "max_tokens": 4096})
+                     "chat_template_kwargs": {"enable_thinking": False}, "max_tokens": 4096},
+                    max_output_tokens=4096))
+                if response is None:
+                    break
                 try:
                     valid = source_starts(source, response)
                 except ValueError as error:
                     if attempt == 2:
+                        record_model_warning(ir, "semantic_source_starts", type(error).__name__)
                         break
-                    messages.extend([{"role": "assistant", "content": json.dumps(response, ensure_ascii=False)},
-                        {"role": "user", "content": "Repair the exact source anchors: " + str(error) +
-                            ". Return a complete starts array using only unique verbatim prefixes from the supplied text."}])
+                    messages[2:] = [{"role": "user", "content": "Repair the exact source anchors: " + str(error)[:300] +
+                        ". Return a complete starts array using only unique verbatim prefixes from the supplied text."}]
                     continue
                 self.cache.put(key, response, 0, 0)
                 anchors.extend((first + offset, quote) for offset, quote in valid)
@@ -108,19 +116,23 @@ class SemanticBoundaryScorer:
         if not atoms:
             ir["segmentation_method"] = BOUNDARY_VERSION
             return ir
-        endpoint = model_primary("chunking.text")
+        endpoint = optional_model_call(ir, "semantic_boundaries", lambda: model_primary("chunking.text"))
+        if endpoint is None:
+            ir["segmentation_method"] = UNAVAILABLE_METHOD
+            return ir
         long_blocks = [block for block in blocks if not block.get("foreign_spans")
                        and self.budget.count(block["text"]) > self.budget.maximum]
         by_block = defaultdict(list)
         for atom in atoms:
             by_block[atom["block_id"]].append(atom)
-        proposed_starts = ordered_parallel(lambda block: self._start_proposals(block, by_block[block["id"]], endpoint),
+        proposed_starts = ordered_parallel(lambda block: self._start_proposals(block, by_block[block["id"]], endpoint, ir),
             long_blocks, self.workers)
         starts = {block["id"]: proposals for block, proposals in zip(long_blocks, proposed_starts) if proposals}
 
         def window(start):
-            selected = atoms[max(0, start - 3):start + 27]
-            editable = atoms[start:start + 24]
+            end = start + ATOMS_PER_WINDOW
+            selected = atoms[max(0, start - CONTEXT_ATOMS):end + CONTEXT_ATOMS]
+            editable = atoms[start:end]
             if not editable:
                 return {"boundaries": [], "proposals": []}
             state = {"atoms": selected, "editable_ids": [atom["id"] for atom in editable]}
@@ -178,7 +190,8 @@ class SemanticBoundaryScorer:
             for attempt in range(3):
                 result = cloud_json(endpoint.url.rstrip("/") + "/chat/completions", endpoint.api_key,
                     {"model": endpoint.model, "messages": messages, "temperature": 0,
-                     "chat_template_kwargs": {"enable_thinking": False}, "max_tokens": 8192})
+                     "chat_template_kwargs": {"enable_thinking": False}, "max_tokens": 4096},
+                    max_output_tokens=4096)
                 try:
                     checked = validate(result)
                     self.cache.put(key, checked, 0, 0)
@@ -186,12 +199,14 @@ class SemanticBoundaryScorer:
                 except (ValueError, TypeError) as error:
                     if attempt == 2:
                         raise
-                    messages.extend([{"role": "assistant", "content": json.dumps(result, ensure_ascii=False)},
-                        {"role": "user", "content": "Repair scores: " + str(error) +
-                         ". Return exactly these editable IDs once each: " + json.dumps(state["editable_ids"]) +
-                         ". Return a complete boundaries array and optional source-grounded proposals, not a patch."}])
+                    messages[2:] = [{"role": "user", "content": "Repair scores: " + str(error)[:300] +
+                        ". Return exactly these editable IDs once each: " + json.dumps(state["editable_ids"]) +
+                        ". Return a complete boundaries array and optional source-grounded proposals, not a patch."}]
 
-        results = ordered_parallel(window, list(range(0, len(atoms), 24)), self.workers)
+        window_starts = list(range(0, len(atoms), ATOMS_PER_WINDOW))
+        results = ordered_parallel(lambda start: optional_model_call(ir, "semantic_boundaries", lambda: window(start)),
+                                   window_starts, self.workers)
+        results = [result for result in results if result is not None]
         ir["semantic_rejected_proposals"] = sum(result.get("rejected_proposals", 0) for result in results)
         scores = {item["id"]: item["score"] for result in results for item in result["boundaries"]}
         ir["semantic_boundaries"] = [{"block_id": atom["block_id"], "offset": atom["end"],
@@ -206,5 +221,7 @@ class SemanticBoundaryScorer:
                 offset = atom["start"] + atom["text"].index(proposal["end_quote"]) + len(proposal["end_quote"])
                 ir["semantic_boundaries"].append({"block_id": atom["block_id"], "offset": offset, "score": proposal["score"],
                                                    "source_ending": proposal["end_quote"]})
-        ir["segmentation_method"] = BOUNDARY_VERSION
+        ir["segmentation_method"] = UNAVAILABLE_METHOD
+        if results or starts:
+            ir["segmentation_method"] = BOUNDARY_VERSION if len(results) == len(window_starts) else BOUNDARY_VERSION + "-partial"
         return ir

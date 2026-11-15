@@ -98,6 +98,13 @@ def _load_snapshot(output, manifest, require_ready):
         if cached is None:
             raise ValueError("Published document artifact failed integrity checks: " + record["rel_path"])
         document_chunks, artifact = cached
+        extraction = artifact["document"].get("extraction_method")
+        if require_ready and (record["status"] == "MANUALLY_EDITED" or artifact["quality"].get("manually_edited_chunks")
+                              or extraction in ("pdf_reviewed_transcript", "pdf_reviewed_transcript_and_cloud_vision")):
+            raise ValueError("Published document uses a retired content override; rerun chunking: " + record["rel_path"])
+        if (require_ready and Path(record["rel_path"]).suffix.lower() == ".pdf"
+                and artifact["quality"].get("visual_policy") != "pdf_cloud_ocr"):
+            raise ValueError("Published PDF uses a retired extraction policy; rerun chunking: " + record["rel_path"])
         if require_ready and not artifact["quality"].get("index_ready"):
             raise ValueError("Published document is not ready for indexing: " + record["rel_path"])
         if chunks[offset:offset + len(document_chunks)] != document_chunks:

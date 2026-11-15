@@ -40,6 +40,7 @@ from agent_banking.chunking.universal.planning.schema import (
     normalize_chunk_type,
     link_chunk_sequence,
     infer_business_metadata,
+    require_index_ready,
 )
 
 
@@ -274,6 +275,7 @@ def run_auto_embedding(
 
     if not isinstance(raw_chunks, list):
         raise ValueError("Embedding input must contain a list of chunks")
+    require_index_ready(raw_chunks)
 
     # Sync file to in_dir if not present (auto mode only)
     in_copy = in_dir / "chunks.json"

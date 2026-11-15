@@ -54,7 +54,7 @@ def attach_visual_captions(ir, ask_decisions, cache=None):
     if questions:
         answers = ask_decisions("caption_attachment", {"candidates": ambiguous}, questions, cache=cache)
         for qid, (block, prev_visual, next_visual) in ambiguous_map.items():
-            choice = answers.get(qid, {}).get("choice", "ATTACH_NEXT")
+            choice = answers.get(qid, {}).get("choice")
             if choice == "ATTACH_PREV":
                 _attach_caption(ir, block, prev_visual, existing)
             elif choice == "ATTACH_NEXT":
@@ -224,9 +224,13 @@ def resolve_image_titles_and_context(ir, ask_decisions, cache=None):
     if not entries:
         return
     answers = ask_decisions("image_title_and_context", {"images": entries}, questions, cache=cache)
+    if not answers:
+        return
     model = model_primary("chunking.decision").model
     existing = {(rel["from"], rel["to"], rel["type"]) for rel in ir.get("relations", [])}
     for iid, context in contexts.items():
-        title_choice = answers.get(iid + "_title", {}).get("choice", "NEXT_CAPTION")
+        title_choice = answers.get(iid + "_title", {}).get("choice")
+        if title_choice is None:
+            continue
         bundle = answers.get(iid + "_bundle", {}).get("choice") == "BUNDLE_PRECEDING"
         _record_evidence(context, title_choice, bundle, model, ir, existing)

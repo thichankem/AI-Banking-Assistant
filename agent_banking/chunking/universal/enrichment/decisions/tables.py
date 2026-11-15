@@ -15,9 +15,16 @@ def resolve_table_structures_and_titles(ir, ask_decisions, cache=None):
     headings = {}
     by_id = {block["id"]: block for block in blocks}
     caption_sources = {}
+    caption_targets = {}
     for relation in ir.get("relations", []):
         if relation["type"] == "caption_of" and relation["from"] in by_id:
             caption_sources.setdefault(relation["to"], []).append(by_id[relation["from"]])
+            caption_targets.setdefault(relation["from"], set()).add(relation["to"])
+
+    def caption_conflicts(source_id, table_id):
+        targets = caption_targets.get(source_id)
+        return bool(targets and table_id not in targets)
+
     for idx, block in enumerate(blocks):
         region = region_key(block)
         if block["type"] == "heading":
@@ -47,6 +54,18 @@ def resolve_table_structures_and_titles(ir, ask_decisions, cache=None):
                        and cell.get("col_span", cell.get("column_span", 1)) == width), "")
         preceding = adjacent_source(blocks, idx, -1, {"paragraph", "caption", "heading"})
         following = adjacent_source(blocks, idx, 1, {"caption", "paragraph"})
+        title_criteria = {
+            "PREV_BLOCK": "The immediately preceding block introduces or titles this table",
+            "NEXT_BLOCK": "The immediately following block is the caption/title of this table",
+            "ROW_0_BANNER": "Row 0 of the table itself is a full-width banner title",
+            "SECTION_HEADING": "The enclosing section heading is the best title for this table",
+        }
+        if preceding and caption_conflicts(preceding["id"], block["id"]):
+            preceding = None
+            del title_criteria["PREV_BLOCK"]
+        if following and caption_conflicts(following["id"], block["id"]):
+            following = None
+            del title_criteria["NEXT_BLOCK"]
         prev_text = ""
         prev_type = "none"
         if preceding:
@@ -58,6 +77,8 @@ def resolve_table_structures_and_titles(ir, ask_decisions, cache=None):
             next_text = following.get("text", "").strip()
             next_type = following["type"]
         heading, heading_id = headings.get(region, ("", None))
+        if caption_conflicts(heading_id, block["id"]):
+            heading, heading_id = "", None
         entry = {
             "id": tid,
             "width": width,
@@ -91,12 +112,7 @@ def resolve_table_structures_and_titles(ir, ask_decisions, cache=None):
         questions[tid + "_title"] = {
             "type": "choice",
             "instructions": "Select the best descriptive title source for table " + tid + ".",
-            "criteria": {
-                "PREV_BLOCK": "The immediately preceding block introduces or titles this table",
-                "NEXT_BLOCK": "The immediately following block is the caption/title of this table",
-                "ROW_0_BANNER": "Row 0 of the table itself is a full-width banner title",
-                "SECTION_HEADING": "The enclosing section heading is the best title for this table",
-            },
+            "criteria": title_criteria,
         }
     if not table_entries:
         return
@@ -114,18 +130,29 @@ def resolve_table_structures_and_titles(ir, ask_decisions, cache=None):
                 table["header_grid"] = grid[:count]
                 table["rows"] = grid[count:]
                 table["header_detection"] = "decision_model_headers"
-        title_choice = answers.get(tid + "_title", {}).get("choice", "SECTION_HEADING")
-        title_options = {"ROW_0_BANNER": (banner, None), "PREV_BLOCK": previous_title,
-                         "NEXT_BLOCK": next_title, "SECTION_HEADING": section_title}
-        resolved_title, title_source = title_options[title_choice]
-        if not resolved_title:
+        title_choice = answers.get(tid + "_title", {}).get("choice")
+        resolved_title, title_source = "", None
+        if title_choice:
+            title_options = {"ROW_0_BANNER": (banner, None), "PREV_BLOCK": previous_title,
+                             "NEXT_BLOCK": next_title, "SECTION_HEADING": section_title}
+            resolved_title, title_source = title_options[title_choice]
             caption = block.get("caption", "")
-            caption_source = next((item["id"] for item in caption_sources.get(block["id"], [])
-                                   if item["text"] == caption), None)
-            resolved_title, title_source = next((candidate for candidate in (
-                (caption, caption_source), section_title, previous_title) if candidate[0]), ("", None))
+            attached_captions = caption_sources.get(block["id"], [])
+            caption_source = next((item["id"] for item in attached_captions if item["text"] == caption), None)
+            if caption_source is None and caption == table.get("title") and caption_conflicts(table.get("title_source_block_id"), block["id"]):
+                # A previous decision may have copied its title into the block's
+                # caption fallback before the explicit caption link was known.
+                block.pop("caption", None)
+                caption = ""
+            if not caption:
+                own_caption = next((item for item in attached_captions if item["text"].strip()), None)
+                if own_caption:
+                    caption, caption_source = own_caption["text"], own_caption["id"]
+            if not resolved_title:
+                resolved_title, title_source = next((candidate for candidate in (
+                    (caption, caption_source), section_title, previous_title) if candidate[0]), ("", None))
         header_count = table["header_row_count"]
-        if header_count:
+        if header_count and (hdr_key in answers or title_choice):
             start_hdr_row = 0
             if banner and header_count >= 2:
                 start_hdr_row = 1
@@ -140,6 +167,8 @@ def resolve_table_structures_and_titles(ir, ask_decisions, cache=None):
                 headers.append(" / ".join(labels))
             if "row_provenance" not in table:
                 table["headers"] = headers
+        if not title_choice:
+            continue
         table["title"] = resolved_title
         table.pop("title_source_block_id", None)
         if title_source:

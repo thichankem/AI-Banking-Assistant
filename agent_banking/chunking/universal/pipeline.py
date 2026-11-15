@@ -10,6 +10,7 @@ from .extraction.docx.extractor import DocxExtractor
 from .planning.planner import ChunkPlanner
 from .extraction.sources import (
     discover_documents as discover_documents,
+    document_source_root,
     document_source_name as document_source_name,
     resolve_document_source,
 )
@@ -21,7 +22,7 @@ from .planning.schema import (
     generate_chunk_id, REQUIRED_UNIVERSAL_SCHEMA_KEYS, VALID_CHUNK_TYPES,
 )
 
-PIPELINE_VERSION = "universal-pdf-docx-6.2"
+PIPELINE_VERSION = "universal-pdf-docx-7.0-cloud"
 MODULE = Path(__file__).resolve().parent.parent
 _DOCUMENT_LOCK = threading.RLock()
 
@@ -93,8 +94,10 @@ class UniversalDocxChunker:
         from .extraction.pdf.extractor import PdfExtractor
 
         if vision_client is None and any(value is not None for value in (base_url, api_key, model)):
+            from .extraction.pdf.page_review import OCR_MAX_OUTPUT_TOKENS
             from .models.vision_client import DocumentVisionClient
-            vision_client = DocumentVisionClient(base_url=base_url, api_key=api_key, model=model)
+            vision_client = DocumentVisionClient(base_url=base_url, api_key=api_key, model=model,
+                                                 max_tokens=OCR_MAX_OUTPUT_TOKENS)
         self._owns_cache = cache is None
         self.cache = cache
         if self.cache is None:
@@ -137,7 +140,10 @@ class UniversalDocxChunker:
     def chunk_document(self, docx_path=None, docx_bytes=None, source_name=None, expected_format=None):
         with _DOCUMENT_LOCK:
             self.last_artifact = None
-            source, name, fmt = self._resolve_source(docx_path, docx_bytes, source_name, expected_format)
+            source_root = getattr(self.config, "CHUNKING_INPUT_DIR", MODULE / "input")
+            source, name, fmt = self._resolve_source(
+                docx_path, docx_bytes, source_name, expected_format, source_root=source_root,
+            )
             return self._process_ir(self._extract_ir(source, name, fmt))
 
     @property
@@ -177,8 +183,7 @@ class UniversalDocxChunker:
         artifact["pipeline_fingerprint"] = self.fingerprint()
         ready = all(block["image"].get("status") in RESOLVED_IMAGE_STATUSES
                     for block in ir["blocks"] if block["type"] == "image")
-        if ir.get("extraction_method") == "pdf_cloud_vision_reviewed":
-            ready = ready and len(ir["page_reviews"]) == ir["statistics"]["pages"]
+        statistics = ir.get("statistics", {})
         ready = ready and self.use_llm and self.semantic
         artifact["quality"]["empty_searchable_content"] = not has_searchable_content
         artifact["quality"]["index_ready"] = bool(ready and not any(
@@ -190,22 +195,27 @@ class UniversalDocxChunker:
         if ir.get("page_reviews"):
             default_visual_policy = "reviewed_pdf_pages"
         artifact["quality"]["visual_policy"] = ir.get("visual_policy", default_visual_policy)
-        artifact["quality"]["reviewed_pages"] = len(ir.get("page_reviews", []))
-        statistics = ir.get("statistics", {})
+        artifact["quality"]["reviewed_pages"] = statistics.get("ocr_pages_processed", 0)
         if "pages" in statistics:
             artifact["quality"]["source_pages"] = statistics["pages"]
-            artifact["quality"]["pages_without_native_text"] = statistics.get("pages_without_native_text", 0)
             artifact["quality"]["pages_requiring_ocr"] = statistics.get("pages_requiring_ocr", 0)
             artifact["quality"]["ocr_pages_processed"] = statistics.get("ocr_pages_processed", 0)
-            artifact["quality"]["scan_page_numbers"] = statistics.get("scan_page_numbers", [])
+            artifact["quality"]["ocr_partial_pages"] = statistics.get("ocr_partial_pages", 0)
+            artifact["quality"]["ocr_failed_pages"] = statistics.get("ocr_failed_pages", 0)
+            artifact["quality"]["ocr_failed_page_numbers"] = statistics.get("ocr_failed_page_numbers", [])
             artifact["quality"]["pdf_processing_mode"] = statistics.get("pdf_processing_mode")
+        artifact["quality"]["model_warning_count"] = len(ir.get("model_warnings", []))
         artifact["quality"]["page_region_reviews"] = sum(len(review.get("region_audit", [])) for review in ir.get("page_reviews", []))
         artifact["quality"]["font_reconciled_lines"] = sum(len(review.get("native_reconciliation", [])) for review in ir.get("page_reviews", []))
         artifact["quality"]["page_level_locations"] = sum(block["provenance"].get("bbox_granularity") == "page" for block in ir["blocks"])
         for chunk in chunks:
             chunk["business_metadata"]["pipeline_fingerprint"] = artifact["pipeline_fingerprint"]
-            chunk["business_metadata"]["quality"]["index_ready"] = artifact["quality"]["index_ready"]
-            chunk["business_metadata"]["quality"]["decision_route"] = decision_route
+            quality = chunk["business_metadata"]["quality"]
+            quality["index_ready"] = artifact["quality"]["index_ready"]
+            quality["decision_route"] = decision_route
+            if "pages" in statistics:
+                quality["ocr_partial_pages"] = artifact["quality"]["ocr_partial_pages"]
+                quality["ocr_failed_page_numbers"] = artifact["quality"]["ocr_failed_page_numbers"]
         self.last_artifact = artifact
         return chunks
 
@@ -219,10 +229,17 @@ class UniversalDocxChunker:
     def docx_chunker(self):
         return self
 
-    def chunk_directory(self, dir_path, extensions=None, max_files=None):
+    def chunk_directory(self, dir_path, extensions=None, max_files=None, *, source_root=None):
         target_dir = Path(dir_path)
         if not target_dir.exists():
             return []
+        target_dir = target_dir.resolve()
+        if source_root is None:
+            source_root = document_source_root(target_dir, getattr(self.config, "CHUNKING_INPUT_DIR", MODULE / "input"))
+        else:
+            source_root = Path(source_root).resolve()
+        if not target_dir.is_relative_to(source_root):
+            raise ValueError("Document directory must be inside its source root")
         files = discover_documents(target_dir, extensions, reject_unsupported=extensions is None)
         if max_files is not None:
             if type(max_files) is not int or max_files < 0:
@@ -230,7 +247,7 @@ class UniversalDocxChunker:
             files = files[:max_files]
         all_chunks = []
         for path in files:
-            chunks = self.chunk_file(path, source_name=path.relative_to(target_dir).as_posix())
+            chunks = self.chunk_file(path, source_name=path.relative_to(source_root).as_posix())
             all_chunks.extend(chunks)
         return all_chunks
 

@@ -146,27 +146,24 @@ class ChunkPlanner:
             elif block["type"] in ("heading", "paragraph", "caption"):
                 pending.append(block)
             elif block["type"] == "table":
+                self._flush_conflicting_captions(pending, current, block["id"])
                 pending_words = sum(len(item["text"].split()) for item in pending)
                 if pending and (pending_words < self.min_words or all(item["type"] in ("heading", "caption") for item in pending)):
                     plan_table(self, block, current, lead_in_blocks=pending)
                 else:
                     flush_text(self, pending, current)
                     plan_table(self, block, current)
+                trailing_blocks = self._following_captions(idx, block["id"], current, current_region)
+                idx += len(trailing_blocks)
+                if trailing_blocks:
+                    self._try_append_tail_to_last_chunk(trailing_blocks)
+                    flush_text(self, trailing_blocks, current)
             elif block["type"] == "image":
                 if excluded_image(block):
                     continue
-                trailing_blocks = []
-                if idx < len(blocks_list) and blocks_list[idx]["type"] == "caption" and not is_furniture_block(blocks_list[idx]):
-                    next_cap = blocks_list[idx]
-                    next_region = section_region(next_cap)
-                    targets = self.caption_targets.get(next_cap["id"])
-                    if (next_region == current_region and (not targets or block["id"] in targets)
-                            and has_visible_text(next_cap["text"])
-                            and not (next_cap.get("foreign_language") or next_cap.get("foreign_spans"))):
-                        self.parents[current]["block_ids"].append(next_cap["id"])
-                        next_cap["section_id"] = current
-                        trailing_blocks.append(next_cap)
-                        idx += 1
+                self._flush_conflicting_captions(pending, current, block["id"])
+                trailing_blocks = self._following_captions(idx, block["id"], current, current_region, allow_unlinked=True)
+                idx += len(trailing_blocks)
                 pending_words = sum(len(item["text"].split()) for item in pending)
                 bundle_prev = block.get("image", {}).get("bundle_preceding", False)
                 if pending and (bundle_prev or pending_words < self.min_words or all(item["type"] in ("heading", "caption") for item in pending)):
@@ -189,6 +186,39 @@ class ChunkPlanner:
         link_chunk_sequence(self.chunks)
         quality = validate_coverage(self)
         return self.chunks, {"parents": self.parents, "document": ir, "quality": quality}
+
+    def _caption_conflicts(self, block, target):
+        targets = self.caption_targets.get(block["id"])
+        return bool(targets and target not in targets)
+
+    def _flush_conflicting_captions(self, pending, parent_id, target):
+        for index in range(len(pending) - 1, -1, -1):
+            if self._caption_conflicts(pending[index], target):
+                flush_text(self, pending[:index + 1], parent_id)
+                del pending[:index + 1]
+                break
+
+    def _following_captions(self, index, target, parent_id, region, *, allow_unlinked=False):
+        captions = []
+        blocks = self.ir["blocks"]
+        while index < len(blocks):
+            candidate = blocks[index]
+            targets = self.caption_targets.get(candidate["id"])
+            if candidate["type"] not in ("caption", "paragraph"):
+                break
+            if not targets and (not allow_unlinked or candidate["type"] != "caption"):
+                break
+            if (self._caption_conflicts(candidate, target) or is_furniture_block(candidate)
+                    or section_region(candidate) != region or not has_visible_text(candidate["text"])
+                    or candidate.get("foreign_language") or candidate.get("foreign_spans")):
+                break
+            self.parents[parent_id]["block_ids"].append(candidate["id"])
+            candidate["section_id"] = parent_id
+            captions.append(candidate)
+            index += 1
+            if not targets:
+                break
+        return captions
 
     def _keep_foreign(self, block, start, end, language):
         kind = "source_spacing" if language is None else "foreign_language"
@@ -265,6 +295,9 @@ class ChunkPlanner:
         if last["chunk_type"] not in ("text", "table", "multimodal"):
             return
         prov = last["business_metadata"]["provenance"]
+        target = (last["table_data"] or {}).get("table_id") or prov.get("image_block_id")
+        if target and any(self._caption_conflicts(block, target) for block in pending):
+            return
         if section_region(self.block_map[prov["block_ids"][-1]]) != section_region(pending[0]):
             return
         retrieval = last["business_metadata"]["retrieval"]

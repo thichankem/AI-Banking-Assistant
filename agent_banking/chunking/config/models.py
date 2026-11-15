@@ -15,26 +15,34 @@ TEXT_MODELS = [
 VISION_MODELS = [
     {
         "name": "primary",
-        "model_env": "CHUNKING_VISION_MODEL",
-        "model_default": "",
-        "url_env": "BASE_URL",
-        "api_key_env": "API_KEY",
+        "model_env": ("CHUNKING_VISION_MODEL", "VISION_MODEL"),
+        "model_default": "Qwen3.6-27B",
+        "url_env": ("CHUNKING_VISION_BASE_URL", "BASE_URL"),
+        "api_key_env": ("CHUNKING_VISION_API_KEY", "API_KEY"),
         "timeout": 240,
         "attempts": 3,
     },
 ]
 
-# Independent visual review; selected separately from the extraction model.
-# These scoped overrides keep generic VISION_MODEL settings for other modules.
+# The FPT Cloud defaults use two different vision model families.
 VISION_REVIEW_MODELS = [
     {
         "name": "vision-review-primary",
-        "model_env": "CHUNKING_VISION_REVIEW_MODEL",
-        "model_default": "",
-        "url_env": "BASE_URL",
-        "api_key_env": "API_KEY",
+        "model_env": ("CHUNKING_VISION_REVIEW_MODEL", "VISION_REVIEW_MODEL"),
+        "model_default": "Azure:gpt-5.6-luna",
+        "url_env": ("CHUNKING_VISION_REVIEW_BASE_URL", "BASE_URL"),
+        "api_key_env": ("CHUNKING_VISION_REVIEW_API_KEY", "API_KEY"),
         "timeout": 240,
         "attempts": 3,
+    },
+    {
+        "name": "vision-review-fallback",
+        "model_env": "CHUNKING_VISION_REVIEW_FALLBACK_MODEL",
+        "model_default": "gemma-4-31B-it",
+        "url_env": ("CHUNKING_VISION_REVIEW_BASE_URL", "BASE_URL"),
+        "api_key_env": ("CHUNKING_VISION_REVIEW_API_KEY", "API_KEY"),
+        "timeout": 240,
+        "attempts": 2,
     },
 ]
 

@@ -10,15 +10,19 @@ from .image_context import IMAGE_POLICY, source_text
 from ..text.language import vietnamese_projection
 from ..models.text_client import IncompleteModelResponse, ordered_parallel
 from .evidence import evidence_preview, table_preview
+from .model_warnings import optional_model_call
 from .annotations import (
     ANNOTATION_ARRAYS,
-    OptionalContextReferenceError,
     apply_annotations,
+    filter_optional_annotations,
     validate_annotations,
 )
 
 
 logger = logging.getLogger("chunking.models")
+_STRUCTURE_WINDOW_BLOCKS = 6
+_STRUCTURE_WINDOW_BYTES = 4500
+_STRUCTURE_COMPLETION_TOKENS = 8192
 
 
 def structure_request_options(model, json_mode=None):
@@ -30,7 +34,7 @@ def structure_request_options(model, json_mode=None):
         disabled = [name.strip().casefold() for name in names.split(",") if name.strip()]
         normalized = model.casefold()
         json_mode = "reasoner" not in normalized and not any(name in normalized for name in disabled)
-    options = {"temperature": 0.1, "max_tokens": maximum}
+    options = {"temperature": 0.1, "max_tokens": min(maximum, _STRUCTURE_COMPLETION_TOKENS)}
     if json_mode:
         options["response_format"] = {"type": "json_object"}
     else:
@@ -41,17 +45,18 @@ def structure_request_options(model, json_mode=None):
 def _source_preview(block, alias):
     location = block["provenance"]
     preview = {
-        "id": alias, "type": block["type"], "text": evidence_preview(vietnamese_projection(block), 1200),
+        "id": alias, "type": block["type"], "text": evidence_preview(vietnamese_projection(block), 600),
         "level": block.get("level", 0),
         "location": {key: location[key] for key in ("region", "page_index", "bbox", "xpath") if key in location},
     }
     if "xpath" in preview["location"]:
-        preview["location"]["xpath"] = evidence_preview(preview["location"]["xpath"], 360)
+        preview["location"]["xpath"] = evidence_preview(preview["location"]["xpath"], 180)
     for key in ("heading_format", "heading_evidence", "authored_level"):
         if key in block:
             preview[key] = block[key]
     if block["type"] == "table":
-        preview["grid"] = table_preview(block["table_data"]["grid"], rows=6)
+        preview["grid"] = [[evidence_preview(cell, 60) for cell in row]
+                           for row in table_preview(block["table_data"]["grid"], rows=3)]
     if block["type"] == "image":
         preview["image_context_status"] = block["image"].get("status", "unresolved")
     return preview
@@ -78,7 +83,7 @@ def _structure_state(ir):
         "Report conflicting claims as source warnings; do not repair their text.")}
     if ir.get("page_reviews"):
         state["task"] += (
-            " These blocks also contain completed, reviewed visual transcriptions. "
+            " These blocks contain cloud OCR transcriptions. "
             "Their page/figure coordinates are available as source evidence. "
             "Retain visual labels and table values exactly; do not treat scan text as absent. "
             "Connect continued tables/paragraphs across pages with source-ID relations.")
@@ -90,21 +95,53 @@ def _structure_state(ir):
     return state
 
 
-def _window_ranges(blocks):
-    serialized_sizes = [len(json.dumps(block, ensure_ascii=False)) + 2 for block in blocks]
+def _context_preview(block, text_limit):
+    preview = {"id": block["id"], "type": block["type"], "level": block["level"],
+               "text": evidence_preview(block["text"], text_limit)}
+    if block.get("authored_level"):
+        preview["authored_level"] = block["authored_level"]
+    return preview
+
+
+def _window_evidence(core, neighbors, preceding):
+    before, after = neighbors
+    selected = before + core + after
+    return {"blocks": selected, "previous_heading": preceding,
+            "editable_block_ids": [block["id"] for block in core],
+            "context_source_ids": [block["id"] for block in selected
+                                   if block.get("grid") or (block["type"] != "image" and block["text"].strip())]}
+
+
+def _window_size(evidence):
+    return len(json.dumps(evidence, ensure_ascii=False).encode("utf-8"))
+
+
+def _structure_windows(blocks):
     start = 0
     preceding = None
     while start < len(blocks):
-        end, size = start, 0
-        while end < min(start + 12, len(blocks)):
-            size += serialized_sizes[end]
-            if end > start and size > 9000:
+        before = [_context_preview(block, 180) for block in blocks[max(0, start - 1):start]]
+        end = start
+        window = None
+        while end < min(start + _STRUCTURE_WINDOW_BLOCKS, len(blocks)):
+            next_end = end + 1
+            after = [_context_preview(block, 180) for block in blocks[next_end:next_end + 1]]
+            candidate = _window_evidence(blocks[start:next_end], (before, after), preceding)
+            if _window_size(candidate) > _STRUCTURE_WINDOW_BYTES:
                 break
-            end += 1
-        yield start, end, preceding
+            end, window = next_end, candidate
+        if window is None:
+            # Keep a large block editable in its own request without crowding its neighbors.
+            block = blocks[start]
+            compact = _context_preview(block, 200)
+            if block.get("grid"):
+                compact["grid"] = [[evidence_preview(cell, 40) for cell in row[:4]] for row in block["grid"][:2]]
+            end = start + 1
+            window = _window_evidence([compact], ([], []), preceding)
+        yield start, window
         for block in blocks[start:end]:
             if block["type"] == "heading":
-                preceding = {"text": evidence_preview(block["text"], 300), "level": block["level"]}
+                preceding = {"text": evidence_preview(block["text"], 150), "level": block["level"]}
         start = end
 
 
@@ -124,9 +161,9 @@ def _review_window(start, window, native_text, endpoint, cloud_json):
         try:
             result = cloud_json(endpoint.url.rstrip("/") + "/chat/completions", endpoint.api_key,
                                 {"model": endpoint.model, "messages": messages, **options},
-                                timeout=240, configure_payload=configure_payload)
+                                timeout=240, max_output_tokens=options["max_tokens"], configure_payload=configure_payload)
         except ModelFallbackError as error:
-            cause = error.last_error
+            cause = getattr(error, "last_error", None)
             if (decode_mode_changed or repair == 4 or not isinstance(cause, ValueError)
                     or isinstance(cause, IncompleteModelResponse)):
                 raise
@@ -135,17 +172,15 @@ def _review_window(start, window, native_text, endpoint, cloud_json):
             logger.warning("Switching JSON mode for structure window %s after response decoding failed", start)
             continue
         try:
-            return validate_annotations(result, window, native_text)
+            return filter_optional_annotations(result, window, native_text)
         except ValueError as error:
             if repair == 4:
-                if isinstance(error, OptionalContextReferenceError):
-                    return validate_annotations(result, window, native_text, quarantine_context=True)
                 raise
             if any(key not in result for key in ANNOTATION_ARRAYS):
                 json_mode = False
             logger.warning("Repairing structure window %s: %s", start, error)
             messages[2:] = [
-                {"role": "assistant", "content": evidence_preview(json.dumps(result, ensure_ascii=False), 2400)},
+                {"role": "assistant", "content": evidence_preview(json.dumps(result, ensure_ascii=False), 1200)},
                 {"role": "user", "content": (
                     "Repair the JSON annotations. Validation error: " + str(error)
                     + ". Use only supplied IDs and return all arrays. "
@@ -171,26 +206,20 @@ def enrich_structure(enricher, ir, cloud_json):
     def native_text(alias):
         return source_text(by_id[native_ids[alias]])
 
-    endpoint = model_primary("chunking.text")
+    endpoint = optional_model_call(ir, "grounded_structure_window", lambda: model_primary("chunking.text"))
+    if endpoint is None:
+        return
     state = _structure_state(ir)
 
-    def review_window(bounds):
-        start, end, preceding = bounds
-        # Neighbors only supply context. Keep expensive grid previews in the editable core.
-        before = [{key: block[key] for key in block if key != "grid"} for block in blocks[max(0, start - 1):start]]
-        after = [{key: block[key] for key in block if key != "grid"} for block in blocks[end:end + 1]]
-        core = blocks[start:end]
-        selected = before + core + after
-        window = {**state, "blocks": selected, "previous_heading": preceding,
-                  "editable_block_ids": [block["id"] for block in core],
-                  "context_source_ids": [block["id"] for block in selected
-                                         if block.get("grid") or (block["type"] != "image" and block["text"].strip())]}
-        result = enricher._cached(
-            "grounded_structure_window", endpoint.model, window,
+    def review_window(item):
+        start, evidence = item
+        window = {**state, **evidence}
+        result = enricher._optional_cached(
+            ir, "grounded_structure_window", endpoint.model, window,
             lambda: _review_window(start, window, native_text, endpoint, cloud_json),
             lambda value: validate_annotations(value, window, native_text),
         )
         return start, result
 
-    results = ordered_parallel(review_window, _window_ranges(blocks), enricher.workers)
-    apply_annotations(ir, results, native_ids, by_id)
+    results = ordered_parallel(review_window, _structure_windows(blocks), enricher.workers)
+    apply_annotations(ir, [(start, result) for start, result in results if result is not None], native_ids, by_id)

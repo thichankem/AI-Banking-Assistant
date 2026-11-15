@@ -1,7 +1,9 @@
 """Cached structural decisions for document chunking."""
 from copy import deepcopy
+from functools import partial
 import hashlib
 import json
+import math
 from pathlib import Path
 
 from agent_banking.core.models import chain_fingerprint, model_primary
@@ -15,6 +17,7 @@ from .tables import (
     table_header_cells as table_header_cells,
     table_row_provenance as table_row_provenance,
 )
+from ..model_warnings import optional_model_call, record_model_warning
 from ...text.language import classify_text_blocks
 from ...models.text_client import cloud_json, ordered_parallel, validate_decisions
 from ...models.response_cache import PageVisionCache
@@ -33,7 +36,7 @@ def get_decision_cache(cache=None):
     return _DEFAULT_CACHE
 
 
-def ask_decisions(role, state, questions, cache=None, batch_size=12, workers=2):
+def ask_decisions(role, state, questions, cache=None, batch_size=6, workers=2, *, ir=None):
     """Execute and cache batched /systemone decision queries."""
     if type(batch_size) is not int or batch_size < 1:
         raise ValueError("Decision batch size must be a positive integer")
@@ -42,7 +45,9 @@ def ask_decisions(role, state, questions, cache=None, batch_size=12, workers=2):
     if not questions:
         return {}
     active_cache = get_decision_cache(cache)
-    endpoint = model_primary("chunking.decision")
+    endpoint = optional_model_call(ir, role, lambda: model_primary("chunking.decision"))
+    if endpoint is None:
+        return {}
     model = endpoint.model
     namespace = {
         "engine": DECISION_ENGINE_VERSION,
@@ -80,19 +85,25 @@ def ask_decisions(role, state, questions, cache=None, batch_size=12, workers=2):
         if cached is not None:
             try:
                 validate_decisions(cached, batch_questions)
-                return deepcopy(cached.get("answers", {}))
+                return {name: deepcopy(cached["answers"][name]) for name in batch_questions}
             except (ValueError, TypeError, KeyError):
                 active_cache.delete(key)
-        result = cloud_json(
-            endpoint.url.rstrip("/") + "/systemone",
-            endpoint.api_key,
-            {"model": model, "state": batch_state, "questions": batch_questions},
-            timeout=60,
-            model_module="chunking.decision",
-        )
-        validate_decisions(result, batch_questions)
+        def request():
+            result = cloud_json(
+                endpoint.url.rstrip("/") + "/systemone",
+                endpoint.api_key,
+                {"model": model, "state": batch_state, "questions": batch_questions},
+                timeout=60,
+                model_module="chunking.decision",
+            )
+            validate_decisions(result, batch_questions)
+            return result
+
+        result = optional_model_call(ir, role, request)
+        if result is None:
+            return {}
         active_cache.put(key, result)
-        return deepcopy(result.get("answers", {}))
+        return {name: deepcopy(result["answers"][name]) for name in batch_questions}
 
     if len(batches) == 1:
         return run_batch(batches[0])
@@ -146,7 +157,7 @@ def decide_breadcrumb_hierarchy(ir, cache=None):
     for idx, block in enumerate(body):
         if block["type"] not in ("paragraph", "heading", "caption"):
             continue
-        if block.get("heading_format") == "openxml_outline":
+        if block.get("authored_level") or block.get("heading_format") == "openxml_outline":
             continue
         typo = block.get("typography")
         if typo is None or not typo.get("single_line"):
@@ -205,11 +216,20 @@ def decide_breadcrumb_hierarchy(ir, cache=None):
         "typography_profile": ir["typography_profile"],
         "candidates": candidates,
     }
-    answers = ask_decisions("breadcrumb_hierarchy", state, questions, cache=cache)
+    answers = ask_decisions("breadcrumb_hierarchy", state, questions, cache=cache, ir=ir)
     for cid, (block, typo) in candidate_blocks.items():
-        ans = answers.get(cid, {})
-        choice = ans.get("choice", "BODY")
-        confidence = float(ans.get("confidence", 1.0))
+        ans = answers.get(cid)
+        if ans is None:
+            continue
+        choice = ans["choice"]
+        try:
+            raw_confidence = ans.get("confidence", 1.0)
+            confidence = math.nan if isinstance(raw_confidence, bool) else float(raw_confidence)
+        except (ValueError, TypeError, OverflowError):
+            confidence = math.nan
+        if not 0 <= confidence <= 1:
+            record_model_warning(ir, "breadcrumb_hierarchy", "invalid_confidence")
+            continue
         if choice == "CAPTION":
             block["type"] = "caption"
             block.pop("level", None)
@@ -243,21 +263,21 @@ def decide_breadcrumb_hierarchy(ir, cache=None):
 
 def decide_caption_attachments(ir, cache=None):
     """Resolve captions, table structures, and image context."""
-    attach_visual_captions(ir, ask_decisions, cache=cache)
+    attach_visual_captions(ir, partial(ask_decisions, ir=ir), cache=cache)
     decide_table_structures_and_titles(ir, cache=cache)
     decide_image_titles_and_context(ir, cache=cache)
 
 
 def decide_table_structures_and_titles(ir, cache=None):
-    resolve_table_structures_and_titles(ir, ask_decisions, cache=cache)
+    resolve_table_structures_and_titles(ir, partial(ask_decisions, ir=ir), cache=cache)
 
 
 def decide_image_titles_and_context(ir, cache=None):
-    resolve_image_titles_and_context(ir, ask_decisions, cache=cache)
+    resolve_image_titles_and_context(ir, partial(ask_decisions, ir=ir), cache=cache)
 
 
 def decide_continued_tables(ir, cache=None):
-    merge_continued_tables(ir, ask_decisions, cache=cache)
+    merge_continued_tables(ir, partial(ask_decisions, ir=ir), cache=cache)
 
 
 def decide_prompt_pairs(blocks, cache=None):

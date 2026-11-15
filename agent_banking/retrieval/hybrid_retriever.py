@@ -21,6 +21,8 @@ DESIGN INVARIANTS:
 
 import time
 
+from agent_banking.chunking.universal.planning.schema import payload_index_key
+
 try:
     from agent_banking.query_parser.rag_query_parser import ParsedQuery
 except ImportError:
@@ -443,7 +445,8 @@ class HybridRetriever:
 
         # 6. Filter Zero-Result Fallback mechanism
         fallback_unfiltered = False
-        if len(dense_results) == 0 and len(bm25_results) == 0 and norm_filter is not None:
+        if (not dense_results and not bm25_results and norm_filter is not None
+                and "business_metadata.publication_scopes" not in norm_filter):
             fallback_unfiltered = True
             if self.vector_store is not None and hasattr(self.vector_store, "search_vector"):
                 dense_results = self.vector_store.search_vector(
@@ -484,9 +487,10 @@ class HybridRetriever:
 
             norm_chunk = self._normalize_chunk(raw_chunk)
             chunk_id = norm_chunk["chunk_id"]
+            index_key = payload_index_key(norm_chunk)
 
-            if chunk_id not in candidates:
-                candidates[chunk_id] = {
+            if index_key not in candidates:
+                candidates[index_key] = {
                     "chunk_id": chunk_id,
                     "chunk": norm_chunk,
                     "dense_rank": rank,
@@ -496,8 +500,8 @@ class HybridRetriever:
                     "rrf_score": 0.0
                 }
             else:
-                candidates[chunk_id]["dense_rank"] = rank
-                candidates[chunk_id]["dense_score"] = float(score)
+                candidates[index_key]["dense_rank"] = rank
+                candidates[index_key]["dense_score"] = float(score)
 
         # Record BM25 results
         for rank, item in enumerate(bm25_results, start=1):
@@ -508,9 +512,10 @@ class HybridRetriever:
 
             norm_chunk = self._normalize_chunk(raw_chunk)
             chunk_id = norm_chunk["chunk_id"]
+            index_key = payload_index_key(norm_chunk)
 
-            if chunk_id not in candidates:
-                candidates[chunk_id] = {
+            if index_key not in candidates:
+                candidates[index_key] = {
                     "chunk_id": chunk_id,
                     "chunk": norm_chunk,
                     "dense_rank": None,
@@ -520,8 +525,8 @@ class HybridRetriever:
                     "rrf_score": 0.0
                 }
             else:
-                candidates[chunk_id]["bm25_rank"] = rank
-                candidates[chunk_id]["bm25_score"] = float(score)
+                candidates[index_key]["bm25_rank"] = rank
+                candidates[index_key]["bm25_score"] = float(score)
 
         # Compute RRF scores:
         # RRF(d) = (w_dense / (k + rank_dense)) + (w_bm25 / (k + rank_bm25))

@@ -16,12 +16,16 @@ DESIGN INVARIANTS:
 
 import gc
 import hashlib
+import json
 import math
 import os
 import shutil
+import struct
 import uuid
 import warnings
 from pathlib import Path
+
+from agent_banking.chunking.universal.planning.schema import payload_index_key
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -58,6 +62,45 @@ def _publication_owners(payload):
         if isinstance(owners, list):
             return {owner for owner in owners if isinstance(owner, str)}
     return set()
+
+
+def _index_payload(chunk, fallback_id):
+    chunk_type = chunk.get("chunk_type")
+    if chunk_type not in ("text", "table", "multimodal"):
+        chunk_type = "text"
+    metadata = chunk.get("business_metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+    images = chunk.get("images")
+    if not isinstance(images, list):
+        images = []
+    return {
+        "chunk_id": str(chunk.get("chunk_id") or fallback_id),
+        "parent_id": str(chunk.get("parent_id") or ""),
+        "source": str(chunk.get("source") or ""),
+        "chunk_type": chunk_type,
+        "breadcrumb": str(chunk.get("breadcrumb") or ""),
+        "section_title": str(chunk.get("section_title") or ""),
+        "content": str(chunk.get("content") or ""),
+        "parent_content": str(chunk.get("parent_content") or ""),
+        "business_metadata": {key: value for key, value in metadata.items() if key != "publication_revision"},
+        "prev_chunk_id": str(chunk.get("prev_chunk_id") or ""),
+        "next_chunk_id": str(chunk.get("next_chunk_id") or ""),
+        "table_data": chunk.get("table_data"),
+        "images": images,
+    }
+
+
+def _set_publication_revision(payload, vector):
+    metadata = payload["business_metadata"]
+    if not (_publication_owners(payload) or metadata.get("pipeline_fingerprint")):
+        return
+    fields = {**payload, "business_metadata": {key: value for key, value in metadata.items()
+                                              if key != "publication_scopes"}}
+    encoded = json.dumps(fields, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    # Local cache and Qdrant persist vectors at float32 precision.
+    stored_vector = struct.pack(f"<{len(vector)}f", *vector)
+    metadata["publication_revision"] = "publication:" + hashlib.sha256(encoded + stored_vector).hexdigest()
 
 
 class QdrantBankingStore:
@@ -246,13 +289,19 @@ class QdrantBankingStore:
     # -------------------------------------------------------------------------
     # 1. DATA INGESTION
     # -------------------------------------------------------------------------
+    def index_key(self, chunk, fallback_id=""):
+        payload = _index_payload(chunk, fallback_id)
+        vector = [float(value) for value in chunk["vector"][:self.dimension]]
+        _set_publication_revision(payload, vector)
+        return payload_index_key(payload)
+
     def add_chunks(self, chunks, batch_size=64):
         """
         Nạp danh sách chunks đã có trường 'vector' vào Qdrant và lập chỉ mục BM25F.
         Đảm bảo 100% chunks tuân thủ Target Universal Schema 13 trường.
         """
         if not chunks:
-            return
+            return set()
 
         points = []
         new_payloads = []
@@ -261,65 +310,19 @@ class QdrantBankingStore:
             if not vec:
                 continue
 
-            pt_id = chunk.get("chunk_id")
-            if not pt_id:
-                pt_id = str(idx)
-
+            vector = [float(value) for value in vec[:self.dimension]]
+            payload = _index_payload(chunk, str(idx))
+            _set_publication_revision(payload, vector)
+            point_key = payload_index_key(payload)
             try:
-                point_uuid = str(uuid.UUID(str(pt_id)))
-            except Exception:
-                point_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(pt_id)))
-
-            # Normalize chunk_type to Target Universal Schema
-            raw_type = chunk.get("chunk_type")
-            if raw_type in ("text", "table", "multimodal"):
-                chunk_type = raw_type
-            else:
-                chunk_type = "text"
-
-            # Safely extract metadata
-            b_meta = chunk.get("business_metadata")
-            if not isinstance(b_meta, dict):
-                b_meta = {}
-
-            imgs = chunk.get("images")
-            if not isinstance(imgs, list):
-                imgs = []
-
-            prev_c = chunk.get("prev_chunk_id")
-            if prev_c is None:
-                prev_c = ""
-            else:
-                prev_c = str(prev_c)
-
-            next_c = chunk.get("next_chunk_id")
-            if next_c is None:
-                next_c = ""
-            else:
-                next_c = str(next_c)
-
-            # Pack exact 13-field Payload of Target Universal Schema
-            # Completely remove legacy fields: original_text, word_count, token_count, is_active
-            payload = {
-                "chunk_id": str(pt_id),
-                "parent_id": str(chunk.get("parent_id") or ""),
-                "source": str(chunk.get("source") or ""),
-                "chunk_type": chunk_type,
-                "breadcrumb": str(chunk.get("breadcrumb") or ""),
-                "section_title": str(chunk.get("section_title") or ""),
-                "content": str(chunk.get("content") or ""),
-                "parent_content": str(chunk.get("parent_content") or ""),
-                "business_metadata": b_meta,
-                "prev_chunk_id": prev_c,
-                "next_chunk_id": next_c,
-                "table_data": chunk.get("table_data"),
-                "images": imgs
-            }
+                point_uuid = str(uuid.UUID(point_key))
+            except ValueError:
+                point_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, point_key))
 
             points.append(
                 PointStruct(
                     id=point_uuid,
-                    vector=[float(x) for x in vec[:self.dimension]],
+                    vector=vector,
                     payload=payload
                 )
             )
@@ -339,6 +342,7 @@ class QdrantBankingStore:
                 if owners:
                     payload["business_metadata"] = {**payload["business_metadata"], "publication_scopes": sorted(owners)}
                     point.payload = payload
+                    existing_owners[point.id] = owners
             self.client.upsert(
                 collection_name=self.collection_name,
                 points=batch_slice
@@ -347,12 +351,12 @@ class QdrantBankingStore:
         # Synchronize and index BM25F (True Upsert synchronized with Qdrant)
         corpus_id_to_idx = {}
         for idx, c in enumerate(self._bm25_corpus):
-            cid = c.get("chunk_id")
+            cid = payload_index_key(c)
             if cid:
                 corpus_id_to_idx[cid] = idx
 
         for p in new_payloads:
-            cid = p.get("chunk_id")
+            cid = payload_index_key(p)
             if cid and cid in corpus_id_to_idx:
                 existing_idx = corpus_id_to_idx[cid]
                 self._bm25_corpus[existing_idx] = p
@@ -364,54 +368,64 @@ class QdrantBankingStore:
 
         self._build_bm25_index(self._bm25_corpus)
         print(f"✅ [Qdrant Store] Đã nạp thành công {total_points} chunks vào Vector DB (Tổng BM25: {len(self._bm25_corpus)} chunks)!")
+        return {payload_index_key(payload) for payload in new_payloads}
 
     upsert_chunks = add_chunks
 
-    def chunk_ids(self, *, scope=None):
+    def chunk_ids(self, *, scope=None, index_keys=False):
         identifiers = set()
         offset = None
         payload_fields = ["chunk_id"]
+        if index_keys:
+            payload_fields.append("business_metadata.publication_revision")
         if scope is not None:
             payload_fields.append("business_metadata.publication_scopes")
         while True:
             records, offset = self.client.scroll(collection_name=self.collection_name, offset=offset, limit=256,
                                                   with_payload=payload_fields, with_vectors=False)
-            identifiers.update(record.payload.get("chunk_id") for record in records
-                               if record.payload and (scope is None or scope in _publication_owners(record.payload)))
+            for record in records:
+                payload = record.payload
+                if payload and (scope is None or scope in _publication_owners(payload)):
+                    identifier = payload_index_key(payload) if index_keys else payload.get("chunk_id")
+                    identifiers.add(identifier)
             if offset is None:
                 return identifiers
 
-    def prune_chunks(self, active_chunk_ids, sources=None, *, scope=None, preserve_sources=()):
+    def prune_chunks(self, active_chunk_ids, sources=None, *, scope=None, preserve_sources=(), active_index_keys=None):
         """Remove obsolete versions after their replacements have been upserted.
 
         With a publication scope, `sources` identifies legacy sources eligible
         for migration. Other explicitly owned snapshots stay outside that scope.
         """
-        active = set(active_chunk_ids)
-        preserved_names = set()
-        if preserve_sources:
-            from agent_banking.chunking.universal.extraction.sources import document_source_name
+        from agent_banking.chunking.universal.extraction.sources import legacy_source_resolver, source_key
 
-            preserved_names = {document_source_name(source).casefold() for source in preserve_sources}
+        active = set(active_chunk_ids)
+        preserved = {source_key(source) for source in preserve_sources}
+        current_sources = {source_key(source) for source in sources or () if isinstance(source, str)}
+        resolve_legacy = legacy_source_resolver(current_sources | preserved)
 
         def stale(payload):
-            if payload.get("chunk_id") in active:
+            if active_index_keys is None and payload.get("chunk_id") in active:
+                return False
+            if active_index_keys is not None and payload_index_key(payload) in active_index_keys:
                 return False
             source = payload.get("source")
-            if preserved_names and document_source_name(source).casefold() in preserved_names:
+            if source_key(source) in preserved:
                 return False
-            if scope is None:
-                return sources is None or source in sources
             owners = _publication_owners(payload)
+            if scope is None:
+                if resolve_legacy(source) in preserved:
+                    return False
+                return sources is None or source_key(source) in current_sources
             if owners:
                 return scope in owners
-            return sources is not None and source in sources
+            return resolve_legacy(source) in current_sources
 
         obsolete = []
         shared = {}
         retained_points = {}
         offset = None
-        payload_fields = ["chunk_id", "source"]
+        payload_fields = ["chunk_id", "source", "business_metadata.publication_revision"]
         if scope is not None:
             payload_fields.append("business_metadata.publication_scopes")
         while True:
@@ -423,7 +437,7 @@ class QdrantBankingStore:
                     remaining_owners = tuple(sorted(_publication_owners(payload) - {scope}))
                     if scope is not None and remaining_owners:
                         shared.setdefault(remaining_owners, []).append(record.id)
-                        retained_points[payload["chunk_id"]] = list(remaining_owners)
+                        retained_points[payload_index_key(payload)] = list(remaining_owners)
                     else:
                         obsolete.append(record.id)
             if offset is None:
@@ -437,7 +451,7 @@ class QdrantBankingStore:
             self.client.delete(collection_name=self.collection_name, points_selector=obsolete[start:start + 256], wait=True)
         remaining = []
         for item in self._bm25_corpus:
-            owners = retained_points.get(item.get("chunk_id"))
+            owners = retained_points.get(payload_index_key(item))
             if owners:
                 item["business_metadata"]["publication_scopes"] = owners
             if not stale(item):
@@ -891,7 +905,7 @@ class QdrantBankingStore:
 
         # Record Dense ranking
         for rank, (chunk, score) in enumerate(dense_hits, start=1):
-            c_id = chunk.get("chunk_id")
+            c_id = payload_index_key(chunk)
             if not c_id:
                 c_id = str(id(chunk))
             candidates[c_id] = {
@@ -905,7 +919,7 @@ class QdrantBankingStore:
 
         # Record BM25 ranking
         for rank, (chunk, score) in enumerate(bm25_hits, start=1):
-            c_id = chunk.get("chunk_id")
+            c_id = payload_index_key(chunk)
             if not c_id:
                 c_id = str(id(chunk))
             if c_id not in candidates:

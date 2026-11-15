@@ -26,6 +26,12 @@ def _has_glyph_row(image):
         glyphs = [(left, right) for left, right in _runs(columns) if right - left <= line_height * 2]
         if len(glyphs) >= 4 and glyphs[-1][1] - glyphs[0][0] >= line_height * 2:
             return True
+        if 2 <= len(glyphs) <= 3 and line_height >= 6:
+            extent = glyphs[-1][1] - glyphs[0][0]
+            # A compact short label can consist of a digit and a percent sign.
+            substantial = sum(right - left >= max(2, line_height // 5) for left, right in glyphs)
+            if substantial >= 2 and line_height <= extent <= line_height * 4:
+                return True
     return False
 
 

@@ -32,6 +32,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent_banking.core.settings import Config
+from agent_banking.chunking.universal.planning.schema import payload_index_key
 from agent_banking.reranking.rag_reranker import BankingReranker
 from agent_banking.state_tracker import StateTracker
 
@@ -45,15 +46,12 @@ def extract_candidate_ids(candidates):
         return cand_ids
     for idx, c in enumerate(candidates):
         if isinstance(c, dict):
-            cid = c.get("chunk_id")
-            if cid is None or cid == "":
-                cid = c.get("id")
-            if cid is None or cid == "":
-                chunk_obj = c.get("chunk")
-                if isinstance(chunk_obj, dict):
-                    cid = chunk_obj.get("chunk_id")
-                    if cid is None or cid == "":
-                        cid = chunk_obj.get("id")
+            chunk_obj = c.get("chunk")
+            cid = payload_index_key(chunk_obj) if isinstance(chunk_obj, dict) else None
+            if not cid:
+                cid = payload_index_key(c) or c.get("id")
+            if not cid and isinstance(chunk_obj, dict):
+                cid = chunk_obj.get("id")
             if cid is not None and str(cid).strip() != "":
                 cand_ids.append(str(cid).strip())
             else:

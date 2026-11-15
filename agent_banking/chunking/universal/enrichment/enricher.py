@@ -7,7 +7,9 @@ import logging
 from agent_banking.core.models import chain_fingerprint, model_primary
 from agent_banking.chunking.config.prompt_config import PROMPT_VERSION, STRUCTURE_SYSTEM_PROMPT
 from .review import adjudicate_repair, review_extraction, review_headings
+from .model_warnings import optional_model_call
 from .image_context import (
+    CONTEXT_UNAVAILABLE,
     IMAGE_POLICY,
     RESOLVED_IMAGE_STATUSES,
     apply_context_selection,
@@ -24,7 +26,8 @@ from ..models.text_client import (
     validate_decisions,
 )
 from .evidence import evidence_preview, table_preview
-from .structure import OptionalContextReferenceError, enrich_structure, structure_request_options
+from .annotations import OptionalContextReferenceError as OptionalContextReferenceError
+from .structure import enrich_structure, structure_request_options
 
 
 logger = logging.getLogger("chunking.models")
@@ -85,6 +88,9 @@ class ModelEnricher:
         self.events.append(event)
         return deepcopy(result)
 
+    def _optional_cached(self, ir, role, model, input_data, operation, validator=None):
+        return optional_model_call(ir, role, lambda: self._cached(role, model, input_data, operation, validator))
+
     def enrich(self, ir, pages=None):
         self.events = []
         ir["image_policy"] = "ignore_standalone_images"
@@ -119,7 +125,10 @@ class ModelEnricher:
             apply_context_selection(block, [], {"include": False, "evidence": [],
                                                 "reason": "No native surrounding text or author-supplied annotation"}, "")
             return
-        endpoint = model_primary("chunking.text")
+        endpoint = optional_model_call(ir, "image_text_context", lambda: model_primary("chunking.text"))
+        if endpoint is None:
+            self._skip_unassessed_image(block)
+            return
         model = endpoint.model
         previews = [{**source, "text": source["text"][:1600]} for source in candidates]
         state = {"image_occurrence_id": block["id"], "policy": IMAGE_POLICY,
@@ -156,8 +165,17 @@ class ModelEnricher:
                     messages.extend([{"role": "assistant", "content": evidence_preview(json.dumps(result, ensure_ascii=False), 2000)},
                                      {"role": "user", "content": "Correct the JSON decision: " + str(error) +
                                       '. Required keys: include, evidence [{source_id,quote}], reason. Use only literal supplied text.'}])
-        result = self._cached("image_text_context", model, state, operation, validate)
-        apply_context_selection(block, candidates, result, model)
+        result = self._optional_cached(ir, "image_text_context", model, state, operation, validate)
+        if result is None:
+            self._skip_unassessed_image(block)
+        else:
+            apply_context_selection(block, candidates, result, model)
+
+    @staticmethod
+    def _skip_unassessed_image(block):
+        apply_context_selection(block, [], {"include": False, "evidence": [],
+                                "reason": "Cloud image-context assessment unavailable"}, "")
+        block["image"].update(status=CONTEXT_UNAVAILABLE, text_context_assessed=False)
 
     def _table_headers(self, ir):
         """Resolve unmarked/multirow headers without generating any cell text."""
@@ -168,14 +186,16 @@ class ModelEnricher:
             if (table["header_row_count"] or len(table["grid"]) < 2 or "row_provenance" in table
                     or table.get("header_occurrences")):
                 continue
-            endpoint = model_primary("chunking.text")
-            model = endpoint.model
             maximum = min(8, len(table["grid"]) - 1)
             allowed = [count for count in range(maximum + 1) if not any(
                 cell["row"] < count < cell["row"] + cell["row_span"] for cell in table["cells"]
             )]
             if allowed == [0]:
                 continue
+            endpoint = optional_model_call(ir, "table_header_review", lambda: model_primary("chunking.text"))
+            if endpoint is None:
+                continue
+            model = endpoint.model
             state = {"grid_preview": table_preview(table["grid"], maximum + 1, native=True),
                      "cells": [{"row": cell["row"], "column": cell["column"],
                                 "row_span": cell["row_span"], "col_span": cell.get("col_span", cell.get("column_span", 1)),
@@ -203,20 +223,26 @@ class ModelEnricher:
                         if attempt == 2:
                             raise
                         messages.append({"role": "user", "content": 'Return an integer header_row_count and reason in JSON; no other schema.'})
-            result = self._cached("table_header_review", model, state, operation, validate)
+            result = self._optional_cached(ir, "table_header_review", model, state, operation, validate)
+            if result is None:
+                continue
             count = result["header_row_count"]
             review = {"proposed_count": count, "reason": result.get("reason", ""), "model": model}
             if self.use_decision and count:
                 questions = {"header": {"type": "choice", "instructions": "Verify that ALL proposed leading rows are column headers, not records. Merged group and subheaders may occupy multiple rows.",
                                          "criteria": {"ACCEPT": "Proposed header boundary is supported by native grid and cell spans", "KEEP_DATA": "Uncertain boundary or at least one proposed row is data"}}}
                 evidence = {"grid": state["grid_preview"], "cells": state["cells"], "proposed_count": count}
-                decision_endpoint = model_primary("chunking.decision")
+                decision_endpoint = optional_model_call(ir, "table_header_confirmation", lambda: model_primary("chunking.decision"))
+                if decision_endpoint is None:
+                    continue
                 decision_model = decision_endpoint.model
                 def decision():
                     return cloud_json(decision_endpoint.url.rstrip("/") + "/systemone", decision_endpoint.api_key,
                                       {"model": decision_model, "state": evidence, "questions": questions}, timeout=60)
-                checked = self._cached("heading_review", decision_model, {"state": evidence, "questions": questions}, decision,
-                                       lambda value: validate_decisions(value, questions))
+                checked = self._optional_cached(ir, "heading_review", decision_model, {"state": evidence, "questions": questions}, decision,
+                                                lambda value: validate_decisions(value, questions))
+                if checked is None:
+                    continue
                 review["decision"] = checked["answers"]["header"]["choice"]
                 if review["decision"] == "KEEP_DATA":
                     count = 0

@@ -30,6 +30,35 @@ def table_markdown(headers, rows):
                      + [markdown_row(row) for row in rows])
 
 
+def table_fragment_data(block, rows, row_start):
+    """Select row geometry and source metadata for one table fragment."""
+    table = block["table_data"]
+    headers = table["headers"]
+    title = table.get("title", "") or block.get("caption", "")
+    header_count = table["header_row_count"]
+    header_grid = table["grid"][:header_count]
+    row_end = row_start + len(rows)
+    header_cells = [cell for cell in table["cells"] if cell["row"] < header_count]
+    cells = [cell for cell in table["cells"] if header_count <= cell["row"] < row_end
+             and cell["row"] + cell.get("row_span", 1) > row_start]
+    data = {"table_id": table["table_id"], "title": title, "headers": headers, "rows": rows,
+            "row_start": row_start, "row_end": row_end, "header_row_count": header_count,
+            "header_grid": header_grid, "header_cells": header_cells, "cells": cells,
+            "html": render_structured_html_table(headers, rows, title, cells=[*header_cells, *cells],
+                                                 header_grid=header_grid, row_start=row_start)}
+    row_provenance = table.get("row_provenance", [])
+    source_rows = row_provenance[row_start:row_end] if table["rows"] else row_provenance[:header_count]
+    if source_rows:
+        data["row_provenance"] = source_rows
+    for key in ("parent_cell", "title_source_block_id", "header_occurrences"):
+        if table.get(key):
+            data[key] = table[key]
+    if table.get("row_grid_offsets"):
+        data["row_grid_offsets"] = table["row_grid_offsets"][row_start:row_end]
+        data["header_grid_offsets"] = table["row_grid_offsets"][:header_count]
+    return data
+
+
 def escape_html(text):
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 

@@ -11,14 +11,14 @@ from .enrichment.image_context import IMAGE_POLICY
 
 
 def chunker_fingerprint(chunker, pipeline_version):
-    from .extraction.pdf import extractor as pdf_extractor
+    from .extraction.pdf import page_review
 
     configuration = {"pipeline": pipeline_version,
                      "prompts": {"version": model_enrichment.PROMPT_VERSION,
                                  "structure": model_enrichment.STRUCTURE_SYSTEM_PROMPT,
-                                 "pdf_version": pdf_extractor.PDF_PROMPT_VERSION,
-                                 "pdf_schema": pdf_extractor.PDF_SCHEMA_VERSION,
-                                 "page": pdf_extractor.SCAN_PAGE_PROMPT,
+                                 "pdf_version": page_review.PDF_PROMPT_VERSION,
+                                 "pdf_schema": page_review.PDF_SCHEMA_VERSION,
+                                 "page": page_review.SCAN_PAGE_PROMPT,
                                  "start": semantic_boundaries.START_PROMPT,
                                  "boundary": semantic_boundaries.BOUNDARY_PROMPT},
                      "semantic": chunker.semantic, "image_mode": chunker.image_mode,

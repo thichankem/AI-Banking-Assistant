@@ -2,7 +2,8 @@
 import hashlib
 
 IMAGE_POLICY = "surrounding_text_only_v1"
-RESOLVED_IMAGE_STATUSES = ("text_context_supported", "skipped_no_text_support")
+CONTEXT_UNAVAILABLE = "skipped_context_unavailable"
+RESOLVED_IMAGE_STATUSES = ("text_context_supported", "skipped_no_text_support", CONTEXT_UNAVAILABLE)
 
 
 def source_text(block):
@@ -117,6 +118,6 @@ def apply_context_selection(block, candidates, result, model):
 def excluded_image(block):
     info = block["image"]
     return (info.get("image_policy") == IMAGE_POLICY
-            and info.get("status") == "skipped_no_text_support"
-            and info.get("text_context_assessed") is True
+            and ((info.get("status") == "skipped_no_text_support" and info.get("text_context_assessed") is True)
+                 or (info.get("status") == CONTEXT_UNAVAILABLE and info.get("text_context_assessed") is False))
             and not info.get("context_evidence"))

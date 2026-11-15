@@ -505,6 +505,9 @@ class BankingEmbedder:
             return []
         if type(batch_size) is not int or batch_size < 1:
             raise ValueError("batch_size must be a positive integer")
+        from agent_banking.chunking.universal.planning.schema import require_index_ready
+
+        require_index_ready(chunks)
 
         self.last_cache_hits = 0
         self.last_cache_misses = 0
@@ -513,13 +516,6 @@ class BankingEmbedder:
         passages = []
         hashes = []
         for c in chunks:
-            metadata = c.get("business_metadata")
-            if not isinstance(metadata, dict):
-                metadata = {}
-            quality = metadata.get("quality")
-            if isinstance(quality, dict) and quality.get("index_ready") is False:
-                if os.getenv("STRICT_QUALITY_CHECK", "").lower() in ("1", "true", "yes"):
-                    raise ValueError("Chunk has unresolved source/image-context assessment; embedding refused")
             vp = self.format_virtual_passage(c)
             passages.append(vp)
             hashes.append(self._get_hash(vp))

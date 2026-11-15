@@ -134,16 +134,22 @@ def table_from_html(markup, header_rows):
                 for c in range(cell["column"], cell["column"] + cell["column_span"]):
                     if not grid[r][c]:
                         grid[r][c] = cell["text"]
-    headers = []
-    for column in range(width):
-        labels = [cell["text"] for cell in parser.cells if cell["row"] < header_rows
-                  and cell["column"] <= column < cell["column"] + cell["column_span"] and cell["text"]]
-        headers.append(" / ".join(labels))
+    headers = _header_labels(parser.cells, header_rows, width)
     return {"headers": headers, "header_row_count": header_rows, "header_grid": grid[:header_rows],
             "rows": grid[header_rows:], "cells": parser.cells, "serialization": "model_declared_html_cells_v1"}
 
 
-def validate_table(table):
+def _header_labels(cells, count, width):
+    labels = [[] for _ in range(width)]
+    origins = sorted((cell for cell in cells if cell["row"] < count and cell["text"]),
+                     key=lambda cell: (cell["row"], cell["column"]))
+    for cell in origins:
+        for column in range(cell["column"], cell["column"] + cell["column_span"]):
+            labels[column].append(cell["text"])
+    return [" / ".join(values) for values in labels]
+
+
+def validate_table(table, *, require_complete=False):
     if not isinstance(table, dict):
         raise ValueError("PDF table must be structured")
     headers, rows = table.get("headers"), table.get("rows")
@@ -186,4 +192,10 @@ def validate_table(table):
                              + ": cell=" + repr(cell["text"]) + ", grid=" + repr(grid[row][column]))
         if any(grid[r][c] not in ("", cell["text"]) for r, c in locations):
             raise ValueError("PDF cell span covers conflicting grid text")
+    if require_complete:
+        if not grid or len(occupied) != len(grid) * len(headers):
+            raise ValueError("Visual table requires complete cell coordinates and spans")
+        # Flattened labels are presentation metadata. Derive them from the
+        # complete source grid so a legacy response cannot invent a label.
+        table["headers"] = _header_labels(cells, count, len(headers))
     table["header_grid"] = header_grid

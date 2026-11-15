@@ -172,10 +172,20 @@ class NodePipeline:
             return {"node": "embedding", "count": len(embeds)}
         elif clean_name in ("3", "vector_db", "indexing"):
             vdb_in = self._resolve_node_input(f["vector_db"]["input"], ["embedded_chunks.json"])
+            options = {}
+            publication_dir = f["chunking"]["output"]
+            if (publication_dir / "chunking_manifest.json").is_file():
+                published_embeddings = f["embedding"]["output"] / "embedded_chunks.json"
+                if published_embeddings.is_file():
+                    vdb_in = published_embeddings
+                if not vdb_in.is_file():
+                    raise FileNotFoundError("Embed the current chunking publication before indexing")
+                options = {"snapshot": True, "publication_dir": publication_dir}
             vdb = run_auto_indexing(
                 input_file=vdb_in,
                 output_dir=f["vector_db"]["output"],
-                force=force
+                force=force,
+                **options,
             )
             return {"node": "vector_db", "manifest": vdb}
         elif clean_name in ("4", "query_parser"):

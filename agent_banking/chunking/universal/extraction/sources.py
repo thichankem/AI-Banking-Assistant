@@ -24,11 +24,41 @@ def source_key(value):
     return unicodedata.normalize("NFC", str(value).replace("\\", "/")).casefold()
 
 
-def preserved_source_keys(preserve_sources, current_sources):
-    """Include a legacy basename for a failed nested source if it has no current owner."""
-    keys = {source_key(source) for source in preserve_sources}
+def document_source_root(directory, canonical_root):
+    directory = Path(directory).resolve()
+    if canonical_root is not None:
+        root = Path(canonical_root).resolve()
+        if directory.is_relative_to(root):
+            return root
+    return directory
+
+
+def legacy_source_resolver(current_sources):
+    """Resolve exact paths or unique directory-relative aliases from older indexes."""
     current = {source_key(source) for source in current_sources}
-    return keys | {document_source_name(key) for key in keys if document_source_name(key) not in current}
+    suffix_owners = {}
+    for key in current:
+        parts = key.split("/")
+        for index in range(1, len(parts)):
+            suffix_owners.setdefault("/".join(parts[index:]), set()).add(key)
+
+    def resolve(source):
+        if not isinstance(source, str) or not source.strip():
+            return None
+        key = source_key(source)
+        if key in current:
+            return key
+        candidates = set(suffix_owners.get(key, ()))
+        parts = key.split("/")
+        for index in range(1, len(parts)):
+            suffix = "/".join(parts[index:])
+            if suffix in current:
+                candidates.add(suffix)
+        if len(candidates) == 1:
+            return candidates.pop()
+        return None
+
+    return resolve
 
 
 def discover_documents(directory, extensions=None, *, reject_unsupported=False):
@@ -61,8 +91,7 @@ def discover_documents(directory, extensions=None, *, reject_unsupported=False):
             if not marker or not suffix.isascii() or not suffix.isdecimal() or suffix.startswith("0"):
                 break
             stem = preceding
-        parent = source_key(path.relative_to(directory).parent.as_posix())
-        groups.setdefault((parent, stem, path.suffix.lower()), []).append(path)
+        groups.setdefault((stem, path.suffix.lower()), []).append(path)
     conflicts = [group for group in groups.values() if len(group) > 1]
     if conflicts:
         listing = "\n".join(
@@ -82,7 +111,16 @@ def _relative_document_name(value):
     return raw
 
 
-def resolve_document_source(source=None, source_bytes=None, source_name=None, expected_format=None):
+def _path_document_name(path, source_root):
+    if source_root is not None:
+        relative_path = path.parent.resolve() / path.name
+        root = Path(source_root).resolve()
+        if relative_path.is_relative_to(root):
+            return relative_path.relative_to(root).as_posix()
+    return path.name
+
+
+def resolve_document_source(source=None, source_bytes=None, source_name=None, expected_format=None, *, source_root=None):
     if expected_format is not None and expected_format not in ("docx", "pdf"):
         raise ValueError("expected_format must be docx or pdf")
     if isinstance(source, (bytes, bytearray)):
@@ -97,9 +135,14 @@ def resolve_document_source(source=None, source_bytes=None, source_name=None, ex
         name = None
         named_format = None
         if source_name is not None:
-            name = document_source_name(source_name)
-            if not name.strip() or name in (".", "..") or "\0" in name:
+            label = str(source_name)
+            if not document_source_name(label).strip() or "\0" in label:
                 raise ValueError("source_name must contain a document filename")
+            if Path(label).is_absolute():
+                label = _path_document_name(Path(label), source_root)
+            elif PurePosixPath(label).is_absolute() or PureWindowsPath(label).is_absolute():
+                label = document_source_name(label)
+            name = _relative_document_name(label)
             extension = Path(name).suffix.lower()
             if extension in SUPPORTED_EXTENSIONS:
                 named_format = extension[1:]
@@ -129,5 +172,5 @@ def resolve_document_source(source=None, source_bytes=None, source_name=None, ex
     fmt = ext[1:]
     if expected_format is not None and fmt != expected_format:
         raise ValueError(expected_format.upper() + " adapter requires ." + expected_format + " input")
-    name = path.name if source_name is None else _relative_document_name(source_name)
+    name = _path_document_name(path, source_root) if source_name is None else _relative_document_name(source_name)
     return str(path), name, fmt

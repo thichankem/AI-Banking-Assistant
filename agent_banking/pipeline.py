@@ -37,9 +37,9 @@ if sys.platform == "win32":
 
 from agent_banking.core.settings import Config
 from .chunking.run_chunking import load_published_chunks
-from .chunking.universal.extraction.sources import discover_documents
+from .chunking.universal.extraction.sources import discover_documents, document_source_root, source_key
 from .chunking.universal.pipeline import DLAChunker
-from .chunking.universal.planning.schema import link_chunk_sequence
+from .chunking.universal.planning.schema import link_chunk_sequence, require_index_ready
 from .embedding.embedder import BankingEmbedder
 from .vector_db.qdrant_store import (
     QdrantBankingStore, QdrantVectorStore, mark_publication_chunks, publication_scope,
@@ -74,6 +74,7 @@ class BankingRAGPipeline:
             target_chunk_tokens=int(getattr(self.config, "CHUNK_SIZE_TOKENS", 512)),
             max_chunk_tokens=int(getattr(self.config, "CHUNK_MAX_TOKENS", 1024)),
             min_chunk_tokens=int(getattr(self.config, "CHUNK_MIN_TOKENS", 128)),
+            search_language=getattr(self.config, "CHUNK_SEARCH_LANGUAGE", "vi"),
             config=self.config
         )
         self.chunker = self.dla_chunker
@@ -137,15 +138,20 @@ class BankingRAGPipeline:
         self.indexed_chunks = []
         print("[System] Enterprise RAG Pipeline, Tracing, and Guardrails are ready.\n")
 
-    def ingest_chunks(self, chunks, batch_size=32):
+    def ingest_chunks(self, chunks, batch_size=32, *, return_index_keys=False):
         """
         Directly ingest a list of chunks into the system:
         1. Generate dense vector embeddings (using SQLite cache).
         2. Ingest concurrently into HNSW Vector Store and Okapi BM25 index.
         """
+        chunks = list(chunks)
+        require_index_ready(chunks)
         chunks = [chunk for chunk in chunks
                   if chunk.get("business_metadata", {}).get("retrieval", {}).get("role") != "attachment_only"]
+        link_chunk_sequence(chunks)
         if not chunks:
+            if return_index_keys:
+                return 0, set()
             return 0
 
         t0 = time.time()
@@ -163,11 +169,13 @@ class BankingRAGPipeline:
 
         t1 = time.time()
         print(" -> [Ingest] Ingesting into Vector & BM25 Store...")
-        self.vector_store.add_chunks(chunks_with_vec)
+        index_keys = self.vector_store.add_chunks(chunks_with_vec)
         t_store = (time.time() - t1) * 1000
 
         print(f"    + Embedding finished ({t_embed:.1f}ms) and storage finished ({t_store:.1f}ms).")
         self.indexed_chunks.extend(chunks)
+        if return_index_keys:
+            return len(chunks), index_keys
         return len(chunks)
 
     def ingest_published_chunks(self, output_dir=None, require_ready=True, batch_size=32):
@@ -182,6 +190,7 @@ class BankingRAGPipeline:
             target_out = Path(getattr(self.config, "CHUNKING_OUTPUT_DIR", default_out))
 
         chunks, manifest = load_published_chunks(target_out, require_ready=require_ready, return_manifest=True)
+        require_index_ready(chunks)
         print(f"[*] Loaded {len(chunks)} verified published chunks from {target_out}")
         scope = publication_scope(target_out)
         searchable = mark_publication_chunks([
@@ -189,11 +198,12 @@ class BankingRAGPipeline:
             if chunk.get("business_metadata", {}).get("retrieval", {}).get("role") != "attachment_only"
         ], scope)
         link_chunk_sequence(searchable)
-        count = self.ingest_chunks(searchable, batch_size=batch_size)
+        count, index_keys = self.ingest_chunks(searchable, batch_size=batch_size, return_index_keys=True)
         sources = {record["rel_path"] for record in manifest["records"] if record["status"] != "FAILED"}
         failed_sources = {record["rel_path"] for record in manifest["records"] if record["status"] == "FAILED"}
         active = {chunk["chunk_id"] for chunk in searchable}
-        self.vector_store.prune_chunks(active, sources, scope=scope, preserve_sources=failed_sources)
+        self.vector_store.prune_chunks(active, sources, scope=scope, preserve_sources=failed_sources,
+                                       active_index_keys=index_keys)
         return count
 
     def ingest_chunk_files(self, chunks_dir, file_pattern="*.json"):
@@ -243,9 +253,12 @@ class BankingRAGPipeline:
         2. Parallel dual indexing into Dense Vector Store and Okapi BM25.
         """
         if dataset_dir:
-            target_dir = Path(dataset_dir)
+            target_dir = Path(dataset_dir).resolve()
         else:
-            target_dir = Path(self.config.DATASET_DIR)
+            target_dir = Path(self.config.DATASET_DIR).resolve()
+
+        configured_input = getattr(getattr(self, "config", None), "CHUNKING_INPUT_DIR", None)
+        source_root = document_source_root(target_dir, configured_input)
 
         print(f"[*] Starting ingestion phase from: {target_dir}")
 
@@ -260,24 +273,33 @@ class BankingRAGPipeline:
         # Layout-Aware DLA Chunking
         t0 = time.time()
         if filenames:
+            if isinstance(filenames, (str, Path)):
+                filenames = [filenames]
             print(f" -> [Ingestion] Chunking {len(filenames)} specified files...")
-            chunks = []
-            available = {path.name.casefold(): path for path in discover_documents(target_dir, target_exts)}
-            selected = set()
+            available = {}
+            for path in discover_documents(target_dir, target_exts):
+                for alias in (path.name, str(path), path.relative_to(target_dir).as_posix(),
+                              path.relative_to(source_root).as_posix()):
+                    available.setdefault(source_key(alias), set()).add(path)
+            selected = {}
             for fname in filenames:
-                name = str(fname).replace("\\", "/").rsplit("/", 1)[-1].casefold()
-                if name in selected:
-                    continue
-                if name not in available:
+                matches = available.get(source_key(fname), set())
+                if not matches:
                     raise FileNotFoundError(str(fname))
-                selected.add(name)
-                chunks.extend(self.dla_chunker.chunk_file(available[name]))
+                if len(matches) != 1:
+                    raise ValueError("Ambiguous document path: " + str(fname))
+                path = next(iter(matches))
+                selected[path] = path.relative_to(source_root).as_posix()
+            chunks = []
+            for path, source in selected.items():
+                chunks.extend(self.dla_chunker.chunk_file(path, source_name=source))
         else:
             print(" -> [Ingestion] Chunking via Layout-Aware Chunker (DOCX/PDF)...")
             chunks = self.dla_chunker.chunk_directory(
                 target_dir,
                 extensions=target_exts,
-                max_files=max_files
+                max_files=max_files,
+                source_root=source_root,
             )
 
         print(f"    + Extracted: {len(chunks)} chunks ({round((time.time() - t0)*1000, 1)}ms)")

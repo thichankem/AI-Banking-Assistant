@@ -200,6 +200,23 @@ def link_chunk_sequence(chunks):
     return chunks
 
 
+def require_index_ready(chunks):
+    """Reject explicitly unresolved canonical chunks at ingestion boundaries."""
+    for chunk in chunks:
+        metadata = chunk.get("business_metadata")
+        quality = metadata.get("quality") if isinstance(metadata, dict) else None
+        if isinstance(quality, dict) and quality.get("index_ready") is False:
+            raise ValueError("Chunk is not ready for indexing: " + str(chunk.get("chunk_id") or "unknown"))
+
+
+def payload_index_key(chunk):
+    """Distinguish indexed payload revisions while preserving the source chunk ID."""
+    metadata = chunk.get("business_metadata")
+    if isinstance(metadata, dict) and metadata.get("publication_revision"):
+        return metadata["publication_revision"]
+    return chunk.get("chunk_id")
+
+
 def validate_universal_chunk(chunk, strict_domain_agnostic=True):
     """Check the required fields, field types and retired metadata keys."""
     if not isinstance(chunk, dict):

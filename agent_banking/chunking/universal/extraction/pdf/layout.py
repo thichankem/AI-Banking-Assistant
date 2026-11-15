@@ -32,8 +32,12 @@ def inside_box(inner, outer):
 def region_signature(element):
     if element["type"] == "table":
         table = element["table_data"]
-        return ("table", tuple(tuple(compact(value) for value in row)
-                               for row in table["header_grid"] + table["rows"]))
+        cells = sorted(
+            (cell["row"], cell["column"], cell["row_span"], cell["column_span"], compact(cell["text"]))
+            for cell in table["cells"]
+        )
+        return ("table", len(table["header_grid"]) + len(table["rows"]), len(table["headers"]),
+                table["header_row_count"], cells)
     value = compact(element.get("text", ""))
     if value:
         return ("text", value)
@@ -57,9 +61,15 @@ def merge_region_observation(elements, incoming):
         return
     for index, previous in enumerate(elements):
         containment, similarity = region_overlap(incoming, previous)
-        if containment < 0.75:
+        if not containment:
             continue
         other = region_signature(previous)
+        if (other is not None and other[0] == value[0] == "text"
+                and (other != value or containment < 0.75)
+                and _crossing_text_boxes(previous, incoming)):
+            raise ValueError("Overlapping PDF regions contain partial readings of the same text")
+        if containment < 0.75:
+            continue
         if other == value:
             return
         if other is not None and other[0] == value[0] == "text":
@@ -71,6 +81,26 @@ def merge_region_observation(elements, incoming):
         if similarity >= 0.85:
             raise ValueError("Overlapping PDF regions disagree on the same text")
     elements.append(incoming)
+
+
+def _crossing_text_boxes(first, second):
+    if (not first.get("region_pixel_path") or not second.get("region_pixel_path")
+            or first["region_pixel_path"] == second["region_pixel_path"]):
+        return False
+    first_box, second_box = first["bbox"], second["bbox"]
+    for axis, cross_axis in ((0, 1), (1, 0)):
+        low, high = sorted((first_box, second_box), key=lambda box: box[axis])
+        if not low[axis] < high[axis] < low[axis + 2] < high[axis + 2]:
+            continue
+        overlap = low[axis + 2] - high[axis]
+        size = min(low[axis + 2] - low[axis], high[axis + 2] - high[axis])
+        cross_overlap = min(low[cross_axis + 2], high[cross_axis + 2]) - max(low[cross_axis], high[cross_axis])
+        cross_size = min(low[cross_axis + 2] - low[cross_axis], high[cross_axis + 2] - high[cross_axis])
+        # Ignore small bbox rounding drift. Substantial crossing from two
+        # different crops needs a reading that spans the disputed area.
+        if overlap >= 0.15 * size and cross_overlap >= 0.8 * cross_size:
+            return True
+    return False
 
 
 def reading_order(elements):
@@ -213,7 +243,7 @@ def validate_page(layout, native_lines, *, allow_ocr_additions=False):
         if not normalized_box(box):
             raise ValueError("PDF element bbox must be a nonempty [x0,y0,x1,y1] in [0,1]; received " + repr(box)[:120])
         if element["type"] == "table":
-            validate_table(element.get("table_data"))
+            validate_table(element.get("table_data"), require_complete=True)
         if element["type"] == "heading":
             level = element.get("level")
             if isinstance(level, bool) or not isinstance(level, int) or not 1 <= level <= 7:
@@ -267,6 +297,7 @@ def normalize_visual_layout(layout):
         if (not isinstance(item, dict) or not isinstance(item.get("type"), str)
                 or item.get("role") is not None and not isinstance(item["role"], str)):
             raise ValueError("Invalid PDF element")
+    place_reported_headings(layout)
     body = [item for item in layout["elements"]
             if item["type"] not in IGNORED_VISUAL_TYPES and item.get("role") not in IGNORED_VISUAL_TYPES
             and normalized_box(item.get("bbox"))]
@@ -290,3 +321,51 @@ def normalize_visual_layout(layout):
             element["bbox_granularity"] = "page"
         kept.append(element)
     layout["elements"] = kept
+
+
+def place_reported_headings(layout, *, allow_unlocated=False):
+    """Reconcile a legacy heading array without inventing source positions."""
+    headings = layout.get("headings", [])
+    if not isinstance(headings, list):
+        raise ValueError("PDF headings must be an array")
+    visible = []
+    for item in layout["elements"]:
+        role = item.get("role")
+        if role is not None and not isinstance(role, str):
+            raise ValueError("Invalid PDF element role")
+        if item["type"] not in IGNORED_VISUAL_TYPES and role not in IGNORED_VISUAL_TYPES:
+            visible.append(item)
+    represented = []
+    for item in visible:
+        source = item.get("text", "")
+        represented.append((item, {compact(source), *(compact(line) for line in source.splitlines())}))
+    additions = []
+    unlocated = []
+    for heading in headings:
+        if not isinstance(heading, dict) or not isinstance(heading.get("text"), str) or not heading["text"].strip():
+            raise ValueError("Invalid reported PDF heading")
+        text = compact(heading["text"])
+        if any(text in readings and _same_heading_location(heading, item) for item, readings in represented):
+            continue
+        if (not normalized_box(heading.get("bbox"))
+                or any(not normalized_box(item.get("bbox")) for item in layout["elements"])):
+            if not allow_unlocated:
+                raise ValueError("Put every reported heading inside elements at its actual reading position")
+            item = {**heading, "type": "heading", "order_evidence": "cloud_heading_order_unknown"}
+            if not normalized_box(item.get("bbox")):
+                item.update(bbox=[0, 0, 1, 1], bbox_granularity="page")
+            unlocated.append(item)
+            represented.append((item, {text}))
+            continue
+        additions.append({**heading, "type": "heading"})
+        represented.append((additions[-1], {text}))
+    if additions:
+        layout["elements"] = reading_order(layout["elements"] + additions)
+    layout["elements"].extend(unlocated)
+
+
+def _same_heading_location(heading, element):
+    if (not normalized_box(heading.get("bbox")) or not normalized_box(element.get("bbox"))
+            or element.get("bbox_granularity") == "page"):
+        return True
+    return region_overlap(heading, element)[0] >= 0.75

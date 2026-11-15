@@ -38,7 +38,7 @@ def repair_tables(layout, pixels, reviewer, asset_dir, use_decision):
             element["table_data"] = table_from_html(element["table_html"], element.get("header_row_count"))
         original = element.get("table_data")
         try:
-            validate_table(original)
+            validate_table(original, require_complete=True)
             continue
         except (ValueError, TypeError, KeyError):
             pass
@@ -74,7 +74,7 @@ def repair_tables(layout, pixels, reviewer, asset_dir, use_decision):
                  "temperature": 0, "chat_template_kwargs": {"enable_thinking": True}, "max_tokens": 65536})
             repaired = value.get("table_data")
             try:
-                validate_table(repaired)
+                validate_table(repaired, require_complete=True)
                 break
             except (ValueError, TypeError, KeyError) as error:
                 if repair_attempt == 2:

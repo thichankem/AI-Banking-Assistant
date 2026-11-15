@@ -1,5 +1,6 @@
 """Extract native PDF text and reconstruct tables and page furniture."""
 from collections import Counter
+import re
 from threading import Lock
 
 from .layout import compact, inside_box, is_inline_list_marker, layout_text, reading_order
@@ -8,6 +9,11 @@ from .tables import validate_table
 from .visibility import hidden_glyphs, visible_span
 
 NATIVE_TABLE_LOCK = Lock()
+_UNRELIABLE_NUMERIC_GLYPH = re.compile(r"\u00ad\s*\d")
+
+
+def unreliable_native_text(text):
+    return "\ufffd" in text or _UNRELIABLE_NUMERIC_GLYPH.search(text) is not None
 
 
 def normalized_page_box(page, bounds):
@@ -74,7 +80,7 @@ def native_text_elements(page, clip=None, *, hidden=None):
 def page_requires_scan(page, elements):
     """Recognize missing text and pages dominated by a raster document image."""
     from pymupdf import Rect
-    if any("\ufffd" in item["text"] for item in elements):
+    if any(unreliable_native_text(item["text"]) for item in elements):
         return True
     page_area = page.rect.get_area()
     if page_area <= 0:
@@ -228,6 +234,16 @@ def native_table_elements(page, *, hidden=None):
             header_count = getattr(table, "header_rows", 0)
             if not isinstance(header_count, int) or not 0 <= header_count < len(grid):
                 header_count = 0
+            if not header_count and not table.header.external:
+                # The detected header box can extend over several physical rows
+                # when its first cell spans the group. Require merged-cell
+                # evidence and align the boundary to a real row start.
+                stop = table.header.bbox[3]
+                count = sum(y < stop - 0.5 for y in y_positions)
+                if (1 < count < len(grid) and abs(y_positions[count] - stop) <= 0.5
+                        and any(cell["row"] < count and cell["column_span"] > 1 for cell in cells)
+                        and not any(cell["row"] < count < cell["row"] + cell["row_span"] for cell in cells)):
+                    header_count = count
             headers = [""] * len(grid[0])
             if header_count:
                 for index in range(len(headers)):

@@ -32,6 +32,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent_banking.core.settings import Config
+from agent_banking.chunking.universal.planning.schema import payload_index_key
 from agent_banking.generator.rag_generator import RAGGenerator
 from agent_banking.state_tracker import StateTracker
 
@@ -47,7 +48,7 @@ def _compute_chunk_signature(chunk):
         else:
             c_target = chunk
 
-        cid = c_target.get("chunk_id")
+        cid = payload_index_key(c_target)
         if not cid:
             cid = chunk.get("chunk_id")
         if not cid:

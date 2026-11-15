@@ -198,6 +198,8 @@ class _DocxReader:
         if not table["grid"]:
             return
         block = self._append("table", "", node, region, table_data=table, unit_ids=[])
+        if parent_cell:
+            block["provenance"]["parent_cell"] = parent_cell
         table["table_id"] = block["id"]
         for text, paragraph in units:
             unit_id = self._unit(text, paragraph, region, block["id"])
@@ -205,16 +207,23 @@ class _DocxReader:
                 block["unit_ids"].append(unit_id)
         for cell in table["cells"]:
             self.ir["relations"].append({"from": block["id"], "to": cell["id"], "type": "contains_cell"})
-        for child, cell_id, position in attachments:
+        for child, cell, position in attachments:
+            cell_id = cell["id"]
             if position["type"] == "table":
                 nested = self._table(child, part, region + ":nested", cell_id)
-                if nested is not None:
-                    position["table_id"] = nested["id"]
+                if nested is None:
+                    continue
+                position["table_id"] = nested["id"]
             else:
                 start = len(self.ir["blocks"])
                 self._walk_textboxes(child, part, region + ":cell")
                 blocks = self.ir["blocks"][start:]
+                if not blocks:
+                    continue
                 for item in blocks:
                     item["provenance"].setdefault("parent_cell", cell_id)
+                    if item["type"] == "table" and item["table_data"]["parent_cell"] is None:
+                        item["table_data"]["parent_cell"] = cell_id
                 position["block_ids"] = [item["id"] for item in blocks]
+            cell.setdefault("attachments", []).append(position)
         return block
