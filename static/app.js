@@ -13,18 +13,13 @@ document.addEventListener("DOMContentLoaded", () => {
     // Stepper DOM Elements
     const nodeStepper = document.getElementById("nodeStepper");
     const stepperDesc = document.getElementById("stepperDesc");
-    const stepperBadge = document.getElementById("stepperBadge");
+    const agentActions = document.getElementById("agentActions");
 
-    const stepNode0 = document.getElementById("step-node0");
-    const stepNode1 = document.getElementById("step-node1");
-    const stepNode2 = document.getElementById("step-node2");
-    const stepNode3 = document.getElementById("step-node3");
-    const stepNode6 = document.getElementById("step-node6");
-    const stepNode7 = document.getElementById("step-node7");
-    const stepNode8 = document.getElementById("step-node8");
+    function newSessionId() {
+        return Array.from(window.crypto.getRandomValues(new Uint32Array(4)), value => value.toString(16).padStart(8, "0")).join("");
+    }
 
-    // Session ID cố định cho phiên hội thoại (hỗ trợ thread_id bộ nhớ)
-    let currentSessionId = "vcb_session_" + Math.floor(Math.random() * 1000000);
+    let currentSessionId = newSessionId();
 
     const initialWelcomeHtml = chatMessages.innerHTML;
 
@@ -195,105 +190,22 @@ document.addEventListener("DOMContentLoaded", () => {
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
-    function getSubAgentBadgeClass(role) {
-        if (role === "CREDIT_CARD_AGENT") {
-            return "badge-credit-card";
-        } else if (role === "LOAN_MORTGAGE_AGENT") {
-            return "badge-loan-mortgage";
-        } else if (role === "COMPLIANCE_AUDIT_AGENT") {
-            return "badge-compliance-audit";
-        } else {
-            return "badge-general-advisor";
-        }
-    }
-
     function resetStepper() {
-        const steps = [stepNode0, stepNode1, stepNode2, stepNode3, stepNode6, stepNode7, stepNode8];
-        for (let s of steps) {
-            if (s) {
-                s.className = "step-item";
-            }
-        }
-        if (stepperDesc) {
-            stepperDesc.textContent = "Khởi tạo luồng xử lý Agent...";
-        }
-        if (stepperBadge) {
-            stepperBadge.className = "sub-agent-badge badge-general-advisor";
-            stepperBadge.textContent = "[SUPERVISOR]";
+        agentActions.replaceChildren();
+        stepperDesc.textContent = "Đang nhận yêu cầu...";
+    }
+
+    function updateStepperProgress(description, action) {
+        stepperDesc.textContent = description;
+        if (action) {
+            const item = document.createElement("li");
+            item.textContent = description;
+            agentActions.appendChild(item);
         }
     }
 
-    function updateStepperProgress(nodeName, description, subAgent) {
-        if (nodeStepper) {
-            nodeStepper.style.display = "block";
-        }
-        if (stepperDesc && description) {
-            stepperDesc.textContent = description;
-        }
-        if (stepperBadge && subAgent) {
-            stepperBadge.className = "sub-agent-badge " + getSubAgentBadgeClass(subAgent);
-            stepperBadge.textContent = "[" + subAgent + "]";
-        }
-
-        if (nodeName === "input_guardrail") {
-            if (stepNode0) {
-                stepNode0.className = "step-item active";
-            }
-        } else if (nodeName === "router") {
-            if (stepNode0) {
-                stepNode0.className = "step-item completed";
-            }
-            if (stepNode1) {
-                stepNode1.className = "step-item active";
-            }
-        } else if (nodeName === "retrieve" || nodeName === "banking_tool") {
-            if (stepNode1) {
-                stepNode1.className = "step-item completed";
-            }
-            if (stepNode2) {
-                stepNode2.className = "step-item active";
-            }
-        } else if (nodeName === "grade_documents" || nodeName === "rewrite_query") {
-            if (stepNode2) {
-                stepNode2.className = "step-item completed";
-            }
-            if (stepNode3) {
-                stepNode3.className = "step-item active";
-            }
-        } else if (nodeName === "generate") {
-            if (stepNode3) {
-                stepNode3.className = "step-item completed";
-            }
-            if (stepNode6) {
-                stepNode6.className = "step-item active";
-            }
-        } else if (nodeName === "audit_generation") {
-            if (stepNode6) {
-                stepNode6.className = "step-item completed";
-            }
-            if (stepNode7) {
-                stepNode7.className = "step-item active";
-            }
-        } else if (nodeName === "output_guardrail") {
-            if (stepNode7) {
-                stepNode7.className = "step-item completed";
-            }
-            if (stepNode8) {
-                stepNode8.className = "step-item active";
-            }
-        }
-    }
-
-    function completeAllStepper() {
-        const steps = [stepNode0, stepNode1, stepNode2, stepNode3, stepNode6, stepNode7, stepNode8];
-        for (let s of steps) {
-            if (s) {
-                s.className = "step-item completed";
-            }
-        }
-        if (stepperDesc) {
-            stepperDesc.textContent = "Hoàn tất phản hồi an toàn!";
-        }
+    function finishProgress(message = "Đã hoàn tất phản hồi") {
+        stepperDesc.textContent = message;
     }
 
     function appendMessage(sender, content, meta = null) {
@@ -307,73 +219,30 @@ document.addEventListener("DOMContentLoaded", () => {
                 </div>
             `;
         } else {
-            let roleBadgeHtml = "";
-            if (meta && meta.sub_agent) {
-                const badgeClass = getSubAgentBadgeClass(meta.sub_agent);
-                roleBadgeHtml = `<div style="margin-bottom: 8px;"><span class="sub-agent-badge ${badgeClass}">[${escapeHtml(meta.sub_agent)}]</span></div>`;
-            }
-
-            let metricsHtml = "";
-            if (meta && meta.evaluation_metrics) {
-                const em = meta.evaluation_metrics;
-                let cpVal = 0;
-                if (em.context_precision) {
-                    cpVal = em.context_precision;
-                }
-                let faithVal = 0;
-                if (em.faithfulness) {
-                    faithVal = em.faithfulness;
-                }
-                let relVal = 0;
-                if (em.answer_relevance) {
-                    relVal = em.answer_relevance;
-                }
-                let ovVal = 0;
-                if (em.overall_score) {
-                    ovVal = em.overall_score;
-                }
-
-                const cp = Math.round(cpVal * 100);
-                const faith = Math.round(faithVal * 100);
-                const rel = Math.round(relVal * 100);
-                const ov = Math.round(ovVal * 100);
-
-                metricsHtml = `
-                    <div class="eval-metrics-card">
-                        <div class="metric-pill"><span class="metric-name">Context Precision:</span> <span class="metric-val">${cp}%</span></div>
-                        <div class="metric-pill"><span class="metric-name">Faithfulness:</span> <span class="metric-val">${faith}%</span></div>
-                        <div class="metric-pill"><span class="metric-name">Relevance:</span> <span class="metric-val">${rel}%</span></div>
-                        <div class="metric-pill"><span class="metric-name">Overall:</span> <span class="metric-val">${ov}%</span></div>
-                    </div>
-                `;
-            }
-
             let sourcesHtml = "";
             if (meta) {
-                const combined = [];
-                if (meta.citations) {
-                    for (let c of meta.citations) {
-                        if (c && !combined.includes(c)) {
-                            combined.push(c);
-                        }
+                const combined = new Set();
+                for (const citation of meta.citations || []) {
+                    if (typeof citation === "string") {
+                        combined.add(citation);
+                    } else if (citation && citation.source) {
+                        combined.add(citation.label + " " + citation.source);
                     }
                 }
-                if (meta.sources) {
-                    for (let s of meta.sources) {
-                        if (s && !combined.includes(s)) {
-                            combined.push(s);
-                        }
+                if (combined.size === 0) {
+                    for (const source of meta.sources || []) {
+                        combined.add(source);
                     }
                 }
 
-                if (combined.length > 0) {
+                if (combined.size > 0) {
                     let pills = [];
-                    for (let item of combined.slice(0, 4)) {
+                    for (let item of Array.from(combined).slice(0, 6)) {
                         pills.push(`<span class="source-tag">${escapeHtml(item)}</span>`);
                     }
                     sourcesHtml = `
                         <div class="sources-card">
-                            <div class="sources-header">Căn cứ quy chuẩn Vietcombank:</div>
+                            <div class="sources-header">Tài liệu đã trích dẫn</div>
                             <div class="sources-pills">${pills.join("")}</div>
                         </div>
                     `;
@@ -382,9 +251,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
             msgDiv.innerHTML = `
                 <div class="bubble">
-                    ${roleBadgeHtml}
                     ${parseMarkdown(content)}
-                    ${metricsHtml}
                     ${sourcesHtml}
                 </div>
             `;
@@ -411,14 +278,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 appendMessage("bot", "**Rất tiếc:** " + detailMsg);
             } else {
                 const data = await res.json();
-                completeAllStepper();
+                finishProgress();
                 let ans = "Không nhận được phản hồi từ hệ thống.";
                 if (data.answer) {
                     ans = data.answer;
                 }
                 appendMessage("bot", ans, {
-                    sub_agent: data.sub_agent_role,
-                    evaluation_metrics: data.evaluation_metrics,
                     citations: data.citations,
                     sources: data.sources
                 });
@@ -452,7 +317,7 @@ document.addEventListener("DOMContentLoaded", () => {
         botMsgDiv.className = "message bot-message";
         botMsgDiv.innerHTML = `
             <div class="bubble" id="streamingBubble">
-                <span id="streamingText" style="color: #94a3b8; font-style: italic;">Đang kết nối hệ thống Multi-Agent...</span>
+                <span id="streamingText" style="color: #94a3b8; font-style: italic;">Đang kết nối agent...</span>
             </div>
         `;
         chatMessages.appendChild(botMsgDiv);
@@ -461,7 +326,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const streamingBubble = botMsgDiv.querySelector("#streamingBubble");
         let accumulatedText = "";
         let finalDoneMeta = null;
-        let streamSuccess = false;
+        let streamStarted = false;
 
         try {
             const response = await fetch("/api/agent/stream", {
@@ -476,6 +341,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 return;
             }
 
+            streamStarted = true;
             const reader = response.body.getReader();
             const decoder = new TextDecoder("utf-8");
             let buffer = "";
@@ -499,18 +365,16 @@ document.addEventListener("DOMContentLoaded", () => {
                             const eventType = eventData.event_type;
 
                             if (eventType === "node_progress") {
-                                updateStepperProgress(eventData.node, eventData.description, eventData.sub_agent);
+                                updateStepperProgress(eventData.description, eventData.action);
                             } else if (eventType === "token") {
-                                streamSuccess = true;
                                 accumulatedText = accumulatedText + eventData.content;
                                 if (streamingBubble) {
                                     streamingBubble.innerHTML = parseMarkdown(accumulatedText);
                                     scrollToBottom();
                                 }
                             } else if (eventType === "done") {
-                                streamSuccess = true;
                                 finalDoneMeta = eventData;
-                                completeAllStepper();
+                                finishProgress();
                             }
                         } catch (e) {
                             console.warn("Parse SSE event error:", e);
@@ -519,38 +383,31 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
             }
 
-            // Nếu stream thành công và có full_answer, cập nhật bong bóng hoàn chỉnh
-            if (streamSuccess) {
+            if (finalDoneMeta) {
                 let finalText = accumulatedText;
-                if (finalDoneMeta && finalDoneMeta.full_answer) {
+                if (finalDoneMeta.full_answer) {
                     finalText = finalDoneMeta.full_answer;
-                }
-
-                let metaSubAgent = "GENERAL_ADVISOR";
-                let metaEvalMetrics = null;
-                if (finalDoneMeta) {
-                    if (finalDoneMeta.sub_agent) {
-                        metaSubAgent = finalDoneMeta.sub_agent;
-                    }
-                    if (finalDoneMeta.evaluation_metrics) {
-                        metaEvalMetrics = finalDoneMeta.evaluation_metrics;
-                    }
                 }
 
                 botMsgDiv.remove();
                 appendMessage("bot", finalText, {
-                    sub_agent: metaSubAgent,
-                    evaluation_metrics: metaEvalMetrics
+                    citations: finalDoneMeta.citations,
+                    sources: finalDoneMeta.sources
                 });
             } else {
                 botMsgDiv.remove();
-                await submitQueryFallback(cleanQuery);
+                finishProgress("Kết nối bị gián đoạn");
+                appendMessage("bot", "Kết nối bị gián đoạn trước khi nhận được phản hồi.");
             }
 
         } catch (err) {
-            console.warn("SSE stream failed, falling back to chat endpoint:", err);
             botMsgDiv.remove();
-            await submitQueryFallback(cleanQuery);
+            if (streamStarted) {
+                finishProgress("Kết nối bị gián đoạn");
+                appendMessage("bot", "Kết nối bị gián đoạn trước khi nhận được phản hồi.");
+            } else {
+                await submitQueryFallback(cleanQuery);
+            }
         } finally {
             userInput.disabled = false;
             sendBtn.disabled = false;
@@ -566,7 +423,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (clearChatBtn) {
         clearChatBtn.addEventListener("click", () => {
-            currentSessionId = "vcb_session_" + Math.floor(Math.random() * 1000000);
+            currentSessionId = newSessionId();
             chatMessages.innerHTML = initialWelcomeHtml;
             if (nodeStepper) {
                 nodeStepper.style.display = "none";

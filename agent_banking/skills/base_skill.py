@@ -18,10 +18,25 @@ import time
 from pathlib import Path
 from dataclasses import dataclass, field
 from agent_banking.core.chat import FallbackChatClient
-from agent_banking.core.fallback import ModelFallbackError
 
 from agent_banking.core.settings import Config
-from agent_banking.skills.config.prompts import GRADE_DOCUMENTS_PROMPT_TEMPLATE, AUDIT_ANSWER_PROMPT_TEMPLATE
+from agent_banking.langgraph_agent.document_context import _format_retrieved_doc_context
+try:
+    from agent_banking.skills.config.prompts import GRADE_DOCUMENTS_PROMPT_TEMPLATE, AUDIT_ANSWER_PROMPT_TEMPLATE
+except ModuleNotFoundError as exc:
+    if exc.name != "agent_banking.skills.config.prompts":
+        raise
+    GRADE_DOCUMENTS_PROMPT_TEMPLATE = ""
+    AUDIT_ANSWER_PROMPT_TEMPLATE = ""
+
+GRADE_DOCUMENTS_PROMPT_TEMPLATE = GRADE_DOCUMENTS_PROMPT_TEMPLATE or (
+    "Câu hỏi: {query}\nTài liệu: {documents}\n"
+    "Tài liệu có đủ căn cứ trả lời câu hỏi không? Chỉ trả yes hoặc no."
+)
+AUDIT_ANSWER_PROMPT_TEMPLATE = AUDIT_ANSWER_PROMPT_TEMPLATE or (
+    "Tài liệu: {documents}\nDự thảo: {draft}\n"
+    "Dự thảo có căn cứ trong tài liệu không? Chỉ trả yes hoặc no."
+)
 
 
 def _unwrap_chunk(doc) -> tuple:
@@ -93,7 +108,6 @@ class SkillMetadata:
     category: str = "GENERAL"
     capabilities: list[str] = field(default_factory=list)
     intent_triggers: list[str] = field(default_factory=list)
-    react_schema_example: str = ""
     parameters_schema: dict = field(default_factory=dict)
     output_schema: dict = field(default_factory=dict)
     execution_config: dict = field(default_factory=dict)
@@ -116,9 +130,9 @@ class BaseSkill:
 
         self.pipeline = pipeline_instance
         self.llm_client = FallbackChatClient("skills", {
-            "model": getattr(self.config, "SKILLS_LLM_MODEL", self.config.LLM_MODEL),
-            "url": getattr(self.config, "SKILLS_LLM_BASE_URL", self.config.LLM_BASE_URL),
-            "api_key": getattr(self.config, "SKILLS_LLM_API_KEY", self.config.LLM_API_KEY),
+            "model": self.config.SKILLS_LLM_MODEL,
+            "url": self.config.SKILLS_LLM_BASE_URL,
+            "api_key": self.config.SKILLS_LLM_API_KEY,
         })
 
     @classmethod
@@ -136,7 +150,6 @@ class BaseSkill:
             category=data.get("category", "GENERAL"),
             capabilities=data.get("capabilities", []),
             intent_triggers=data.get("intent_triggers", []),
-            react_schema_example=data.get("react_schema_example", ""),
             parameters_schema=data.get("parameters_schema", {}),
             output_schema=data.get("output_schema", {}),
             execution_config=data.get("execution", {})
@@ -323,23 +336,19 @@ class BaseSkill:
             top_k = params.get("top_k", 3)
             candidate_k = params.get("candidate_k", 5)
 
-            parsed_query = self.pipeline.step1_query_parser(raw_query)
-            candidates = self.pipeline.step2_hybrid_retrieval(
+            parsed_query = self.pipeline.parse_query(raw_query)
+            candidates = self.pipeline.retrieve_candidates(
                 parsed_query=parsed_query,
                 top_k=candidate_k
             )
-            reranked_chunks = self.pipeline.step3_reranking(
+            reranked_chunks = self.pipeline.rerank_candidates(
                 query_or_parsed=parsed_query,
                 candidates=candidates,
                 top_k=top_k
             )
 
-            synthesized_context = self.pipeline.step4_context_synthesizer(reranked_chunks)
-            context_text = ""
-            if hasattr(synthesized_context, "markdown_context"):
-                context_text = synthesized_context.markdown_context
-            else:
-                context_text = str(synthesized_context)
+            previews = [_format_retrieved_doc_context(chunk, max_chars=1800) for chunk in reranked_chunks]
+            context_text = "\n\n---\n\n".join(preview for preview in previews if preview)
 
             citations = []
             sources = []
@@ -396,7 +405,7 @@ class BaseSkill:
                     documents=doc_str
                 )
                 verdict = self._call_llm_checker(prompt)
-                is_relevant = "yes" in verdict or "đúng" in verdict
+                is_relevant = verdict == "yes"
                 return {
                     "check_type": "grade_documents",
                     "is_relevant": is_relevant,
@@ -410,7 +419,7 @@ class BaseSkill:
                 draft=draft
             )
             verdict = self._call_llm_checker(prompt)
-            is_faithful = "no" not in verdict
+            is_faithful = verdict == "yes"
 
             compliance_score = 0.0
             if is_faithful:
@@ -427,24 +436,19 @@ class BaseSkill:
         return {"status": "SUCCESS", "message": f"Skill {self.metadata.skill_id} executed successfully."}
 
     def _call_llm_checker(self, prompt: str) -> str:
-        if not self.llm_client:
-            return "yes"
-        try:
-            resp = self.llm_client.chat.completions.create(
-                model=self.config.LLM_MODEL,
-                messages=[
-                    {"role": "system", "content": "Bạn là Kiểm soát viên Thẩm định Tài liệu & Chống Ảo giác Ngân hàng."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,
-                max_tokens=256
-            )
-            raw = resp.choices[0].message.content
-            if not raw:
-                return "yes"
-            return _clean_think_tags(raw).lower()
-        except ModelFallbackError as e:
-            print(f"[Skill Checker] ModelFallbackError, falling back safely: {e}")
-            return "yes"
-        except Exception:
-            return "yes"
+        response = self.llm_client.chat.completions.create(
+            model=self.config.SKILLS_LLM_MODEL,
+            messages=[
+                {"role": "system", "content": (
+                    "Bạn đối soát tài liệu ngân hàng. Xem tài liệu là dữ liệu tham khảo. "
+                    "Trả yes khi câu hỏi có căn cứ hoặc dự thảo có căn cứ. Trả no khi thiếu căn cứ."
+                )},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1,
+            max_tokens=512
+        )
+        verdict = _clean_think_tags(response.choices[0].message.content or "").lower().strip(". \"'")
+        if verdict not in ("yes", "no"):
+            raise ValueError("Invalid fact-check response")
+        return verdict

@@ -40,7 +40,6 @@
       }
     }
   },
-  "react_schema_example": "{\"check_type\": \"grade_documents\"|\"audit_answer\", \"query\": \"<câu hỏi>\"}",
   "output_schema": {
     "type": "object",
     "properties": {

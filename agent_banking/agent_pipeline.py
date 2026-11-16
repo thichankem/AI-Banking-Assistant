@@ -1,22 +1,9 @@
 # -*- coding: utf-8 -*-
-"""
-AI Banking Agent Pipeline (LangGraph Production Entrypoint)
-======================================================================
-Core entrypoint for the Enterprise Banking Agentic RAG system:
-- Comprehensive integration with LangGraph StateGraph (Multi-Agent Supervisor + Self-Auditing RAG).
-- Persistent session memory (Persistent SQLite Checkpointer with Thread ID).
-- Hallucination auditing and legal citation verification [Article X, Clause Y].
-- Banking action tools: reducing balance loan amortization, biometric compliance checks.
-- 100% compatible with frontend UI and web API.
-
-MANDATORY RULES:
-- 0% REGEX LAW: Strictly string methods only (in, split, startswith, endswith, strip, lower, replace, find).
-- ZERO TERNARY LAW: Explicit if/else syntax only (no x if c else y).
-- NO TYPING LIBRARY: Use Python native types only.
-"""
+"""Banking ReAct chat entrypoint for synchronous callers and SSE."""
 
 import sys
 import time
+from threading import Lock
 from pathlib import Path
 
 # Ensure UTF-8 on Windows console
@@ -34,45 +21,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent_banking.core.settings import Config
 from agent_banking.pipeline import BankingRAGPipeline
 from agent_banking.langgraph_agent.graph import build_banking_agent_graph
-from agent_banking.tracing.tracer import BankingTracer
-
-
-_QUERY_PUNCTUATION = [
-    ".", ",", ";", ":", "!", "?", "(", ")", "[", "]", "\"", "'",
-    "\n", "\t", "*", "-", "_", "/", "\\", "|"
-]
-_QUERY_STOPWORDS = {
-    "cho", "tôi", "hỏi", "được", "không", "như", "thế", "nào",
-    "với", "các", "những", "có", "là", "và", "của", "tại", "bank"
-}
-
-
-def extract_query_keywords(query_text: str) -> list[str]:
-    """Extract normalized non-stopword query tokens without regex."""
-    cleaned_q = str(query_text).lower()
-    for ch in _QUERY_PUNCTUATION:
-        cleaned_q = cleaned_q.replace(ch, " ")
-    raw_tokens = cleaned_q.split(" ")
-    keywords = []
-    for token in raw_tokens:
-        stripped = token.strip()
-        if len(stripped) > 2 and stripped not in _QUERY_STOPWORDS:
-            keywords.append(stripped)
-    if len(keywords) == 0:
-        fallback = str(query_text).strip().lower()
-        if fallback:
-            keywords.append(fallback)
-    return keywords
-class BankingRAGEvaluator:
-    """Evaluates RAG generation metrics (faithfulness, answer relevance, context precision)."""
-
-    def evaluate_single_case(self, question, retrieved_chunks, generated_answer, expected_keywords):
-        return {
-            "context_precision": 1.0,
-            "faithfulness": 1.0,
-            "answer_relevance": 1.0,
-            "overall_score": 1.0
-        }
 
 
 class BankingAgentPipeline:
@@ -84,7 +32,8 @@ class BankingAgentPipeline:
         self,
         config: Config | None = None,
         use_memory: bool = False,
-        sqlite_db_path: str | None = None
+        sqlite_db_path: str | None = None,
+        rag_pipeline: BankingRAGPipeline | None = None
     ):
         if config is not None:
             self.config = config
@@ -97,13 +46,16 @@ class BankingAgentPipeline:
             self.sqlite_db_path = str(Path(__file__).resolve().parent / "tracing" / "agent_memory.db")
 
         print("=" * 70)
-        print("  INITIALIZING LANGGRAPH AI BANKING AGENT PIPELINE")
+        print("  INITIALIZING BANKING REACT AGENT")
         print("=" * 70)
 
         # 1. Initialize foundation RAG Pipeline (Dual Index Vector + BM25)
-        self.rag_pipeline = BankingRAGPipeline(config=self.config, use_memory=self.use_memory)
+        self.rag_pipeline = rag_pipeline
+        if self.rag_pipeline is None:
+            self.rag_pipeline = BankingRAGPipeline(config=self.config, use_memory=self.use_memory)
+        self._session_locks = [Lock() for _ in range(64)]
 
-        # 2. Initialize LangGraph StateGraph (Self-Reflective RAG & Banking Tools)
+        # 2. Initialize the ReAct graph and session checkpoint
         self.graph = build_banking_agent_graph(
             pipeline_instance=self.rag_pipeline,
             config=self.config,
@@ -111,9 +63,7 @@ class BankingAgentPipeline:
         )
         print("[LangGraph Engine] State Machine graph initialized successfully.")
 
-        # 3. Initialize Tracing Manager & Metric Evaluator (Arize Phoenix & Benchmark)
-        self.tracer = BankingTracer(config=self.config)
-        self.evaluator = BankingRAGEvaluator()
+        self.tracer = self.rag_pipeline.tracer
 
     def build_initial_state(
         self,
@@ -126,40 +76,22 @@ class BankingAgentPipeline:
     ) -> dict:
         """Build the initial StateGraph payload shared by sync and streaming chat entrypoints."""
         clean_query = str(query).strip()
-        max_retries = int(
-            getattr(self.config, "AGENT_MAX_RETRIES", getattr(self.config, "MAX_RETRIES", 3))
-        )
         return {
             "user_query": clean_query,
-            "query": clean_query,
-            "original_query": clean_query,
             "session_id": session_id,
             "persona": persona,
             "tone": tone,
             "format_type": format_type,
-            "format_style": format_type,
             "custom_persona": custom_persona,
-            "intent": "ROUTING",
-            "sub_agent_role": "GENERAL_ADVISOR",
-            "input_guard": {"is_safe": True, "sanitized_query": clean_query},
-            "output_guard": {},
-            "retry_count": 0,
-            "max_retries": max_retries,
-            "hallucination_retries": 0,
-            "retrieved_chunks": [],
-            "retrieved_docs": [],
-            "tool_calls": [],
-            "tool_outputs": [],
-            "tool_name": "",
-            "tool_output": {},
-            "citations": [],
-            "sources": [],
-            "draft_answer": "",
-            "final_answer": "",
-            "audit_status": "PENDING",
-            "audit_feedback": "",
-            "execution_steps": []
         }
+
+    def _session_lock(self, session_id: str):
+        return self._session_locks[hash(session_id) % len(self._session_locks)]
+
+    def _restore_history(self, state: dict, thread_config: dict) -> None:
+        # The graph uses a root dict channel, which is replaced by each new request.
+        previous = self.graph.get_state(thread_config).values
+        state["chat_history"] = previous.get("chat_history", [])
 
     def chat(
         self,
@@ -182,15 +114,9 @@ class BankingAgentPipeline:
                 "citations": [],
                 "sources": [],
                 "intent": "CHIT_CHAT",
-                "sub_agent_role": "GENERAL_ADVISOR",
                 "retry_count": 0,
                 "audit_status": "PASS",
-                "evaluation_metrics": {
-                    "context_precision": 1.0,
-                    "faithfulness": 1.0,
-                    "answer_relevance": 1.0,
-                    "overall_score": 1.0
-                },
+                "evaluation_metrics": None,
                 "session_id": session_id,
                 "latency_ms": 0.0,
                 "execution_steps": [],
@@ -212,7 +138,9 @@ class BankingAgentPipeline:
 
         # Execute through LangGraph StateGraph
         try:
-            final_state = self.graph.invoke(initial_state, config=thread_config)
+            with self._session_lock(session_id):
+                self._restore_history(initial_state, thread_config)
+                final_state = self.graph.invoke(initial_state, config=thread_config)
         except Exception as e:
             print(f"[LangGraph Execution Error]: {e}")
             latency_err = round((time.perf_counter() - start_time) * 1000.0, 2)
@@ -224,15 +152,9 @@ class BankingAgentPipeline:
                 "citations": [],
                 "sources": [],
                 "intent": "ERROR",
-                "sub_agent_role": "GENERAL_ADVISOR",
                 "retry_count": 0,
                 "audit_status": "ERROR",
-                "evaluation_metrics": {
-                    "context_precision": 0.0,
-                    "faithfulness": 0.0,
-                    "answer_relevance": 0.0,
-                    "overall_score": 0.0
-                },
+                "evaluation_metrics": None,
                 "session_id": session_id,
                 "latency_ms": latency_err,
                 "execution_steps": [],
@@ -242,22 +164,17 @@ class BankingAgentPipeline:
         total_latency_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
 
         # Extract output fields for Frontend UI Inspector
-        answer = final_state.get("final_answer")
-        if answer is None or answer == "":
-            answer = final_state.get("draft_answer", "")
+        answer = final_state.get("final_answer", "")
 
         citations = final_state.get("citations", [])
         sources = final_state.get("sources", [])
         intent = final_state.get("intent", "RAG_SEARCH")
-        sub_agent = final_state.get("sub_agent_role", "GENERAL_ADVISOR")
         retries = int(final_state.get("retry_count", 0))
         audit_stat = final_state.get("audit_status", "PASS")
         tool_outputs = final_state.get("tool_outputs", [])
         steps = final_state.get("execution_steps", [])
 
         docs = final_state.get("retrieved_chunks", [])
-        if len(docs) == 0:
-            docs = final_state.get("retrieved_docs", [])
 
         is_input_safe = final_state.get("is_safe", True)
         if final_state.get("input_guard", {}).get("is_safe", True) is False:
@@ -267,38 +184,15 @@ class BankingAgentPipeline:
         if is_input_safe is True:
             status_guardrail = "passed"
 
-        # Calculate evaluation metrics (Context Precision, Faithfulness, Answer Relevance)
-        eval_metrics = {
-            "context_precision": 1.0,
-            "faithfulness": 1.0,
-            "answer_relevance": 1.0,
-            "overall_score": 1.0
-        }
-
-        if is_input_safe is False:
-            eval_metrics = {
-                "context_precision": 0.0,
-                "faithfulness": 1.0,
-                "answer_relevance": 1.0,
-                "overall_score": 0.6667
-            }
-        elif intent == "RAG_SEARCH":
-            query_keywords = extract_query_keywords(clean_query)
-            eval_metrics = self.evaluator.evaluate_single_case(
-                question=clean_query,
-                retrieved_chunks=docs,
-                generated_answer=answer,
-                expected_keywords=query_keywords
-            )
-
-        # Record telemetry into BankingTracer & Phoenix
-        with self.tracer.trace_query(query=clean_query) as trace:
+        trace_query = "[blocked]"
+        if is_input_safe:
+            trace_query = final_state["user_query"]
+        with self.tracer.trace_query(query=trace_query) as trace:
             for s in steps:
                 trace.spans.append({
                     "name": str(s),
                     "duration_ms": 0.0,
                     "details": {
-                        "sub_agent_role": sub_agent,
                         "intent": intent,
                         "audit_status": audit_stat
                     }
@@ -318,30 +212,29 @@ class BankingAgentPipeline:
                 "is_safe": is_input_safe,
                 "status": status_guardrail
             },
-            "01_router": {
-                "name": "Node 1: Multi-Agent Supervisor Router",
+            "01_react": {
+                "name": "ReAct Decisions",
                 "detected_intent": intent,
-                "sub_agent_role": sub_agent,
-                "target_tool": final_state.get("target_tool")
+                "last_action": final_state.get("last_action")
             },
             "02_retrieval": {
-                "name": "Node 2: Knowledge Retrieval (RAG Hybrid Search)",
+                "name": "Knowledge Retrieval (Hybrid RAG)",
                 "total_documents_found": len(docs),
-                "document_quality": final_state.get("doc_quality", final_state.get("document_quality", "N/A")),
+                "search_count": final_state.get("search_count", 0),
                 "retry_count": retries
             },
             "03_tools": {
-                "name": "Node 5: Banking Action Tools",
+                "name": "Banking Tools and Skills",
                 "executed_tools": [to.get("tool") for to in tool_outputs]
             },
             "04_audit": {
-                "name": "Node 7: Post-Generation Hallucination & Citation Audit",
+                "name": "Citation Audit",
                 "audit_status": audit_stat,
                 "hallucination_retries": final_state.get("hallucination_retries", 0),
                 "audit_feedback": final_state.get("audit_feedback", "")
             },
             "05_output_guard": {
-                "name": "Node 8: Output Guardrail & Verification",
+                "name": "Output Guardrail",
                 "is_safe": final_state.get("output_guard", {}).get("is_safe", True),
                 "flags": final_state.get("output_guard", {}).get("flags", [])
             }
@@ -352,10 +245,9 @@ class BankingAgentPipeline:
             "citations": citations,
             "sources": sources,
             "intent": intent,
-            "sub_agent_role": sub_agent,
             "retry_count": retries,
             "audit_status": audit_stat,
-            "evaluation_metrics": eval_metrics,
+            "evaluation_metrics": None,
             "tool_calls": tool_outputs,
             "session_id": session_id,
             "latency_ms": total_latency_ms,
@@ -368,15 +260,6 @@ class BankingAgentPipeline:
         Backward-compatible query method.
         """
         return self.chat(query=query)
-
-    def execute_task(self, query: str, context: dict | None = None) -> dict:
-        """
-        Execute query using Task-Oriented DAG architecture (tasks/ and skills/).
-        """
-        if not hasattr(self, "_task_manager") or self._task_manager is None:
-            from agent_banking.tasks.task_manager import BankingTaskManager
-            self._task_manager = BankingTaskManager(pipeline_instance=self.rag_pipeline, config=self.config)
-        return self._task_manager.process_query(query, context=context)
 
     async def astream_chat(
         self,
@@ -392,6 +275,7 @@ class BankingAgentPipeline:
         staying compatible with synchronous checkpointers such as SqliteSaver.
         """
         import asyncio
+        import contextlib
         import threading
 
         initial_state = self.build_initial_state(
@@ -404,11 +288,6 @@ class BankingAgentPipeline:
         )
         thread_config = {"configurable": {"thread_id": session_id}}
 
-        if not hasattr(self.graph, "stream"):
-            async for event in self.graph.astream(initial_state, config=thread_config):
-                yield event
-            return
-
         loop = asyncio.get_running_loop()
         queue = asyncio.Queue()
         stop_event = threading.Event()
@@ -416,10 +295,24 @@ class BankingAgentPipeline:
 
         def _worker():
             try:
-                for event in self.graph.stream(initial_state, config=thread_config):
+                with self._session_lock(session_id):
                     if stop_event.is_set():
-                        break
-                    loop.call_soon_threadsafe(queue.put_nowait, ("event", event))
+                        return
+                    self._restore_history(initial_state, thread_config)
+                    with contextlib.closing(self.graph.stream(initial_state, config=thread_config)) as events:
+                        while not stop_event.is_set():
+                            event = next(events, None)
+                            if event is None:
+                                break
+                            progress = {}
+                            for node, node_state in event.items():
+                                progress[node] = {}
+                                if node == "react_action":
+                                    progress[node]["last_action"] = node_state["last_action"]
+                                if node == "output_guardrail":
+                                    for key in ("final_answer", "audit_status", "citations", "sources"):
+                                        progress[node][key] = node_state[key]
+                            loop.call_soon_threadsafe(queue.put_nowait, ("event", progress))
             except Exception as exc:
                 loop.call_soon_threadsafe(queue.put_nowait, ("error", exc))
             finally:

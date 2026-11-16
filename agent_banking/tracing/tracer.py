@@ -209,20 +209,6 @@ def _extract_chunk_trace_fields(raw_item, index=0):
     }
 
 
-def _read_synthesized_field(synthesized, attr_name, dict_keys, default):
-    """Read ContextBundle attributes or dict keys uniformly."""
-    if isinstance(synthesized, dict):
-        for k in dict_keys:
-            if k in synthesized and synthesized[k] is not None:
-                return synthesized[k]
-        return default
-    for k in dict_keys:
-        val = getattr(synthesized, k, None)
-        if val is not None:
-            return val
-    return getattr(synthesized, attr_name, default)
-
-
 class ActiveTrace:
     """
     Quản lý vòng đời và dữ liệu của một phiên truy vết (Trace) cho một câu hỏi khách hàng.
@@ -242,24 +228,10 @@ class ActiveTrace:
         self.px_context = None
         if self.tracer.is_phoenix_active and self.tracer.px_tracer:
             try:
-                self.px_root_span = self.tracer.px_tracer.start_span("rag_query_pipeline")
+                self.px_root_span = self.tracer.px_tracer.start_span("banking_query")
                 if PHOENIX_AVAILABLE:
                     self.px_root_span.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, OpenInferenceSpanKindValues.CHAIN.value)
-                    root_inp = {
-                        "user_query": query,
-                        "pipeline": "AI Banking Hybrid RAG Pipeline (Chunking -> Guardrails -> Query Parser -> Dense Embedding -> Top-K Hybrid Retrieval -> Top-K Reranking -> Synthesizer -> LLM Serving -> Output Guardrail)",
-                        "tracked_stages": [
-                            "1. chunking_layout_aware (DLA Layout-Aware Hierarchy Chunking)",
-                            "2. input_guardrail (Prompt Injection & Security)",
-                            "3. query_parser (Entities & Keyword extraction)",
-                            "4. dense_embedding (1024-dim Vector representation)",
-                            "5. top_k_hybrid_retrieval (Top-5 Chunks: Dense HNSW + BM25 + RRF)",
-                            "6. top_k_cross_encoder_reranker (Top-3 Chunks: Cross-Encoder)",
-                            "7. context_synthesizer (Token budgeting & Citation map)",
-                            "8. llm_generation (Persona & Tone)",
-                            "9. output_guardrail (PII mask & Safety audit)"
-                        ]
-                    }
+                    root_inp = {"user_query": query}
                     self.px_root_span.set_attribute(SpanAttributes.INPUT_MIME_TYPE, "application/json")
                     self.px_root_span.set_attribute(SpanAttributes.INPUT_VALUE, json.dumps(root_inp, ensure_ascii=False, indent=2))
                 self.px_context = otel_trace.set_span_in_context(self.px_root_span)
@@ -937,126 +909,6 @@ class ActiveTrace:
                 s_px.end()
             except Exception as e:
                 logger.debug(f"Phoenix cross_encoder_reranker error: {e}")
-
-    def record_synthesis(self, synthesized, duration_ms):
-        """Bước 4: Ghi nhận vết Context Synthesizer (Markdown Context, Legal Citations)"""
-        citations = _read_synthesized_field(synthesized, "legal_citations", ["legal_citations", "citations"], [])
-        sources = _read_synthesized_field(synthesized, "sources_used", ["sources_used", "sources"], [])
-        tokens_est = _read_synthesized_field(
-            synthesized,
-            "total_tokens",
-            ["total_tokens", "total_tokens_estimated", "tokens"],
-            0
-        )
-        formatted_context = _read_synthesized_field(
-            synthesized,
-            "markdown_context",
-            ["markdown_context", "formatted_context", "context"],
-            str(synthesized)
-        )
-        chunks_used = _read_synthesized_field(synthesized, "chunks_included", ["chunks_included"], len(sources))
-
-        span_data = {
-            "name": "Step 4: Context Synthesizer",
-            "duration_ms": duration_ms,
-            "legal_citations": citations,
-            "sources_used": sources,
-            "estimated_tokens": tokens_est,
-            "chunks_included": chunks_used
-        }
-        self.spans.append(span_data)
-
-        if self.tracer.is_phoenix_active and self.tracer.px_tracer and self.px_context:
-            try:
-                s_px = self.tracer.px_tracer.start_span("context_synthesizer", context=self.px_context)
-                if PHOENIX_AVAILABLE:
-                    s_px.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, OpenInferenceSpanKindValues.CHAIN.value)
-                    inp_dict = {
-                        "action": "synthesize_context",
-                        "chunks_count": chunks_used,
-                        "sources_count": len(sources),
-                        "estimated_tokens": tokens_est
-                    }
-                    if len(formatted_context) > 600:
-                        ctx_preview = formatted_context[:600] + "..."
-                    else:
-                        ctx_preview = formatted_context
-                    out_dict = {
-                        "legal_citations": citations,
-                        "sources_used": sources,
-                        "context_tokens": tokens_est,
-                        "context_preview": ctx_preview
-                    }
-                    s_px.set_attribute(SpanAttributes.INPUT_MIME_TYPE, "application/json")
-                    s_px.set_attribute(SpanAttributes.INPUT_VALUE, json.dumps(inp_dict, ensure_ascii=False, indent=2))
-                    s_px.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, "application/json")
-                    s_px.set_attribute(SpanAttributes.OUTPUT_VALUE, json.dumps(out_dict, ensure_ascii=False, indent=2))
-                    s_px.set_attribute("synthesis.duration_ms", duration_ms)
-                    s_px.set_attribute("synthesis.tokens_count", tokens_est)
-                s_px.end()
-            except Exception as e:
-                logger.debug(f"Phoenix context_synthesizer error: {e}")
-
-    def record_llm_serving(self, query, result, model, duration_ms, persona=None, tone=None, format_style=None):
-        """Bước 5: Ghi nhận vết LLM Serving (Model, Guardrails, Persona, Tokens & Generation)"""
-        answer = result.get("answer", "")
-        usage = result.get("usage", {})
-        prompt_tokens = usage.get("prompt_tokens", result.get("context_tokens", 0))
-        completion_tokens = usage.get("completion_tokens", max(1, len(answer) // 4))
-        total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
-
-        chosen_persona = persona or result.get("persona", "advisor")
-        chosen_tone = tone or result.get("tone", "formal")
-        chosen_format = format_style or result.get("format_style", "standard")
-
-        if len(answer) > 120:
-            ans_preview = answer[:120] + "..."
-        else:
-            ans_preview = answer
-
-        span_data = {
-            "name": "Step 5: LLM Serving",
-            "duration_ms": duration_ms,
-            "model": model,
-            "persona": chosen_persona,
-            "tone": chosen_tone,
-            "format_style": chosen_format,
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": total_tokens,
-            "answer_preview": ans_preview
-        }
-        self.spans.append(span_data)
-
-        if self.tracer.is_phoenix_active and self.tracer.px_tracer and self.px_context:
-            try:
-                s_px = self.tracer.px_tracer.start_span("llm_generation", context=self.px_context)
-                if PHOENIX_AVAILABLE:
-                    s_px.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, OpenInferenceSpanKindValues.LLM.value)
-                    s_px.set_attribute(SpanAttributes.LLM_MODEL_NAME, str(model))
-                    s_px.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_PROMPT, int(prompt_tokens))
-                    s_px.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_COMPLETION, int(completion_tokens))
-                    s_px.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_TOTAL, int(total_tokens))
-                    
-                    llm_input_info = {
-                        "user_query": query,
-                        "persona_configuration": {
-                            "persona": chosen_persona,
-                            "tone": chosen_tone,
-                            "format_style": chosen_format
-                        },
-                        "estimated_prompt_tokens": prompt_tokens
-                    }
-                    s_px.set_attribute(SpanAttributes.INPUT_MIME_TYPE, "application/json")
-                    s_px.set_attribute(SpanAttributes.INPUT_VALUE, json.dumps(llm_input_info, ensure_ascii=False, indent=2))
-                    s_px.set_attribute(SpanAttributes.OUTPUT_VALUE, answer)
-                    s_px.set_attribute("llm.latency_ms", duration_ms)
-                    s_px.set_attribute("llm.persona", str(chosen_persona))
-                    s_px.set_attribute("llm.tone", str(chosen_tone))
-                    s_px.set_attribute("llm.format_style", str(chosen_format))
-                s_px.end()
-            except Exception as e:
-                logger.debug(f"Phoenix llm_generation error: {e}")
 
     def record_guardrail_block(self, reason, details=None, duration_ms=0.0):
         """Ghi nhận vết chặn an ninh từ Banking Guardrails (Prompt Injection, Fraud, PII)"""

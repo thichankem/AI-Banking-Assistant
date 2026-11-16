@@ -2,17 +2,7 @@
 """
 Banking Guardrails System (Streamlined & Robust Protection)
 ===========================================================
-Comprehensive 3-stage defense architecture for banking RAG:
-1. Stage 1 (Input Guardrail):
-   - Blocks Prompt Injection & Jailbreak (Role hijacking, system prompt leakage).
-   - Blocks Financial Fraud & Cyber Attacks (eKYC bypass, skimming, money laundering).
-   - Blocks Out-of-Domain queries (cooking, poetry, programming, astrology).
-   - Contrastive semantic vector guardrail (SemanticBankingGuardrail).
-2. Stage 2 (Pre-Generation Relevance Gating):
-   - Prevents hallucinations prior to generation; fail-fast if no relevant documents.
-3. Stage 3 (Post-Generation Grounding & Faithfulness):
-   - Cleans output (removes leaked thinking tags, monologue).
-   - Verifies legal citations and financial numerical figures against retrieved chunks.
+Checks ReAct input, tool parameters, retrieved documents, and final output.
 
 CORE DESIGN INVARIANTS:
 - 0% Regex Law: No regex methods or import re.
@@ -754,7 +744,7 @@ class BankingGuardrailManager:
         # 2. Process each token
         tokens = sanitized.split(" ")
         out_tokens = []
-        for token in tokens:
+        for index, token in enumerate(tokens):
             clean_tok = token.strip(".,;?!:()[]\"'")
 
             # 2.1. Che Email (user@domain.com)
@@ -819,8 +809,12 @@ class BankingGuardrailManager:
                 elif len(clean_tok) == 12 and clean_tok.startswith("0"):
                     out_tokens.append(token.replace(clean_tok, "[CITIZEN_ID_REDACTED]"))
                 elif len(clean_tok) == 9:
-                    # Legacy 9-digit ID number
-                    out_tokens.append(token.replace(clean_tok, "[CITIZEN_ID_REDACTED]"))
+                    # Preserve explicit currency amounts while masking unlabelled legacy IDs.
+                    following = tokens[index + 1:index + 2]
+                    if following and following[0].strip(".,;?!:()[]").lower() in ("vnd", "vnđ", "đồng"):
+                        out_tokens.append(token)
+                    else:
+                        out_tokens.append(token.replace(clean_tok, "[CITIZEN_ID_REDACTED]"))
                 elif len(clean_tok) == 10 and clean_tok.startswith(("03", "05", "07", "08", "09")):
                     # 10-digit mobile phone number
                     out_tokens.append(token.replace(clean_tok, "[PHONE_NUMBER_REDACTED]"))
@@ -1099,131 +1093,6 @@ class BankingGuardrailManager:
             del self._decision_cache[oldest_key]
         self._decision_cache[key] = result
 
-    # -----------------------------------------------------------------
-    # STAGE 2: PRE-GENERATION RAG RELEVANCE GATING (ANTI-HALLUCINATION)
-    # -----------------------------------------------------------------
-    def guard_rag_relevance(self, query, top_chunks, min_score=0.25, use_decision_model=None):
-        """
-        Đánh giá độ liên quan của tài liệu RAG trước khi gửi vào LLM.
-        Kiểm tra business_metadata.quality.index_ready (nếu có) và ngưỡng relevance/rerank.
-        Nếu không có tài liệu liên quan -> Ngắt luồng fail-fast, ngăn LLM bịa đặt.
-        """
-        if not top_chunks:
-            msg = (
-                "Hệ thống AI xin thông báo: Rất tiếc, trong hệ thống tài liệu quy định và chính sách ngân hàng "
-                "hiện tại không tìm thấy thông tin phù hợp với câu hỏi của Quý khách. Quý khách vui lòng liên hệ "
-                "Tổng đài CSKH 24/7 hoặc đến quầy giao dịch gần nhất để được tư vấn chính xác."
-            )
-            return False, msg, {"max_score": 0.0, "reason": "EMPTY_CHUNKS"}
-
-        ready_chunks = []
-        unready_chunk_ids = []
-        require_index_ready = getattr(Config, "REQUIRE_INDEX_READY", True)
-
-        for idx, raw_item in enumerate(top_chunks, start=1):
-            chunk_dict, _ = _unwrap_guardrail_chunk(raw_item)
-            is_explicit_unready = False
-            if isinstance(chunk_dict, dict):
-                bmeta = chunk_dict.get("business_metadata")
-                if isinstance(bmeta, dict):
-                    quality = bmeta.get("quality")
-                    if isinstance(quality, dict) and "index_ready" in quality:
-                        if quality.get("index_ready") is False:
-                            is_explicit_unready = True
-                            cid = str(chunk_dict.get("chunk_id") or f"chunk_{idx}")
-                            unready_chunk_ids.append(cid)
-            if not is_explicit_unready:
-                ready_chunks.append(raw_item)
-
-        if require_index_ready and len(unready_chunk_ids) == len(top_chunks) and len(top_chunks) > 0:
-            msg = (
-                "Hệ thống AI xin thông báo: Rất tiếc, các đoạn tài liệu truy xuất hiện chưa đạt chuẩn chỉ mục "
-                "(index_ready=false) để sử dụng làm căn cứ trả lời. Quý khách vui lòng liên hệ "
-                "Tổng đài CSKH 24/7 để được Chuyên viên Ngân hàng hỗ trợ trực tiếp."
-            )
-            return False, msg, {
-                "max_score": 0.0,
-                "min_score": min_score,
-                "reason": "CHUNKS_NOT_INDEX_READY",
-                "unready_chunk_ids": unready_chunk_ids,
-            }
-
-        if ready_chunks:
-            eval_chunks = ready_chunks
-        else:
-            eval_chunks = top_chunks
-
-        max_score = 0.0
-        for c in eval_chunks:
-            if isinstance(c, dict):
-                raw_score = None
-                for sk in ("rerank_score", "relevance_score", "score"):
-                    cand_val = c.get(sk)
-                    if cand_val is not None:
-                        raw_score = cand_val
-                        break
-                if raw_score is None:
-                    score = 0.0
-                else:
-                    score = float(raw_score)
-                if score > max_score:
-                    max_score = score
-
-        if max_score < min_score:
-            msg = (
-                "Hệ thống AI xin thông báo: Rất tiếc, các tài liệu thông tin ngân hàng hiện có không chứa dữ liệu "
-                "xác thực để giải đáp chính xác cho nội dung này. Để bảo đảm tính chuẩn xác và an toàn thông tin, "
-                "Quý khách vui lòng liên hệ Hotline CSKH 24/7 để được Chuyên viên Ngân hàng hỗ trợ trực tiếp."
-            )
-            return False, msg, {
-                "max_score": max_score,
-                "min_score": min_score,
-                "reason": "LOW_RELEVANCE",
-                "excluded_unready_count": len(unready_chunk_ids),
-            }
-
-        should_use_decision = self.use_decision_model
-        if use_decision_model is not None:
-            should_use_decision = use_decision_model
-
-        if should_use_decision is True:
-            if self.decision_client is not None:
-                try:
-                    if self.decision_client.is_available():
-                        first_chunk = eval_chunks[0]
-                        doc_text = _collect_chunk_text(first_chunk, include_parent=False, include_source=False).strip()
-
-                        if doc_text:
-                            grade = self.decision_client.grade_document_relevance(query, doc_text)
-                            if isinstance(grade, dict):
-                                if grade.get("is_relevant") is False:
-                                    msg = (
-                                        "Hệ thống AI xin thông báo: Rất tiếc, các tài liệu thông tin ngân hàng hiện có không chứa dữ liệu "
-                                        "xác thực để giải đáp chính xác cho nội dung này. Để bảo đảm tính chuẩn xác và an toàn thông tin, "
-                                        "Quý khách vui lòng liên hệ Hotline CSKH 24/7 để được Chuyên viên Ngân hàng hỗ trợ trực tiếp."
-                                    )
-                                    return False, msg, {
-                                        "max_score": max_score,
-                                        "min_score": min_score,
-                                        "reason": "DECISION_MODEL_IRRELEVANT",
-                                        "grade_audit": grade
-                                    }
-                                return True, "", {
-                                    "max_score": max_score,
-                                    "min_score": min_score,
-                                    "decision_grade": grade,
-                                    "excluded_unready_count": len(unready_chunk_ids),
-                                }
-                except Exception as e:
-                    # Fail-safe: safe fallback to score threshold verification
-                    print(f"⚠️ [Banking Guardrail] DecisionClient grade fallback: {e}")
-
-        return True, "", {
-            "max_score": max_score,
-            "min_score": min_score,
-            "excluded_unready_count": len(unready_chunk_ids),
-        }
-
     def guard_retrieved_chunks(self, chunks):
         """Rà soát tài liệu trích xuất từ RAG khỏi indirect prompt injection"""
         if Config.ENABLE_INDIRECT_INJECTION_SCAN is True:
@@ -1345,132 +1214,6 @@ class BankingGuardrailManager:
             sanitized = sanitized[:-1].strip()
 
         return OutputGuardResult(is_safe=True, sanitized_answer=sanitized.strip(), flags=flags)
-
-    def _extract_rates_from_text(self, text):
-        """Trích xuất danh sách tỷ lệ % (0% Regex)"""
-        if not text:
-            return set()
-        rates = set()
-        text_lower = text.lower()
-        start_pos = 0
-        while True:
-            pct_idx = text_lower.find("%", start_pos)
-            if pct_idx == -1:
-                break
-            k = pct_idx - 1
-            while k >= 0 and text_lower[k] == " ":
-                k -= 1
-
-            num_chars = []
-            while k >= 0:
-                ch = text_lower[k]
-                if ch.isdigit() or ch in [".", ","]:
-                    num_chars.append(ch)
-                    k -= 1
-                else:
-                    break
-
-            if len(num_chars) > 0:
-                num_chars.reverse()
-                num_str = "".join(num_chars).strip(".,")
-                if len(num_str) > 0:
-                    rates.add(num_str)
-                    rates.add(num_str.replace(",", "."))
-                    rates.add(num_str.replace(".", ","))
-
-            start_pos = pct_idx + 1
-        return rates
-
-    def guard_rag_faithfulness(self, answer, retrieved_chunks):
-        """
-        Đối soát trích dẫn pháp lý [Điều X, Khoản Y], lãi suất % và số tiền tài chính
-        với tài liệu RAG thực tế để phát hiện ảo giác (Hallucination).
-        """
-        if not answer:
-            return True, []
-        if not retrieved_chunks:
-            return True, []
-
-        flags = []
-        all_chunks_text = _collect_chunks_grounding_text(retrieved_chunks)
-        all_chunks_lower = all_chunks_text.lower()
-
-        # 1. Verify legal references and citations
-        citation_res = self.verify_citation_grounding(answer, retrieved_chunks)
-        if citation_res.get("is_grounded") is False:
-            unv = citation_res.get("unverified_citations", [])
-            flags.append(f"UNGROUNDED_CITATIONS: {', '.join(unv)}")
-
-        # 2. Verify percentages in answer against RAG context (0% Regex)
-        context_rates = self._extract_rates_from_text(all_chunks_lower)
-        start_pos = 0
-        answer_lower = answer.lower()
-        while True:
-            pct_idx = answer_lower.find("%", start_pos)
-            if pct_idx == -1:
-                break
-
-            k = pct_idx - 1
-            while k >= 0 and answer_lower[k] == " ":
-                k -= 1
-
-            num_chars = []
-            while k >= 0:
-                ch = answer_lower[k]
-                if ch.isdigit() or ch in [".", ","]:
-                    num_chars.append(ch)
-                    k -= 1
-                else:
-                    break
-
-            if len(num_chars) > 0:
-                num_chars.reverse()
-                num_str = "".join(num_chars).strip(".,")
-                if len(num_str) > 0:
-                    num_dot = num_str.replace(",", ".")
-                    num_comma = num_str.replace(".", ",")
-                    is_rate_grounded = False
-                    if num_str in context_rates:
-                        is_rate_grounded = True
-                    elif num_dot in context_rates:
-                        is_rate_grounded = True
-                    elif num_comma in context_rates:
-                        is_rate_grounded = True
-
-                    if not is_rate_grounded:
-                        end_tok = pct_idx + 1
-                        while end_tok < len(answer) and answer[end_tok] not in [" ", ",", ";", ")", "]", "}"]:
-                            end_tok += 1
-                        rate_display = answer[k+1:end_tok].strip()
-                        if not rate_display:
-                            rate_display = f"{num_str}%"
-                        flags.append(f"UNGROUNDED_RATE: {rate_display}")
-
-            start_pos = pct_idx + 1
-
-        # 3. Verify committed financial amounts
-        currency_units = ["triệu", "tỷ", "trieu", "ty", "nghìn", "ngàn"]
-        words = answer.replace(",", " ").replace(";", " ").split()
-        for i in range(len(words)):
-            w = words[i].strip("().:;[]{}").lower()
-            if i + 1 < len(words):
-                next_w = words[i+1].strip("().:;[]{}").lower()
-                if next_w in currency_units:
-                    # Check if token is a financial amount
-                    clean_num = w.replace(".", "").replace(",", "")
-                    if clean_num.isdigit():
-                        num_val = int(clean_num)
-                        # Skip if token represents a calendar year (e.g. 2024, 2025)
-                        if not (2020 <= num_val <= 2030):
-                            candidate_amount = f"{w} {next_w}"
-                            if candidate_amount not in all_chunks_lower:
-                                flags.append(f"UNGROUNDED_FINANCIAL_AMOUNT: {candidate_amount}")
-
-        is_faithful = True
-        if len(flags) > 0:
-            is_faithful = False
-
-        return is_faithful, flags
 
     def verify_citation_grounding(self, answer, retrieved_chunks):
         """Đối soát trích dẫn điều khoản pháp lý trong câu trả lời (0% Regex, Zero Ternary)."""

@@ -87,7 +87,7 @@ def test_scoped_prune_resolves_only_unique_legacy_aliases(tmp_path):
 
 
 def test_publication_variants_keep_independent_payloads_and_vectors(tmp_path):
-    from agent_banking.generator.run_generator import _compute_chunk_signature
+    from agent_banking.langgraph_agent.react import BankingReActNodes
     from agent_banking.reranking.run_reranking import extract_candidate_ids
     from agent_banking.retrieval.hybrid_retriever import HybridRetriever
 
@@ -112,7 +112,12 @@ def test_publication_variants_keep_independent_payloads_and_vectors(tmp_path):
         assert len(merged) == 2
         assert {hit["chunk_id"] for hit in merged} == {"shared"}
         assert len(set(extract_candidate_ids(merged))) == 2
-        assert _compute_chunk_signature(merged[0]) != _compute_chunk_signature(merged[1])
+        guard = SimpleNamespace(guard_retrieved_chunks=lambda chunks: (chunks, 0, []))
+        agent = SimpleNamespace(guardrails=guard)
+        evidence = []
+        observations = BankingReActNodes._observe_retrieval(agent, {"documents": merged}, evidence)
+        assert [doc["label"] for doc in observations["documents"]] == ["[Nguồn 1]", "[Nguồn 2]"]
+        assert {item["chunk"]["content"] for item in evidence} == {first["content"], second["content"]}
         assert retriever.retrieve("Hạn mức", filter_dict={"business_metadata.publication_scopes": "unpublished"}) == []
         assert store.prune_chunks(set(), scope="second") == 1
         assert store.prune_chunks(set(), scope="third") == 0

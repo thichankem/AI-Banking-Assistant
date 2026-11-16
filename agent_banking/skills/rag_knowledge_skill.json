@@ -46,7 +46,6 @@
     },
     "required": ["query"]
   },
-  "react_schema_example": "{\"query\": \"từ khóa tra cứu\", \"top_k\": 3}",
   "output_schema": {
     "type": "object",
     "properties": {

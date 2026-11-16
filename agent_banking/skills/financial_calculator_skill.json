@@ -69,7 +69,6 @@
       }
     }
   },
-  "react_schema_example": "{\"operation\": \"loan_amortization\"|\"savings_profit\"|\"fx_rates\", \"principal\": <số tiền>, \"term_months\": <tháng>, \"annual_rate_percent\": <lãi>}",
   "output_schema": {
     "type": "object",
     "properties": {

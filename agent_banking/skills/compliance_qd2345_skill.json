@@ -49,7 +49,6 @@
     },
     "required": ["transaction_amount"]
   },
-  "react_schema_example": "{\"transaction_amount\": <số tiền>, \"daily_accumulated_amount\": <tổng ngày>, \"is_new_device\": false/true}",
   "output_schema": {
     "type": "object",
     "properties": {

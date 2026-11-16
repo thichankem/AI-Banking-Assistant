@@ -1,6 +1,6 @@
 """
 Script to Re-evaluate and Fix all previously Failed Cases.
-Runs failed cases through the fixed LangGraph Agent Pipeline and re-judges them with LLM-as-a-Judge.
+Runs failed cases through the ReAct Agent Pipeline and re-judges them with LLM-as-a-Judge.
 Synchronizes the results to both JSON caches and the master Excel file.
 
 RULES COMPLIANCE:

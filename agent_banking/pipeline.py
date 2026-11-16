@@ -1,26 +1,4 @@
-"""
-Banking RAG Pipeline Module (Enterprise Banking RAG System - Dual Indexing & 5-Step Pipeline)
-======================================================================
-5-step architecture conforming strictly to technical specifications:
-- Ingestion & Dual-Indexing Phase:
-    * Layout-aware preservation via Breadcrumbs (DLA Chunker).
-    * Parallel dual indexing into Qdrant: Sparse BM25 and Dense Vector Store (1024-dim).
-- Step 1 (Query Parser):
-    * Banking acronym normalization (eKYC, TKTT, Smart OTP, Digibank) and keyword extraction.
-- Step 2 (Hybrid Retrieval):
-    * Concurrent query across Dense Vector and BM25, fused via RRF k=60 to retrieve Top-5 candidates.
-- Step 3 (Reranking):
-    * Cross-Encoder semantic reranker refining candidates to Top-3 most accurate chunks.
-- Step 4 (Context Synthesizer):
-    * Markdown context packaging, attaching legal references [Article X, Clause Y].
-- Step 5 (LLM Serving):
-    * Answer generation via dynamically configured LLM with strict banking guardrails.
-
-DESIGN PRINCIPLES:
-1. 0% REGEX LAW: Strictly string methods only (in, split, startswith, endswith, strip, lower, replace, find).
-2. ZERO TERNARY: Explicit if/else syntax only.
-3. NO __INIT__.PY: Direct module imports.
-"""
+"""Banking knowledge ingestion, indexing, and retrieval services for ReAct."""
 
 import sys
 import time
@@ -47,15 +25,11 @@ from .vector_db.qdrant_store import (
 from .query_parser.rag_query_parser import BankingQueryParser, ParsedQuery
 from .retrieval.hybrid_retriever import HybridRetriever
 from .reranking.rag_reranker import BankingReranker
-from .generator.rag_generator import RAGGenerator, ContextBundle
 from .tracing.tracer import BankingTracer
-from .guardrails.rag_guardrails import BankingGuardrailManager
 
 
 class BankingRAGPipeline:
-    """
-    Enterprise Banking AI RAG Pipeline with 5-step dual-indexing architecture.
-    """
+    """Own the banking knowledge index and its search components."""
 
     def __init__(self, config=None, use_memory=False):
         if config is not None:
@@ -69,7 +43,7 @@ class BankingRAGPipeline:
         print("=" * 70)
 
         # 1. Initialize DLA Chunker (Canonical document chunking)
-        print("[1/5] Initializing Layout-Aware Document Chunker...")
+        print("[1/4] Initializing Layout-Aware Document Chunker...")
         self.dla_chunker = DLAChunker(
             target_chunk_tokens=int(getattr(self.config, "CHUNK_SIZE_TOKENS", 512)),
             max_chunk_tokens=int(getattr(self.config, "CHUNK_MAX_TOKENS", 1024)),
@@ -80,7 +54,7 @@ class BankingRAGPipeline:
         self.chunker = self.dla_chunker
 
         # 2. Initialize Dense Embedding Model (integrated SQLite Cache)
-        print(f"[2/5] Initializing Dense Embedding Model ({self.config.EMBEDDING_MODEL_1024})...")
+        print(f"[2/4] Initializing Dense Embedding Model ({self.config.EMBEDDING_MODEL_1024})...")
         self.embedder = BankingEmbedder(
             dimension=self.config.EMBEDDING_DIM,
             model_name=self.config.EMBEDDING_MODEL_1024,
@@ -94,7 +68,7 @@ class BankingRAGPipeline:
             store_mode = "In-Memory"
         else:
             store_mode = "Disk"
-        print(f"[3/5] Initializing Vector & BM25 Store ({store_mode})...")
+        print(f"[3/4] Initializing Vector & BM25 Store ({store_mode})...")
         raw_qdrant_path = Path(getattr(self.config, "QDRANT_STORAGE_PATH", self.config.STORAGE_DIR / "qdrant_db"))
         if raw_qdrant_path.is_absolute():
             qdrant_storage_path = raw_qdrant_path
@@ -108,7 +82,7 @@ class BankingRAGPipeline:
         )
 
         # 4. Initialize Query Parser, Hybrid Retriever (RRF) & Reranker
-        print(f"[4/5] Initializing Query Parser & Hybrid Retriever (RRF k={self.config.RRF_K})...")
+        print(f"[4/4] Initializing Query Parser & Hybrid Retriever (RRF k={self.config.RRF_K})...")
         self.query_parser = BankingQueryParser()
         self.retriever = HybridRetriever(
             vector_store=self.vector_store,
@@ -117,26 +91,15 @@ class BankingRAGPipeline:
             dense_weight=self.config.DENSE_WEIGHT
         )
 
-        print(f"[4.1/5] Initializing Reranker ({self.config.RERANKER_MODEL})...")
+        print(f"[4/4] Initializing Reranker ({self.config.RERANKER_MODEL})...")
         self.reranker = BankingReranker(
             model_name=self.config.RERANKER_MODEL
         )
 
-        # 5. Initialize LLM Serving with System Guardrails
-        print(f"[5/5] Initializing LLM Serving ({self.config.LLM_MODEL})...")
-        self.generator = RAGGenerator(
-            api_key=self.config.LLM_API_KEY,
-            base_url=self.config.LLM_BASE_URL,
-            model=self.config.LLM_MODEL,
-            temperature=self.config.LLM_TEMPERATURE,
-            max_tokens=self.config.LLM_MAX_TOKENS
-        )
-        self.synthesizer = self.generator
         self.tracer = BankingTracer(config=self.config)
-        self.guardrails = BankingGuardrailManager(embedder=self.embedder)
 
         self.indexed_chunks = []
-        print("[System] Enterprise RAG Pipeline, Tracing, and Guardrails are ready.\n")
+        print("[System] Banking knowledge index and retrieval are ready.\n")
 
     def ingest_chunks(self, chunks, batch_size=32, *, return_index_keys=False):
         """
@@ -314,22 +277,20 @@ class BankingRAGPipeline:
         # Ingest into Vector DB and BM25
         return self.ingest_chunks(chunks)
 
-    def step1_query_parser(self, query):
+    def parse_query(self, query):
         """
-        Step 1: Query Parser
         Normalize domain acronyms (eKYC, TKTT, Smart OTP, Digibank) and extract keywords.
         """
         parsed = self.query_parser.parse(query)
         return parsed
 
-    def step2_hybrid_retrieval(
+    def retrieve_candidates(
         self,
         parsed_query,
         top_k=None,
         filter_dict=None
     ):
         """
-        Step 2: Hybrid Retrieval
         Query concurrently across Dense Vector and BM25, then fuse via RRF k=60 to get top candidates.
         """
         if top_k is not None:
@@ -337,22 +298,20 @@ class BankingRAGPipeline:
         else:
             k = self.config.HYBRID_TOP_K
 
-        candidates_top5 = self.retriever.retrieve(
+        return self.retriever.retrieve(
             query=parsed_query,
             top_k=k,
             candidate_k=self.config.HYBRID_CANDIDATE_K,
             filter_dict=filter_dict
         )
-        return candidates_top5
 
-    def step3_reranking(
+    def rerank_candidates(
         self,
         query_or_parsed,
         candidates,
         top_k=None
     ):
         """
-        Step 3: Reranking
         Use Cross-Encoder reranker to refine candidates to top most accurate chunks.
         """
         if top_k is not None:
@@ -371,308 +330,6 @@ class BankingRAGPipeline:
             top_k=k
         )
         return top_reranked
-
-    def step4_context_synthesizer(
-        self,
-        top_chunks,
-        max_tokens=None
-    ):
-        """
-        Step 4: Context Synthesizer
-        Package context in Markdown format with legal reference citations [Article X, Clause Y].
-        """
-        return self.generator.format_chunks(top_chunks, max_tokens=max_tokens)
-
-    def step5_llm_serving(
-        self,
-        query,
-        synthesized_context,
-        persona_config=None
-    ):
-        """
-        Step 5: LLM Serving
-        Pass context with dynamic persona and banking guardrails to the configured LLM.
-        """
-        serving_result = self.generator.generate_answer(
-            query=query,
-            synthesized_context=synthesized_context,
-            persona_config=persona_config
-        )
-        return serving_result
-
-    def run_pipeline(
-        self,
-        query,
-        filter_dict=None,
-        persona_config=None,
-        top_k=None
-    ):
-        """
-        Execute full 5-step Enterprise Banking RAG pipeline:
-        Secured with dual-layer Banking Guardrails and telemetry to Arize Phoenix & local traces.
-        """
-        t_start = time.time()
-        print(f"\n[QUERY] '{query}'")
-
-        # -------------------------------------------------------------
-        # LAYER 1: INPUT GUARDRAIL (Prompt Injection, Fraud, PII/Auth)
-        # -------------------------------------------------------------
-        input_guard = self.guardrails.guard_input(query)
-        if not input_guard.is_safe:
-            print(f"[Banking Guardrail Blocked] Reason: {input_guard.trigger_reason}")
-            if input_guard.refusal_message:
-                refusal_text = input_guard.refusal_message
-            else:
-                refusal_text = "The request was declined in accordance with banking security policies."
-
-            with self.tracer.trace_query(query=query) as trace:
-                trace.record_guardrail_block(
-                    reason=input_guard.trigger_reason,
-                    details=input_guard.details
-                )
-                trace.finish(
-                    answer=refusal_text,
-                    citations=[],
-                    sources=[],
-                    is_blocked=True,
-                    guardrail_trigger=input_guard.trigger_reason
-                )
-
-            return {
-                "query": query,
-                "answer": refusal_text,
-                "is_blocked": True,
-                "guardrail_trigger": input_guard.trigger_reason,
-                "guardrail_details": input_guard.details,
-                "step1_parsed_query": None,
-                "step2_candidates_top5": [],
-                "step3_top3_chunks": [],
-                "retrieved_chunks": [],
-                "step4_synthesized_context": None,
-                "step5_serving_result": {"answer": refusal_text, "blocked": True},
-                "legal_citations": [],
-                "sources_used": [],
-                "latency": {
-                    "total_pipeline_ms": round((time.time() - t_start) * 1000, 1)
-                }
-            }
-
-        sanitized_query = input_guard.sanitized_query
-
-        with self.tracer.trace_query(query=sanitized_query) as trace:
-            # Step 1: Query Parser
-            t1 = time.time()
-            parsed_query = self.step1_query_parser(sanitized_query)
-            t1_ms = round((time.time() - t1) * 1000, 1)
-            trace.record_query_parser(input_query=sanitized_query, parsed=parsed_query, duration_ms=t1_ms)
-
-            # Step 2: Hybrid Retrieval
-            t2 = time.time()
-            candidates_top5 = self.step2_hybrid_retrieval(
-                parsed_query,
-                top_k=self.config.HYBRID_TOP_K,
-                filter_dict=filter_dict
-            )
-            t2_ms = round((time.time() - t2) * 1000, 1)
-
-            # Record Query Embedding trace
-            trace.record_embedding(
-                num_texts=1,
-                dimension=self.config.EMBEDDING_DIM,
-                duration_ms=round(t2_ms * 0.3, 1),
-                model_name=self.config.EMBEDDING_MODEL_1024,
-                is_query=True
-            )
-            trace.record_retrieval(query=sanitized_query, candidates=candidates_top5, duration_ms=t2_ms)
-
-            # Step 3: Reranking
-            t3 = time.time()
-            if top_k is not None:
-                rerank_k = top_k
-            else:
-                rerank_k = self.config.RERANK_TOP_K
-            top3_chunks = self.step3_reranking(
-                parsed_query,
-                candidates_top5,
-                top_k=rerank_k
-            )
-            t3_ms = round((time.time() - t3) * 1000, 1)
-            trace.record_rerank(query=sanitized_query, candidates=candidates_top5, reranked=top3_chunks, duration_ms=t3_ms)
-
-            # Stage 2: Pre-Generation Relevance Gating (Anti-hallucination prior to generation)
-            relevance_threshold = 0.25
-            if hasattr(self.config, "RELEVANCE_THRESHOLD"):
-                relevance_threshold = self.config.RELEVANCE_THRESHOLD
-            is_relevant, no_info_msg, rel_details = self.guardrails.guard_rag_relevance(
-                sanitized_query,
-                top3_chunks,
-                min_score=relevance_threshold
-            )
-            if is_relevant is False:
-                print(f"[Relevance Gating Blocked] RAG context does not contain relevant information: {rel_details}")
-                trace.record_guardrail_block(
-                    reason="RAG_IRRELEVANT_CHUNKS",
-                    details=rel_details
-                )
-                trace.finish(
-                    answer=no_info_msg,
-                    citations=[],
-                    sources=[],
-                    is_blocked=False,
-                    guardrail_trigger="RAG_IRRELEVANT_CHUNKS"
-                )
-                return {
-                    "query": query,
-                    "sanitized_query": sanitized_query,
-                    "answer": no_info_msg,
-                    "is_blocked": False,
-                    "guardrail_trigger": "RAG_IRRELEVANT_CHUNKS",
-                    "guardrail_details": rel_details,
-                    "step1_parsed_query": parsed_query,
-                    "step2_candidates_top5": candidates_top5,
-                    "step3_top3_chunks": top3_chunks,
-                    "retrieved_chunks": candidates_top5,
-                    "step4_synthesized_context": None,
-                    "step5_serving_result": {"answer": no_info_msg, "fail_fast": True},
-                    "legal_citations": [],
-                    "sources_used": [],
-                    "latency": {
-                        "step1_query_parser_ms": t1_ms,
-                        "step2_hybrid_retrieval_ms": t2_ms,
-                        "step3_reranking_ms": t3_ms,
-                        "total_pipeline_ms": round((time.time() - t_start) * 1000, 1)
-                    }
-                }
-
-            # Step 4: Context Synthesizer
-            t4 = time.time()
-            # Stage 3: Scan for indirect prompt injection in chunks before passing to context
-            safe_chunks, blocked_cnt, threats = self.guardrails.guard_retrieved_chunks(top3_chunks)
-            if blocked_cnt > 0:
-                print(f"[Indirect Injection Guardrail] Removed {blocked_cnt} unsafe chunk(s) from context.")
-                trace.record_guardrail_check(
-                    layer="indirect_injection",
-                    is_safe=len(safe_chunks) > 0,
-                    details=threats
-                )
-            if not safe_chunks:
-                blocked_msg = "Xin lỗi, thông tin truy xuất được không đạt kiểm định an toàn ngữ cảnh để trả lời câu hỏi này."
-                trace.record_guardrail_block(
-                    reason="INDIRECT_PROMPT_INJECTION",
-                    details=threats
-                )
-                trace.finish(
-                    answer=blocked_msg,
-                    citations=[],
-                    sources=[],
-                    is_blocked=True,
-                    guardrail_trigger="INDIRECT_PROMPT_INJECTION"
-                )
-                return {
-                    "query": query,
-                    "sanitized_query": sanitized_query,
-                    "answer": blocked_msg,
-                    "is_blocked": True,
-                    "guardrail_trigger": "INDIRECT_PROMPT_INJECTION",
-                    "guardrail_details": threats,
-                    "step1_parsed_query": parsed_query,
-                    "step2_candidates_top5": candidates_top5,
-                    "step3_top3_chunks": [],
-                    "retrieved_chunks": candidates_top5,
-                    "step4_synthesized_context": None,
-                    "step5_serving_result": {"answer": blocked_msg, "blocked": True},
-                    "legal_citations": [],
-                    "sources_used": [],
-                    "latency": {
-                        "step1_query_parser_ms": t1_ms,
-                        "step2_hybrid_retrieval_ms": t2_ms,
-                        "step3_reranking_ms": t3_ms,
-                        "total_pipeline_ms": round((time.time() - t_start) * 1000, 1)
-                    }
-                }
-            top3_chunks = safe_chunks
-
-            synthesized_context = self.step4_context_synthesizer(
-                top3_chunks,
-                max_tokens=self.config.MAX_CONTEXT_TOKENS
-            )
-            t4_ms = round((time.time() - t4) * 1000, 1)
-            trace.record_synthesis(synthesized=synthesized_context, duration_ms=t4_ms)
-
-            # Step 5: LLM Serving
-            t5 = time.time()
-            serving_result = self.step5_llm_serving(sanitized_query, synthesized_context, persona_config=persona_config)
-            t5_ms = round((time.time() - t5) * 1000, 1)
-            trace.record_llm_serving(
-                query=sanitized_query,
-                result=serving_result,
-                model=self.config.LLM_MODEL,
-                duration_ms=t5_ms,
-                persona=serving_result.get("persona", "advisor"),
-                tone=serving_result.get("tone", "formal"),
-                format_style=serving_result.get("format_style", "standard")
-            )
-
-            # -------------------------------------------------------------
-            # STAGE 4: OUTPUT GUARDRAIL & FAITHFULNESS GROUNDING
-            # -------------------------------------------------------------
-            raw_answer = serving_result.get("answer", "")
-            output_guard = self.guardrails.guard_output(raw_answer)
-            answer = output_guard.sanitized_answer
-            serving_result["answer"] = answer
-            if output_guard.flags:
-                serving_result["guardrail_flags"] = output_guard.flags
-                trace.record_guardrail_check(
-                    layer="output_guardrail",
-                    is_safe=True,
-                    details=output_guard.flags
-                )
-
-            # Cross-check grounding & faithfulness with actual retrieved chunks
-            is_faithful, faith_flags = self.guardrails.guard_rag_faithfulness(answer, top3_chunks)
-            if is_faithful is False:
-                serving_result["faithfulness_flags"] = faith_flags
-                trace.record_guardrail_check(
-                    layer="rag_faithfulness",
-                    is_safe=False,
-                    details=faith_flags
-                )
-
-            total_latency_ms = round((time.time() - t_start) * 1000, 1)
-
-            # Finish trace span and export telemetry
-            trace.finish(
-                answer=answer,
-                citations=synthesized_context.legal_citations,
-                sources=synthesized_context.sources_used
-            )
-
-        return {
-            "query": query,
-            "sanitized_query": sanitized_query,
-            "is_blocked": False,
-            "step1_parsed_query": parsed_query,
-            "step2_candidates_top5": candidates_top5,
-            "step3_top3_chunks": top3_chunks,
-            "retrieved_chunks": candidates_top5,
-            "step4_synthesized_context": synthesized_context,
-            "step5_serving_result": serving_result,
-            "answer": answer,
-            "legal_citations": synthesized_context.legal_citations,
-            "sources_used": synthesized_context.sources_used,
-            "latency": {
-                "step1_query_parser_ms": t1_ms,
-                "step2_hybrid_retrieval_ms": t2_ms,
-                "step3_reranking_ms": t3_ms,
-                "step4_context_synthesizer_ms": t4_ms,
-                "step5_llm_serving_ms": t5_ms,
-                "total_pipeline_ms": total_latency_ms
-            }
-        }
-
-    def ask(self, query, top_k=None):
-        """Convenience method for application querying."""
-        return self.run_pipeline(query, top_k=top_k)
 
     def close(self):
         """Release connection resources."""

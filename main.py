@@ -5,11 +5,10 @@ AI Banking Assistant - Web Application Server
 ======================================================================
 Launches web API service and static frontend connected to all RAG and Agentic nodes:
 
-1. Chat Endpoint: /api/chat (End-to-end processing across 7 nodes with execution trace)
+1. ReAct chat: /api/chat, /api/agent/chat, /api/agent/stream
 2. Config Endpoint: /api/config
 3. Node Folders Management: /api/nodes, /api/nodes/{node_name}/{io_type}/{file_name}
-4. Trigger Pipeline: /api/pipeline/run-folders
-5. Static Frontend: http://127.0.0.1:8000
+4. Static Frontend: http://127.0.0.1:8000
 
 MANDATORY RULES:
 - 0% REGEX LAW: Strictly string methods only (in, split, startswith, endswith, strip, lower, replace, find).
@@ -23,6 +22,7 @@ import time
 import json
 import asyncio
 from pathlib import Path
+from uuid import uuid4
 
 # Ensure UTF-8 on Windows console
 if sys.platform == "win32":
@@ -45,8 +45,8 @@ import uvicorn
 from agent_banking.core.settings import Config
 from agent_banking.pipeline import BankingRAGPipeline
 from agent_banking.node_pipeline import NodePipeline
-from agent_banking.agent_pipeline import extract_query_keywords
-from agent_banking.generator.rag_generator import (
+from agent_banking.agent_pipeline import BankingAgentPipeline
+from agent_banking.langgraph_agent.config.response_profiles import (
     PERSONA_PROFILES,
     TONE_PROFILES,
     FORMAT_PROFILES
@@ -79,8 +79,8 @@ except RuntimeError as lock_err:
     else:
         raise
 
-# Initialize NodePipeline connected with rag_pipeline
-node_pipe = NodePipeline(config=config, rag_pipeline=rag_pipeline)
+# Manage indexing and diagnostic folders.
+node_pipe = NodePipeline()
 
 
 # Pydantic Schemas
@@ -90,7 +90,7 @@ class ChatRequest(BaseModel):
     tone: str | None = "formal"
     format_style: str | None = "standard"
     custom_persona: str | None = ""
-    session_id: str | None = "default_session"
+    session_id: str | None = None
 
 
 # -----------------------------------------------------------------------------
@@ -152,18 +152,10 @@ def get_persona_profiles():
 @app.get("/api/config")
 def get_config():
     total_points = rag_pipeline.vector_store.count()
-    decision_active = False
-    if getattr(config, "ENABLE_DECISION", False):
-        if getattr(config, "DECISION_API_KEY", ""):
-            decision_active = True
-    decision_model_name = getattr(config, "DECISION_MODEL", "")
-
     return {
-        "default_model": config.LLM_MODEL,
+        "default_model": config.AGENT_LLM_MODEL,
         "embedding_model": config.EMBEDDING_MODEL_1024,
         "reranker_model": config.RERANKER_MODEL,
-        "decision_model": decision_model_name,
-        "decision_model_enabled": decision_active,
         "qdrant_collection": config.QDRANT_COLLECTION,
         "points_count": total_points,
         "tracing_enabled": rag_pipeline.tracer.is_phoenix_active,
@@ -174,27 +166,8 @@ def get_config():
             {"id": "vector_db", "name": "Node 3: Vector DB & BM25"},
             {"id": "query_parser", "name": "Node 4: Query Parser"},
             {"id": "retrieval", "name": "Node 5: Hybrid Retrieval"},
-            {"id": "reranking", "name": "Node 6: Cross-Encoder Reranker"},
-            {"id": "generator", "name": "Node 7: Generator & Guardrails"}
+            {"id": "reranking", "name": "Node 6: Cross-Encoder Reranker"}
         ]
-    }
-
-
-@app.get("/api/decision/status")
-def get_decision_status(ping: bool = False):
-    """Check decision model configuration status."""
-    decision_model = getattr(config, "DECISION_MODEL", "default-decision-model")
-    decision_base_url = getattr(config, "DECISION_BASE_URL", "")
-    has_api_key = bool(getattr(config, "DECISION_API_KEY", ""))
-    decision_timeout = float(getattr(config, "DECISION_TIMEOUT", 8.0))
-    return {
-        "status": "disabled",
-        "model": decision_model,
-        "base_url": decision_base_url,
-        "enabled": False,
-        "has_api_key": has_api_key,
-        "timeout": decision_timeout,
-        "note": "Runtime agent/guardrail decision module disabled; chunking uses chunking.decision when configured"
     }
 
 
@@ -225,49 +198,28 @@ def _resolve_chat_style(req: ChatRequest) -> dict:
 
 
 # -----------------------------------------------------------------------------
-# 3. DIRECT CHAT QUERY ACROSS 7 RAG NODES
+# 3. BANKING REACT CHAT
 # -----------------------------------------------------------------------------
-@app.post("/api/chat")
-def handle_chat(req: ChatRequest):
-    query_text = req.message.strip()
-    if not query_text:
-        raise HTTPException(status_code=400, detail="Query message cannot be empty.")
-
-    persona_config = _resolve_chat_style(req)
-
-    try:
-        result = node_pipe.run_single_query_with_node_trace(query_text, persona_config=persona_config)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"RAG pipeline execution error: {e}")
-
-
-# -----------------------------------------------------------------------------
-# 3.1 LANGGRAPH AI AGENT (SELF-REFLECTIVE RAG & BANKING ACTION TOOLS)
-# -----------------------------------------------------------------------------
-_agent_pipeline_instance = None
+_agent_pipeline_instance = BankingAgentPipeline(
+    config=config, use_memory=rag_pipeline.use_memory, rag_pipeline=rag_pipeline
+)
 
 
 def get_agent_pipeline():
-    global _agent_pipeline_instance
-    if _agent_pipeline_instance is None:
-        from agent_banking.agent_pipeline import BankingAgentPipeline
-        _agent_pipeline_instance = BankingAgentPipeline(config=config, use_memory=rag_pipeline.use_memory)
     return _agent_pipeline_instance
 
 
+@app.post("/api/chat")
 @app.post("/api/agent/chat")
 def handle_agent_chat(req: ChatRequest):
     """
-    LangGraph Agentic RAG Endpoint: Intent classification, Self-Reflection, banking tools, and memory.
+    Execute a ReAct turn with session memory.
     """
     query_text = req.message.strip()
     if not query_text:
         raise HTTPException(status_code=400, detail="Query message cannot be empty.")
 
-    session_id = "default_session"
-    if req.session_id:
-        session_id = req.session_id
+    session_id = req.session_id or uuid4().hex
 
     style = _resolve_chat_style(req)
 
@@ -295,18 +247,15 @@ async def stream_agent_chat(req: ChatRequest):
     if query_text == "":
         raise HTTPException(status_code=400, detail="Query message cannot be empty.")
 
-    session_id = "default_session"
-    if req.session_id is not None:
-        if req.session_id != "":
-            session_id = req.session_id
+    session_id = req.session_id or uuid4().hex
 
     style = _resolve_chat_style(req)
 
     async def event_generator():
         final_response_text = ""
-        sub_agent_used = "GENERAL_ADVISOR"
         audit_status_used = "PASS"
-        last_retrieved_chunks = []
+        citations = []
+        sources = []
 
         try:
             agent = get_agent_pipeline()
@@ -319,48 +268,29 @@ async def stream_agent_chat(req: ChatRequest):
                 custom_persona=style["custom_persona"]
             ):
                 for node_name, node_state in step_event.items():
-                    if "sub_agent_role" in node_state:
-                        sub_agent_used = str(node_state["sub_agent_role"])
-
                     if "audit_status" in node_state:
                         audit_status_used = str(node_state["audit_status"])
 
-                    if "retrieved_chunks" in node_state:
-                        last_retrieved_chunks = node_state["retrieved_chunks"]
-
-                    if "final_answer" in node_state:
-                        if node_state["final_answer"]:
-                            final_response_text = str(node_state["final_answer"])
-                    elif "draft_answer" in node_state:
-                        if node_state["draft_answer"]:
-                            if final_response_text == "":
-                                final_response_text = str(node_state["draft_answer"])
-
-                    node_description = node_name
-                    if node_name == "input_guardrail":
-                        node_description = "Validating input safety and resetting turn state..."
-                    elif node_name == "router":
-                        node_description = f"Multi-Agent Supervisor: Routing to {sub_agent_used}..."
-                    elif node_name == "retrieve":
-                        node_description = "Retrieving policy knowledge from Vector DB and BM25..."
-                    elif node_name == "grade_documents":
-                        node_description = "Evaluating relevance of retrieved context documents..."
-                    elif node_name == "rewrite_query":
-                        node_description = "Optimizing search query for improved retrieval precision..."
-                    elif node_name == "banking_tool":
-                        node_description = "Executing banking business action tool..."
-                    elif node_name == "generate":
-                        node_description = "Generating grounded response based on regulatory articles..."
-                    elif node_name == "audit_generation":
-                        node_description = "Auditing citations [Article X, Clause Y] and checking for hallucinations..."
-                    elif node_name == "output_guardrail":
-                        node_description = "Auditing output safety and finalizing response..."
+                    descriptions = {
+                        "input_guardrail": "Đã kiểm tra yêu cầu",
+                        "react_decide": "Đã chọn bước tiếp theo",
+                        "audit_generation": "Đã đối soát trích dẫn",
+                        "output_guardrail": "Đã kiểm tra phản hồi"
+                    }
+                    node_description = descriptions.get(node_name, node_name)
+                    action = node_state.get("last_action")
+                    if action:
+                        node_description = f"{action['kind']} · {action['name']} · {action['status']}"
+                    if node_name == "output_guardrail":
+                        final_response_text = node_state["final_answer"]
+                        citations = node_state["citations"]
+                        sources = node_state["sources"]
 
                     step_payload = {
                         "event_type": "node_progress",
                         "node": node_name,
                         "description": node_description,
-                        "sub_agent": sub_agent_used
+                        "action": action
                     }
                     data_str = json.dumps(step_payload, ensure_ascii=False)
                     yield f"data: {data_str}\n\n"
@@ -376,28 +306,13 @@ async def stream_agent_chat(req: ChatRequest):
                 yield f"data: {token_str}\n\n"
                 await asyncio.sleep(0.015)
 
-            eval_metrics = {
-                "context_precision": 1.0,
-                "faithfulness": 1.0,
-                "answer_relevance": 1.0,
-                "overall_score": 1.0
-            }
-            if hasattr(agent, "evaluator"):
-                if agent.evaluator is not None and len(last_retrieved_chunks) > 0:
-                    kws = extract_query_keywords(query_text)
-                    eval_metrics = agent.evaluator.evaluate_single_case(
-                        question=query_text,
-                        retrieved_chunks=last_retrieved_chunks,
-                        generated_answer=final_response_text,
-                        expected_keywords=kws
-                    )
-
             done_payload = {
                 "event_type": "done",
                 "session_id": session_id,
-                "sub_agent": sub_agent_used,
                 "audit_status": audit_status_used,
-                "evaluation_metrics": eval_metrics,
+                "evaluation_metrics": None,
+                "citations": citations,
+                "sources": sources,
                 "full_answer": final_response_text
             }
             done_str = json.dumps(done_payload, ensure_ascii=False)
@@ -496,21 +411,6 @@ def get_node_file_content(node_name: str, io_type: str, file_name: str):
             return {"file_name": file_name, "is_json": False, "content": raw_text}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unable to read file: {e}")
-
-
-# -----------------------------------------------------------------------------
-# 5. TRIGGER PIPELINE EXECUTION ACROSS NODE FOLDERS
-# -----------------------------------------------------------------------------
-@app.post("/api/pipeline/run-folders")
-def run_folders_pipeline():
-    """
-    Trigger end-to-end processing across all node input/output folders.
-    """
-    return {
-        "status": "SUCCESS",
-        "message": "System operating in Task-Oriented & LangGraph StateGraph mode.",
-        "points_count": rag_pipeline.vector_store.count()
-    }
 
 
 if __name__ == "__main__":

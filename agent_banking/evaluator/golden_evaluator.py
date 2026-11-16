@@ -171,7 +171,7 @@ class GoldenAnswerEvaluator:
             model_name = os.getenv("JUDGE_MODEL", os.getenv("MODEL", ""))
             if not model_name:
                 if model_primary is not None:
-                    model_name = model_primary("generator").model
+                    model_name = model_primary("langgraph_agent").model
             messages = [{"role": "user", "content": prompt}]
             resp = self.chat_client.chat(messages=messages, model=model_name, temperature=0.0)
             

@@ -60,7 +60,6 @@
       }
     }
   },
-  "react_schema_example": "{\"issue_type\": \"nuot_the_atm\"|\"mat_the_khoa_the\", \"user_contact\": \"<sdt>\", \"details\": \"<chi tiết>\"}",
   "output_schema": {
     "type": "object",
     "properties": {

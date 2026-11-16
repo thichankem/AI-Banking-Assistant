@@ -5,7 +5,6 @@ Module-specific parameters are maintained independently in each module's config 
 Complies with 0% Regex Law, Zero Ternary Law, and No Typing Library.
 """
 
-import os
 from agent_banking.core.environment import ROOT_DIR
 
 retrieval_dir = ROOT_DIR / "dataset" / "A_Bank_golden_400"
@@ -48,24 +47,12 @@ from agent_banking.vector_db.config.settings import VectorDBConfig
 from agent_banking.query_parser.config.settings import QueryParserConfig
 from agent_banking.retrieval.config.settings import RetrievalConfig
 from agent_banking.reranking.config.settings import RerankingConfig
-from agent_banking.generator.config.settings import ContextConfig, GeneratorConfig
 from agent_banking.tracing.config.settings import TracingConfig
 from agent_banking.guardrails.config.settings import GuardrailsConfig
 
 
-class DecisionConfig:
-    """Fallback defaults for optional decision settings (chunking uses core.models)."""
-    ENABLE_DECISION = False
-    DECISION_MODEL = os.getenv("DECISION_MODEL", "")
-    DECISION_BASE_URL = os.getenv("DECISION_BASE_URL", os.getenv("BASE_URL", ""))
-    DECISION_API_KEY = os.getenv("DECISION_API_KEY", "")
-    DECISION_TIMEOUT = 8.0
-    DECISION_CONFIDENCE_THRESHOLD = 0.70
-
-
 from agent_banking.langgraph_agent.config.settings import AgentConfig
 from agent_banking.skills.config.settings import SkillsConfig
-from agent_banking.tasks.config.settings import TasksConfig
 from agent_banking.tools.config.settings import ToolsConfig
 
 
@@ -77,14 +64,10 @@ class Config(
     QueryParserConfig,
     RetrievalConfig,
     RerankingConfig,
-    ContextConfig,
-    GeneratorConfig,
     TracingConfig,
     GuardrailsConfig,
-    DecisionConfig,
     AgentConfig,
     SkillsConfig,
-    TasksConfig,
     ToolsConfig
 ):
     """Unified Config class aggregating all modular configurations."""

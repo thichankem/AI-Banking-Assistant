@@ -3,7 +3,7 @@ Banking Skill Registry (JSON-Driven Architecture).
 Design:
 - Automatically scans and loads skills from declarative JSON specification files (*_skill.json).
 - Zero hardcoded skills list or schemas in Python code.
-- Provides skill descriptions for Intent Router and schema definitions for ReAct Engine.
+- Provides skill descriptions and schemas for the ReAct agent.
 
 MANDATORY RULES:
 1. NO __INIT__.PY: Direct module imports.
@@ -16,7 +16,7 @@ MANDATORY RULES:
 import json
 from pathlib import Path
 
-from .base_skill import BaseSkill, SkillMetadata
+from .base_skill import BaseSkill
 from agent_banking.core.settings import Config
 
 
@@ -79,30 +79,3 @@ class SkillRegistry:
                 "triggers": meta.intent_triggers
             })
         return records
-
-    def get_skills_prompt_description(self) -> str:
-        """Export skills description for Intent Router classification prompt."""
-        lines = []
-        for s in self.skills.values():
-            m = s.metadata
-            lines.append(f"- [{m.skill_id}] ({m.display_name}): {m.description}")
-        return "\n".join(lines)
-
-    def get_skills_react_schema(self) -> str:
-        """Export skills and parameter schemas for ReAct reasoning loop directly from JSON."""
-        lines = []
-        for s in self.skills.values():
-            m = s.metadata
-            lines.append(f"Skill: {m.skill_id} ({m.display_name})")
-            lines.append(f"Description: {m.description}")
-            if m.react_schema_example:
-                lines.append(f"JSON Parameters: {m.react_schema_example}")
-            else:
-                param_props = m.parameters_schema.get("properties", {})
-                param_keys = list(param_props.keys())
-                example_dict = {}
-                for pk in param_keys:
-                    example_dict[pk] = f"<{pk}>"
-                lines.append(f"JSON Parameters: {json.dumps(example_dict, ensure_ascii=False)}")
-            lines.append("")
-        return "\n".join(lines)

@@ -182,8 +182,8 @@ def execute_retrieval(retriever_obj, query_obj, top_k=5, filter_dict=None):
     """
     if hasattr(retriever_obj, "retrieve"):
         return retriever_obj.retrieve(query=query_obj, top_k=top_k, filter_dict=filter_dict)
-    elif hasattr(retriever_obj, "step2_hybrid_retrieval"):
-        return retriever_obj.step2_hybrid_retrieval(query_obj, top_k=top_k, filter_dict=filter_dict)
+    elif hasattr(retriever_obj, "retrieve_candidates"):
+        return retriever_obj.retrieve_candidates(query_obj, top_k=top_k, filter_dict=filter_dict)
     else:
         raise AttributeError(f"Retriever engine khong hop le: {type(retriever_obj)}")
 

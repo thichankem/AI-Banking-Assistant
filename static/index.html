@@ -12,7 +12,6 @@
         <header class="chat-header">
             <div class="header-left">
                 <h2>Vietcombank AI Banking Assistant</h2>
-                <span class="sub-agent-badge badge-credit-card">v4.5 Production</span>
             </div>
             <div class="header-right">
                 <button type="button" id="clearChatBtn" class="btn-reset">
@@ -21,60 +20,19 @@
             </div>
         </header>
 
-        <!-- LIVE STEPPER PROGRESS BAR (LANGGRAPH v4.5) -->
         <div class="stepper-container" id="nodeStepper" style="display: none;">
             <div class="stepper-header">
-                <span class="stepper-title">LangGraph Workflow:</span>
-                <span class="stepper-current-desc" id="stepperDesc">Đang khởi tạo luồng xử lý...</span>
-                <span class="sub-agent-badge badge-general-advisor" id="stepperBadge">[SUPERVISOR]</span>
+                <span class="stepper-title">Agent ReAct</span>
+                <span class="stepper-current-desc" id="stepperDesc" role="status"></span>
             </div>
-            <div class="stepper-steps">
-                <div class="step-item" id="step-node0" title="Node 0: Input Guardrail & State Reset">
-                    <div class="step-circle">0</div>
-                    <div class="step-label">Guardrail</div>
-                </div>
-                <div class="step-line"></div>
-                <div class="step-item" id="step-node1" title="Node 1: Multi-Agent Supervisor Router">
-                    <div class="step-circle">1</div>
-                    <div class="step-label">Router</div>
-                </div>
-                <div class="step-line"></div>
-                <div class="step-item" id="step-node2" title="Node 2/5: RAG Search / Banking Tool">
-                    <div class="step-circle">2/5</div>
-                    <div class="step-label">Action/RAG</div>
-                </div>
-                <div class="step-line"></div>
-                <div class="step-item" id="step-node3" title="Node 3/4: Document Grader / Query Rewriter">
-                    <div class="step-circle">3/4</div>
-                    <div class="step-label">Grade/Rewrite</div>
-                </div>
-                <div class="step-line"></div>
-                <div class="step-item" id="step-node6" title="Node 6: Vietcombank Persona Generator">
-                    <div class="step-circle">6</div>
-                    <div class="step-label">Generate</div>
-                </div>
-                <div class="step-line"></div>
-                <div class="step-item" id="step-node7" title="Node 7: Citation & Groundedness Audit">
-                    <div class="step-circle">7</div>
-                    <div class="step-label">Audit</div>
-                </div>
-                <div class="step-line"></div>
-                <div class="step-item" id="step-node8" title="Node 8: Output Guardrail & Verification">
-                    <div class="step-circle">8</div>
-                    <div class="step-label">Output</div>
-                </div>
-            </div>
+            <ul id="agentActions" class="agent-actions" aria-label="Hành động của agent"></ul>
         </div>
 
         <!-- CHAT MESSAGES -->
         <main class="chat-messages" id="chatMessages">
             <div class="message bot-message">
                 <div class="bubble">
-                    <div style="margin-bottom: 8px;">
-                        <span class="sub-agent-badge badge-general-advisor">[GENERAL_ADVISOR]</span>
-                    </div>
                     <p>Kính chào Quý khách! Tôi là <strong>Trợ lý AI chuyên trách của Ngân hàng TMCP Ngoại thương Việt Nam (Vietcombank)</strong>.</p>
-                    <p>Hệ thống phiên bản <strong>v4.5</strong> đã được tích hợp bộ điều phối Multi-Agent Supervisor, công cụ tính khấu hao khoản vay, thẩm định sinh trắc học theo <strong>Quyết định 2345/QĐ-NHNN</strong>, tra cứu tỷ giá ngoại tệ, tính lãi suất tiết kiệm và tự động kiểm toán trích dẫn nguồn quy chế.</p>
                     <p>Quý khách cần hỗ trợ thông tin gì hôm nay ạ?</p>
                 </div>
             </div>

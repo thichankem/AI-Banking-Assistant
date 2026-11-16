@@ -150,7 +150,7 @@ class SemanticBankingGuardrail:
                 self.embedder = BankingEmbedder(
                     dimension=getattr(Config, "EMBEDDING_DIM", 1024),
                     model_name=getattr(Config, "EMBEDDING_MODEL_1024", getattr(Config, "EMBEDDING_MODEL", "")),
-                    api_key=getattr(Config, "LLM_API_KEY", ""),
+                    api_key=Config.AGENT_LLM_API_KEY,
                     embedding_url=getattr(Config, "EMBEDDING_URL", "")
                 )
                 _GLOBAL_EMBEDDER = self.embedder
