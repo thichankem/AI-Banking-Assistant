@@ -21,7 +21,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent_banking.chunking.run_chunking import atomic_json, run_auto_chunking
 from agent_banking.embedding.run_embedding import run_auto_embedding
 from agent_banking.vector_db.run_vector_db import run_auto_indexing
-from agent_banking.query_parser.run_query_parser import run_auto_query_parser
 from agent_banking.retrieval.run_retrieval import run_auto_retrieval
 from agent_banking.reranking.run_reranking import run_auto_reranking
 from agent_banking.guardrails.run_guardrails import run_auto_guardrails
@@ -44,7 +43,7 @@ class NodePipeline:
     def get_node_folders(self) -> dict:
         """Get input and output directories for all pipeline nodes."""
         nodes = [
-            "chunking", "embedding", "vector_db", "query_parser",
+            "chunking", "embedding", "vector_db",
             "retrieval", "reranking", "guardrails",
             "tracing", "skills", "tools"
         ]
@@ -119,19 +118,8 @@ class NodePipeline:
                 **options,
             )
             return {"node": "vector_db", "manifest": vdb}
-        elif clean_name in ("4", "query_parser"):
-            qp_in = self._resolve_node_input(
-                f["query_parser"]["input"],
-                ["queries.json", "latest_query.json", "queries.txt"]
-            )
-            qp = run_auto_query_parser(
-                input_file=qp_in,
-                output_dir=f["query_parser"]["output"],
-                force=force
-            )
-            return {"node": "query_parser", "count": len(qp)}
         elif clean_name in ("5", "retrieval"):
-            ret_in = self._resolve_node_input(f["retrieval"]["input"], ["parsed_queries.json"])
+            ret_in = self._resolve_node_input(f["retrieval"]["input"], ["queries.json", "queries.txt", "latest_query.json", "parsed_queries.json"])
             ret = run_auto_retrieval(
                 input_file=ret_in,
                 output_dir=f["retrieval"]["output"],
@@ -183,7 +171,7 @@ class NodePipeline:
             )
             return {"node": "tools", "count": len(tools)}
         else:
-            print(f"[NodePipeline] Unrecognized node: '{node_name}'. Valid options: chunking, embedding, vector_db, query_parser, retrieval, reranking, guardrails, tracing, skills, tools")
+            print(f"[NodePipeline] Unrecognized node: '{node_name}'. Valid options: chunking, embedding, vector_db, retrieval, reranking, guardrails, tracing, skills, tools")
             return {"error": "UNKNOWN_NODE"}
 
     def run_indexing_pipeline(self, force: bool = False, max_files: int | None = None) -> dict:
@@ -295,7 +283,7 @@ class NodePipeline:
 def main():
     parser = argparse.ArgumentParser(description="AI Banking Assistant - Auto Folder-to-Folder Pipeline")
     parser.add_argument("--auto", action="store_true", help="Update the knowledge index")
-    parser.add_argument("--node", type=str, default=None, help="Run a specific single node (chunking, embedding, vector_db, query_parser, retrieval, reranking, guardrails, tracing, skills, tools)")
+    parser.add_argument("--node", type=str, default=None, help="Run a specific single node (chunking, embedding, vector_db, retrieval, reranking, guardrails, tracing, skills, tools)")
     parser.add_argument("--watch", action="store_true", help="Run automatic input folder watcher daemon")
     parser.add_argument("--force", action="store_true", help="Clear state caches and re-run all nodes from scratch")
     parser.add_argument("--max-files", type=int, default=None, help="Limit maximum number of document files during chunking")

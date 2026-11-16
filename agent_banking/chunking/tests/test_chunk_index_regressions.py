@@ -87,7 +87,7 @@ def test_scoped_prune_resolves_only_unique_legacy_aliases(tmp_path):
 
 
 def test_publication_variants_keep_independent_payloads_and_vectors(tmp_path):
-    from agent_banking.langgraph_agent.react import BankingReActNodes
+    from agent_banking.agent.react import BankingReActNodes
     from agent_banking.reranking.run_reranking import extract_candidate_ids
     from agent_banking.retrieval.hybrid_retriever import HybridRetriever
 

@@ -5,7 +5,7 @@ AI Banking Assistant - Web Application Server
 ======================================================================
 Launches web API service and static frontend connected to all RAG and Agentic nodes:
 
-1. ReAct chat: /api/chat, /api/agent/chat, /api/agent/stream
+1. Deep agent chat: /api/chat, /api/agent/chat, /api/agent/stream
 2. Config Endpoint: /api/config
 3. Node Folders Management: /api/nodes, /api/nodes/{node_name}/{io_type}/{file_name}
 4. Static Frontend: http://127.0.0.1:8000
@@ -46,7 +46,7 @@ from agent_banking.core.settings import Config
 from agent_banking.pipeline import BankingRAGPipeline
 from agent_banking.node_pipeline import NodePipeline
 from agent_banking.agent_pipeline import BankingAgentPipeline
-from agent_banking.langgraph_agent.config.response_profiles import (
+from agent_banking.agent.config.response_profiles import (
     PERSONA_PROFILES,
     TONE_PROFILES,
     FORMAT_PROFILES
@@ -154,6 +154,7 @@ def get_config():
     total_points = rag_pipeline.vector_store.count()
     return {
         "default_model": config.AGENT_LLM_MODEL,
+        "agent_mode": "deep",
         "embedding_model": config.EMBEDDING_MODEL_1024,
         "reranker_model": config.RERANKER_MODEL,
         "qdrant_collection": config.QDRANT_COLLECTION,
@@ -164,9 +165,8 @@ def get_config():
             {"id": "chunking", "name": "Node 1: Chunking"},
             {"id": "embedding", "name": "Node 2: Embedding"},
             {"id": "vector_db", "name": "Node 3: Vector DB & BM25"},
-            {"id": "query_parser", "name": "Node 4: Query Parser"},
-            {"id": "retrieval", "name": "Node 5: Hybrid Retrieval"},
-            {"id": "reranking", "name": "Node 6: Cross-Encoder Reranker"}
+            {"id": "retrieval", "name": "Hybrid Retrieval"},
+            {"id": "reranking", "name": "Cross-Encoder Reranker"}
         ]
     }
 
@@ -198,7 +198,7 @@ def _resolve_chat_style(req: ChatRequest) -> dict:
 
 
 # -----------------------------------------------------------------------------
-# 3. BANKING REACT CHAT
+# 3. BANKING DEEP AGENT
 # -----------------------------------------------------------------------------
 _agent_pipeline_instance = BankingAgentPipeline(
     config=config, use_memory=rag_pipeline.use_memory, rag_pipeline=rag_pipeline
@@ -213,7 +213,7 @@ def get_agent_pipeline():
 @app.post("/api/agent/chat")
 def handle_agent_chat(req: ChatRequest):
     """
-    Execute a ReAct turn with session memory.
+    Execute a deep agent turn with persistent session memory.
     """
     query_text = req.message.strip()
     if not query_text:
@@ -234,8 +234,9 @@ def handle_agent_chat(req: ChatRequest):
             custom_persona=style["custom_persona"]
         )
         return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"LangGraph Agent execution error: {e}")
+    except Exception as error:
+        print(f"[Deep agent chat] {type(error).__name__}")
+        raise HTTPException(status_code=500, detail="Tạm thời chưa thể hoàn tất phản hồi.") from None
 
 
 @app.post("/api/agent/stream")
@@ -256,6 +257,7 @@ async def stream_agent_chat(req: ChatRequest):
         audit_status_used = "PASS"
         citations = []
         sources = []
+        final_metadata = {}
 
         try:
             agent = get_agent_pipeline()
@@ -273,11 +275,17 @@ async def stream_agent_chat(req: ChatRequest):
 
                     descriptions = {
                         "input_guardrail": "Đã kiểm tra yêu cầu",
-                        "react_decide": "Đã chọn bước tiếp theo",
-                        "audit_generation": "Đã đối soát trích dẫn",
+                        "context_prepare": "Đã chuẩn bị ngữ cảnh phiên",
+                        "deep_decide": "Đã chọn bước tiếp theo",
+                        "plan_update": "Đã cập nhật kế hoạch",
+                        "subagent": "Đã nhận kết quả từ subagent",
+                        "memory_update": "Đã xử lý bộ nhớ",
+                        "answer_review": "Đã kiểm tra dự thảo",
                         "output_guardrail": "Đã kiểm tra phản hồi"
                     }
                     node_description = descriptions.get(node_name, node_name)
+                    if node_name == "answer_review" and node_state["audit_status"] == "RETRY":
+                        node_description = "Cần bổ sung hoặc sửa sau kiểm tra"
                     action = node_state.get("last_action")
                     if action:
                         node_description = f"{action['kind']} · {action['name']} · {action['status']}"
@@ -285,6 +293,9 @@ async def stream_agent_chat(req: ChatRequest):
                         final_response_text = node_state["final_answer"]
                         citations = node_state["citations"]
                         sources = node_state["sources"]
+                        final_metadata = {
+                            key: node_state[key] for key in ("plan", "delegations", "review_outcomes", "memory")
+                        }
 
                     step_payload = {
                         "event_type": "node_progress",
@@ -292,6 +303,10 @@ async def stream_agent_chat(req: ChatRequest):
                         "description": node_description,
                         "action": action
                     }
+                    if "plan" in node_state:
+                        step_payload["plan"] = node_state["plan"]
+                    if node_name == "answer_review":
+                        step_payload["audit_status"] = node_state["audit_status"]
                     data_str = json.dumps(step_payload, ensure_ascii=False)
                     yield f"data: {data_str}\n\n"
                     await asyncio.sleep(0.02)
@@ -313,15 +328,17 @@ async def stream_agent_chat(req: ChatRequest):
                 "evaluation_metrics": None,
                 "citations": citations,
                 "sources": sources,
-                "full_answer": final_response_text
+                "full_answer": final_response_text,
+                **final_metadata
             }
             done_str = json.dumps(done_payload, ensure_ascii=False)
             yield f"data: {done_str}\n\n"
 
         except Exception as err:
+            print(f"[Deep agent stream] {type(err).__name__}")
             error_payload = {
                 "event_type": "error",
-                "message": f"Service connection error: {err}"
+                "message": "Tạm thời chưa thể hoàn tất phản hồi."
             }
             err_str = json.dumps(error_payload, ensure_ascii=False)
             yield f"data: {err_str}\n\n"

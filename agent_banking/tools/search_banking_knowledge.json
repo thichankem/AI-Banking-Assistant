@@ -8,7 +8,7 @@
     "properties": {
       "query": {
         "type": "string",
-        "description": "Nội dung câu hỏi hoặc từ khóa cần tra cứu trong kho tài liệu A-Bank"
+        "description": "Câu tìm kiếm tự chứa chủ đề, đối tượng và điều kiện còn áp dụng. Với câu nối tiếp, dùng đối tượng xác định được từ ngữ cảnh của phiên."
       },
       "top_k": {
         "type": "integer",

@@ -1,0 +1,32 @@
+{
+  "name": "analyze_banking_query",
+  "display_name": "Phân tích truy vấn ngân hàng",
+  "category": "KNOWLEDGE",
+  "description": "Chuẩn hóa câu hỏi, mở rộng từ viết tắt ngân hàng đã biết, báo nghĩa có thể nhầm và trích từ khóa, số tiền, tham chiếu văn bản. Các trường trả về là dữ liệu từ câu hỏi và gợi ý tìm kiếm. RAG đã tự chuẩn hóa khi gọi tra cứu.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500,
+        "description": "Câu hỏi hoặc cụm từ ngân hàng cần phân tích."
+      }
+    },
+    "required": [
+      "query"
+    ]
+  },
+  "handler": {
+    "module": "agent_banking.tools.extensions.banking_query",
+    "function": "analyze_banking_query"
+  },
+  "policy": {
+    "access": "read_only",
+    "workers": [
+      "policy_research",
+      "financial_analysis",
+      "service_research"
+    ]
+  }
+}

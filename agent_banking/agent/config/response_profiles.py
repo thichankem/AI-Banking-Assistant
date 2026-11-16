@@ -3,11 +3,11 @@
 from importlib import import_module
 
 try:
-    _profiles = import_module("agent_banking.langgraph_agent.config.prompts")
+    _profiles = import_module("agent_banking.agent.config.prompts")
 except ModuleNotFoundError as exc:
-    if exc.name != "agent_banking.langgraph_agent.config.prompts":
+    if exc.name != "agent_banking.agent.config.prompts":
         raise
-    from agent_banking.langgraph_agent.config import default_profiles as _profiles
+    from agent_banking.agent.config import default_profiles as _profiles
 
 
 PERSONA_PROFILES = _profiles.PERSONA_PROFILES

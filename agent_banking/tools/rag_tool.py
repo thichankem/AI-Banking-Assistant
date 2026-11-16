@@ -2,7 +2,7 @@
 """
 Banking RAG Tool for LangGraph / Agentic Workflows
 ======================================================================
-Encapsulates RAG pipeline (Query Parser -> Hybrid Retrieval -> Cross-Encoder Reranker)
+Encapsulates RAG pipeline (query preparation, hybrid retrieval and reranking)
 into a standard tool for AI Agents:
 - Reuses classes and logic from pipeline.py.
 - Independent of LangChain Runnable or BaseRetriever.
@@ -47,7 +47,7 @@ class BankingRAGTool:
             }
 
         # 1. Parse Query & Acronym Normalization
-        parsed_q = self.pipeline.query_parser.parse(clean_query)
+        parsed_q = self.pipeline.parse_query(clean_query)
         search_query = parsed_q.normalized_query
 
         # 2. Hybrid Retrieval (Dense Vector + BM25 Okapi with RRF k=60)

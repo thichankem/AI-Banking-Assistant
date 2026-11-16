@@ -56,7 +56,7 @@ def main():
         "-i",
         type=str,
         default=None,
-        help="Custom path to parsed queries JSON"
+        help="Path to raw or preprocessed query input (JSON or TXT)"
     )
     parser.add_argument(
         "--output",

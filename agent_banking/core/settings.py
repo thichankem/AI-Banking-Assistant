@@ -44,14 +44,13 @@ class PathConfig:
 from agent_banking.chunking.config.settings import ChunkingConfig
 from agent_banking.embedding.config.settings import EmbeddingConfig
 from agent_banking.vector_db.config.settings import VectorDBConfig
-from agent_banking.query_parser.config.settings import QueryParserConfig
 from agent_banking.retrieval.config.settings import RetrievalConfig
 from agent_banking.reranking.config.settings import RerankingConfig
 from agent_banking.tracing.config.settings import TracingConfig
 from agent_banking.guardrails.config.settings import GuardrailsConfig
 
 
-from agent_banking.langgraph_agent.config.settings import AgentConfig
+from agent_banking.agent.config.settings import AgentConfig
 from agent_banking.skills.config.settings import SkillsConfig
 from agent_banking.tools.config.settings import ToolsConfig
 
@@ -61,7 +60,6 @@ class Config(
     ChunkingConfig,
     EmbeddingConfig,
     VectorDBConfig,
-    QueryParserConfig,
     RetrievalConfig,
     RerankingConfig,
     TracingConfig,

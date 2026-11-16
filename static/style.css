@@ -262,6 +262,7 @@ tr:last-child td {
     font-size: 0.82rem;
 }
 
+.agent-plan,
 .agent-actions {
     margin: 8px 0 0;
     padding-left: 20px;
@@ -270,6 +271,7 @@ tr:last-child td {
     overflow-wrap: anywhere;
 }
 
+.agent-plan:empty,
 .agent-actions:empty {
     display: none;
 }

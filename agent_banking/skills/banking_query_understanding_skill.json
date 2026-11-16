@@ -1,0 +1,24 @@
+{
+  "skill_id": "banking_query_understanding",
+  "display_name": "Làm rõ câu hỏi ngân hàng",
+  "category": "KNOWLEDGE",
+  "description": "Dùng khi câu hỏi có chữ viết tắt, thuật ngữ hoặc ý tìm kiếm cần làm rõ. Đọc các nghĩa có thể có và hỏi ngắn nếu việc chọn nghĩa sẽ đổi câu trả lời. Dùng kết quả để tìm tài liệu hoặc chọn phép tính phù hợp.",
+  "parameters_schema": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500,
+        "description": "Câu hỏi hoặc cụm từ ngân hàng cần phân tích."
+      }
+    },
+    "required": [
+      "query"
+    ]
+  },
+  "execution": {
+    "type": "registered_tool",
+    "tool": "analyze_banking_query"
+  }
+}

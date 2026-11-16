@@ -22,7 +22,7 @@ from .embedding.embedder import BankingEmbedder
 from .vector_db.qdrant_store import (
     QdrantBankingStore, QdrantVectorStore, mark_publication_chunks, publication_scope,
 )
-from .query_parser.rag_query_parser import BankingQueryParser, ParsedQuery
+from .tools.extensions.banking_query import ParsedQuery, parse_banking_query
 from .retrieval.hybrid_retriever import HybridRetriever
 from .reranking.rag_reranker import BankingReranker
 from .tracing.tracer import BankingTracer
@@ -82,8 +82,7 @@ class BankingRAGPipeline:
         )
 
         # 4. Initialize Query Parser, Hybrid Retriever (RRF) & Reranker
-        print(f"[4/4] Initializing Query Parser & Hybrid Retriever (RRF k={self.config.RRF_K})...")
-        self.query_parser = BankingQueryParser()
+        print(f"[4/4] Initializing Hybrid Retriever (RRF k={self.config.RRF_K})...")
         self.retriever = HybridRetriever(
             vector_store=self.vector_store,
             embedding_model=self.embedder,
@@ -281,8 +280,7 @@ class BankingRAGPipeline:
         """
         Normalize domain acronyms (eKYC, TKTT, Smart OTP, Digibank) and extract keywords.
         """
-        parsed = self.query_parser.parse(query)
-        return parsed
+        return parse_banking_query(query)
 
     def retrieve_candidates(
         self,

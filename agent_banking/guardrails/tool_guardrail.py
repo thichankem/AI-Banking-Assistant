@@ -316,7 +316,26 @@ class BankingToolGuardrail:
             "error_message": None
         }
 
-    def guard_tool_call(self, tool_name, params):
+    def _guard_readonly(self, params):
+        def scrub(value):
+            if isinstance(value, str):
+                return self._sanitize_string(value)
+            if isinstance(value, list):
+                return [scrub(item) for item in value]
+            if isinstance(value, dict):
+                return {key: scrub(item) for key, item in value.items()}
+            if isinstance(value, float) and not math.isfinite(value):
+                raise ValueError("Non-finite number")
+            return value
+
+        try:
+            if not isinstance(params, dict):
+                raise ValueError("Arguments must be an object")
+            return {"is_safe": True, "sanitized_params": scrub(params), "error_message": None}
+        except ValueError:
+            return {"is_safe": False, "sanitized_params": {}, "error_message": "Invalid read-only tool arguments."}
+
+    def guard_tool_call(self, tool_name, params, *, registered_readonly=False):
         """
         Coordinates safety checks before executing any Banking Tool.
         Enforces strict Fail-Closed policy for unauthorized tools and sensitive transactions.
@@ -341,6 +360,9 @@ class BankingToolGuardrail:
                         f"requires multi-factor authentication and cannot be triggered automatically by AI Assistant."
                     )
                 }
+
+        if registered_readonly:
+            return self._guard_readonly(params)
 
         # 2. Route by tool family
         if "loan" in name_lower or "amortization" in name_lower:

@@ -1,178 +1,189 @@
-"""
-Banking Tool Registry (JSON-Driven Architecture).
-Design:
-- Scans and loads tool definitions from JSON specification files (*.json).
-- Exports standard Tool Calling and execution specifications.
-- Coordinates safe execution with parameter validation.
+"""Discover tool specs and dispatch to project-owned banking handlers."""
 
-MANDATORY RULES:
-1. NO __INIT__.PY: Direct module imports.
-2. NO TYPING LIBRARY: Native Python types only.
-3. ZERO TERNARY: Explicit if/else only.
-4. 0% REGEX LAW: Absolutely no regular expressions.
-5. KEEP IT SIMPLE: Clear, direct, readable code.
-"""
-
-import json
-import time
+from ast import FunctionDef, parse
+from importlib import import_module, invalidate_caches
+from importlib.util import find_spec
 from pathlib import Path
+import time
+
+from jsonschema import Draft202012Validator
+
+from agent_banking.core.plugin_specs import check_parameters, load_specs, public_name
+from agent_banking.guardrails.tool_guardrail import (
+    SENSITIVE_UNAPPROVED_ACTIONS, get_tool_guardrail
+)
+
+
+BANKING_MODULE = "agent_banking.tools.banking_api_tools"
+EXTENSIONS_MODULE = "agent_banking.tools.extensions"
+RAG_HANDLER = {"module": "agent_banking.tools.rag_tool", "class": "BankingRAGTool", "method": "execute"}
+
+# Retain the fixture runner's aliases, coercions and defaults for existing tools.
+BUILTIN_ARGS = {
+    "calculate_loan_amortization": {
+        "principal_vnd": (500000000.0, float), "annual_rate_percent": (7.5, float), "term_months": (12, int)
+    },
+    "calculate_savings_profit": {"amount_vnd": (100000000.0, float), "term_months": (6, int)},
+    "get_interest_rates": {"deposit_type": ("vnd", None)},
+    "get_foreign_exchange_rates": {"currency": ("USD", None)},
+    "check_biometric_compliance_qd2345": {
+        "single_tx_amount_vnd": (0.0, float, "transaction_amount"),
+        "daily_cumulative_amount_vnd": (0.0, float, "daily_accumulated_amount"),
+        "is_first_time_new_device": (False, bool, "is_new_device"),
+        "has_verified_chip_cccd": (True, bool, "has_cccd_chip_nfc")
+    },
+    "create_support_ticket": {
+        "customer_name": ("KHACH_HANG_HOTLINE", None, "user_contact"),
+        "issue_type": ("nuot_the_atm", None),
+        "description": ("Sự cố tiếp nhận qua AI Agent", None, "details"), "priority": ("NORMAL", None)
+    },
+    "parse_vietnamese_financial_params": {"query": ("", None)},
+    "check_complain_count": {"complain_count": (0, int)},
+    "transfer_to_agent": {
+        "business_process": ("request_human_agent", str, "reason"),
+        "customer_segment": ("individual", str, "department")
+    },
+    "rate_agent_csat": {
+        "rating_score": (5, int, "rating"), "user_message": ("", str, "feedback"), "channel": ("web", str)
+    },
+    "deflect_competitor_comparison": {"competitor_name": ("", str), "query": ("", str, "product_type")}
+}
+ONCE_PER_TURN = {"create_support_ticket", "transfer_to_agent", "rate_agent_csat"}
+
+
+def is_extension(spec: dict) -> bool:
+    return spec["handler"]["module"].startswith(EXTENSIONS_MODULE + ".")
 
 
 class BankingToolRegistry:
-    """Centralized manager for banking tools defined declaratively via JSON."""
-
-    def __init__(self, tools_dir: str | Path | None = None, pipeline_instance=None):
+    def __init__(self, tools_dir=None, pipeline_instance=None):
+        self.tools_dir = Path(__file__).resolve().parent
         if tools_dir is not None:
             self.tools_dir = Path(tools_dir)
-        else:
-            self.tools_dir = Path(__file__).resolve().parent
-
         self.pipeline_instance = pipeline_instance
-        self.tools_definitions: dict[str, dict] = {}
-        self._load_tools_from_json()
 
-    def _load_tools_from_json(self) -> None:
-        """Load all tool JSON specification files."""
-        if not self.tools_dir.exists():
+    def _extension_file(self, spec: dict) -> Path:
+        handler = spec["handler"]
+        stem = handler["module"].removeprefix(EXTENSIONS_MODULE + ".")
+        if not public_name(stem) or not public_name(handler.get("function")):
+            raise ValueError("Invalid extension handler")
+        parent = self.tools_dir / "extensions"
+        path = parent / (stem + ".py")
+        if parent.is_symlink() or path.is_symlink() or not path.is_file():
+            raise ValueError("Extension source is missing")
+        return path.resolve()
+
+    def _validate(self, spec: dict) -> None:
+        check_parameters(spec.get("parameters"))
+        name = spec["name"]
+        handler = spec.get("handler")
+        if not isinstance(handler, dict):
+            raise ValueError("Missing handler")
+        if name == "search_banking_knowledge" and handler == RAG_HANDLER:
             return
+        if name in BUILTIN_ARGS and handler == {"module": BANKING_MODULE, "function": name}:
+            return
+        if name in BUILTIN_ARGS or name == "search_banking_knowledge":
+            raise ValueError("Built-in tool names are reserved")
+        if not isinstance(handler.get("module"), str) or not is_extension(spec):
+            raise ValueError("Handler is outside the extension namespace")
+        if set(handler) != {"module", "function"}:
+            raise ValueError("Extension handlers must be functions")
+        policy = spec.get("policy")
+        if not isinstance(policy, dict) or policy.get("access") != "read_only":
+            raise ValueError("New extensions require a read-only policy")
+        workers = policy.get("workers", [])
+        if not isinstance(workers, list) or not all(public_name(role) for role in workers):
+            raise ValueError("Invalid worker allowlist")
+        if any(action in name.lower() for action in SENSITIVE_UNAPPROVED_ACTIONS):
+            raise ValueError("Sensitive action is outside the extension policy")
+        path = self._extension_file(spec)
+        try:
+            tree = parse(path.read_bytes(), filename=path.name)
+        except SyntaxError as error:
+            raise ValueError("Invalid extension source") from error
+        if not any(isinstance(node, FunctionDef) and node.name == handler["function"] for node in tree.body):
+            raise ValueError("Extension handler needs a top-level function")
 
-        json_files = list(self.tools_dir.glob("*.json"))
-        for jf in json_files:
-            if jf.name == "tools_manifest.json":
-                continue
-            try:
-                with open(jf, "r", encoding="utf-8") as f:
-                    tool_def = json.load(f)
-                tool_name = tool_def.get("name", jf.stem)
-                self.tools_definitions[tool_name] = tool_def
-            except Exception as e:
-                print(f"⚠️ Failed to load tool from {jf.name}: {e}")
+    def snapshot(self) -> dict:
+        return load_specs(self.tools_dir, "*.json", "name", self._validate)
 
     def list_tools(self) -> list[dict]:
-        """Return summary list of all registered tools."""
-        result = []
-        for name, t in self.tools_definitions.items():
-            result.append({
-                "name": name,
-                "display_name": t.get("display_name", name),
-                "category": t.get("category", "GENERAL"),
-                "description": t.get("description", "")
-            })
-        return result
+        return [
+            {
+                "name": name, "display_name": spec.get("display_name", name),
+                "category": spec.get("category", "GENERAL"), "description": spec.get("description", "")
+            }
+            for name, spec in self.snapshot().items()
+        ]
 
     def get_tool_definition(self, name: str) -> dict | None:
-        """Get full JSON specification of a tool."""
-        return self.tools_definitions.get(name)
+        return self.snapshot().get(name)
 
     def get_tool_specs(self) -> list[dict]:
-        """Export tool specifications conforming to standard Tool Calling specifications."""
-        specs = []
-        for name, t in self.tools_definitions.items():
-            specs.append({
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "description": t.get("description", ""),
-                    "parameters": t.get("parameters", {"type": "object", "properties": {}})
-                }
-            })
-        return specs
+        return [
+            {"type": "function", "function": {
+                "name": name, "description": spec.get("description", ""), "parameters": spec["parameters"]
+            }}
+            for name, spec in self.snapshot().items()
+        ]
 
-    def execute_tool(self, name: str, params: dict) -> dict:
-        """Execute a tool by name and parameter payload."""
-        start_t = time.perf_counter()
-        tool_def = self.tools_definitions.get(name)
-        if not tool_def:
-            return {
-                "status": "ERROR",
-                "message": f"Tool '{name}' not found in registry.",
-                "latency_ms": 0.0
-            }
+    def _invoke(self, spec: dict, params: dict):
+        name = spec["name"]
+        handler = spec["handler"]
+        if handler == RAG_HANDLER:
+            from agent_banking.tools.rag_tool import BankingRAGTool
 
+            return BankingRAGTool(pipeline_instance=self.pipeline_instance).execute(
+                query=params.get("query", ""), top_k=params.get("top_k", 3)
+            )
+        if not is_extension(spec):
+            arguments = {}
+            for key, (default, convert, *aliases) in BUILTIN_ARGS[name].items():
+                value = params.get(key, default)
+                if key not in params and aliases:
+                    value = params.get(aliases[0], default)
+                if convert is not None:
+                    value = convert(value)
+                arguments[key] = value
+            return getattr(import_module(BANKING_MODULE), handler["function"])(**arguments)
+
+        result = get_tool_guardrail().guard_tool_call(name, params, registered_readonly=True)
+        if not result["is_safe"]:
+            raise ValueError("Tool guard rejected arguments")
+        safe_params = result["sanitized_params"]
+        schema = {**spec["parameters"], "additionalProperties": False}
+        if not Draft202012Validator(schema).is_valid(safe_params):
+            raise ValueError("Tool arguments do not match the schema")
+
+        path = self._extension_file(spec)
+        invalidate_caches()
+        origin = find_spec(handler["module"])
+        if origin is None or not origin.origin or Path(origin.origin).resolve() != path:
+            raise ValueError("Unexpected extension module origin")
+        module = import_module(handler["module"])
+        function = getattr(module, handler["function"])
+        if not callable(function) or getattr(function, "__module__", None) != module.__name__:
+            raise ValueError("Handler must be defined in the extension module")
+        return function(**safe_params)
+
+    def execute_tool(self, name: str, params: dict, *, definition=None) -> dict:
+        start = time.perf_counter()
+        spec = definition
+        if spec is None:
+            spec = self.get_tool_definition(name)
+        if spec is None or spec["name"] != name:
+            return {"status": "ERROR", "message": f"Tool '{name}' not found in registry.", "latency_ms": 0.0}
         try:
-            if name == "search_banking_knowledge":
-                from agent_banking.tools.rag_tool import BankingRAGTool
-                rag_tool = BankingRAGTool(pipeline_instance=self.pipeline_instance)
-                q = params.get("query", "")
-                k = params.get("top_k", 3)
-                result = rag_tool.execute(query=q, top_k=k)
-            elif name == "calculate_loan_amortization":
-                from agent_banking.tools.banking_api_tools import calculate_loan_amortization
-                p = float(params.get("principal_vnd", 500000000.0))
-                r = float(params.get("annual_rate_percent", 7.5))
-                m = int(params.get("term_months", 12))
-                result = calculate_loan_amortization(principal_vnd=p, annual_rate_percent=r, term_months=m)
-            elif name == "calculate_savings_profit":
-                from agent_banking.tools.banking_api_tools import calculate_savings_profit
-                amt = float(params.get("amount_vnd", 100000000.0))
-                m = int(params.get("term_months", 6))
-                result = calculate_savings_profit(amount_vnd=amt, term_months=m)
-            elif name == "get_interest_rates":
-                from agent_banking.tools.banking_api_tools import get_interest_rates
-                dep = params.get("deposit_type", "vnd")
-                result = get_interest_rates(deposit_type=dep)
-            elif name == "get_foreign_exchange_rates":
-                from agent_banking.tools.banking_api_tools import get_foreign_exchange_rates
-                curr = params.get("currency", "USD")
-                result = get_foreign_exchange_rates(currency=curr)
-            elif name == "check_biometric_compliance_qd2345":
-                from agent_banking.tools.banking_api_tools import check_biometric_compliance_qd2345
-                stx = float(params.get("single_tx_amount_vnd", params.get("transaction_amount", 0.0)))
-                dtx = float(params.get("daily_cumulative_amount_vnd", params.get("daily_accumulated_amount", 0.0)))
-                ndev = bool(params.get("is_first_time_new_device", params.get("is_new_device", False)))
-                chip = bool(params.get("has_verified_chip_cccd", params.get("has_cccd_chip_nfc", True)))
-                result = check_biometric_compliance_qd2345(
-                    single_tx_amount_vnd=stx,
-                    daily_cumulative_amount_vnd=dtx,
-                    is_first_time_new_device=ndev,
-                    has_verified_chip_cccd=chip
-                )
-            elif name == "create_support_ticket":
-                from agent_banking.tools.banking_api_tools import create_support_ticket
-                cname = params.get("customer_name", params.get("user_contact", "KHACH_HANG_HOTLINE"))
-                itype = params.get("issue_type", "nuot_the_atm")
-                desc = params.get("description", params.get("details", "Sự cố tiếp nhận qua AI Agent"))
-                prio = params.get("priority", "NORMAL")
-                result = create_support_ticket(customer_name=cname, issue_type=itype, description=desc, priority=prio)
-            elif name == "parse_vietnamese_financial_params":
-                from agent_banking.tools.banking_api_tools import parse_vietnamese_financial_params
-                q = params.get("query", "")
-                result = parse_vietnamese_financial_params(query=q)
-            elif name == "check_complain_count":
-                from agent_banking.tools.banking_api_tools import check_complain_count
-                cnt = int(params.get("complain_count", 0))
-                result = check_complain_count(complain_count=cnt)
-            elif name == "transfer_to_agent":
-                from agent_banking.tools.banking_api_tools import transfer_to_agent
-                bproc = str(params.get("business_process", params.get("reason", "request_human_agent")))
-                cseg = str(params.get("customer_segment", params.get("department", "individual")))
-                result = transfer_to_agent(business_process=bproc, customer_segment=cseg)
-            elif name == "rate_agent_csat":
-                from agent_banking.tools.banking_api_tools import rate_agent_csat
-                rate = int(params.get("rating_score", params.get("rating", 5)))
-                msg = str(params.get("user_message", params.get("feedback", "")))
-                chan = str(params.get("channel", "web"))
-                result = rate_agent_csat(rating_score=rate, user_message=msg, channel=chan)
-            elif name == "deflect_competitor_comparison":
-                from agent_banking.tools.banking_api_tools import deflect_competitor_comparison
-                comp = str(params.get("competitor_name", ""))
-                q_arg = str(params.get("query", params.get("product_type", "")))
-                result = deflect_competitor_comparison(competitor_name=comp, query=q_arg)
-            else:
-                result = {"status": "ERROR", "message": f"Handler not implemented for tool '{name}'"}
-
-            latency_ms = round((time.perf_counter() - start_t) * 1000, 2)
+            data = self._invoke(spec, params)
+            if not isinstance(data, dict):
+                raise ValueError("Tool handler must return an object")
             return {
-                "status": "SUCCESS",
-                "tool_name": name,
-                "latency_ms": latency_ms,
-                "data": result
+                "status": "SUCCESS", "tool_name": name, "data": data,
+                "latency_ms": round((time.perf_counter() - start) * 1000, 2)
             }
-        except Exception as exc:
-            latency_ms = round((time.perf_counter() - start_t) * 1000, 2)
+        except Exception as error:
             return {
-                "status": "FAILED",
-                "tool_name": name,
-                "latency_ms": latency_ms,
-                "error": str(exc)
+                "status": "FAILED", "tool_name": name, "error": type(error).__name__,
+                "latency_ms": round((time.perf_counter() - start) * 1000, 2)
             }

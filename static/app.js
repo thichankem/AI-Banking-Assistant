@@ -14,6 +14,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const nodeStepper = document.getElementById("nodeStepper");
     const stepperDesc = document.getElementById("stepperDesc");
     const agentActions = document.getElementById("agentActions");
+    const agentPlan = document.getElementById("agentPlan");
 
     function newSessionId() {
         return Array.from(window.crypto.getRandomValues(new Uint32Array(4)), value => value.toString(16).padStart(8, "0")).join("");
@@ -190,7 +191,24 @@ document.addEventListener("DOMContentLoaded", () => {
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
+    function renderPlan(plan) {
+        if (!Array.isArray(plan)) {
+            return;
+        }
+        const labels = {
+            pending: "Chờ xử lý", in_progress: "Đang xử lý",
+            done: "Hoàn tất", blocked: "Cần bổ sung"
+        };
+        const items = plan.map(step => {
+            const item = document.createElement("li");
+            item.textContent = step.task + " · " + (labels[step.status] || step.status);
+            return item;
+        });
+        agentPlan.replaceChildren(...items);
+    }
+
     function resetStepper() {
+        renderPlan([]);
         agentActions.replaceChildren();
         stepperDesc.textContent = "Đang nhận yêu cầu...";
     }
@@ -278,6 +296,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 appendMessage("bot", "**Rất tiếc:** " + detailMsg);
             } else {
                 const data = await res.json();
+                renderPlan(data.plan);
                 finishProgress();
                 let ans = "Không nhận được phản hồi từ hệ thống.";
                 if (data.answer) {
@@ -366,6 +385,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
                             if (eventType === "node_progress") {
                                 updateStepperProgress(eventData.description, eventData.action);
+                                renderPlan(eventData.plan);
                             } else if (eventType === "token") {
                                 accumulatedText = accumulatedText + eventData.content;
                                 if (streamingBubble) {
@@ -374,6 +394,7 @@ document.addEventListener("DOMContentLoaded", () => {
                                 }
                             } else if (eventType === "done") {
                                 finalDoneMeta = eventData;
+                                renderPlan(eventData.plan);
                                 finishProgress();
                             }
                         } catch (e) {

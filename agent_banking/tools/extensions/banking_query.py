@@ -1,25 +1,5 @@
-"""
-Banking Query Parser & Preprocessing Module.
-========================================================================
-Core Responsibilities:
-1. Normalize Vietnamese Unicode to NFC composed standard (resolving NFD and typing glitches).
-2. Expand Vietnamese banking acronyms (eKYC, Smart OTP, VCB Digibank, TKTT, STH, NAPAS 247...).
-3. Extract legal entities (Articles, Clauses, Points, Circulars, Decisions, Decrees, Laws) with 0% Regex.
-4. Detect financial transaction amounts & standardize currency units (10tr -> 10,000,000 VND, 500k, 2 billion).
-5. Classify query intent (12 Intents Taxonomy) & route domain (8 Domains) without substring collisions.
-6. Extract key BM25 keywords, eliminate decimal fragmentation digits, and filter stopwords.
-7. Construct expanded queries optimized for dense vector search models.
-8. Optional Semantic LLM Routing Fallback for complex queries.
+"""Normalize banking queries for the analysis tool and hybrid retrieval."""
 
-MANDATORY RULES (GEMINI.md & AGENTS.md):
-1. 0% REGEX LAW: String methods only, no regex imports or functions.
-2. ZERO TERNARY: Explicit if/else statements only, no ternary operators.
-3. NO TYPING LIBRARY: Native Python types only, no typing module imports.
-4. NO __INIT__.PY: Direct module imports.
-"""
-
-import os
-import json
 import unicodedata
 from dataclasses import dataclass, field
 
@@ -82,7 +62,7 @@ DEFAULT_BANKING_ACRONYMS = {
     "khdn": "khách hàng doanh nghiệp (KHDN)",
     "cif": "mã định danh khách hàng (CIF)",
     "casa": "tiền gửi không kỳ hạn (CASA)",
-    "stk": "sổ tiết kiệm (STK)",
+    "stk": "STK",
     "sdkd": "số dư khả dụng (SĐKD)",
     "sđkd": "số dư khả dụng (SĐKD)",
     "hmgd": "hạn mức giao dịch (HMGD)",
@@ -368,17 +348,14 @@ class ParsedQuery:
 
 class BankingQueryParser:
     """
-    Next-generation banking query preprocessor and analyzer (0% Regex, Native Unicode NFC).
-    Achieves linear O(N) performance, preventing bottlenecks on queries up to 100,000 characters.
+    Normalize Unicode, expand known terms and extract search metadata.
     """
 
-    def __init__(self, acronym_dict=None, use_llm_fallback=False):
+    def __init__(self, acronym_dict=None):
         if acronym_dict is not None:
             raw_dict = acronym_dict
         else:
             raw_dict = DEFAULT_BANKING_ACRONYMS
-
-        self.use_llm_fallback = use_llm_fallback
 
         # Normalize all dictionary keys to lowercase Unicode NFC
         self.acronym_dict = {}
@@ -1237,56 +1214,9 @@ class BankingQueryParser:
 
         return keywords
 
-    def _semantic_llm_fallback(self, query):
+    def parse(self, query):
         """
-        Optional Semantic LLM Routing Fallback (R3):
-        Triggered only when rule-based classifier yields 'hoi_dap_chung' on complex queries.
-        Uses chat completion API configured in environment (if available).
-        Completely safe: handles exceptions and returns None when offline or unconfigured.
-        """
-        from agent_banking.core.chat import FallbackChatClient
-        from agent_banking.core.fallback import ModelFallbackError
-
-        try:
-            client = FallbackChatClient("query_parser")
-            system_msg = (
-                "Bạn là bộ phân loại ý định ngân hàng. Hãy phân tích câu hỏi người dùng và trả về JSON: "
-                "{\"intent\": \"...\", \"sub_intent\": \"...\", \"domain\": \"...\"}. "
-                "Các intent hợp lệ: sinh_trac_hoc_ekyc, xu_ly_su_co_khan_cap, tai_khoan_ngan_hang, "
-                "tra_cuu_sao_ke, chuyen_tien_thanh_toan, vay_von_tin_dung, tiet_kiem_tien_gui, "
-                "the_ngan_hang, ngan_hang_so, phap_ly_tuan_thu, tra_cuu_bieu_phi, ho_tro_khach_hang."
-            )
-
-            def parse_response(response):
-                content = response.choices[0].message.content.strip()
-                start_brace = content.find("{")
-                end_brace = content.rfind("}")
-                if start_brace < 0 or end_brace <= start_brace:
-                    raise ValueError("Missing query classification JSON")
-                data = json.loads(content[start_brace:end_brace + 1])
-                if not isinstance(data, dict) or not all(isinstance(data.get(key), str) and data[key] for key in ("intent", "sub_intent", "domain")):
-                    raise ValueError("Invalid query classification schema")
-                return data["intent"], data["sub_intent"], data["domain"]
-
-            resp = client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": query}
-                ],
-                temperature=0.1,
-                max_tokens=150,
-                validate=parse_response,
-            )
-            return parse_response(resp)
-        except ModelFallbackError:
-            raise
-        except Exception:
-            pass
-        return None, None, None
-
-    def parse(self, query, use_llm=False):
-        """
-        Executes complete Step 1: Query Parser (0% Regex, Zero Ternary, Native Unicode NFC).
+        Prepare the raw query for hybrid search.
         Takes raw user query string -> Returns fully standardized ParsedQuery object.
         """
         if not query:
@@ -1337,20 +1267,6 @@ class BankingQueryParser:
             legal_refs=legal_refs
         )
 
-        # Optional Semantic LLM Fallback (R3) when rule-based returns generic FAQ
-        should_call_llm = False
-        if use_llm:
-            should_call_llm = True
-        elif self.use_llm_fallback:
-            should_call_llm = True
-
-        if should_call_llm and intent == "hoi_dap_chung" and len(clean_query.split()) >= 4:
-            llm_intent, llm_sub, llm_dom = self._semantic_llm_fallback(clean_query)
-            if llm_intent:
-                intent = llm_intent
-                sub_intent = llm_sub
-                domain = llm_dom
-
         # 6. Construct expanded query for dense search (with asymmetric 'query: ' prefix)
         expanded_parts = [normalized_query]
         if legal_refs:
@@ -1380,6 +1296,25 @@ class BankingQueryParser:
         )
 
 
-# Backward compatibility aliases
-RAGQueryParser = BankingQueryParser
-QueryParser = BankingQueryParser
+_PARSER = BankingQueryParser()
+_AMBIGUOUS_TERMS = {"stk": ("số tài khoản", "sổ tiết kiệm")}
+
+
+def parse_banking_query(query: str) -> ParsedQuery:
+    """Prepare the search query without a model call."""
+    return _PARSER.parse(query)
+
+
+def analyze_banking_query(query: str) -> dict:
+    """Expose query analysis to the agent as structured data."""
+    parsed = parse_banking_query(query)
+    ambiguities = {}
+    for term, _ in parsed.detected_acronyms:
+        candidates = _AMBIGUOUS_TERMS.get(term.lower())
+        if candidates:
+            ambiguities[term] = list(candidates)
+    acronyms = [list(item) for item in parsed.detected_acronyms]
+    return {
+        **parsed.to_dict(), "detected_acronyms": acronyms, "entities": acronyms,
+        "ambiguous_acronyms": ambiguities
+    }

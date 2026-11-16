@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Banking ReAct chat entrypoint for synchronous callers and SSE."""
+"""Banking deep agent entrypoint for synchronous chat and SSE."""
 
 import sys
 import time
@@ -20,7 +20,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent_banking.core.settings import Config
 from agent_banking.pipeline import BankingRAGPipeline
-from agent_banking.langgraph_agent.graph import build_banking_agent_graph
+from agent_banking.agent.graph import build_banking_agent_graph
+from agent_banking.agent.deep import BankingDeepAgent
+from agent_banking.agent.react import FALLBACK_ANSWER
 
 
 class BankingAgentPipeline:
@@ -46,7 +48,7 @@ class BankingAgentPipeline:
             self.sqlite_db_path = str(Path(__file__).resolve().parent / "tracing" / "agent_memory.db")
 
         print("=" * 70)
-        print("  INITIALIZING BANKING REACT AGENT")
+        print("  INITIALIZING BANKING DEEP AGENT")
         print("=" * 70)
 
         # 1. Initialize foundation RAG Pipeline (Dual Index Vector + BM25)
@@ -56,11 +58,8 @@ class BankingAgentPipeline:
         self._session_locks = [Lock() for _ in range(64)]
 
         # 2. Initialize the ReAct graph and session checkpoint
-        self.graph = build_banking_agent_graph(
-            pipeline_instance=self.rag_pipeline,
-            config=self.config,
-            sqlite_db_path=self.sqlite_db_path
-        )
+        self.runtime = BankingDeepAgent(self.rag_pipeline, self.config)
+        self.graph = build_banking_agent_graph(nodes=self.runtime, sqlite_db_path=self.sqlite_db_path)
         print("[LangGraph Engine] State Machine graph initialized successfully.")
 
         self.tracer = self.rag_pipeline.tracer
@@ -76,13 +75,15 @@ class BankingAgentPipeline:
     ) -> dict:
         """Build the initial StateGraph payload shared by sync and streaming chat entrypoints."""
         clean_query = str(query).strip()
+        screened = self.runtime.screen_input(clean_query)
         return {
-            "user_query": clean_query,
+            "user_query": screened["query"],
+            "screened_input": screened,
             "session_id": session_id,
             "persona": persona,
             "tone": tone,
             "format_type": format_type,
-            "custom_persona": custom_persona,
+            "custom_persona": self.runtime.guard_artifact(str(custom_persona or "")[:1000]),
         }
 
     def _session_lock(self, session_id: str):
@@ -91,7 +92,18 @@ class BankingAgentPipeline:
     def _restore_history(self, state: dict, thread_config: dict) -> None:
         # The graph uses a root dict channel, which is replaced by each new request.
         previous = self.graph.get_state(thread_config).values
-        state["chat_history"] = previous.get("chat_history", [])
+        history = previous.get("chat_history", [])
+        memory = previous.get("session_memory")
+        if memory is None:
+            # Import the latest history from pre-harness checkpoints once.
+            history = [
+                {"role": item["role"], "content": self.runtime.guard_artifact(item["content"])}
+                for item in history if item.get("role") in ("user", "assistant")
+            ]
+            history = [item for item in history if item["content"]]
+        else:
+            state["session_memory"] = memory
+        state["chat_history"] = history
 
     def chat(
         self,
@@ -109,8 +121,9 @@ class BankingAgentPipeline:
         clean_query = query.strip()
 
         if clean_query == "":
+            reply = self.runtime.guardrails.guard_output("Quý khách vui lòng nhập câu hỏi.")
             return {
-                "answer": "Welcome! Please enter your question or inquiry to get started.",
+                "answer": reply.sanitized_answer,
                 "citations": [],
                 "sources": [],
                 "intent": "CHIT_CHAT",
@@ -124,31 +137,22 @@ class BankingAgentPipeline:
             }
 
         # Configure Thread ID for Checkpointer (session memory)
-        thread_config = {"configurable": {"thread_id": session_id}}
+        thread_config = {"configurable": {"thread_id": session_id}, "recursion_limit": 64}
 
-        # Initial state payload for StateGraph
-        initial_state = self.build_initial_state(
-            query=clean_query,
-            session_id=session_id,
-            persona=persona,
-            tone=tone,
-            format_type=format_type,
-            custom_persona=custom_persona
-        )
-
-        # Execute through LangGraph StateGraph
         try:
             with self._session_lock(session_id):
+                initial_state = self.build_initial_state(
+                    query=query, session_id=session_id, persona=persona, tone=tone,
+                    format_type=format_type, custom_persona=custom_persona
+                )
                 self._restore_history(initial_state, thread_config)
-                final_state = self.graph.invoke(initial_state, config=thread_config)
+                final_state = self.graph.invoke(initial_state, config=thread_config, durability="exit")
         except Exception as e:
-            print(f"[LangGraph Execution Error]: {e}")
+            print(f"[LangGraph Execution Error]: {type(e).__name__}")
             latency_err = round((time.perf_counter() - start_time) * 1000.0, 2)
+            reply = self.runtime.guardrails.guard_output(FALLBACK_ANSWER)
             return {
-                "answer": (
-                    "The system is currently undergoing scheduled maintenance on some advanced features. "
-                    "Please contact customer service for immediate assistance."
-                ),
+                "answer": reply.sanitized_answer,
                 "citations": [],
                 "sources": [],
                 "intent": "ERROR",
@@ -213,7 +217,7 @@ class BankingAgentPipeline:
                 "status": status_guardrail
             },
             "01_react": {
-                "name": "ReAct Decisions",
+                "name": "Deep agent decisions",
                 "detected_intent": intent,
                 "last_action": final_state.get("last_action")
             },
@@ -228,7 +232,7 @@ class BankingAgentPipeline:
                 "executed_tools": [to.get("tool") for to in tool_outputs]
             },
             "04_audit": {
-                "name": "Citation Audit",
+                "name": "Independent answer review",
                 "audit_status": audit_stat,
                 "hallucination_retries": final_state.get("hallucination_retries", 0),
                 "audit_feedback": final_state.get("audit_feedback", "")
@@ -252,6 +256,11 @@ class BankingAgentPipeline:
             "session_id": session_id,
             "latency_ms": total_latency_ms,
             "execution_steps": steps,
+            "plan": final_state.get("plan", []),
+            "plan_revision": final_state.get("plan_revision", 0),
+            "delegations": final_state.get("delegations", []),
+            "review_outcomes": final_state.get("reviews", []),
+            "memory": final_state.get("memory_status", {}),
             "nodes": nodes_detail
         }
 
@@ -278,15 +287,7 @@ class BankingAgentPipeline:
         import contextlib
         import threading
 
-        initial_state = self.build_initial_state(
-            query=query,
-            session_id=session_id,
-            persona=persona,
-            tone=tone,
-            format_type=format_type,
-            custom_persona=custom_persona
-        )
-        thread_config = {"configurable": {"thread_id": session_id}}
+        thread_config = {"configurable": {"thread_id": session_id}, "recursion_limit": 64}
 
         loop = asyncio.get_running_loop()
         queue = asyncio.Queue()
@@ -298,20 +299,32 @@ class BankingAgentPipeline:
                 with self._session_lock(session_id):
                     if stop_event.is_set():
                         return
+                    initial_state = self.build_initial_state(
+                        query=query, session_id=session_id, persona=persona, tone=tone,
+                        format_type=format_type, custom_persona=custom_persona
+                    )
                     self._restore_history(initial_state, thread_config)
-                    with contextlib.closing(self.graph.stream(initial_state, config=thread_config)) as events:
+                    with contextlib.closing(self.graph.stream(initial_state, config=thread_config, durability="exit")) as events:
                         while not stop_event.is_set():
                             event = next(events, None)
                             if event is None:
                                 break
                             progress = {}
                             for node, node_state in event.items():
-                                progress[node] = {}
-                                if node == "react_action":
-                                    progress[node]["last_action"] = node_state["last_action"]
+                                public = {}
+                                if node in ("react_action", "plan_update", "subagent", "memory_update", "context_prepare"):
+                                    if node_state.get("last_action"):
+                                        public["last_action"] = node_state["last_action"]
+                                if node == "plan_update":
+                                    public["plan"] = node_state["plan"]
+                                if node == "answer_review":
+                                    public["audit_status"] = node_state["audit_status"]
                                 if node == "output_guardrail":
-                                    for key in ("final_answer", "audit_status", "citations", "sources"):
-                                        progress[node][key] = node_state[key]
+                                    for key in ("final_answer", "audit_status", "citations", "sources", "plan", "delegations"):
+                                        public[key] = node_state[key]
+                                    public["review_outcomes"] = node_state["reviews"]
+                                    public["memory"] = node_state["memory_status"]
+                                progress[node] = public
                             loop.call_soon_threadsafe(queue.put_nowait, ("event", progress))
             except Exception as exc:
                 loop.call_soon_threadsafe(queue.put_nowait, ("error", exc))

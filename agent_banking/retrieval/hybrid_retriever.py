@@ -23,13 +23,7 @@ import time
 
 from agent_banking.chunking.universal.planning.schema import payload_index_key
 
-try:
-    from agent_banking.query_parser.rag_query_parser import ParsedQuery
-except ImportError:
-    try:
-        from ..query_parser.rag_query_parser import ParsedQuery
-    except Exception:
-        ParsedQuery = None
+from agent_banking.tools.extensions.banking_query import ParsedQuery
 
 
 REQUIRED_UNIVERSAL_SCHEMA_KEYS = (
@@ -309,7 +303,7 @@ class HybridRetriever:
         bm25_query_text = ""
         suggested_filters = {}
 
-        if ParsedQuery is not None and isinstance(query, ParsedQuery):
+        if isinstance(query, ParsedQuery):
             if query.raw_query:
                 raw_query_text = str(query.raw_query).strip()
             else:

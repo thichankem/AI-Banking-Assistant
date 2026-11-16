@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from agent_banking.core.chat import FallbackChatClient
 
 from agent_banking.core.settings import Config
-from agent_banking.langgraph_agent.document_context import _format_retrieved_doc_context
+from agent_banking.agent.document_context import _format_retrieved_doc_context
 try:
     from agent_banking.skills.config.prompts import GRADE_DOCUMENTS_PROMPT_TEMPLATE, AUDIT_ANSWER_PROMPT_TEMPLATE
 except ModuleNotFoundError as exc:
@@ -129,6 +129,7 @@ class BaseSkill:
             self.config = Config()
 
         self.pipeline = pipeline_instance
+        self.tool_registry = None
         self.llm_client = FallbackChatClient("skills", {
             "model": self.config.SKILLS_LLM_MODEL,
             "url": self.config.SKILLS_LLM_BASE_URL,
@@ -142,9 +143,14 @@ class BaseSkill:
         with open(p, "r", encoding="utf-8") as f:
             data = json.load(f)
 
+        data.setdefault("skill_id", p.stem)
+        return cls.from_spec(data, config=config, pipeline_instance=pipeline_instance)
+
+    @classmethod
+    def from_spec(cls, data: dict, config=None, pipeline_instance=None):
         meta = SkillMetadata(
-            skill_id=data.get("skill_id", p.stem),
-            display_name=data.get("display_name", p.stem),
+            skill_id=data["skill_id"],
+            display_name=data.get("display_name", data["skill_id"]),
             description=data.get("description", ""),
             version=data.get("version", "2.0.0"),
             category=data.get("category", "GENERAL"),
@@ -183,6 +189,35 @@ class BaseSkill:
         """Dispatch execution based on JSON execution config."""
         exec_cfg = self.metadata.execution_config
         exec_type = exec_cfg.get("type", "generic")
+
+        if exec_type == "registered_tool":
+            from jsonschema import Draft202012Validator
+
+            from agent_banking.guardrails.tool_guardrail import get_tool_guardrail
+            from agent_banking.skills.skill_registry import mapped_arguments
+            from agent_banking.tools.tool_registry import BankingToolRegistry, ONCE_PER_TURN, is_extension
+
+            registry = self.tool_registry
+            if registry is None:
+                registry = BankingToolRegistry(pipeline_instance=self.pipeline)
+            name = exec_cfg["tool"]
+            definition = registry.get_tool_definition(name)
+            if definition is None or name in ONCE_PER_TURN:
+                raise ValueError("Skill target must be a registered read-only tool")
+            schema = {**self.metadata.parameters_schema, "additionalProperties": False}
+            if not Draft202012Validator(schema).is_valid(params):
+                raise ValueError("Skill arguments do not match the schema")
+            arguments = mapped_arguments(exec_cfg, params)
+            guarded = get_tool_guardrail().guard_tool_call(name, arguments, registered_readonly=is_extension(definition))
+            if not guarded["is_safe"]:
+                raise ValueError("Tool guard rejected arguments")
+            tool_schema = {**definition["parameters"], "additionalProperties": False}
+            if not Draft202012Validator(tool_schema).is_valid(guarded["sanitized_params"]):
+                raise ValueError("Tool arguments do not match the schema")
+            result = registry.execute_tool(name, guarded["sanitized_params"], definition=definition)
+            if result["status"] != "SUCCESS":
+                raise ValueError("Registered tool could not complete the skill")
+            return result["data"]
 
         # 1. Biometric Compliance Execution (Decision 2345)
         if exec_type == "tool_call":

@@ -2,7 +2,7 @@
 Automated Hybrid Retrieval Runner (Auto Retrieval Node with Deduplication).
 ===========================================================================
 Features:
-1. Synchronizes from query_parser/output/parsed_queries.json to retrieval/input/.
+1. Accepts raw query lists and previously prepared query JSON.
 2. Lightweight direct engine initialization: BankingEmbedder + QdrantBankingStore.
 3. Preserves 100% of the 13 fields in Target Universal Contract of ParsedQuery.
 4. Checks StateTracker: Reuses previously retrieved queries (SKIP).
@@ -41,51 +41,8 @@ from agent_banking.core.settings import Config
 from agent_banking.embedding.embedder import BankingEmbedder
 from agent_banking.vector_db.qdrant_store import QdrantBankingStore
 from agent_banking.retrieval.hybrid_retriever import HybridRetriever
-from agent_banking.query_parser.rag_query_parser import ParsedQuery
+from agent_banking.tools.extensions.banking_query import ParsedQuery, parse_banking_query
 from agent_banking.state_tracker import StateTracker
-
-
-def sync_upstream_parsed_queries(upstream_path=None, dest_path=None):
-    """
-    Tu dong dong bo tep parsed_queries.json tu Query Parser sang Retrieval Input.
-    Kich hoat khi tep dich chua ton tai hoac tep upstream co st_mtime moi hon.
-    """
-    if upstream_path is not None:
-        src = Path(upstream_path)
-    else:
-        src = PROJECT_ROOT / "agent_banking" / "query_parser" / "output" / "parsed_queries.json"
-
-    if dest_path is not None:
-        dst = Path(dest_path)
-    else:
-        dst = PROJECT_ROOT / "agent_banking" / "retrieval" / "input" / "parsed_queries.json"
-
-    if not src.exists():
-        return False
-
-    dst.parent.mkdir(parents=True, exist_ok=True)
-
-    should_sync = False
-    sync_reason = ""
-    if not dst.exists():
-        should_sync = True
-        sync_reason = "tep dich chua ton tai"
-    else:
-        src_mtime = src.stat().st_mtime
-        dst_mtime = dst.stat().st_mtime
-        if src_mtime > dst_mtime:
-            should_sync = True
-            sync_reason = "tep nguon moi hon tep dich"
-
-    if should_sync:
-        try:
-            shutil.copy2(str(src), str(dst))
-            print(f"🔄 [Auto-Sync] Da dong bo '{src.name}' tu query_parser sang retrieval/input ({sync_reason}).")
-            return True
-        except Exception as e:
-            print(f"⚠️ [Auto-Sync] Loi khi sao chep: {e}")
-            return False
-    return False
 
 
 def init_retrieval_engine(config=None, use_memory=False, top_k=5):
@@ -189,29 +146,46 @@ def execute_retrieval(retriever_obj, query_obj, top_k=5, filter_dict=None):
 
 
 def wrap_query_input(query_input):
-    """
-    Chuyen doi dau vao truy van sang doi tuong tuong thich Universal Query Contract.
-    Neu la chuoi str, goi BankingQueryParser de sinh day du expanded_query va suggested_filters.
-    Neu la ParsedQuery hoac dict, giu nguyen.
-    """
+    """Prepare raw text and retain structured search inputs as supplied."""
+    if isinstance(query_input, str):
+        return parse_banking_query(query_input)
     if query_input is None:
         return ""
-
-    if isinstance(query_input, str):
-        clean_text = query_input.strip()
-        try:
-            from agent_banking.query_parser.rag_query_parser import BankingQueryParser
-            qp = BankingQueryParser()
-            return qp.parse(clean_text)
-        except Exception:
-            return {
-                "raw_query": clean_text,
-                "normalized_query": clean_text,
-                "expanded_query": f"query: {clean_text}",
-                "keywords_str": clean_text
-            }
-
     return query_input
+
+
+def load_batch_queries(path: Path) -> list[dict]:
+    """Accept JSON queries, legacy parsed records and text files with one query per line."""
+    if path.suffix.lower() == ".txt":
+        items = path.read_text(encoding="utf-8-sig").splitlines()
+    else:
+        items = json.loads(path.read_text(encoding="utf-8-sig"))
+        if isinstance(items, dict):
+            items = items.get("queries", [items])
+        if isinstance(items, str):
+            items = [items]
+    if not isinstance(items, list):
+        raise ValueError("Retrieval input must contain a list of queries")
+
+    prepared = []
+    for item in items:
+        if isinstance(item, str):
+            item = {"query": item}
+        if not isinstance(item, dict):
+            raise ValueError("Each query must be text or an object")
+        query = item.get("raw_query") or item.get("query") or item.get("question") or ""
+        if not isinstance(query, str):
+            raise ValueError("Query text must be a string")
+        if not query.strip():
+            continue
+        if isinstance(item.get("normalized_query"), str) and item["normalized_query"].strip():
+            prepared.append({**item, "raw_query": query})
+        else:
+            parsed = parse_banking_query(query).to_dict()
+            if isinstance(item.get("suggested_filters"), dict):
+                parsed["suggested_filters"] = item["suggested_filters"]
+            prepared.append({**item, **parsed})
+    return prepared
 
 
 def write_retrieval_manifest(
@@ -506,7 +480,7 @@ def run_batch_retrieval(
     retriever=None
 ):
     """
-    Thuc thi batch retrieval tu tap tin parsed_queries.json voi StateTracker deduplication.
+    Run hybrid retrieval over raw or preprocessed query files with deduplication.
     """
     cfg = Config()
     in_dir = PROJECT_ROOT / "agent_banking" / "retrieval" / "input"
@@ -517,10 +491,6 @@ def run_batch_retrieval(
     else:
         out_path = PROJECT_ROOT / "agent_banking" / "retrieval" / "output"
     out_path.mkdir(parents=True, exist_ok=True)
-
-    # 1. Tu dong dong bo thuong nguon (Upstream Auto-Sync)
-    if input_file is None and output_dir is None:
-        sync_upstream_parsed_queries()
 
     state_file = out_path / ".state_tracker.json"
     tracker = StateTracker(state_file)
@@ -534,25 +504,21 @@ def run_batch_retrieval(
         if p_in.exists():
             target_in_file = p_in
     else:
-        default_in = in_dir / "parsed_queries.json"
-        if default_in.exists():
-            target_in_file = default_in
-        else:
-            qp_out = PROJECT_ROOT / "agent_banking" / "query_parser" / "output" / "parsed_queries.json"
-            if qp_out.exists():
-                target_in_file = qp_out
+        for name in ("queries.json", "queries.txt", "latest_query.json", "parsed_queries.json"):
+            candidate = in_dir / name
+            if candidate.is_file():
+                target_in_file = candidate
+                break
 
-    if target_in_file is None or not target_in_file.exists():
-        print(f"⚠️ Khong tim thay tap tin parsed_queries.json trong: {in_dir}")
-        print("Vui long bo file 'parsed_queries.json' vao agent_banking/retrieval/input/")
+    if target_in_file is None or not target_in_file.is_file():
+        print(f"No query file found in {in_dir}. Use queries.json, queries.txt, latest_query.json or parsed_queries.json.")
         return []
 
     print(f"\n{'=' * 75}")
     print(f"▶ [MODULE 5: HYBRID RETRIEVAL] Input: {target_in_file.name} -> Output: {out_path}")
     print(f"{'=' * 75}")
 
-    with open(target_in_file, "r", encoding="utf-8") as fp:
-        raw_queries = json.load(fp)
+    raw_queries = load_batch_queries(target_in_file)
 
     if not raw_queries:
         print("⚠️ Danh sach queries rong.")
@@ -924,7 +890,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Hybrid Retrieval Execution Node")
     parser.add_argument("--query", "-q", type=str, default=None, help="Cau hoi don le can truy van")
-    parser.add_argument("--input", "-i", type=str, default=None, help="Duong dan tap tin input parsed_queries.json")
+    parser.add_argument("--input", "-i", type=str, default=None, help="Path to raw or preprocessed query input (JSON or TXT)")
     parser.add_argument("--output", "-o", type=str, default=None, help="Thu muc output")
     parser.add_argument("--top-k", "-k", type=int, default=5, help="So luong candidates (default: 5)")
     parser.add_argument("--force", "-f", action="store_true", help="Chay lai toan bo bo qua cache")

@@ -31,7 +31,7 @@
     "properties": {
       "query": {
         "type": "string",
-        "description": "Câu hỏi hoặc từ khóa cần tra cứu tri thức ngân hàng"
+        "description": "Câu tìm kiếm tự chứa chủ đề, đối tượng và điều kiện còn áp dụng. Với câu nối tiếp, dùng đối tượng xác định được từ ngữ cảnh của phiên."
       },
       "top_k": {
         "type": "integer",

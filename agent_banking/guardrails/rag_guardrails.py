@@ -12,6 +12,7 @@ CORE DESIGN INVARIANTS:
 """
 
 import unicodedata
+from threading import Lock
 from agent_banking.core.settings import Config
 from agent_banking.guardrails.indirect_injection_guardrail import strip_vietnamese_accents, condense_spaced_text
 
@@ -487,6 +488,7 @@ class BankingGuardrailManager:
 
         # L1 In-Memory LRU Decision Cache (Max 5,000 queries)
         self._decision_cache = {}
+        self._decision_cache_lock = Lock()
         self._cache_max_size = 5000
 
     def _get_refusal_for_category(self, category):
@@ -952,9 +954,11 @@ class BankingGuardrailManager:
         norm_key = raw_query.lower()
 
         # 1. Check L1 Decision Cache
-        if norm_key in self._decision_cache:
-            cached = self._decision_cache.pop(norm_key)
-            self._decision_cache[norm_key] = cached
+        with self._decision_cache_lock:
+            cached = self._decision_cache.pop(norm_key, None)
+            if cached is not None:
+                self._decision_cache[norm_key] = cached
+        if cached is not None:
             return InputGuardResult(
                 is_safe=cached.is_safe,
                 sanitized_query=cached.sanitized_query,
@@ -969,12 +973,11 @@ class BankingGuardrailManager:
         if is_leak:
             res = InputGuardResult(
                 is_safe=False,
-                sanitized_query=raw_query,
+                sanitized_query="",
                 trigger_reason=leak_reason,
                 refusal_message=leak_msg,
                 details={"leak_type": leak_reason}
             )
-            self._save_to_decision_cache(norm_key, res)
             return res
 
         # 3. Fast-Path Prompt Injection / Jailbreak
@@ -1088,10 +1091,11 @@ class BankingGuardrailManager:
 
     def _save_to_decision_cache(self, key, result):
         """Lưu kết quả vào L1 Decision Cache với cơ chế giới hạn kích thước FIFO/LRU"""
-        if len(self._decision_cache) >= self._cache_max_size:
-            oldest_key = next(iter(self._decision_cache))
-            del self._decision_cache[oldest_key]
-        self._decision_cache[key] = result
+        with self._decision_cache_lock:
+            if len(self._decision_cache) >= self._cache_max_size:
+                oldest_key = next(iter(self._decision_cache))
+                del self._decision_cache[oldest_key]
+            self._decision_cache[key] = result
 
     def guard_retrieved_chunks(self, chunks):
         """Rà soát tài liệu trích xuất từ RAG khỏi indirect prompt injection"""
@@ -1325,10 +1329,10 @@ class BankingGuardrailManager:
             "unsupported_citations": unverified
         }
 
-    def guard_tool_call(self, tool_name, params):
+    def guard_tool_call(self, tool_name, params, *, registered_readonly=False):
         """Kiểm soát tham số công cụ qua BankingToolGuardrail"""
         if hasattr(self, "tool_guardrail") and self.tool_guardrail is not None:
-            return self.tool_guardrail.guard_tool_call(tool_name, params)
+            return self.tool_guardrail.guard_tool_call(tool_name, params, registered_readonly=registered_readonly)
         return {"is_safe": True, "sanitized_params": params, "error_message": None}
 
 
