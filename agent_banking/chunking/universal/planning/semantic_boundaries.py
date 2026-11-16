@@ -8,7 +8,7 @@ import json
 from collections import defaultdict
 
 from ..enrichment.model_warnings import optional_model_call, record_model_warning
-from ..models.text_client import cloud_json, ordered_parallel
+from ..models.text_client import CloudAttempts, MAX_CLOUD_ATTEMPTS, cloud_json, ordered_parallel
 from ..text.language import classify_text_blocks
 from .partitioning import atoms_for as atoms_for, optimal_partition as optimal_partition
 from agent_banking.core.models import model_primary, chain_fingerprint
@@ -73,18 +73,19 @@ class SemanticBoundaryScorer:
                 except ValueError:
                     pass
             messages = [{"role": "system", "content": START_PROMPT}, {"role": "user", "content": source}]
-            for attempt in range(3):
+            attempt_budget = CloudAttempts()
+            for attempt in range(MAX_CLOUD_ATTEMPTS):
                 response = optional_model_call(ir, "semantic_source_starts", lambda: cloud_json(
                     endpoint.url.rstrip("/") + "/chat/completions", endpoint.api_key,
                     {"model": endpoint.model, "messages": messages, "temperature": 0,
                      "chat_template_kwargs": {"enable_thinking": False}, "max_tokens": 4096},
-                    max_output_tokens=4096))
+                    max_output_tokens=4096, attempt_budget=attempt_budget))
                 if response is None:
                     break
                 try:
                     valid = source_starts(source, response)
                 except ValueError as error:
-                    if attempt == 2:
+                    if attempt == MAX_CLOUD_ATTEMPTS - 1 or not attempt_budget.remaining:
                         record_model_warning(ir, "semantic_source_starts", type(error).__name__)
                         break
                     messages[2:] = [{"role": "user", "content": "Repair the exact source anchors: " + str(error)[:300] +
@@ -187,17 +188,18 @@ class SemanticBoundaryScorer:
                     pass
             messages = [{"role": "system", "content": BOUNDARY_PROMPT},
                         {"role": "user", "content": json.dumps(state, ensure_ascii=False)}]
-            for attempt in range(3):
+            attempt_budget = CloudAttempts()
+            for attempt in range(MAX_CLOUD_ATTEMPTS):
                 result = cloud_json(endpoint.url.rstrip("/") + "/chat/completions", endpoint.api_key,
                     {"model": endpoint.model, "messages": messages, "temperature": 0,
                      "chat_template_kwargs": {"enable_thinking": False}, "max_tokens": 4096},
-                    max_output_tokens=4096)
+                    max_output_tokens=4096, attempt_budget=attempt_budget)
                 try:
                     checked = validate(result)
                     self.cache.put(key, checked, 0, 0)
                     return checked
                 except (ValueError, TypeError) as error:
-                    if attempt == 2:
+                    if attempt == MAX_CLOUD_ATTEMPTS - 1 or not attempt_budget.remaining:
                         raise
                     messages[2:] = [{"role": "user", "content": "Repair scores: " + str(error)[:300] +
                         ". Return exactly these editable IDs once each: " + json.dumps(state["editable_ids"]) +

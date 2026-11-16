@@ -21,18 +21,18 @@ TEXT_NODES = {"t", "tab", "ptab", "br", "cr", "noBreakHyphen", "softHyphen", "sy
 VISUAL_NODES = {"drawing", "pict", "txbxContent"}
 
 
-def paragraph_parts(paragraph, part, script_styles, hidden_run):
+def paragraph_parts(paragraph, part, script_styles, hidden_run, *, include_images=False):
     """Yield text segments with their hyperlinks, interleaved with textbox nodes."""
     buffer = []
     fragments = {}
     fields = []
-    for kind, value, link in _inline_events(paragraph, part, script_styles, hidden_run):
-        if kind == "visual":
+    for kind, value, link in _inline_events(paragraph, part, script_styles, hidden_run, include_images=include_images):
+        if kind in ("visual", "image"):
             if buffer:
                 yield "text", "".join(buffer), _links(fragments)
                 buffer.clear()
                 fragments.clear()
-            yield "textbox", value, []
+            yield ("textbox" if kind == "visual" else kind), value, []
         elif kind == "field":
             marker = value.get(qn("w:fldCharType"))
             if marker == "begin":
@@ -91,7 +91,7 @@ def _hyperlink_target(node, part):
     return _target_with_anchor(target, node.get(qn("w:anchor")))
 
 
-def _inline_events(node, part, script_styles, hidden_run, link=None):
+def _inline_events(node, part, script_styles, hidden_run, link=None, *, include_images=False):
     for child in content_children(node):
         name = local_name(child)
         if name in NONCONTENT or name in EMBEDDED_CONTENT or child.tag == MC + "AlternateContent" or hidden_run(child):
@@ -99,6 +99,10 @@ def _inline_events(node, part, script_styles, hidden_run, link=None):
         if name in VISUAL_NODES:
             if any(item.tag == qn("w:txbxContent") for item in content_nodes(child, stop_at=("txbxContent",))):
                 yield "visual", child, None
+            if include_images:
+                for item in content_nodes(child, stop_at=("txbxContent",), hidden_run=hidden_run):
+                    if item.tag == qn("a:blip") or local_name(item) == "imagedata":
+                        yield "image", item, None
         elif name in TEXT_NODES:
             yield "text", native_text(child), link
         elif name == "fldChar":
@@ -106,12 +110,12 @@ def _inline_events(node, part, script_styles, hidden_run, link=None):
         elif name == "instrText":
             yield "instruction", child.text or "", None
         elif name == "r":
-            events = _inline_events(child, part, script_styles, hidden_run, link)
+            events = _inline_events(child, part, script_styles, hidden_run, link, include_images=include_images)
             yield from _script_events(events, _run_script(child, script_styles), link)
         else:
             target = _hyperlink_target(child, part) if name in ("hyperlink", "fldSimple") else None
             child_link = (child, target) if target else link
-            yield from _inline_events(child, part, script_styles, hidden_run, child_link)
+            yield from _inline_events(child, part, script_styles, hidden_run, child_link, include_images=include_images)
 
 
 def _script_events(events, script, link):

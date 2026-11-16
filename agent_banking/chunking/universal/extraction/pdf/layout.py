@@ -6,7 +6,7 @@ from .tables import validate_table
 
 
 IGNORED_VISUAL_TYPES = {"image", "figure", "diagram", "chart", "picture", "header", "footer",
-                        "page_number", "footnote", "endnote", "annotation", "furniture"}
+                        "page_number", "annotation", "furniture"}
 
 
 def compact(value):
@@ -316,7 +316,6 @@ def normalize_visual_layout(layout):
                 element["level"] = min(level, 7)
         box = element.get("bbox")
         if not normalized_box(box):
-            element["unverified_bbox"] = repr(box)
             element["bbox"] = [0, 0, 1, 1]
             element["bbox_granularity"] = "page"
         kept.append(element)

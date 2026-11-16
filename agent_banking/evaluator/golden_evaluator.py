@@ -2,7 +2,7 @@
 Golden Answer Evaluator Engine for Banking Operations.
 ======================================================
 Tier-1: Deterministic Rule-Based Verifier (Must-include, Must-avoid, Table/Figure grounding, Numbers).
-Tier-2: LLM-as-a-Judge (DeepSeek-V4-Flash via FPT Cloud API) for Banking Semantic Rubric.
+Tier-2: LLM-as-a-Judge for Banking Semantic Rubric (configured via environment).
 
 DESIGN PRINCIPLES:
 1. 0% REGEX LAW: No regex imports or functions; string methods only.
@@ -148,7 +148,7 @@ class GoldenAnswerEvaluator:
 
     def _call_llm_judge(self, prediction_text, case_data):
         """
-        Call DeepSeek-V4-Flash via FPT Cloud API as an impartial banking judge.
+        Call LLM-as-a-Judge via configured API as an impartial banking judge.
         """
         prompt = (
             "Bạn là Giám khảo Chấm điểm Trợ lý AI Ngân hàng A-Bank cấp cao.\n"
@@ -168,9 +168,10 @@ class GoldenAnswerEvaluator:
         )
         
         try:
-            model_name = "DeepSeek-V4-Flash"
-            if model_primary is not None:
-                model_name = model_primary
+            model_name = os.getenv("JUDGE_MODEL", os.getenv("MODEL", ""))
+            if not model_name:
+                if model_primary is not None:
+                    model_name = model_primary("generator").model
             messages = [{"role": "user", "content": prompt}]
             resp = self.chat_client.chat(messages=messages, model=model_name, temperature=0.0)
             

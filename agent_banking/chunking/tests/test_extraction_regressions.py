@@ -94,13 +94,15 @@ def test_invalid_review_shape_is_retried_after_corrupt_cached_metadata(tmp_path)
 def test_unavailable_primary_can_use_backup_cloud(tmp_path):
     cache = Mock()
     cache.get.return_value = None
-    backup = layout_client([reviewed([{"type": "paragraph", "text": "Backup text"}], verdict="unresolved")])
+    partial = reviewed([{"type": "paragraph", "text": "Backup text"}], verdict="unresolved")
+    backup = layout_client([partial])
     reader = PdfVisualReviewer(tmp_path, cache, layout_client([RuntimeError("unavailable")]), backup, False)
     result = reader.read(page_png(), [], 64, 64)
     assert result["elements"][0]["text"] == "Backup text"
     assert result["elements"][0]["bbox_granularity"] == "page"
     assert result["visual_review"]["incomplete"] is True
     assert result["visual_review"]["failed_candidates"] == ["RuntimeError"]
+    assert result["visual_review"]["cloud_attempts"] == 2
 
 
 def test_full_page_overflow_recovers_a_partial_cloud_crop(tmp_path):
@@ -114,6 +116,7 @@ def test_full_page_overflow_recovers_a_partial_cloud_crop(tmp_path):
     assert result["elements"][0]["text"] == "Visible crop"
     assert result["visual_review"]["incomplete"] is True
     assert len(result["region_audit"]) == 4
+    assert first.analyze_page_layout.call_count == 3
     assert sum("error" in item for item in result["region_audit"]) == 3
 
 
@@ -166,13 +169,20 @@ def test_explicit_caption_outside_radius_and_derived_title():
 def test_vision_fallback_rebuilds_provider_fields_for_each_image(monkeypatch):
     from agent_banking.chunking.universal.models import vision_client
 
-    endpoint = SimpleNamespace(url="https://invalid.example", api_key="fixture", model="Azure:primary", timeout=1, attempts=1)
+    from agent_banking.chunking.universal.models.text_client import apply_chat_profile
+    from agent_banking.core.fallback import ModelEndpoint
+
+    endpoint = ModelEndpoint("primary", "arbitrary-vision-id", "https://invalid.example", "fixture",
+                             timeout=1, image_detail="high", token_parameter="max_completion_tokens", json_mode="off")
     monkeypatch.setattr(vision_client, "model_primary", lambda module: endpoint)
     client = QwenVisionClient()
     payload = client._build_payload(page_png())
     payload["messages"][1]["content"].append(client._image_part(page_png()))
     fallback = dict(payload)
-    client._configure_payload(fallback, SimpleNamespace(model="qwen-fallback"))
+    alternate = ModelEndpoint("fallback", "arbitrary-fallback-id", "https://fallback.example", "fixture", json_mode="on")
+    client._configure_payload(fallback, alternate)
+    apply_chat_profile(fallback, alternate, client.max_tokens)
+    apply_chat_profile(payload, endpoint, client.max_tokens)
     assert "max_completion_tokens" not in fallback and fallback["max_tokens"] == client.max_tokens
     assert "response_format" in fallback and "response_format" not in payload
     assert all("detail" not in part["image_url"] for part in fallback["messages"][1]["content"][1:])
@@ -188,7 +198,8 @@ def test_vision_request_uses_fallback_candidate_payload(monkeypatch):
     from agent_banking.core import models
     from agent_banking.core.fallback import ModelEndpoint
 
-    first = ModelEndpoint("first", "Azure:example", "https://first.invalid", "fixture")
+    first = ModelEndpoint("first", "vision-one", "https://first.invalid", "fixture",
+                          token_parameter="max_completion_tokens", json_mode="off")
     second = ModelEndpoint("second", "Qwen-example", "https://second.invalid", "fixture")
     monkeypatch.setattr(vision_client, "model_primary", lambda module: first)
     monkeypatch.setattr(models, "get_model_chain", lambda *args: [first, second])

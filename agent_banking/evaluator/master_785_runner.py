@@ -3,7 +3,7 @@ Master Runner for A-Bank 785 Golden Questions Pipeline & LLM Judge Evaluation.
 =============================================================================
 1. Identifies un-evaluated and flawed cases (from old buggy pipeline).
 2. Runs cases through the fixed LangGraph Agent Banking Pipeline.
-3. Simultaneously grades each answer with LLM-as-a-Judge (DeepSeek-V4-Flash)
+3. Simultaneously grades each answer with LLM-as-a-Judge (configured via environment)
    across 3 core metrics:
    - Accuracy (0-100): Grounded match against Reference Answer & Must-Include facts.
    - Faithfulness (0-100): Strict alignment with bank regulations (zero hallucination).
@@ -377,7 +377,7 @@ def run_master():
 
     print("\nInitializing BankingAgentPipeline (Fixed LangGraph Engine)...")
     pipeline = BankingAgentPipeline()
-    print("Initializing LLM Judge Client (DeepSeek-V4-Flash)...")
+    print("Initializing LLM Judge Client...")
     judge_client = FallbackChatClient(module="generator")
 
     start_total_time = time.time()

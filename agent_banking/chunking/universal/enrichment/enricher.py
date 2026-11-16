@@ -17,6 +17,8 @@ from .image_context import (
     validate_context_selection,
 )
 from ..models.text_client import (
+    CloudAttempts,
+    MAX_CLOUD_ATTEMPTS,
     IncompleteModelResponse,
     _cloud_json,
     cloud_json,
@@ -152,15 +154,17 @@ class ModelEnricher:
         def operation():
             messages = [{"role": "system", "content": STRUCTURE_SYSTEM_PROMPT},
                         {"role": "user", "content": json.dumps(state, ensure_ascii=False)}]
-            for attempt in range(3):
+            attempt_budget = CloudAttempts()
+            for attempt in range(MAX_CLOUD_ATTEMPTS):
                 result = cloud_json(endpoint.url.rstrip("/") + "/chat/completions", endpoint.api_key,
                                     {"model": model, "messages": messages, "temperature": 0.1,
-                                     "chat_template_kwargs": {"enable_thinking": False}, "max_tokens": 16384})
+                                     "chat_template_kwargs": {"enable_thinking": False}, "max_tokens": 16384},
+                                    attempt_budget=attempt_budget)
                 try:
                     validate(result)
                     return result
                 except (ValueError, TypeError, KeyError) as error:
-                    if attempt == 2:
+                    if attempt == MAX_CLOUD_ATTEMPTS - 1 or not attempt_budget.remaining:
                         raise
                     messages.extend([{"role": "assistant", "content": evidence_preview(json.dumps(result, ensure_ascii=False), 2000)},
                                      {"role": "user", "content": "Correct the JSON decision: " + str(error) +
@@ -212,15 +216,17 @@ class ModelEnricher:
             def operation():
                 messages = [{"role": "system", "content": STRUCTURE_SYSTEM_PROMPT},
                             {"role": "user", "content": json.dumps(state, ensure_ascii=False)}]
-                for attempt in range(3):
+                attempt_budget = CloudAttempts()
+                for attempt in range(MAX_CLOUD_ATTEMPTS):
                     result = cloud_json(endpoint.url.rstrip("/") + "/chat/completions", endpoint.api_key,
                                         {"model": model, "messages": messages, "temperature": 0.1,
-                                         "chat_template_kwargs": {"enable_thinking": False}, "max_tokens": 16384})
+                                         "chat_template_kwargs": {"enable_thinking": False}, "max_tokens": 16384},
+                                    attempt_budget=attempt_budget)
                     try:
                         validate(result)
                         return result
                     except ValueError:
-                        if attempt == 2:
+                        if attempt == MAX_CLOUD_ATTEMPTS - 1 or not attempt_budget.remaining:
                             raise
                         messages.append({"role": "user", "content": 'Return an integer header_row_count and reason in JSON; no other schema.'})
             result = self._optional_cached(ir, "table_header_review", model, state, operation, validate)

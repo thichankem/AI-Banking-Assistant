@@ -56,7 +56,7 @@ from agent_banking.guardrails.config.settings import GuardrailsConfig
 class DecisionConfig:
     """Fallback defaults for optional decision settings (chunking uses core.models)."""
     ENABLE_DECISION = False
-    DECISION_MODEL = os.getenv("DECISION_MODEL", "default-decision-model")
+    DECISION_MODEL = os.getenv("DECISION_MODEL", "")
     DECISION_BASE_URL = os.getenv("DECISION_BASE_URL", os.getenv("BASE_URL", ""))
     DECISION_API_KEY = os.getenv("DECISION_API_KEY", "")
     DECISION_TIMEOUT = 8.0

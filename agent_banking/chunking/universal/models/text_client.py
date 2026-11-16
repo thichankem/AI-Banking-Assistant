@@ -9,6 +9,23 @@ import urllib.request
 
 
 logger = logging.getLogger("chunking.models")
+MAX_CLOUD_ATTEMPTS = 3
+
+
+class CloudAttemptLimit(RuntimeError):
+    retryable = False
+
+
+class CloudAttempts:
+    """Share an HTTP attempt budget across retries of one model operation."""
+
+    def __init__(self, limit=MAX_CLOUD_ATTEMPTS):
+        self.remaining = min(limit, MAX_CLOUD_ATTEMPTS)
+
+    def consume(self):
+        if self.remaining <= 0:
+            raise CloudAttemptLimit("Cloud request attempt limit reached")
+        self.remaining -= 1
 
 
 class IncompleteModelResponse(ValueError):
@@ -130,7 +147,7 @@ def validate_decisions(result, questions):
 
 def cloud_json(endpoint, key, payload, timeout=None, retries=None, allow_layout_list=False,
                max_output_tokens=131072, model_module=None, validate=None, dimension=None,
-               configure_payload=None):
+               configure_payload=None, attempt_budget=None):
     from agent_banking.core.fallback import run_fallback
     from agent_banking.core.models import get_model_chain
 
@@ -159,6 +176,12 @@ def cloud_json(endpoint, key, payload, timeout=None, retries=None, allow_layout_
         primary["dimension"] = dimension
     if retries is not None:
         primary["attempts"] = retries + 1
+    chat_profile = model_module in ("chunking.text", "chunking.vision", "chunking.vision_review", "vision", "vision_review")
+    chunking_route = chat_profile or model_module == "chunking.decision"
+    if chunking_route:
+        primary["timeout"] = None
+        if attempt_budget is None:
+            attempt_budget = CloudAttempts()
     candidates = get_model_chain(model_module, primary)
     request_payloads = {}
 
@@ -168,11 +191,19 @@ def cloud_json(endpoint, key, payload, timeout=None, retries=None, allow_layout_
             request_payload["model"] = candidate.model
             if configure_payload is not None:
                 configure_payload(request_payload, candidate)
-            request_payloads[candidate] = request_payload
-        request_payload = request_payloads[candidate]
+            ceiling = max_output_tokens
+            if chat_profile:
+                ceiling = apply_chat_profile(request_payload, candidate, ceiling)
+            request_payloads[candidate] = (request_payload, ceiling)
+        request_payload, ceiling = request_payloads[candidate]
         request_url = candidate.url.rstrip("/") + path
-        result = _cloud_json(request_url, candidate.api_key, request_payload, candidate.timeout,
-                             0, allow_layout_list, max_output_tokens)
+        request_timeout = candidate.timeout
+        if chunking_route and timeout is not None:
+            request_timeout = min(request_timeout, timeout)
+        if attempt_budget is not None:
+            attempt_budget.consume()
+        result = _cloud_json(request_url, candidate.api_key, request_payload, request_timeout,
+                             0, allow_layout_list, ceiling)
         if path == "/systemone":
             validate_decisions(result, payload.get("questions", {}))
         if validate is not None:
@@ -180,6 +211,30 @@ def cloud_json(endpoint, key, payload, timeout=None, retries=None, allow_layout_
         return result
 
     return run_fallback(model_module, candidates, call)
+
+
+def apply_chat_profile(payload, candidate, ceiling, *, structured=True):
+    requested = payload.pop("max_tokens", None)
+    completion = payload.pop("max_completion_tokens", None)
+    ceiling = min(ceiling, candidate.max_output_tokens or ceiling)
+    payload[candidate.token_parameter] = min(requested or completion or ceiling, ceiling)
+    if structured and candidate.json_mode == "on":
+        payload["response_format"] = {"type": "json_object"}
+    elif candidate.json_mode == "off":
+        payload.pop("response_format", None)
+    if not candidate.send_temperature:
+        payload.pop("temperature", None)
+    elif candidate.temperature is not None:
+        payload["temperature"] = candidate.temperature
+    payload.pop("chat_template_kwargs", None)
+    if candidate.disable_thinking:
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
+    for message in payload.get("messages", []):
+        if isinstance(message.get("content"), list):
+            for part in message["content"]:
+                if part.get("type") == "image_url" and candidate.image_detail:
+                    part["image_url"].setdefault("detail", candidate.image_detail)
+    return ceiling
 
 
 def _cloud_json(endpoint, key, payload, timeout=240, retries=2, allow_layout_list=False, max_output_tokens=131072):

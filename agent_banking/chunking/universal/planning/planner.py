@@ -6,6 +6,7 @@ import hashlib
 import os
 
 from ..enrichment.image_context import IMAGE_POLICY, excluded_image
+from ..extraction.sources import document_source_name
 from ..text.language import classify_text_blocks, project_search_text, vietnamese_projection
 from .coverage import validate_coverage
 from .parent_context import materialize_parents, windowed_parent_content
@@ -31,6 +32,37 @@ from ..text.token_budget import TokenBudget, format_passage_fields
 
 
 DEPENDENT_RELATIONS = {"continues", "answer_to", "exception_to", "note_of"}
+_VISUAL_COORDINATES = {"bbox", "bbox_granularity", "coordinate_system", "region_pixel_box", "region_pixel_path"}
+
+
+def _drop_visual_coordinates(blocks):
+    for block in blocks:
+        locations = [block["provenance"]]
+        table = block.get("table_data")
+        if table:
+            for part in (table, *table.get("header_occurrences", ())):
+                locations.extend(part.get("row_provenance", ()))
+        for location in locations:
+            for key in _VISUAL_COORDINATES:
+                location.pop(key, None)
+
+
+def _page_citation(chunk):
+    metadata = chunk["business_metadata"]
+    locations = [*metadata["provenance"]["locations"],
+                 *(element["location"] for element in metadata.get("elements", ()))]
+    pages = set()
+    for location in locations:
+        page_number = location.get("page_number")
+        page_index = location.get("page_index")
+        if type(page_number) is int and page_number > 0:
+            pages.add(page_number)
+        elif type(page_index) is int and page_index >= 0:
+            pages.add(page_index + 1)
+    citation = {"file_name": document_source_name(chunk["source"])}
+    if pages:
+        citation["page_numbers"] = sorted(pages)
+    metadata["citation"] = citation
 
 
 class ChunkPlanner:
@@ -64,6 +96,7 @@ class ChunkPlanner:
         self.search_language = search_language
 
     def plan(self, ir):
+        _drop_visual_coordinates(ir["blocks"])
         self.ir = ir
         self.chunks = []
         self.parents = {}
@@ -185,6 +218,8 @@ class ChunkPlanner:
             provenance["relations"] = [ir["relations"][index] for index in sorted(indices)]
         link_chunk_sequence(self.chunks)
         quality = validate_coverage(self)
+        for chunk in self.chunks:
+            _page_citation(chunk)
         return self.chunks, {"parents": self.parents, "document": ir, "quality": quality}
 
     def _caption_conflicts(self, block, target):

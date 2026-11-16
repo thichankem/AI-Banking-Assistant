@@ -74,12 +74,16 @@ class UniversalDocxChunker:
                  max_chunk_chars=None, min_chunk_words=30, min_section_chars=0, review_vision_client=None,
                  semantic=True, image_mode="text_context", max_pdf_pages=2000, max_page_pixels=40_000_000,
                  max_chunk_size=None, min_section_size=None, config=None, min_chunk_tokens=128,
-                 search_language="vi"):
+                 search_language=None, ocr_docx_images=False):
         if max_chunk_chars is None and max_chunk_size is not None:
             max_chunk_chars = max_chunk_size
         if min_section_size is not None and min_section_chars == 0:
             min_section_chars = min_section_size
         self.config = config
+        if search_language is None:
+            from ..config.settings import ChunkingConfig
+            search_language = getattr(config, "CHUNK_SEARCH_LANGUAGE", ChunkingConfig.CHUNK_SEARCH_LANGUAGE)
+        self.ocr_docx_images = ocr_docx_images
         self.dpi = dpi
         self.max_chunk_words = max_chunk_words
         if type(workers) is not int or workers < 1:
@@ -115,7 +119,8 @@ class UniversalDocxChunker:
             )
             self.extractor = DocxExtractor(
                 self.pdf_extractor.asset_dir, use_decision=use_decision, decision_cache=self.cache,
-                search_language=search_language,
+                search_language=search_language, ocr_images=ocr_docx_images,
+                vision_client=vision_client, review_client=review_vision_client, max_image_pixels=max_page_pixels,
             )
             source_root = Path(__file__).resolve().parent
             self._code_snapshot = {
@@ -207,7 +212,6 @@ class UniversalDocxChunker:
         artifact["quality"]["model_warning_count"] = len(ir.get("model_warnings", []))
         artifact["quality"]["page_region_reviews"] = sum(len(review.get("region_audit", [])) for review in ir.get("page_reviews", []))
         artifact["quality"]["font_reconciled_lines"] = sum(len(review.get("native_reconciliation", [])) for review in ir.get("page_reviews", []))
-        artifact["quality"]["page_level_locations"] = sum(block["provenance"].get("bbox_granularity") == "page" for block in ir["blocks"])
         for chunk in chunks:
             chunk["business_metadata"]["pipeline_fingerprint"] = artifact["pipeline_fingerprint"]
             quality = chunk["business_metadata"]["quality"]

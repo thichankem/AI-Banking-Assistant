@@ -52,7 +52,7 @@ class PdfExtractor:
                     failed_pages.append(error)
                     ir["page_reviews"].append({
                         "page_index": page_index, "method": "pdf_cloud_ocr",
-                        "content": "unavailable", "error": str(error),
+                        "content": "unavailable", "issues": ["ocr_unavailable"], "error": str(error),
                         "render_sha256": getattr(error, "pdf_render_sha256", None),
                     })
                     continue

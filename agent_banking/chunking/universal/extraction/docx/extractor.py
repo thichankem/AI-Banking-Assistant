@@ -5,6 +5,7 @@ from pathlib import Path
 
 import docx
 from docx.enum.style import WD_STYLE_TYPE
+from docx.oxml import parse_xml
 from docx.oxml.ns import qn
 
 from .typography import (
@@ -43,18 +44,26 @@ def link_visual_captions(ir, cache=None):
 
 class DocxExtractor:
     def __init__(self, asset_dir, render_figures=False, *, use_decision=True, decision_cache=None,
-                 search_language="vi"):
+                 search_language="all", ocr_images=False, vision_client=None, review_client=None,
+                 max_image_pixels=40_000_000):
         self.asset_dir = Path(asset_dir)
         self.use_decision = use_decision
         self.decision_cache = decision_cache
         self.search_language = search_language
+        self.image_ocr = None
+        if ocr_images:
+            from .image_ocr import DocxImageOCR
+            self.image_ocr = DocxImageOCR(self.asset_dir, decision_cache, vision_client, review_client, max_image_pixels)
 
     def extract(self, source, source_name):
         if isinstance(source, (bytes, bytearray)):
             data = bytes(source)
         else:
             data = Path(source).read_bytes()
-        ir = _DocxReader(data, source_name).extract()
+        ir = _DocxReader(data, source_name, self.image_ocr).extract()
+        if not ir["units"] and any(review.get("issues") for review in ir.get("docx_image_reviews", [])):
+            from ..pdf.page_review import CloudOCRUnavailable
+            raise CloudOCRUnavailable("Image-only DOCX has no usable cloud OCR content")
         ir["search_language"] = self.search_language
         if self.use_decision:
             apply_typography_hierarchy(ir, cache=self.decision_cache)
@@ -66,7 +75,8 @@ class DocxExtractor:
 
 
 class _DocxReader:
-    def __init__(self, data, source_name):
+    def __init__(self, data, source_name, image_ocr):
+        self.image_ocr = image_ocr
         digest = hashlib.sha256(data).hexdigest()
         identity = str(source_name).replace("\\", "/")
         document_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
@@ -91,16 +101,51 @@ class _DocxReader:
                    "document_version": digest, "source": identity, "blocks": [],
                    "units": [], "assets": {}, "warnings": [], "relations": []}
         self._unit_ids = set()
+        self._part_name = "word/document.xml"
 
     def extract(self):
-        self._walk_part(self.document.element.body, self.document.part, "body")
+        body, part = self.document.element.body, self.document.part
+        self._walk_part(body, part, "body")
+        self._walk_notes(body, part)
         return self.ir
+
+    def _walk_notes(self, body, part):
+        references = {"footnote": {}, "endnote": {}}
+        for node in content_nodes(body, hidden_run=self._hidden_run):
+            for kind, by_id in references.items():
+                if node.tag == qn("w:" + kind + "Reference"):
+                    by_id.setdefault(node.get(qn("w:id")), []).append(node.getroottree().getpath(node))
+        for kind, by_id in references.items():
+            if not by_id:
+                continue
+            relationship = next((rel for rel in part.rels.values()
+                                 if not rel.is_external and rel.reltype.endswith("/" + kind + "s")), None)
+            if relationship is None:
+                self.ir["warnings"].append({"code": "DOCX_NOTE_PART_MISSING", "note_type": kind})
+                continue
+            note_part = relationship.target_part
+            note_nodes = {node.get(qn("w:id")): node for node in parse_xml(note_part.blob)
+                          if node.tag == qn("w:" + kind)}
+            self._part_name = str(note_part.partname).lstrip("/")
+            try:
+                for identifier, anchors in by_id.items():
+                    note = note_nodes.get(identifier)
+                    if note is None:
+                        self.ir["warnings"].append({"code": "DOCX_NOTE_MISSING", "note_type": kind,
+                                                    "note_id": identifier})
+                        continue
+                    start = len(self.ir["blocks"])
+                    self._walk_part(note, note_part, kind + ":" + identifier)
+                    for block in self.ir["blocks"][start:]:
+                        block["provenance"]["note_references"] = anchors
+            finally:
+                self._part_name = "word/document.xml"
 
     def _append(self, kind, text, node, region, **attributes):
         index = len(self.ir["blocks"])
         block_id = self.ir["document_id"] + ":v" + self.ir["document_version"][:16] + ":b" + str(index)
         block = {"id": block_id, "type": kind, "text": text, "order": index,
-                 "provenance": {"part": "word/document.xml",
+                 "provenance": {"part": self._part_name,
                                 "xpath": node.getroottree().getpath(node), "region": region}}
         block.update(attributes)
         self.ir["blocks"].append(block)
@@ -152,7 +197,12 @@ class _DocxReader:
         level = heading_level(paragraph, True)
         language = _authored_language(paragraph, self._hidden_run)
         segment = 0
-        for part_kind, value, hyperlinks in paragraph_parts(node, part, self._script_styles, self._hidden_run):
+        for part_kind, value, hyperlinks in paragraph_parts(
+            node, part, self._script_styles, self._hidden_run, include_images=self.image_ocr is not None,
+        ):
+            if part_kind == "image":
+                self._append_image_text(value, part, region)
+                continue
             if part_kind == "textbox":
                 self._walk_textboxes(value, part, region)
                 continue
@@ -183,6 +233,14 @@ class _DocxReader:
             block["unit_ids"] = [unit_id]
             segment += 1
 
+    def _append_image_text(self, node, part, region):
+        relation_id = node.get(qn("r:embed")) or node.get(qn("r:id"))
+        texts, digest = self.image_ocr.read(self.ir, part.rels.get(relation_id), node.getroottree().getpath(node))
+        for index, text in enumerate(texts):
+            block = self._append("paragraph", text, node, region)
+            block["provenance"].update(method="docx_cloud_image_ocr", image_asset_sha256=digest)
+            block["unit_ids"] = [self._unit(text, node, region + ":image:" + str(index), block["id"])]
+
     def _walk_textboxes(self, node, part, region):
         for textbox in content_nodes(node, stop_at=("txbxContent",), hidden_run=self._hidden_run):
             if textbox.tag == qn("w:txbxContent"):
@@ -194,6 +252,7 @@ class _DocxReader:
         prefix = self.ir["document_id"] + ":v" + self.ir["document_version"][:16] + ":cell:" + table_key + ":"
         table, units, attachments = read_table(
             node, self.document, part, self._script_styles, self._hidden_run, prefix, parent_cell,
+            include_images=self.image_ocr is not None,
         )
         if not table["grid"]:
             return
@@ -216,7 +275,10 @@ class _DocxReader:
                 position["table_id"] = nested["id"]
             else:
                 start = len(self.ir["blocks"])
-                self._walk_textboxes(child, part, region + ":cell")
+                if position["type"] == "image":
+                    self._append_image_text(child, part, region + ":cell")
+                else:
+                    self._walk_textboxes(child, part, region + ":cell")
                 blocks = self.ir["blocks"][start:]
                 if not blocks:
                     continue

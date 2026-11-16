@@ -102,3 +102,19 @@ def test_coverage_rejects_changed_table_fragment_metadata(field, replacement):
 
     with pytest.raises(RuntimeError, match=rf"Table fragment metadata changed: .*{field}"):
         validate_coverage(chunk_planner)
+
+
+def test_table_citation_uses_original_page_of_each_row():
+    table = table_block("t1", [["Hạn mức"], ["100.000đ"]], header_count=1)
+    table["provenance"]["page_index"] = 3
+    table["table_data"]["row_provenance"] = [
+        {"page_index": 3, "bbox": [0.1, 0.1, 0.9, 0.3]},
+        {"page_index": 4, "bbox": [0.1, 0.3, 0.9, 0.6]},
+    ]
+    ir = document_ir([table])
+    ir["source"] = "folder/limits.pdf"
+    chunk_planner = planner()
+    (chunk,), _ = chunk_planner.plan(ir)
+    assert chunk["business_metadata"]["citation"] == {"file_name": "limits.pdf", "page_numbers": [4, 5]}
+    assert chunk["table_data"]["row_provenance"] == [{"page_index": 4}]
+    validate_coverage(chunk_planner)

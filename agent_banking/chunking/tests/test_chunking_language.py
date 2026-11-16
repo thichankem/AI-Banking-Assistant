@@ -26,6 +26,7 @@ def chunker(tmp_path, monkeypatch):
         cache_db_path=tmp_path / "cache.db",
         use_llm=False,
         use_decision=False,
+        search_language="vi",
     ) as chunker:
         yield chunker
 

@@ -15,7 +15,7 @@ from .openxml import (
 )
 
 
-def read_table(node, document, part, script_styles, hidden_run, cell_prefix, parent_cell):
+def read_table(node, document, part, script_styles, hidden_run, cell_prefix, parent_cell, *, include_images=False):
     rows = table_items(node, qn("w:tr"))
     grid = []
     cells = []
@@ -58,7 +58,7 @@ def read_table(node, document, part, script_styles, hidden_run, cell_prefix, par
                         raise ValueError("Invalid nonpositive table gridSpan")
                 merge = cell_props.find(qn("w:vMerge"))
             cell_id = cell_prefix + str(row_index) + ":" + str(column)
-            text, cell_units, hyperlinks, children = _read_cell(cell, part, script_styles, hidden_run)
+            text, cell_units, hyperlinks, children = _read_cell(cell, part, script_styles, hidden_run, include_images)
             record = {"id": cell_id, "row": row_index, "column": column,
                       "row_span": 1, "col_span": colspan, "text": text,
                       "xpath": cell.getroottree().getpath(cell)}
@@ -122,7 +122,7 @@ def _cell_content(node):
             yield from _cell_content(child)
 
 
-def _read_cell(cell, part, script_styles, hidden_run):
+def _read_cell(cell, part, script_styles, hidden_run, include_images):
     units = []
     hyperlinks = []
     attachments = []
@@ -135,12 +135,12 @@ def _read_cell(cell, part, script_styles, hidden_run):
             offset += 1  # The newline between authored paragraphs or equations.
         fragments = []
         if kind == "p":
-            parts = paragraph_parts(node, part, script_styles, hidden_run)
+            parts = paragraph_parts(node, part, script_styles, hidden_run, include_images=include_images)
         else:
             parts = (("text", native_math(node), []),)
         for part_kind, value, links in parts:
-            if part_kind == "textbox":
-                attachments.append((value, {"type": "textbox", "text_offset": offset}))
+            if part_kind in ("textbox", "image"):
+                attachments.append((value, {"type": part_kind, "text_offset": offset}))
             else:
                 fragments.append(value)
                 offset += len(value)

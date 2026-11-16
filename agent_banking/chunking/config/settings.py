@@ -25,5 +25,5 @@ class ChunkingConfig:
     CHUNK_SIZE_TOKENS = _settings.get("chunk_size_tokens", 512)
     CHUNK_MAX_TOKENS = _settings.get("chunk_max_tokens", 1024)
     CHUNK_MIN_TOKENS = _settings.get("chunk_min_tokens", 128)
-    CHUNK_SEARCH_LANGUAGE = _settings.get("search_language", "vi")
+    CHUNK_SEARCH_LANGUAGE = _settings.get("search_language", "all")
     OVERLAP_TOKENS = _settings.get("overlap_tokens", 64)

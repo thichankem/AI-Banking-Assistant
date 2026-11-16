@@ -8,7 +8,7 @@ from agent_banking.core.models import model_primary
 from agent_banking.chunking.config.prompt_config import STRUCTURE_SYSTEM_PROMPT
 from .image_context import IMAGE_POLICY, source_text
 from ..text.language import vietnamese_projection
-from ..models.text_client import IncompleteModelResponse, ordered_parallel
+from ..models.text_client import CloudAttempts, MAX_CLOUD_ATTEMPTS, IncompleteModelResponse, ordered_parallel
 from .evidence import evidence_preview, table_preview
 from .model_warnings import optional_model_call
 from .annotations import (
@@ -30,10 +30,10 @@ def structure_request_options(model, json_mode=None):
     if maximum <= 0:
         raise ValueError("CHUNKING_LLM_MAX_TOKENS must be positive")
     if json_mode is None:
-        names = os.getenv("MODELS_DISABLE_JSON_MODE", os.getenv("MODEL", ""))
+        names = os.getenv("MODELS_DISABLE_JSON_MODE", "")
         disabled = [name.strip().casefold() for name in names.split(",") if name.strip()]
         normalized = model.casefold()
-        json_mode = "reasoner" not in normalized and not any(name in normalized for name in disabled)
+        json_mode = not any(name in normalized for name in disabled)
     options = {"temperature": 0.1, "max_tokens": min(maximum, _STRUCTURE_COMPLETION_TOKENS)}
     if json_mode:
         options["response_format"] = {"type": "json_object"}
@@ -150,7 +150,8 @@ def _review_window(start, window, native_text, endpoint, cloud_json):
                 {"role": "user", "content": json.dumps(window, ensure_ascii=False)}]
     json_mode = None
     decode_mode_changed = False
-    for repair in range(5):
+    attempt_budget = CloudAttempts()
+    for repair in range(MAX_CLOUD_ATTEMPTS):
         options = structure_request_options(endpoint.model, json_mode)
 
         def configure_payload(payload, candidate):
@@ -161,10 +162,11 @@ def _review_window(start, window, native_text, endpoint, cloud_json):
         try:
             result = cloud_json(endpoint.url.rstrip("/") + "/chat/completions", endpoint.api_key,
                                 {"model": endpoint.model, "messages": messages, **options},
-                                timeout=240, max_output_tokens=options["max_tokens"], configure_payload=configure_payload)
+                                timeout=240, max_output_tokens=options["max_tokens"],
+                                configure_payload=configure_payload, attempt_budget=attempt_budget)
         except ModelFallbackError as error:
             cause = getattr(error, "last_error", None)
-            if (decode_mode_changed or repair == 4 or not isinstance(cause, ValueError)
+            if (decode_mode_changed or repair == MAX_CLOUD_ATTEMPTS - 1 or not attempt_budget.remaining or not isinstance(cause, ValueError)
                     or isinstance(cause, IncompleteModelResponse)):
                 raise
             json_mode = "response_format" not in options
@@ -174,7 +176,7 @@ def _review_window(start, window, native_text, endpoint, cloud_json):
         try:
             return filter_optional_annotations(result, window, native_text)
         except ValueError as error:
-            if repair == 4:
+            if repair == MAX_CLOUD_ATTEMPTS - 1 or not attempt_budget.remaining:
                 raise
             if any(key not in result for key in ANNOTATION_ARRAYS):
                 json_mode = False

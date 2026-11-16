@@ -346,7 +346,7 @@ def run_batch_and_judge():
     print(f"Loaded existing judge scores: {len(scores_cache)}/{total_cases}")
 
     # Initialize LLM Judge Client
-    print("\n[1/2] Initializing LLM-as-a-Judge Client (DeepSeek-V4-Flash)...")
+    print("\n[1/2] Initializing LLM-as-a-Judge Client...")
     judge_client = FallbackChatClient(module="generator")
 
     # PHASE 1: Judge all existing answers that haven't been scored yet

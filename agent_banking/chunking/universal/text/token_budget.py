@@ -31,10 +31,7 @@ def format_passage_fields(content, retrieval):
 
 
 TOKENIZER_SHA256 = "62c24cdc13d4c9952d63718d6c9fa4c287974249e16b7ade6d5a85e7bbb75626"
-DEFAULT_TOKENIZER_URL = (
-    "https://huggingface.co/intfloat/multilingual-e5-large/resolve/"
-    "81019eef13e0844a1caaeeaead846b79a96a4747/tokenizer.json"
-)
+DEFAULT_TOKENIZER_URL = os.getenv("TOKENIZER_URL", "")
 _TOKENIZER = None
 _TOKENIZER_PATH = None
 _LOCK = threading.Lock()

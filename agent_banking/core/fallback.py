@@ -16,6 +16,13 @@ class ModelEndpoint:
     timeout: float = 60.0
     attempts: int = 1
     dimension: int = 0
+    token_parameter: str = "max_tokens"
+    max_output_tokens: int = 0
+    json_mode: str = "auto"
+    send_temperature: bool = True
+    temperature: float | None = None
+    disable_thinking: bool = False
+    image_detail: str = ""
 
 
 class ModelFallbackError(RuntimeError):

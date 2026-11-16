@@ -31,6 +31,7 @@ from agent_banking.chunking.publication_io import (
     read_verified_json as read_verified_json,
     report,
 )
+from agent_banking.chunking.universal.extraction.pdf.page_review import CloudOCRUnavailable
 from agent_banking.chunking.universal.extraction.sources import discover_documents, document_source_root
 from agent_banking.chunking.universal.pipeline import LayoutAwareChunker
 
@@ -112,6 +113,7 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
     all_chunks = []
     completed = {}
     errors = {}
+    cloud_failures = set()
     aliases = {}
     refreshed = set()
     active_asset_paths = set()
@@ -163,6 +165,8 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
                     detail = f" (cloud OCR: {processed}/{quality['source_pages']} pages, {partial} partial, {failed} failed)"
                 report(status + ": " + source + " -> " + str(len(chunks)) + " chunks" + detail)
             except Exception as error:
+                if isinstance(error, CloudOCRUnavailable):
+                    cloud_failures.add(source)
                 errors[source] = {"file_name": path.name, "rel_path": source, "input_rel_path": path.relative_to(incoming).as_posix(),
                                   "status": "FAILED", "attempts": attempt,
                                   "error_type": type(error).__name__, "error": str(error), "chunk_count": 0}
@@ -182,13 +186,14 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
         for source, path in files.items():
             process(source, path, 1)
         for attempt, delay in enumerate(retry_delays, 2):
-            if not errors:
+            retry_sources = errors.keys() - cloud_failures
+            if not retry_sources:
                 break
-            report(f"Retrying {len(errors)} failed document(s) in {delay}s (attempt {attempt})")
+            report(f"Retrying {len(retry_sources)} failed document(s) in {delay}s (attempt {attempt})")
             time.sleep(delay)
-            for source, path in files.items():
-                if source in errors:
-                    process(source, path, attempt)
+            for source in files:
+                if source in retry_sources:
+                    process(source, files[source], attempt)
         manifests = []
         for source in files:
             if source in completed:
@@ -242,15 +247,22 @@ def main():
     parser.add_argument("--max-files", type=int, default=None, help="Process at most this many files and publish under output/diagnostics")
     parser.add_argument("--image-mode", choices=["text_context", "vision"], default="text_context",
                         help="Deprecated compatibility option. Standalone images are ignored in both modes.")
+    parser.add_argument("--check-models", action="store_true", help="Probe configured cloud endpoints without processing documents")
+    parser.add_argument("--ocr-docx-images", action="store_true", help="Transcribe embedded DOCX raster images via cloud vision")
     parser.add_argument("--search-language", choices=["vi", "all"], default=None,
-                        help="Search Vietnamese only (default) or retain all source languages for search")
+                        help="Retain all source languages for search (default) or opt into Vietnamese-only search")
     parser.add_argument("--input", type=Path, default=None, help="Input directory")
     parser.add_argument("--output", type=Path, default=None, help="Output directory")
     args = parser.parse_args()
+    if args.check_models:
+        from agent_banking.chunking.universal.models.preflight import check_models
+        checks = check_models()
+        print(json.dumps(checks, ensure_ascii=False, indent=2))
+        return 1 if any(check["status"] == "failed" for check in checks) else 0
 
     module_dir = Path(__file__).resolve().parent
     in_dir = args.input or module_dir / "input"
-    options = {}
+    options = {"ocr_docx_images": args.ocr_docx_images}
     if args.search_language is not None:
         options["search_language"] = args.search_language
     run_auto_chunking(
@@ -271,4 +283,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

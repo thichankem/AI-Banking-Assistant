@@ -4,7 +4,7 @@ import json
 from agent_banking.core.models import model_primary
 from agent_banking.chunking.config.prompt_config import STRUCTURE_SYSTEM_PROMPT
 from .image_context import IMAGE_POLICY, RESOLVED_IMAGE_STATUSES, source_text as context_source_text
-from ..models.text_client import ordered_parallel, validate_decisions
+from ..models.text_client import CloudAttempts, MAX_CLOUD_ATTEMPTS, ordered_parallel, validate_decisions
 from .evidence import evidence_preview
 from .model_warnings import optional_model_call, record_model_warning
 
@@ -222,16 +222,17 @@ def adjudicate_repair(enricher, ir, initial, state, observations, cloud_json):
     def adjudicate():
         messages = [{"role": "system", "content": STRUCTURE_SYSTEM_PROMPT},
                     {"role": "user", "content": json.dumps(evidence, ensure_ascii=False)}]
-        for attempt in range(3):
+        attempt_budget = CloudAttempts()
+        for attempt in range(MAX_CLOUD_ATTEMPTS):
             value = cloud_json(text_endpoint.url.rstrip("/") + "/chat/completions", text_endpoint.api_key,
                                {"model": text_endpoint.model, "messages": messages, "temperature": 0.1,
                                 "chat_template_kwargs": {"enable_thinking": False}, "max_tokens": 8192},
-                               max_output_tokens=8192)
+                               max_output_tokens=8192, attempt_budget=attempt_budget)
             try:
                 validate(value)
                 return value
             except ValueError as error:
-                if attempt == 2:
+                if attempt == MAX_CLOUD_ATTEMPTS - 1 or not attempt_budget.remaining:
                     raise
                 messages.append({"role": "user", "content": "Correct the JSON: " + str(error)})
     audit = enricher._cached("extraction_adjudication", text_endpoint.model, evidence, adjudicate, validate)

@@ -175,7 +175,7 @@ def build_master_workbook():
         ("Tier-1: Rule Verifier", "Must-Include (Từ khóa & Ý bắt buộc)", "70% Rule Score", "Khớp chính xác các mốc hạn mức, con số, thuật ngữ nghiệp vụ", "golden_evaluator.py (Rule Engine)"),
         ("Tier-1: Rule Verifier", "Grounding & Citation (Trích dẫn nguồn)", "30% Rule Score", "Kiểm tra độ phủ nguồn tài liệu, số điều khoản, tên bảng/hình", "golden_evaluator.py (Rule Engine)"),
         ("Tier-1: Rule Verifier", "Must-Avoid (Lỗi cấm & Giả định sai)", "Phạt 70% Điểm", "Nếu xuất hiện thông tin cấm hoặc sai số nguy hiểm: Phạt nhân hệ số 0.3", "Safety Filter"),
-        ("Tier-2: LLM Judge", "Semantic Correctness & Professionalism", "60% Final Score", "Chấm độ chuẩn xác ngữ nghĩa, văn phong ngân hàng, tính đầy đủ", "DeepSeek-V4-Flash (FPT Cloud API)"),
+        ("Tier-2: LLM Judge", "Semantic Correctness & Professionalism", "60% Final Score", "Chấm độ chuẩn xác ngữ nghĩa, văn phong ngân hàng, tính đầy đủ", "LLM Judge (Cloud API)"),
         ("Composite Score", "Tổng điểm Đa tiêu chí Toàn diện", "100.0 Điểm", "Final Score = (Rule Score * 0.4) + (LLM Judge * 0.6)", "Ngưỡng Đạt: Score >= 80 & 0 lỗi cấm")
     ]
 

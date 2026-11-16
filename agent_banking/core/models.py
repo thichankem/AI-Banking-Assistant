@@ -29,15 +29,24 @@ def get_model_chain(module, primary=None):
     load_environment()
     config_module = module
     chain_name = "MODELS"
-    if module.startswith("chunking."):
+    if module == "vision":
+        config_module = "chunking"
+        chain_name = "VISION_MODELS"
+    elif module == "vision_review":
+        config_module = "chunking"
+        chain_name = "VISION_REVIEW_MODELS"
+    elif module.startswith("chunking."):
         config_module = "chunking"
         chain_name = module.split(".", 1)[1].upper() + "_MODELS"
 
     module_path = "agent_banking." + config_module + ".config.models"
-    specs = getattr(import_module(module_path), chain_name)
+    config = import_module(module_path)
+    specs = getattr(config, chain_name)
     result = []
     for index, spec in enumerate(specs):
         if not spec.get("enabled", True):
+            continue
+        if config_module == "chunking" and not config.endpoint_enabled(spec):
             continue
         values = {
             "name": spec.get("name", "candidate-" + str(index + 1)),
@@ -54,10 +63,10 @@ def get_model_chain(module, primary=None):
             base_url = os.getenv(spec["base_url_env"], spec.get("base_url_default", ""))
             if base_url:
                 values["url"] = base_url.rstrip("/") + spec.get("path", "")
+        if config_module == "chunking":
+            values.update(config.endpoint_options(spec))
         if not result and primary:
-            for key, value in primary.items():
-                if value is not None:
-                    values[key] = value
+            values.update({key: value for key, value in primary.items() if value is not None})
         result.append(ModelEndpoint(**values))
     if module == "embedding" and result:
         identity = (result[0].model, result[0].dimension)
@@ -73,6 +82,10 @@ def chain_fingerprint(module, primary=None):
     import json
     chain = get_model_chain(module, primary)
     identity = [(item.model, item.url, item.dimension) for item in chain]
+    if module.startswith("chunking.") or module in ("vision", "vision_review"):
+        identity = [(item.model, item.url, item.dimension, item.max_output_tokens, item.token_parameter,
+                     item.json_mode, item.send_temperature, item.temperature, item.disable_thinking,
+                     item.image_detail, item.timeout, item.attempts) for item in chain]
     return sha256(json.dumps(identity).encode("utf-8")).hexdigest()
 
 

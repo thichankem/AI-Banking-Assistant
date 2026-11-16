@@ -2,6 +2,7 @@
 
 from io import BytesIO
 from copy import deepcopy
+import json
 from unittest.mock import Mock
 
 import pymupdf
@@ -105,3 +106,34 @@ def test_blank_and_non_text_pages_use_cloud(tmp_path):
     assert result["blocks"] == []
     assert result["page_reviews"][0]["content"] == "non_text_only"
     assert client.analyze_page_layout.call_count == 2
+
+
+def test_pdf_without_visual_coordinates_publishes_file_and_all_source_pages(tmp_path, monkeypatch):
+    incoming = tmp_path / "input"
+    category = incoming / "manuals"
+    category.mkdir(parents=True)
+    with pymupdf.open() as document:
+        document.new_page().insert_text((30, 100), "Keep the first page.")
+        document.new_page().insert_text((30, 100), "Keep the second page.")
+        document.save(category / "Manual.pdf")
+
+    accepted = {"review": {"verdict": "accepted"}, "uncertainties": []}
+    client = visual_client()
+    client.analyze_page_layout.side_effect = [
+        {**accepted, "elements": [{"type": "paragraph", "text": "Keep the first page."}]},
+        {**accepted, "elements": [{"type": "paragraph", "text": "Keep the second page.", "bbox": [0.1, 0.1, 0.4, 0.3]}]},
+    ]
+    monkeypatch.setattr(ModelEnricher, "enrich", lambda self, ir: ir)
+    monkeypatch.setattr(SemanticBoundaryScorer, "annotate", lambda self, ir: ir)
+    output = tmp_path / "output"
+    run_auto_chunking(incoming, output, vision_client=client, use_decision=False, retry_delays=(),
+                      cache_db_path=":memory:", dpi=72)
+    chunks, manifest = load_published_chunks(output, return_manifest=True)
+    (chunk,) = chunks
+
+    assert client.analyze_page_layout.call_count == 2
+    assert manifest["ocr_partial_pages"] == 0
+    assert chunk["source"] == "manuals/Manual.pdf"
+    assert chunk["business_metadata"]["citation"] == {"file_name": "Manual.pdf", "page_numbers": [1, 2]}
+    assert "Keep the first page." in chunk["content"] and "Keep the second page." in chunk["content"]
+    assert '"bbox"' not in json.dumps(chunk)
