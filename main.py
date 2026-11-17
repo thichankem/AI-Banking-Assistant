@@ -259,10 +259,16 @@ def agent_resume(req: ResumeRequest):
     try:
         return get_agent_pipeline().resume(req.session_id, req.interaction_id, req.choice_id, req.text)
     except InteractionError as error:
-        raise HTTPException(status_code=error.status_code, detail=str(error)) from None
+        headers = None
+        if getattr(error, "trace_id", None):
+            headers = {"X-Trace-ID": error.trace_id}
+        raise HTTPException(status_code=error.status_code, detail=str(error), headers=headers) from None
     except Exception as error:
         print(f"[Deep agent resume] {type(error).__name__}")
-        raise HTTPException(status_code=500, detail="Tạm thời chưa thể tiếp tục yêu cầu.") from None
+        headers = None
+        if getattr(error, "trace_id", None):
+            headers = {"X-Trace-ID": error.trace_id}
+        raise HTTPException(status_code=500, detail="Tạm thời chưa thể tiếp tục yêu cầu.", headers=headers) from None
 
 
 @app.post("/api/agent/stream")
@@ -328,6 +334,7 @@ async def stream_agent_chat(req: ChatRequest):
                         final_metadata = {
                             key: node_state[key] for key in ("plan", "delegations", "review_outcomes", "verification", "memory")
                         }
+                        final_metadata.update({key: node_state[key] for key in ("trace_id", "turn_id") if key in node_state})
 
                     step_payload = {
                         "event_type": "node_progress",
@@ -373,6 +380,8 @@ async def stream_agent_chat(req: ChatRequest):
                 "event_type": "error",
                 "message": "Tạm thời chưa thể hoàn tất phản hồi."
             }
+            if getattr(err, "trace_id", None):
+                error_payload["trace_id"] = err.trace_id
             err_str = json.dumps(error_payload, ensure_ascii=False)
             yield f"data: {err_str}\n\n"
 
