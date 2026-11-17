@@ -1,0 +1,7 @@
+category: OPERATIONAL
+handler:
+  module: agent_banking.tools.banking_api_tools
+  function: rate_agent_csat
+policy:
+  access: simulation
+  workers: []

@@ -127,7 +127,7 @@ def run_auto_tools(
             print(f"  [{idx:02d}] [SKIP] Tool '{tool_name}' (Already executed)")
         else:
             t0 = time.time()
-            res_dict = registry.execute_tool(tool_name, args)
+            res_dict = registry.execute_tool(tool_name, args, legacy_batch=True)
             dt_ms = round((time.time() - t0) * 1000, 2)
 
             res = {

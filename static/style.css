@@ -152,6 +152,57 @@ body {
     margin-bottom: 0;
 }
 
+.interaction-card {
+    border: 1px solid #64748b;
+}
+
+.interaction-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.interaction-options[hidden] {
+    display: none;
+}
+
+.interaction-options button,
+.interaction-options input {
+    border: 1px solid #94a3b8;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font: inherit;
+    color: #f8fafc;
+    background: #1e293b;
+}
+
+.interaction-options input {
+    min-width: 0;
+    flex: 1 1 12rem;
+}
+
+.interaction-options button:enabled {
+    cursor: pointer;
+}
+
+.interaction-options button:enabled:hover {
+    background: #1d4ed8;
+}
+
+.interaction-options button:disabled {
+    opacity: 0.65;
+}
+
+.interaction-card [role="status"]:empty {
+    display: none;
+}
+
+.interaction-card [role="status"] {
+    margin-top: 8px;
+    color: #fde68a;
+}
+
 .bubble strong {
     color: #ffffff;
     font-weight: 600;

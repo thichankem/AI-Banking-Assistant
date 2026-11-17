@@ -1,0 +1,7 @@
+category: INCIDENT
+handler:
+  module: agent_banking.tools.banking_api_tools
+  function: create_support_ticket
+policy:
+  access: simulation
+  workers: []

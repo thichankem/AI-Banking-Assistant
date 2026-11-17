@@ -1,5 +1,5 @@
 /**
- * AI Banking Assistant - Modern Client v4.5 (Vietcombank Specialized Agentic RAG)
+ * A-Bank web chat
  * Tuân thủ 100%: 0% Regex Law & Zero Ternary Law.
  */
 
@@ -20,7 +20,11 @@ document.addEventListener("DOMContentLoaded", () => {
         return Array.from(window.crypto.getRandomValues(new Uint32Array(4)), value => value.toString(16).padStart(8, "0")).join("");
     }
 
-    let currentSessionId = newSessionId();
+    const sessionKey = "banking-agent-session";
+    let currentSessionId = sessionStorage.getItem(sessionKey) || newSessionId();
+    sessionStorage.setItem(sessionKey, currentSessionId);
+    let pendingCard = null;
+    let busy = false;
 
     const initialWelcomeHtml = chatMessages.innerHTML;
 
@@ -280,6 +284,176 @@ document.addEventListener("DOMContentLoaded", () => {
         return msgDiv;
     }
 
+    function setBusy(value) {
+        busy = value;
+        userInput.disabled = busy || Boolean(pendingCard);
+        sendBtn.disabled = userInput.disabled;
+        if (clearChatBtn) {
+            clearChatBtn.disabled = busy;
+        }
+    }
+
+    function renderInteraction(data) {
+        const card = data.interaction;
+        if (pendingCard && pendingCard.id === card.id) {
+            return;
+        }
+        if (pendingCard) {
+            pendingCard.element.remove();
+        }
+        renderPlan(data.plan);
+        finishProgress("Đang chờ lựa chọn của bạn");
+        const element = document.createElement("div");
+        element.className = "message bot-message";
+        const bubble = document.createElement("div");
+        bubble.className = "bubble interaction-card";
+        const message = document.createElement("p");
+        message.textContent = card.message;
+        bubble.appendChild(message);
+        if (card.scope.length) {
+            const list = document.createElement("ol");
+            for (const item of card.scope) {
+                const entry = document.createElement("li");
+                entry.textContent = item.task;
+                list.appendChild(entry);
+            }
+            bubble.appendChild(list);
+        }
+
+        const choices = document.createElement("div");
+        choices.className = "interaction-options";
+        const other = document.createElement("form");
+        other.className = "interaction-options";
+        other.hidden = true;
+        const field = document.createElement("input");
+        field.maxLength = 500;
+        field.required = true;
+        field.setAttribute("aria-label", "Câu trả lời khác");
+        field.placeholder = "Nhập lựa chọn của bạn";
+        const submit = document.createElement("button");
+        submit.textContent = "Gửi lựa chọn";
+        const feedback = document.createElement("p");
+        feedback.setAttribute("role", "status");
+        other.append(field, submit);
+        other.addEventListener("submit", event => {
+            event.preventDefault();
+            const value = field.value.trim();
+            if (value) {
+                sendChoice(card, "other", value, bubble, feedback);
+            }
+        });
+        for (const option of card.options) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = option.label;
+            button.addEventListener("click", () => {
+                if (option.id === "other") {
+                    other.hidden = false;
+                    field.focus();
+                } else {
+                    sendChoice(card, option.id, option.label, bubble, feedback);
+                }
+            });
+            choices.appendChild(button);
+        }
+        bubble.append(choices, other, feedback);
+        element.appendChild(bubble);
+        pendingCard = { id: card.id, element };
+        chatMessages.appendChild(element);
+        setBusy(busy);
+        scrollToBottom();
+    }
+
+    function renderAgentResult(data) {
+        if (data.status === "awaiting_input") {
+            renderInteraction(data);
+            return;
+        }
+        renderPlan(data.plan);
+        finishProgress();
+        appendMessage("bot", data.answer || "Không nhận được phản hồi từ hệ thống.", data);
+    }
+
+    function postAgent(path, payload) {
+        return fetch(path, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: currentSessionId, ...payload })
+        });
+    }
+
+    async function recoverInteraction(interactionId = null, restoreResult = false) {
+        try {
+            const response = await postAgent("/api/agent/status", {});
+            if (!response.ok) {
+                return false;
+            }
+            const data = await response.json();
+            if (data.status === "awaiting_input") {
+                renderInteraction(data);
+                return data.interaction.id !== interactionId;
+            }
+            if (data.answer && (restoreResult || (interactionId && data.accepted_interaction_id === interactionId))) {
+                if (pendingCard) {
+                    pendingCard.element.remove();
+                    pendingCard = null;
+                }
+                renderAgentResult(data);
+                return true;
+            }
+        } catch {
+            return false;
+        }
+        return false;
+    }
+
+    async function sendChoice(card, choiceId, label, bubble, feedback) {
+        if (busy || !pendingCard || pendingCard.id !== card.id) {
+            return;
+        }
+        setBusy(true);
+        const controls = bubble.querySelectorAll("button, input");
+        controls.forEach(control => { control.disabled = true; });
+        feedback.textContent = "Đang gửi lựa chọn…";
+        try {
+            const payload = { interaction_id: card.id, choice_id: choiceId };
+            if (choiceId === "other") {
+                payload.text = label;
+            }
+            const response = await postAgent("/api/agent/resume", payload);
+            if (response.status === 422) {
+                const data = await response.json();
+                feedback.textContent = "Vui lòng kiểm tra lại lựa chọn.";
+                if (typeof data.detail === "string") {
+                    feedback.textContent = data.detail;
+                }
+                return;
+            }
+            if (!response.ok) {
+                throw new Error("Không nhận được kết quả tiếp tục.");
+            }
+            const data = await response.json();
+            pendingCard = null;
+            bubble.querySelectorAll(".interaction-options").forEach(group => group.remove());
+            feedback.remove();
+            if (choiceId === "other") {
+                appendMessage("user", "Đã gửi câu trả lời khác.");
+            } else {
+                appendMessage("user", label);
+            }
+            renderAgentResult(data);
+        } catch {
+            if (!await recoverInteraction(card.id)) {
+                feedback.textContent = "Chưa nhận được kết quả. Bạn có thể thử lại.";
+            }
+        } finally {
+            if (pendingCard && pendingCard.id === card.id) {
+                controls.forEach(control => { control.disabled = false; });
+            }
+            setBusy(false);
+        }
+    }
+
     async function submitQueryFallback(cleanQuery) {
         try {
             const res = await fetch("/api/agent/chat", {
@@ -296,16 +470,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 appendMessage("bot", "**Rất tiếc:** " + detailMsg);
             } else {
                 const data = await res.json();
-                renderPlan(data.plan);
-                finishProgress();
-                let ans = "Không nhận được phản hồi từ hệ thống.";
-                if (data.answer) {
-                    ans = data.answer;
-                }
-                appendMessage("bot", ans, {
-                    citations: data.citations,
-                    sources: data.sources
-                });
+                renderAgentResult(data);
             }
         } catch (err) {
             appendMessage("bot", "**Lỗi kết nối:** Không thể liên lạc với máy chủ (" + err.message + ").");
@@ -313,6 +478,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     async function submitQuery(queryText) {
+        if (busy || pendingCard) {
+            return;
+        }
         let cleanQuery = "";
         if (queryText) {
             cleanQuery = queryText.trim();
@@ -323,8 +491,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         appendMessage("user", cleanQuery);
         userInput.value = "";
-        userInput.disabled = true;
-        sendBtn.disabled = true;
+        setBusy(true);
 
         resetStepper();
         if (nodeStepper) {
@@ -356,7 +523,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
             if (!response.ok || !response.body) {
                 botMsgDiv.remove();
-                await submitQueryFallback(cleanQuery);
+                if (!await recoverInteraction() && response.status < 500) {
+                    await submitQueryFallback(cleanQuery);
+                } else if (!pendingCard) {
+                    appendMessage("bot", "Không nhận được phản hồi từ hệ thống.");
+                }
                 return;
             }
 
@@ -386,6 +557,8 @@ document.addEventListener("DOMContentLoaded", () => {
                             if (eventType === "node_progress") {
                                 updateStepperProgress(eventData.description, eventData.action);
                                 renderPlan(eventData.plan);
+                            } else if (eventType === "awaiting_input") {
+                                finalDoneMeta = eventData;
                             } else if (eventType === "token") {
                                 accumulatedText = accumulatedText + eventData.content;
                                 if (streamingBubble) {
@@ -405,24 +578,33 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             if (finalDoneMeta) {
+                botMsgDiv.remove();
+                if (finalDoneMeta.status === "awaiting_input") {
+                    renderInteraction(finalDoneMeta);
+                    return;
+                }
                 let finalText = accumulatedText;
                 if (finalDoneMeta.full_answer) {
                     finalText = finalDoneMeta.full_answer;
                 }
 
-                botMsgDiv.remove();
                 appendMessage("bot", finalText, {
                     citations: finalDoneMeta.citations,
                     sources: finalDoneMeta.sources
                 });
             } else {
                 botMsgDiv.remove();
-                finishProgress("Kết nối bị gián đoạn");
-                appendMessage("bot", "Kết nối bị gián đoạn trước khi nhận được phản hồi.");
+                if (!await recoverInteraction()) {
+                    finishProgress("Kết nối bị gián đoạn");
+                    appendMessage("bot", "Kết nối bị gián đoạn trước khi nhận được phản hồi.");
+                }
             }
 
         } catch (err) {
             botMsgDiv.remove();
+            if (await recoverInteraction()) {
+                return;
+            }
             if (streamStarted) {
                 finishProgress("Kết nối bị gián đoạn");
                 appendMessage("bot", "Kết nối bị gián đoạn trước khi nhận được phản hồi.");
@@ -430,8 +612,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 await submitQueryFallback(cleanQuery);
             }
         } finally {
-            userInput.disabled = false;
-            sendBtn.disabled = false;
+            setBusy(false);
             userInput.focus();
             scrollToBottom();
         }
@@ -445,6 +626,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (clearChatBtn) {
         clearChatBtn.addEventListener("click", () => {
             currentSessionId = newSessionId();
+            sessionStorage.setItem(sessionKey, currentSessionId);
+            pendingCard = null;
+            setBusy(false);
             chatMessages.innerHTML = initialWelcomeHtml;
             if (nodeStepper) {
                 nodeStepper.style.display = "none";
@@ -454,7 +638,9 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    if (userInput) {
+    setBusy(true);
+    recoverInteraction(null, true).finally(() => {
+        setBusy(false);
         userInput.focus();
-    }
+    });
 });

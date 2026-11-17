@@ -1,0 +1,36 @@
+parameters_schema:
+  type: object
+  properties:
+    query:
+      type: string
+      description: Câu tìm kiếm tự chứa chủ đề, đối tượng và điều kiện còn áp dụng.
+        Với câu nối tiếp, dùng đối tượng xác định được từ ngữ cảnh của phiên.
+    top_k:
+      type: integer
+      default: 3
+      description: Số lượng đoạn văn bản chính xác nhất sau Rerank
+    exact:
+      type: string
+      minLength: 2
+      maxLength: 100
+    candidate_k:
+      type: integer
+      default: 5
+      description: Số ứng viên ban đầu thu thập từ Hybrid Retrieval
+  required:
+  - query
+output_schema:
+  type: object
+  properties:
+    chunks:
+      type: array
+    formatted_context:
+      type: string
+    citations:
+      type: array
+    sources:
+      type: array
+    query_used:
+      type: string
+execution:
+  type: rag_pipeline

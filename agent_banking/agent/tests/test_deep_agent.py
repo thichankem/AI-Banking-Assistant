@@ -3,12 +3,25 @@
 import json
 from pathlib import Path
 from types import SimpleNamespace
+import yaml
 
 from agent_banking.core.fallback import ModelFallbackError
 from agent_banking.core.settings import Config
 from agent_banking.agent.deep import BankingDeepAgent, MAX_ACTIONS, MAX_REVISIONS
 from agent_banking.agent.graph import build_banking_agent_graph
 from agent_banking.agent.react import FALLBACK_ANSWER
+
+
+def fixture_review(answer, request):
+    if "verdict" not in answer or "coverage" in answer:
+        return answer
+    draft = request["draft"]
+    claims = [{"claim": item["label"], "source": item["label"], "line": len(item["text"].splitlines())}
+              for item in request.get("evidence", []) if item["label"] in draft]
+    if not claims and "VND" in draft:
+        claims = [{"claim": draft, "source": key, "quote": value.split(",")[0]} for key, value
+                  in request.get("support", {}).items() if key.startswith("[Tool ")][:1]
+    return {**answer, "coverage": [{"item": "Yêu cầu kiểm thử", "status": "answered"}], "claims": claims}
 
 
 def make_agent(monkeypatch, path: Path, script: list):
@@ -23,6 +36,7 @@ def make_agent(monkeypatch, path: Path, script: list):
         answer = next(decisions)
         if isinstance(answer, Exception):
             raise answer
+        answer = fixture_review(answer, request)
         response = SimpleNamespace(choices=[SimpleNamespace(
             message=SimpleNamespace(content=json.dumps(answer, ensure_ascii=False))
         )])
@@ -65,6 +79,7 @@ def test_delegation_isolated_feedback_replans_and_remaps_citations(tmp_path, mon
         final("Thẻ chính được miễn phí [Nguồn 2]."),
         {"verdict": "revise", "feedback": "Còn thiếu khoản thanh toán tháng đầu."},
         plan(("Xác minh khoản phí", "done"), ("Tính khoản vay", "in_progress")),
+        {"kind": "inspect_skill", "name": "financial-calculator"},
         {"kind": "skill", "name": "financial_calculator", "arguments": {
             "operation": "loan_amortization", "principal": 100000000, "annual_rate_percent": 8, "term_months": 12
         }},
@@ -259,20 +274,24 @@ def test_hot_discovery_runs_a_new_tool_and_skill_on_the_same_agent(tmp_path, mon
     runtime.skills.skills_dir = skill_dir
     monkeypatch.setattr(tools_package, "__path__", [*tools_package.__path__, str(tool_dir)])
 
-    tool_file = tool_dir / "fixture_fee_tool.json"
-    skill_file = skill_dir / "fixture_fee_skill.json"
+    tool_file = tool_dir / "fixture_fee_tool" / "tool.yaml"
+    skill_file = skill_dir / "fixture-fee" / "SKILL.md"
     parameters = {
         "type": "object", "properties": {"units": {"type": "integer", "minimum": 1}},
         "required": ["units"]
     }
     tool = {
         "name": "fixture_fee_tool", "description": "Tính phí mẫu",
+        "inputSchema": {**parameters, "additionalProperties": False},
+        "outputSchema": {"type": "object", "required": ["fixture_fee_vnd"],
+                         "properties": {"fixture_fee_vnd": {"type": "number"}}},
+    }
+    binding = {
         "handler": {"module": "agent_banking.tools.extensions.fixture_fee_rules", "function": "estimate"},
-        "parameters": parameters,
         "policy": {"access": "read_only", "workers": ["financial_analysis"]},
     }
     skill = {
-        "skill_id": "fixture_fee", "description": "Diễn giải phí mẫu",
+        "skill_id": "fixture-fee", "description": "Diễn giải phí mẫu",
         "parameters_schema": {
             "type": "object", "properties": {"count": {"type": "integer"}}, "required": ["count"]
         },
@@ -282,6 +301,7 @@ def test_hot_discovery_runs_a_new_tool_and_skill_on_the_same_agent(tmp_path, mon
     decisions = iter([
         final("Xin chào."), approval(),
         {"kind": "tool", "name": tool["name"], "arguments": {"units": 2}},
+        {"kind": "skill", "name": skill["skill_id"], "arguments": {"count": 3}},
         {"kind": "skill", "name": skill["skill_id"], "arguments": {"count": 3}},
         final("Phí mẫu tương ứng là 20 và 30 VND."), approval(),
         final("Trong phiên này tôi có thể giải thích các lựa chọn dịch vụ."), approval(),
@@ -294,11 +314,11 @@ def test_hot_discovery_runs_a_new_tool_and_skill_on_the_same_agent(tmp_path, mon
         calls.append((sys_prompt, data))
         if decision.get("kind") == "tool":
             assert tool["name"] in sys_prompt and skill["skill_id"] in sys_prompt
-            assert tool["handler"]["module"] not in sys_prompt
+            assert binding["handler"]["module"] not in sys_prompt
             # A malformed edit mid-turn must not invalidate the announced snapshot.
             tool_file.write_text("{", encoding="utf-8")
         response = SimpleNamespace(choices=[SimpleNamespace(
-            message=SimpleNamespace(content=json.dumps(decision, ensure_ascii=False))
+            message=SimpleNamespace(content=json.dumps(fixture_review(decision, data), ensure_ascii=False))
         )])
         validate(response)
         return response
@@ -311,8 +331,16 @@ def test_hot_discovery_runs_a_new_tool_and_skill_on_the_same_agent(tmp_path, mon
         (handler_dir / "fixture_fee_rules.py").write_text(
             'def estimate(units):\n    return {"fixture_fee_vnd": units * 10}\n', encoding="utf-8"
         )
-        tool_file.write_text(json.dumps(tool, ensure_ascii=False), encoding="utf-8")
-        skill_file.write_text(json.dumps(skill, ensure_ascii=False), encoding="utf-8")
+        tool_file.parent.mkdir()
+        tool_file.write_text(yaml.safe_dump(tool, allow_unicode=True), encoding="utf-8")
+        tool_file.with_name("runtime.yaml").write_text(yaml.safe_dump(binding), encoding="utf-8")
+        assets = skill_file.parent / "assets"
+        assets.mkdir(parents=True)
+        frontmatter = yaml.safe_dump({"name": skill["skill_id"], "description": skill["description"]}, allow_unicode=True)
+        skill_file.write_text("---\n" + frontmatter + "---\n\nDùng tham số count để tính phí mẫu.", encoding="utf-8")
+        (assets / "a-bank-runtime.yaml").write_text(yaml.safe_dump({
+            key: skill[key] for key in ("parameters_schema", "execution")
+        }), encoding="utf-8")
 
         scope = runtime._worker_snapshot("financial_analysis", runtime.snapshot())
         assert set(scope["tool"]) == {tool["name"]} and set(scope["skill"]) == {skill["skill_id"]}
@@ -322,20 +350,22 @@ def test_hot_discovery_runs_a_new_tool_and_skill_on_the_same_agent(tmp_path, mon
         assert [(call["kind"], call["status"]) for call in state["tool_outputs"]] == [
             ("tool", "SUCCESS"), ("skill", "SUCCESS")
         ]
-        assert calls[4][1]["observations"][0]["data"]["fixture_fee_vnd"] == 20
-        assert calls[4][1]["observations"][1]["data"]["fixture_fee_vnd"] == 30
+        assert calls[5][1]["observations"][0]["data"]["fixture_fee_vnd"] == 20
+        assert calls[5][1]["observations"][1]["kind"] == "inspect_skill"
+        assert calls[5][1]["observations"][2]["data"]["fixture_fee_vnd"] == 30
+        assert calls[4][1]["active_skills"]["fixture-fee"]["instructions"]
         assert "capabilities" not in state
 
         invalid = runtime.snapshot()
         assert invalid == {"tool": {}, "skill": {}}
-        tool_file.write_text(json.dumps(tool, ensure_ascii=False), encoding="utf-8")
+        tool_file.write_text(yaml.safe_dump(tool, allow_unicode=True), encoding="utf-8")
         assert skill["skill_id"] in runtime.snapshot()["skill"]
         standalone = runtime.skills.get_skill(skill["skill_id"])
         assert standalone.execute({"count": 4})["data"] == {"fixture_fee_vnd": 40}
         tool_file.unlink()
         assert runtime.snapshot() == {"tool": {}, "skill": {}}
         assert run(graph, "Cho tôi hỏi về dịch vụ ngân hàng.")["audit_status"] == "PASS"
-        assert tool["name"] not in calls[6][0] and skill["skill_id"] not in calls[6][0]
+        assert tool["name"] not in calls[7][0] and skill["skill_id"] not in calls[7][0]
     finally:
         graph.checkpointer.conn.close()
 
@@ -345,14 +375,21 @@ def test_plugin_registry_skips_out_of_scope_handlers_and_invalid_skills(tmp_path
     runtime.tools.tools_dir = tmp_path
     runtime.skills.skills_dir = tmp_path
     try:
-        (tmp_path / "outside.json").write_text(json.dumps({
-            "name": "outside", "handler": {"module": "os", "function": "getcwd"},
-            "parameters": {"type": "object"}, "policy": {"access": "read_only"},
+        tool = tmp_path / "outside"
+        tool.mkdir()
+        (tool / "tool.yaml").write_text(yaml.safe_dump({
+            "name": "outside", "description": "Fixture",
+            "inputSchema": {"type": "object", "additionalProperties": False},
         }), encoding="utf-8")
-        (tmp_path / "unbound_skill.json").write_text(json.dumps({
-            "skill_id": "unbound", "parameters_schema": {"type": "object"},
-            "execution": {"type": "registered_tool", "tool": "outside"},
+        (tool / "runtime.yaml").write_text(yaml.safe_dump({
+            "handler": {"module": "os", "function": "getcwd"}, "policy": {"access": "read_only"},
         }), encoding="utf-8")
+        folder = tmp_path / "unbound"
+        folder.mkdir()
+        (folder / "SKILL.md").write_text(
+            "---\nname: unbound\ndescription: Fixture\nmetadata:\n  a-bank-tool: outside\n---\n",
+            encoding="utf-8",
+        )
         assert runtime.snapshot() == {"tool": {}, "skill": {}}
         assert runtime.tools.execute_tool("outside", {})["status"] == "ERROR"
     finally:
@@ -373,20 +410,21 @@ def test_query_understanding_can_run_as_tool_or_skill(tmp_path, monkeypatch):
 
     runtime, graph, seen = make_agent(monkeypatch, tmp_path / "query.sqlite", [
         {"kind": "tool", "name": "analyze_banking_query", "arguments": {"query": query}},
+        {"kind": "inspect_skill", "name": "banking-query-understanding"},
         {"kind": "skill", "name": "banking_query_understanding", "arguments": {"query": query}},
         final("Quý khách muốn nói số tài khoản hay sổ tiết kiệm khi dùng STK?"), approval()
     ])
     try:
         standalone = runtime.skills.get_skill("banking_query_understanding").execute({"query": query})
         assert standalone["data"] == expected
-        assert "banking_query_understanding" in runtime._worker_snapshot("policy_research", runtime.snapshot())["skill"]
+        assert "banking-query-understanding" in runtime._worker_snapshot("policy_research", runtime.snapshot())["skill"]
 
         result = run(graph, query)
         assert result["audit_status"] == "PASS", result
         assert [(call["kind"], call["status"]) for call in result["tool_outputs"]] == [
             ("tool", "SUCCESS"), ("skill", "SUCCESS")
         ]
-        assert [item["data"] for item in seen[2]["observations"]] == [expected, expected]
+        assert [item["data"] for item in seen[3]["observations"] if "data" in item] == [expected, expected]
     finally:
         graph.checkpointer.conn.close()
 

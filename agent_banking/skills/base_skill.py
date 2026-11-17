@@ -1,8 +1,7 @@
 """
-Base Skill for AI Banking Assistant - JSON-Driven Architecture v2.0.
+Execution adapters for Agent Skills in the A-Bank runtime.
 Clean, intuitive, and modular:
-- Every skill is defined declaratively as a standardized JSON specification.
-- BaseSkill loads metadata, input/output schemas, and execution configuration from JSON.
+- BaseSkill receives a validated binding from the skill registry.
 - Measures execution latency and handles exceptions safely.
 
 MANDATORY RULES:
@@ -13,11 +12,10 @@ MANDATORY RULES:
 5. KEEP IT SIMPLE: Clear, direct, readable code.
 """
 
-import json
 import time
-from pathlib import Path
 from dataclasses import dataclass, field
 from agent_banking.core.chat import FallbackChatClient
+from agent_banking.core.fallback import is_temporary_error
 
 from agent_banking.core.settings import Config
 from agent_banking.agent.document_context import _format_retrieved_doc_context
@@ -114,7 +112,7 @@ class SkillMetadata:
 
 
 class BaseSkill:
-    """General-purpose skill executor driven by declarative JSON specification."""
+    """Execute a skill through an A-Bank adapter or registered tool."""
 
     def __init__(
         self,
@@ -135,16 +133,6 @@ class BaseSkill:
             "url": self.config.SKILLS_LLM_BASE_URL,
             "api_key": self.config.SKILLS_LLM_API_KEY,
         })
-
-    @classmethod
-    def from_json_file(cls, json_path: str, config: Config | None = None, pipeline_instance=None):
-        """Initialize Skill directly from a JSON specification file."""
-        p = Path(json_path)
-        with open(p, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        data.setdefault("skill_id", p.stem)
-        return cls.from_spec(data, config=config, pipeline_instance=pipeline_instance)
 
     @classmethod
     def from_spec(cls, data: dict, config=None, pipeline_instance=None):
@@ -182,7 +170,8 @@ class BaseSkill:
                 "status": "FAILED",
                 "latency_ms": latency_ms,
                 "data": None,
-                "error": str(exc)
+                "error": str(exc),
+                "temporary": is_temporary_error(exc)
             }
 
     def _run(self, params: dict):
@@ -195,7 +184,7 @@ class BaseSkill:
 
             from agent_banking.guardrails.tool_guardrail import get_tool_guardrail
             from agent_banking.skills.skill_registry import mapped_arguments
-            from agent_banking.tools.tool_registry import BankingToolRegistry, ONCE_PER_TURN, is_extension
+            from agent_banking.tools.tool_registry import BankingToolRegistry, ONCE_PER_TURN, is_extension, tool_input_schema
 
             registry = self.tool_registry
             if registry is None:
@@ -211,7 +200,7 @@ class BaseSkill:
             guarded = get_tool_guardrail().guard_tool_call(name, arguments, registered_readonly=is_extension(definition))
             if not guarded["is_safe"]:
                 raise ValueError("Tool guard rejected arguments")
-            tool_schema = {**definition["parameters"], "additionalProperties": False}
+            tool_schema = {**tool_input_schema(definition), "additionalProperties": False}
             if not Draft202012Validator(tool_schema).is_valid(guarded["sanitized_params"]):
                 raise ValueError("Tool arguments do not match the schema")
             result = registry.execute_tool(name, guarded["sanitized_params"], definition=definition)
@@ -354,74 +343,16 @@ class BaseSkill:
 
         # 4. RAG Knowledge Retrieval Execution
         if exec_type == "rag_pipeline":
-            if self.pipeline is None:
-                from agent_banking.pipeline import BankingRAGPipeline
-                self.pipeline = BankingRAGPipeline(config=self.config)
+            from agent_banking.tools.rag_tool import BankingRAGTool
 
-            raw_query = params.get("query", "").strip()
-            if not raw_query:
-                return {
-                    "chunks": [],
-                    "formatted_context": "",
-                    "citations": [],
-                    "sources": [],
-                    "query_used": ""
-                }
-
-            top_k = params.get("top_k", 3)
-            candidate_k = params.get("candidate_k", 5)
-
-            parsed_query = self.pipeline.parse_query(raw_query)
-            candidates = self.pipeline.retrieve_candidates(
-                parsed_query=parsed_query,
-                top_k=candidate_k
+            result = BankingRAGTool(pipeline_instance=self.pipeline, config=self.config).execute(
+                params.get("query", ""), top_k=params.get("top_k", 3), candidate_k=params.get("candidate_k"),
+                exact=params.get("exact", "")
             )
-            reranked_chunks = self.pipeline.rerank_candidates(
-                query_or_parsed=parsed_query,
-                candidates=candidates,
-                top_k=top_k
-            )
-
-            previews = [_format_retrieved_doc_context(chunk, max_chars=1800) for chunk in reranked_chunks]
-            context_text = "\n\n---\n\n".join(preview for preview in previews if preview)
-
-            citations = []
-            sources = []
-            for ch in reranked_chunks:
-                outer, chunk = _unwrap_chunk(ch)
-                source = str(chunk.get("source") or "")
-                bm = chunk.get("business_metadata")
-                if isinstance(bm, dict):
-                    doc_name = str(bm.get("document_name") or source or "")
-                else:
-                    doc_name = source
-                src_label = source or doc_name
-                if src_label and src_label not in sources:
-                    sources.append(src_label)
-
-                breadcrumb = str(chunk.get("breadcrumb") or "")
-                section_title = str(chunk.get("section_title") or "")
-                score = float(outer.get("rerank_score", outer.get("relevance_score", outer.get("score", 0.0))))
-                citations.append({
-                    "chunk_id": str(chunk.get("chunk_id") or outer.get("chunk_id") or ""),
-                    "source": src_label,
-                    "document_name": doc_name,
-                    "breadcrumb": breadcrumb,
-                    "breadcrumbs": breadcrumb,
-                    "section_title": section_title,
-                    "section": section_title,
-                    "chunk_type": str(chunk.get("chunk_type") or "text"),
-                    "score": round(score, 4)
-                })
-
-            return {
-                "chunks": reranked_chunks,
-                "formatted_context": context_text,
-                "citations": citations,
-                "sources": sources,
-                "query_used": raw_query,
-                "normalized_query": getattr(parsed_query, "normalized_query", raw_query)
-            }
+            documents = result["documents"]
+            previews = [_format_retrieved_doc_context(chunk, max_chars=1800) for chunk in documents]
+            return {**result, "chunks": documents, "query_used": result.get("query", ""),
+                    "formatted_context": "\n\n---\n\n".join(preview for preview in previews if preview)}
 
         # 5. Document Grader & Hallucination Audit Execution
         if exec_type == "fact_checker_engine":

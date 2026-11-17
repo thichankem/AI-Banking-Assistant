@@ -1,0 +1,42 @@
+name: deflect_competitor_comparison
+title: Điều Hướng So Sánh Đối Thủ Cạnh Tranh
+description: Điều hướng câu hỏi so sánh trực tiếp với ngân hàng đối thủ (Techcombank,
+  MB, VPBank...) về lợi thế và chính sách vượt trội của A-Bank.
+inputSchema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    competitor_name:
+      type: string
+      default: ''
+      description: Tên ngân hàng đối thủ khách hàng nhắc đến
+    query:
+      type: string
+      default: ''
+      description: Câu hỏi hoặc nội dung đối sánh ban đầu của khách hàng
+  required:
+  - competitor_name
+  additionalProperties: false
+outputSchema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    status:
+      type: string
+    strategy:
+      type: string
+    directive:
+      type: string
+    competitor_mentioned:
+      type: string
+    original_query:
+      type: string
+  required:
+  - status
+  - strategy
+  - directive
+  - competitor_mentioned
+  - original_query
+annotations:
+  readOnlyHint: true
+  destructiveHint: false

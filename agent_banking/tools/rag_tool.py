@@ -11,6 +11,16 @@ into a standard tool for AI Agents:
 
 import time
 from pathlib import Path
+from agent_banking.core.search_text import search_key
+
+
+def matches_exact(item: dict, exact: str) -> bool:
+    raw = item.get("chunk", item)
+    meta = raw.get("business_metadata") or {}
+    fields = [raw.get(field) for field in ("source", "section_title", "breadcrumb", "content")]
+    fields += [meta.get(field) for field in ("document_name", "product_name", "service_code")]
+    needle = " " + search_key(exact) + " "
+    return any(needle in " " + search_key(value) + " " for value in fields if isinstance(value, str))
 
 
 class BankingRAGTool:
@@ -30,7 +40,7 @@ class BankingRAGTool:
             from agent_banking.pipeline import BankingRAGPipeline
             self.pipeline = BankingRAGPipeline(config=config, use_memory=use_memory)
 
-    def execute(self, query: str, top_k: int = 3) -> dict:
+    def execute(self, query: str, top_k: int = 3, exact: str = "", candidate_k: int | None = None) -> dict:
         """
         Execute banking knowledge retrieval via Hybrid Retrieval & Reranker.
         """
@@ -47,15 +57,34 @@ class BankingRAGTool:
             }
 
         # 1. Parse Query & Acronym Normalization
-        parsed_q = self.pipeline.parse_query(clean_query)
+        search_text = clean_query
+        exact = exact.strip()
+        if exact and not search_key(exact):
+            raise ValueError("Exact search requires a product name or service code")
+        if exact and search_key(exact) not in search_key(clean_query):
+            search_text += " " + exact
+        parsed_q = self.pipeline.parse_query(search_text)
         search_query = parsed_q.normalized_query
 
         # 2. Hybrid Retrieval (Dense Vector + BM25 Okapi with RRF k=60)
+        candidate_count = candidate_k or self.pipeline.config.HYBRID_CANDIDATE_K
+        top_candidates = candidate_k or self.pipeline.config.HYBRID_TOP_K
+        if exact:
+            candidate_count = max(24, candidate_count)
+            top_candidates = candidate_count
+        scope = getattr(self.pipeline.config, "KNOWLEDGE_PUBLICATION_SCOPE", "")
+        filters = None
+        if scope:
+            filters = {**parsed_q.suggested_filters, "business_metadata.publication_scopes": scope}
         candidates = self.pipeline.retriever.retrieve(
             query=parsed_q,
-            top_k=self.pipeline.config.HYBRID_TOP_K,
-            candidate_k=self.pipeline.config.HYBRID_CANDIDATE_K
+            top_k=top_candidates,
+            candidate_k=candidate_count,
+            filter_dict=filters,
         )
+        relaxed = any(item.get("retrieval_meta", {}).get("fallback_unfiltered") for item in candidates)
+        if exact:
+            candidates = [item for item in candidates if matches_exact(item, exact)]
 
         # 3. Cross-Encoder Reranker
         reranked = self.pipeline.reranker.rerank(
@@ -174,5 +203,12 @@ class BankingRAGTool:
             "documents": docs,
             "sources": sorted(list(sources)),
             "citations": citations,
-            "latency_ms": latency_ms
+            "latency_ms": latency_ms,
+            "retrieval_quality": {
+                "relaxed_filters": relaxed,
+                "reranker": reranked[0].get("rerank_method", "unknown") if reranked else "none",
+                "exact_match_missing": bool(exact and not docs),
+                "searched_candidates": len(candidates),
+                "top_scores": [round(item["relevance_score"], 4) for item in docs[:6]],
+            }
         }

@@ -1,0 +1,44 @@
+parameters_schema:
+  type: object
+  properties:
+    transaction_amount:
+      type: number
+      description: Số tiền giao dịch đơn lẻ (VND)
+      default: 0.0
+    daily_accumulated_amount:
+      type: number
+      description: Tổng số tiền đã giao dịch tích lũy trong ngày (VND)
+      default: 0.0
+    is_new_device:
+      type: boolean
+      description: Giao dịch lần đầu tiên trên thiết bị mới
+      default: false
+    has_cccd_chip_nfc:
+      type: boolean
+      description: Khách hàng đã xác thực CCCD gắn chip qua NFC
+      default: true
+  required:
+  - transaction_amount
+output_schema:
+  type: object
+  properties:
+    compliance_status:
+      type: string
+    requires_biometric:
+      type: boolean
+    action_required:
+      type: string
+    regulatory_rules_triggered:
+      type: array
+    legal_basis:
+      type: string
+    full_audit_details:
+      type: object
+execution:
+  type: tool_call
+  function: check_biometric_compliance_qd2345
+  arg_mapping:
+    single_tx_amount_vnd: transaction_amount
+    daily_cumulative_amount_vnd: daily_accumulated_amount
+    is_first_time_new_device: is_new_device
+    has_verified_chip_cccd: has_cccd_chip_nfc

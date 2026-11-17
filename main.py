@@ -39,13 +39,13 @@ if str(ROOT_DIR) not in sys.path:
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uvicorn
 
 from agent_banking.core.settings import Config
 from agent_banking.pipeline import BankingRAGPipeline
 from agent_banking.node_pipeline import NodePipeline
-from agent_banking.agent_pipeline import BankingAgentPipeline
+from agent_banking.agent_pipeline import BankingAgentPipeline, InteractionError
 from agent_banking.agent.config.response_profiles import (
     PERSONA_PROFILES,
     TONE_PROFILES,
@@ -54,8 +54,8 @@ from agent_banking.agent.config.response_profiles import (
 
 # Initialize FastAPI application
 app = FastAPI(
-    title="AI Banking Assistant",
-    description="Enterprise Digital Banking Assistant & Pipeline Orchestration API",
+    title="A-Bank AI Assistant",
+    description="A-Bank chat, knowledge retrieval, and indexing API",
     version="3.0.0"
 )
 
@@ -91,6 +91,16 @@ class ChatRequest(BaseModel):
     format_style: str | None = "standard"
     custom_persona: str | None = ""
     session_id: str | None = None
+
+
+class SessionRequest(BaseModel):
+    session_id: str = Field(min_length=1, max_length=256)
+
+
+class ResumeRequest(SessionRequest):
+    interaction_id: str = Field(min_length=32, max_length=32)
+    choice_id: str = Field(min_length=1, max_length=32)
+    text: str | None = Field(default=None, max_length=500)
 
 
 # -----------------------------------------------------------------------------
@@ -239,6 +249,22 @@ def handle_agent_chat(req: ChatRequest):
         raise HTTPException(status_code=500, detail="Tạm thời chưa thể hoàn tất phản hồi.") from None
 
 
+@app.post("/api/agent/status")
+def agent_status(req: SessionRequest):
+    return get_agent_pipeline().status(req.session_id)
+
+
+@app.post("/api/agent/resume")
+def agent_resume(req: ResumeRequest):
+    try:
+        return get_agent_pipeline().resume(req.session_id, req.interaction_id, req.choice_id, req.text)
+    except InteractionError as error:
+        raise HTTPException(status_code=error.status_code, detail=str(error)) from None
+    except Exception as error:
+        print(f"[Deep agent resume] {type(error).__name__}")
+        raise HTTPException(status_code=500, detail="Tạm thời chưa thể tiếp tục yêu cầu.") from None
+
+
 @app.post("/api/agent/stream")
 async def stream_agent_chat(req: ChatRequest):
     """
@@ -270,6 +296,10 @@ async def stream_agent_chat(req: ChatRequest):
                 custom_persona=style["custom_persona"]
             ):
                 for node_name, node_state in step_event.items():
+                    if node_name == "awaiting_input":
+                        event = {"event_type": "awaiting_input", **node_state}
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                        return
                     if "audit_status" in node_state:
                         audit_status_used = str(node_state["audit_status"])
 
@@ -280,6 +310,8 @@ async def stream_agent_chat(req: ChatRequest):
                         "plan_update": "Đã cập nhật kế hoạch",
                         "subagent": "Đã nhận kết quả từ subagent",
                         "memory_update": "Đã xử lý bộ nhớ",
+                        "skill_inspect": "Đã nạp hướng dẫn skill",
+                        "prepare_interaction": "Đang chuẩn bị câu hỏi",
                         "answer_review": "Đã kiểm tra dự thảo",
                         "output_guardrail": "Đã kiểm tra phản hồi"
                     }
@@ -294,7 +326,7 @@ async def stream_agent_chat(req: ChatRequest):
                         citations = node_state["citations"]
                         sources = node_state["sources"]
                         final_metadata = {
-                            key: node_state[key] for key in ("plan", "delegations", "review_outcomes", "memory")
+                            key: node_state[key] for key in ("plan", "delegations", "review_outcomes", "verification", "memory")
                         }
 
                     step_payload = {
@@ -323,6 +355,7 @@ async def stream_agent_chat(req: ChatRequest):
 
             done_payload = {
                 "event_type": "done",
+                "status": "completed",
                 "session_id": session_id,
                 "audit_status": audit_status_used,
                 "evaluation_metrics": None,

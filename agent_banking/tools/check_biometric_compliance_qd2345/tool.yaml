@@ -1,0 +1,66 @@
+name: check_biometric_compliance_qd2345
+title: Thẩm Định Pháp Chế Sinh Trắc Học QĐ 2345 & TT 50
+description: Thẩm định bắt buộc xác thực khuôn mặt sinh trắc học (Facepay) khớp CCCD
+  gắn chip qua NFC theo Quyết định 2345/QĐ-NHNN và Thông tư 50/2024/TT-NHNN khi giao
+  dịch vượt 10 triệu/lần hoặc tổng ngày vượt 20 triệu.
+inputSchema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    single_tx_amount_vnd:
+      type: number
+      default: 0.0
+      description: Số tiền của giao dịch hiện tại đang chuẩn bị thực hiện (VND)
+    daily_cumulative_amount_vnd:
+      type: number
+      default: 0.0
+      description: Tổng số tiền đã giao dịch tích lũy thành công trong ngày hôm nay
+        (VND)
+    is_first_time_new_device:
+      type: boolean
+      default: false
+      description: Có phải là giao dịch lần đầu tiên trên thiết bị mới chưa từng đăng
+        ký
+    has_verified_chip_cccd:
+      type: boolean
+      default: true
+      description: Khách hàng đã hoàn thành đối soát CCCD gắn chip qua NFC trên A-Bank
+        Plus hay chưa
+  required:
+  - single_tx_amount_vnd
+  additionalProperties: false
+outputSchema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    status:
+      type: string
+    regulation_reference:
+      type: string
+    single_tx_amount_vnd:
+      type: number
+    daily_cumulative_amount_vnd:
+      type: number
+    requires_biometric:
+      type: boolean
+    has_verified_chip_cccd:
+      type: boolean
+    can_proceed_immediately:
+      type: boolean
+    trigger_reasons:
+      type: array
+    mandatory_action:
+      type: string
+  required:
+  - status
+  - regulation_reference
+  - single_tx_amount_vnd
+  - daily_cumulative_amount_vnd
+  - requires_biometric
+  - has_verified_chip_cccd
+  - can_proceed_immediately
+  - trigger_reasons
+  - mandatory_action
+annotations:
+  readOnlyHint: true
+  destructiveHint: false

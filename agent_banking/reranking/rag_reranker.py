@@ -194,13 +194,15 @@ class BankingReranker:
                 item_copy["relevance_score"] = round(float(score), 4)
                 item_copy["rerank_score"] = round(float(score), 4)
                 item_copy["rerank_rank"] = rank
+                item_copy["rerank_method"] = "local_lexical"
                 results.append(item_copy)
             else:
                 results.append({
                     "document": item,
                     "relevance_score": round(float(score), 4),
                     "rerank_score": round(float(score), 4),
-                    "rerank_rank": rank
+                    "rerank_rank": rank,
+                    "rerank_method": "local_lexical"
                 })
         return results
 
@@ -311,6 +313,7 @@ class BankingReranker:
                         final_results = []
                         for rank, item in enumerate(reranked[:top_k], start=1):
                             item["rerank_rank"] = rank
+                            item["rerank_method"] = "cloud_cross_encoder"
                             final_results.append(item)
                         return final_results
             raise ValueError("No valid reranker results")

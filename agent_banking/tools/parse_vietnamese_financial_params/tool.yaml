@@ -1,0 +1,46 @@
+name: parse_vietnamese_financial_params
+title: Bóc Tách Tham Số Tài Chính Tiếng Việt
+description: Bóc tách số tiền (triệu, tỷ, k, củ), kỳ hạn vay/gửi (tháng, năm), lãi
+  suất từ câu hỏi văn bản tự nhiên tiếng Việt thuần túy 0% regex.
+inputSchema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    query:
+      type: string
+      description: Câu hỏi của khách hàng chứa thông tin tài chính
+  required:
+  - query
+  additionalProperties: false
+outputSchema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    amount_vnd:
+      type: number
+    single_tx_amount_vnd:
+      type: number
+    daily_cumulative_amount_vnd:
+      type: number
+    term_months:
+      type: integer
+    annual_rate_percent:
+      type: number
+    is_first_time_new_device:
+      type: boolean
+    has_verified_chip_cccd:
+      type: boolean
+    requires_biometric:
+      type: boolean
+  required:
+  - amount_vnd
+  - single_tx_amount_vnd
+  - daily_cumulative_amount_vnd
+  - term_months
+  - annual_rate_percent
+  - is_first_time_new_device
+  - has_verified_chip_cccd
+  - requires_biometric
+annotations:
+  readOnlyHint: true
+  destructiveHint: false

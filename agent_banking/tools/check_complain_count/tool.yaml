@@ -1,0 +1,35 @@
+name: check_complain_count
+title: Kiểm Soát Tần Suất Phàn Nàn
+description: Tính số lượt phàn nàn tiếp theo và cho biết đã tới ngưỡng đề xuất chuyển tư vấn viên.
+inputSchema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    complain_count:
+      type: integer
+      default: 0
+      description: Số lượt phàn nàn trong phiên
+  additionalProperties: false
+outputSchema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    status:
+      type: string
+    previous_count:
+      type: integer
+    complain_count:
+      type: integer
+    escalate_to_human:
+      type: boolean
+    message:
+      type: string
+  required:
+  - status
+  - previous_count
+  - complain_count
+  - escalate_to_human
+  - message
+annotations:
+  readOnlyHint: true
+  destructiveHint: false

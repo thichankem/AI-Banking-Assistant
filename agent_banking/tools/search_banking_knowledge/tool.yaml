@@ -1,0 +1,68 @@
+name: search_banking_knowledge
+title: Tra Cứu Tri Thức Quy Chế & Biểu Phí A-Bank (Agentic RAG)
+description: Tra cứu tài liệu quy chế ngân hàng, sản phẩm thẻ, pháp lý tuân thủ, hướng
+  dẫn app A-Bank Plus, bảo hiểm A-Life, tín dụng, báo cáo tài chính và SLA bằng công
+  nghệ Hybrid Vector + BM25 và Cross-Encoder Reranker.
+inputSchema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    query:
+      type: string
+      description: Câu tìm kiếm tự chứa chủ đề, đối tượng và điều kiện còn áp dụng.
+        Với câu nối tiếp, dùng đối tượng xác định được từ ngữ cảnh của phiên.
+      minLength: 1
+    exact:
+      type: string
+      minLength: 2
+      maxLength: 100
+      description: Nếu cần, tên sản phẩm hoặc mã dịch vụ phải xuất hiện trong kết
+        quả.
+    top_k:
+      type: integer
+      default: 3
+      description: Số lượng tài liệu tinh lọc sau Rerank
+      minimum: 1
+      maximum: 6
+  required:
+  - query
+  additionalProperties: false
+outputSchema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    status:
+      type: string
+    documents:
+      type: array
+      items:
+        type: object
+        properties:
+          chunk_id: {type: string}
+          source: {type: string}
+          content: {type: string}
+          business_metadata: {type: object}
+        required: [chunk_id, source, content]
+    sources:
+      type: array
+      items: {type: string}
+    citations:
+      type: array
+      items:
+        type: object
+        properties:
+          label: {type: string}
+          source: {type: string}
+          chunk_id: {type: string}
+        required: [label, source, chunk_id]
+    latency_ms:
+      type: number
+  required:
+  - status
+  - documents
+  - sources
+  - citations
+  - latency_ms
+annotations:
+  readOnlyHint: true
+  destructiveHint: false

@@ -26,6 +26,7 @@ import warnings
 from pathlib import Path
 
 from agent_banking.chunking.universal.planning.schema import payload_index_key
+from agent_banking.core.search_text import search_key
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -474,7 +475,9 @@ class QdrantBankingStore:
                 cleaned_chars.append(ch)
             else:
                 cleaned_chars.append(" ")
-        return "".join(cleaned_chars).split()
+        original = "".join(cleaned_chars).split()
+        folded = search_key(str(text)).split()
+        return original + ["~" + word for word in folded]
 
     @staticmethod
     def _flatten_table_value(value):

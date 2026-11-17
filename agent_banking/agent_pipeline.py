@@ -5,6 +5,7 @@ import sys
 import time
 from threading import Lock
 from pathlib import Path
+from langgraph.types import Command
 
 # Ensure UTF-8 on Windows console
 if sys.platform == "win32":
@@ -23,6 +24,12 @@ from agent_banking.pipeline import BankingRAGPipeline
 from agent_banking.agent.graph import build_banking_agent_graph
 from agent_banking.agent.deep import BankingDeepAgent
 from agent_banking.agent.react import FALLBACK_ANSWER
+
+
+class InteractionError(ValueError):
+    def __init__(self, status_code: int, message: str):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class BankingAgentPipeline:
@@ -89,9 +96,62 @@ class BankingAgentPipeline:
     def _session_lock(self, session_id: str):
         return self._session_locks[hash(session_id) % len(self._session_locks)]
 
-    def _restore_history(self, state: dict, thread_config: dict) -> None:
+    @staticmethod
+    def _thread_config(session_id: str) -> dict:
+        return {"configurable": {"thread_id": session_id}, "recursion_limit": 64}
+
+    @staticmethod
+    def _waiting(snapshot, session_id: str) -> dict:
+        return {
+            "status": "awaiting_input",
+            "session_id": session_id,
+            "answer": "",
+            "interaction": snapshot.interrupts[0].value,
+            "plan": snapshot.values.get("plan", []),
+            "plan_revision": snapshot.values.get("plan_revision", 0),
+        }
+
+    def status(self, session_id: str) -> dict:
+        with self._session_lock(session_id):
+            snapshot = self.graph.get_state(self._thread_config(session_id))
+            if snapshot.interrupts:
+                return self._waiting(snapshot, session_id)
+            if snapshot.values.get("accepted_interaction_id") and not snapshot.next:
+                return self._format_result(snapshot.values, session_id, 0.0)
+        return {"status": "idle", "session_id": session_id}
+
+    def resume(self, session_id: str, interaction_id: str, choice_id: str, text: str | None = None) -> dict:
+        started = time.perf_counter()
+        config = self._thread_config(session_id)
+        with self._session_lock(session_id):
+            snapshot = self.graph.get_state(config)
+            if not snapshot.interrupts or snapshot.interrupts[0].value["id"] != interaction_id:
+                raise InteractionError(409, "Câu hỏi này không còn chờ phản hồi trong phiên hiện tại.")
+            pending = snapshot.interrupts[0]
+            if not any(option["id"] == choice_id for option in pending.value["options"]):
+                raise InteractionError(422, "Lựa chọn không hợp lệ.")
+            reply = {"interaction_id": interaction_id, "choice_id": choice_id}
+            if choice_id == "other":
+                if not text or not text.strip() or len(text) > 500:
+                    raise InteractionError(422, "Vui lòng nhập câu trả lời từ 1 đến 500 ký tự.")
+                screened = self.runtime.screen_input(text)
+                if not screened["is_safe"]:
+                    raise InteractionError(422, "Không thể sử dụng câu trả lời này. Vui lòng chỉnh sửa.")
+                guarded = self.runtime.guard_artifact(screened["query"])
+                if not guarded:
+                    raise InteractionError(422, "Không thể sử dụng câu trả lời này. Vui lòng chỉnh sửa.")
+                reply["text"] = guarded
+            elif text is not None:
+                raise InteractionError(422, "Chỉ lựa chọn Khác nhận câu trả lời tự do.")
+            self.graph.invoke(Command(resume={pending.id: reply}), config=config, durability="sync")
+            snapshot = self.graph.get_state(config)
+            if snapshot.interrupts:
+                return self._waiting(snapshot, session_id)
+        return self._format_result(snapshot.values, session_id, round((time.perf_counter() - started) * 1000, 2),
+                                   trace_result=True)
+
+    def _restore_history(self, state: dict, previous: dict) -> None:
         # The graph uses a root dict channel, which is replaced by each new request.
-        previous = self.graph.get_state(thread_config).values
         history = previous.get("chat_history", [])
         memory = previous.get("session_memory")
         if memory is None:
@@ -137,16 +197,21 @@ class BankingAgentPipeline:
             }
 
         # Configure Thread ID for Checkpointer (session memory)
-        thread_config = {"configurable": {"thread_id": session_id}, "recursion_limit": 64}
+        thread_config = self._thread_config(session_id)
 
         try:
             with self._session_lock(session_id):
+                snapshot = self.graph.get_state(thread_config)
+                if snapshot.interrupts:
+                    return self._waiting(snapshot, session_id)
                 initial_state = self.build_initial_state(
                     query=query, session_id=session_id, persona=persona, tone=tone,
                     format_type=format_type, custom_persona=custom_persona
                 )
-                self._restore_history(initial_state, thread_config)
-                final_state = self.graph.invoke(initial_state, config=thread_config, durability="exit")
+                self._restore_history(initial_state, snapshot.values)
+                final_state = self.graph.invoke(initial_state, config=thread_config, durability="sync")
+                if "__interrupt__" in final_state:
+                    return self._waiting(self.graph.get_state(thread_config), session_id)
         except Exception as e:
             print(f"[LangGraph Execution Error]: {type(e).__name__}")
             latency_err = round((time.perf_counter() - start_time) * 1000.0, 2)
@@ -166,7 +231,10 @@ class BankingAgentPipeline:
             }
 
         total_latency_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
+        return self._format_result(final_state, session_id, total_latency_ms, trace_result=True)
 
+    def _format_result(self, final_state: dict, session_id: str, total_latency_ms: float,
+                       *, trace_result: bool = False) -> dict:
         # Extract output fields for Frontend UI Inspector
         answer = final_state.get("final_answer", "")
 
@@ -191,23 +259,15 @@ class BankingAgentPipeline:
         trace_query = "[blocked]"
         if is_input_safe:
             trace_query = final_state["user_query"]
-        with self.tracer.trace_query(query=trace_query) as trace:
-            for s in steps:
-                trace.spans.append({
-                    "name": str(s),
-                    "duration_ms": 0.0,
-                    "details": {
-                        "intent": intent,
-                        "audit_status": audit_stat
-                    }
-                })
-            trace.finish(
-                answer=answer,
-                citations=citations,
-                sources=sources,
-                is_blocked=(not is_input_safe),
-                guardrail_trigger=None
-            )
+        if trace_result:
+            with self.tracer.trace_query(query=trace_query) as trace:
+                for step in steps:
+                    trace.spans.append({
+                        "name": str(step), "duration_ms": 0.0,
+                        "details": {"intent": intent, "audit_status": audit_stat}
+                    })
+                trace.finish(answer=answer, citations=citations, sources=sources,
+                             is_blocked=not is_input_safe, guardrail_trigger=None)
 
         # Package node inspection details
         nodes_detail = {
@@ -244,13 +304,19 @@ class BankingAgentPipeline:
             }
         }
 
+        status = "completed"
+        if audit_stat == "CANCELED":
+            status = "canceled"
         return {
+            "status": status,
+            "accepted_interaction_id": final_state.get("accepted_interaction_id"),
             "answer": answer,
             "citations": citations,
             "sources": sources,
             "intent": intent,
             "retry_count": retries,
             "audit_status": audit_stat,
+            "error_category": final_state.get("error_category"),
             "evaluation_metrics": None,
             "tool_calls": tool_outputs,
             "session_id": session_id,
@@ -260,6 +326,7 @@ class BankingAgentPipeline:
             "plan_revision": final_state.get("plan_revision", 0),
             "delegations": final_state.get("delegations", []),
             "review_outcomes": final_state.get("reviews", []),
+            "verification": final_state.get("verification", {}),
             "memory": final_state.get("memory_status", {}),
             "nodes": nodes_detail
         }
@@ -287,7 +354,7 @@ class BankingAgentPipeline:
         import contextlib
         import threading
 
-        thread_config = {"configurable": {"thread_id": session_id}, "recursion_limit": 64}
+        thread_config = self._thread_config(session_id)
 
         loop = asyncio.get_running_loop()
         queue = asyncio.Queue()
@@ -299,20 +366,30 @@ class BankingAgentPipeline:
                 with self._session_lock(session_id):
                     if stop_event.is_set():
                         return
+                    snapshot = self.graph.get_state(thread_config)
+                    if snapshot.interrupts:
+                        loop.call_soon_threadsafe(queue.put_nowait, ("event", {
+                            "awaiting_input": self._waiting(snapshot, session_id)
+                        }))
+                        return
                     initial_state = self.build_initial_state(
                         query=query, session_id=session_id, persona=persona, tone=tone,
                         format_type=format_type, custom_persona=custom_persona
                     )
-                    self._restore_history(initial_state, thread_config)
-                    with contextlib.closing(self.graph.stream(initial_state, config=thread_config, durability="exit")) as events:
+                    self._restore_history(initial_state, snapshot.values)
+                    paused = False
+                    with contextlib.closing(self.graph.stream(initial_state, config=thread_config, durability="sync")) as events:
                         while not stop_event.is_set():
                             event = next(events, None)
                             if event is None:
                                 break
+                            if "__interrupt__" in event:
+                                paused = True
+                                continue
                             progress = {}
                             for node, node_state in event.items():
                                 public = {}
-                                if node in ("react_action", "plan_update", "subagent", "memory_update", "context_prepare"):
+                                if node in ("react_action", "plan_update", "subagent", "memory_update", "context_prepare", "skill_inspect"):
                                     if node_state.get("last_action"):
                                         public["last_action"] = node_state["last_action"]
                                 if node == "plan_update":
@@ -323,9 +400,15 @@ class BankingAgentPipeline:
                                     for key in ("final_answer", "audit_status", "citations", "sources", "plan", "delegations"):
                                         public[key] = node_state[key]
                                     public["review_outcomes"] = node_state["reviews"]
+                                    public["verification"] = node_state.get("verification", {})
                                     public["memory"] = node_state["memory_status"]
                                 progress[node] = public
                             loop.call_soon_threadsafe(queue.put_nowait, ("event", progress))
+                    if paused and not stop_event.is_set():
+                        snapshot = self.graph.get_state(thread_config)
+                        loop.call_soon_threadsafe(queue.put_nowait, ("event", {
+                            "awaiting_input": self._waiting(snapshot, session_id)
+                        }))
             except Exception as exc:
                 loop.call_soon_threadsafe(queue.put_nowait, ("error", exc))
             finally:

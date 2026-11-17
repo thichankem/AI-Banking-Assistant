@@ -26,7 +26,7 @@ import datetime
 
 
 def get_interest_rates(deposit_type: str = "vnd") -> dict:
-    """Look up listed deposit interest rates."""
+    """Return the deposit interest rates used in the simulation."""
     dep_type = deposit_type.strip().lower()
     if dep_type == "vnd" or dep_type == "dong":
         rates = [
@@ -45,7 +45,7 @@ def get_interest_rates(deposit_type: str = "vnd") -> dict:
             "effective_date": "2026-10-25",
             "bank": "Ngân hàng Thương mại",
             "interest_rates": rates,
-            "disclaimer": "Lãi suất có thể thay đổi theo từng thời kỳ và áp dụng ưu đãi khi gửi online."
+            "disclaimer": "Đây là lãi suất mẫu dùng để mô phỏng."
         }
     else:
         return {
@@ -54,14 +54,14 @@ def get_interest_rates(deposit_type: str = "vnd") -> dict:
             "effective_date": "2026-10-25",
             "bank": "Ngân hàng Thương mại",
             "interest_rates": [
-                {"term": "Mọi kỳ hạn", "rate_percent_per_year": 0.0, "note": "Áp dụng theo quy định của NHNN đối với ngoại tệ USD"}
+                {"term": "Mọi kỳ hạn", "rate_percent_per_year": 0.0, "note": "Giá trị mẫu cho USD"}
             ],
-            "disclaimer": "Lãi suất tiền gửi USD hiện là 0%/năm theo quy định kiểm soát ngoại hối của Ngân hàng Nhà nước."
+            "disclaimer": "Đây là lãi suất USD mẫu dùng để mô phỏng."
         }
 
 
 def get_foreign_exchange_rates(currency: str = "USD") -> dict:
-    """Look up current foreign exchange rates."""
+    """Return the foreign exchange rates used in the simulation."""
     curr = currency.strip().upper()
 
     rate_table = {
@@ -85,7 +85,7 @@ def get_foreign_exchange_rates(currency: str = "USD") -> dict:
         "effective_date": "2026-10-25",
         "bank": "Ngân hàng Thương mại",
         "rates": selected_rate,
-        "note": "Tỷ giá mua chuyển khoản và bán được cập nhật thời gian thực từ hệ thống."
+        "note": "Đây là bảng tỷ giá mẫu dùng để mô phỏng."
     }
 
 
@@ -565,10 +565,8 @@ def deflect_competitor_comparison(
         "status": "success",
         "strategy": "deflection",
         "directive": (
-            "Tuyệt đối không so sánh tiêu cực với ngân hàng đối thủ. "
-            "Tập trung làm rõ các chính sách vượt trội của Ngân hàng: "
-            "Mạng lưới thanh toán rộng khắp, miễn phí chuyển tiền ngân hàng số, "
-            "chuẩn mực an toàn thông tin quốc tế PCI-DSS Level 1 cao nhất."
+            "Hỏi tiêu chí cần so sánh. Giải thích tính năng A-Bank dựa trên tài liệu đã truy xuất. "
+            "Không suy rộng tài liệu A-Bank sang ngân hàng khác."
         ),
         "competitor_mentioned": competitor_name,
         "original_query": query

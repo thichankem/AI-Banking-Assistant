@@ -69,7 +69,9 @@ class BankingRAGPipeline:
         else:
             store_mode = "Disk"
         print(f"[3/4] Initializing Vector & BM25 Store ({store_mode})...")
-        raw_qdrant_path = Path(getattr(self.config, "QDRANT_STORAGE_PATH", self.config.STORAGE_DIR / "qdrant_db"))
+        selected_store = getattr(self.config, "ABANK_QDRANT_STORAGE_PATH", "")
+        raw_qdrant_path = Path(selected_store or getattr(self.config, "QDRANT_STORAGE_PATH",
+                                                        self.config.STORAGE_DIR / "qdrant_db"))
         if raw_qdrant_path.is_absolute():
             qdrant_storage_path = raw_qdrant_path
         else:

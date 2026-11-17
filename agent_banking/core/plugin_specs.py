@@ -1,12 +1,51 @@
 """Load declarative capabilities from trusted project directories."""
 
-import json
-import logging
+from pathlib import Path
 
+import yaml
 from jsonschema import Draft202012Validator
-from jsonschema.exceptions import SchemaError
 
-logger = logging.getLogger(__name__)
+MAX_PACKAGE_FILE = 65536
+
+
+class PackageYamlLoader(yaml.SafeLoader):
+    def compose_node(self, parent, index):
+        if self.check_event(yaml.AliasEvent):
+            raise ValueError("YAML aliases are not supported in package definitions")
+        return super().compose_node(parent, index)
+
+    def construct_mapping(self, node, deep=False):
+        result = super().construct_mapping(node, deep=deep)
+        if len(result) != len(node.value):
+            raise ValueError("Duplicate YAML field")
+        return result
+
+
+def load_yaml(text: str) -> dict:
+    try:
+        data = yaml.load(text, Loader=PackageYamlLoader)
+    except yaml.YAMLError as error:
+        raise ValueError("Invalid package YAML") from error
+    if not isinstance(data, dict):
+        raise ValueError("Expected a YAML mapping")
+    return data
+
+
+def confined_file(root: Path, relative: str) -> Path:
+    """The caller supplies a canonical root. Reject links and path traversal."""
+    path = root / relative
+    if not path.is_relative_to(root) or ".." in path.parts or path.resolve(strict=True) != path or not path.is_file():
+        raise ValueError("File is outside the package or is not a regular file")
+    return path
+
+
+def read_resource(root: Path, relative: str) -> str:
+    path = confined_file(root, relative)
+    with path.open("rb") as stream:
+        content = stream.read(MAX_PACKAGE_FILE + 1)
+    if len(content) > MAX_PACKAGE_FILE:
+        raise ValueError("Package resource is too large")
+    return content.decode("utf-8-sig")
 
 
 def public_name(name) -> bool:
@@ -18,7 +57,10 @@ def public_name(name) -> bool:
 
 def check_parameters(schema: dict) -> None:
     if not isinstance(schema, dict) or schema.get("type") != "object":
-        raise ValueError("Capability parameters must be an object schema")
+        raise ValueError("Capability schema must describe an object")
+    draft = "https://json-schema.org/draft/2020-12/schema"
+    if schema.get("$schema", draft) not in (draft, draft + "#"):
+        raise ValueError("Only JSON Schema Draft 2020-12 is supported")
 
     def check_refs(value):
         if isinstance(value, dict):
@@ -32,27 +74,3 @@ def check_parameters(schema: dict) -> None:
 
     check_refs(schema)
     Draft202012Validator.check_schema(schema)
-
-
-def load_specs(directory, pattern: str, name_key: str, validate) -> dict:
-    specs = {}
-    duplicates = set()
-    for path in sorted(directory.glob(pattern)):
-        if path.name.endswith("_manifest.json") or path.is_symlink() or not path.is_file():
-            continue
-        try:
-            spec = json.loads(path.read_text(encoding="utf-8-sig"))
-            if not isinstance(spec, dict):
-                raise ValueError("Expected a JSON object")
-            name = spec.get(name_key, path.stem)
-            if not public_name(name):
-                raise ValueError("Invalid capability name")
-            spec[name_key] = name
-            validate(spec)
-            if name in specs:
-                duplicates.add(name)
-                logger.warning("Duplicate capability %s in %s", name, directory.name)
-            specs[name] = spec
-        except (OSError, UnicodeError, ValueError, SchemaError) as error:
-            logger.warning("Skipping %s (%s)", path.name, type(error).__name__)
-    return {name: spec for name, spec in specs.items() if name not in duplicates}

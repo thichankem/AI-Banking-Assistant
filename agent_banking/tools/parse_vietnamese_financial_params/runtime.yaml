@@ -1,0 +1,8 @@
+category: HELPER
+handler:
+  module: agent_banking.tools.banking_api_tools
+  function: parse_vietnamese_financial_params
+policy:
+  access: read_only
+  workers:
+  - financial_analysis

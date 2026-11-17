@@ -1,0 +1,8 @@
+category: COMPLIANCE
+handler:
+  module: agent_banking.tools.banking_api_tools
+  function: check_biometric_compliance_qd2345
+policy:
+  access: read_only
+  workers:
+  - service_research

@@ -1,0 +1,10 @@
+category: KNOWLEDGE
+handler:
+  module: agent_banking.tools.rag_tool
+  class: BankingRAGTool
+  method: execute
+policy:
+  access: read_only
+  workers:
+  - policy_research
+  - service_research

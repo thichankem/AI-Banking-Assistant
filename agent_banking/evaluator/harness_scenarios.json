@@ -1,0 +1,567 @@
+[
+  {
+    "id": "A-01",
+    "group": "A",
+    "question": "chao ban, ban la ai vay",
+    "criteria": "Chào bằng tiếng Việt tự nhiên và tự giới thiệu là A-Bank.",
+    "checks": {
+      "no_tools": true,
+      "contains": "A-Bank"
+    }
+  },
+  {
+    "id": "A-02",
+    "group": "A",
+    "question": "phi thuong nien the chinh sao mai bn?",
+    "criteria": "Hiểu câu không dấu và bn là bao nhiêu. Phí thẻ chính 120.000 VND.",
+    "fixture": {
+      "documents": [
+        {
+          "chunk_id": "Phi-bieu-sao-mai",
+          "source": "Phi-bieu-sao-mai.docx",
+          "content": "Thẻ tín dụng Sao Mai có phí thường niên 120.000 VND cho thẻ chính, 60.000 VND cho thẻ phụ. Miễn phí năm đầu khi được phát hành theo chương trình Sao Mai Chào Mừng."
+        }
+      ]
+    },
+    "checks": {
+      "citations": true
+    }
+  },
+  {
+    "id": "A-03",
+    "group": "A",
+    "question": "Tôi đang hỏi về phí thẻ chính Sao Mai.",
+    "criteria": "Xác định câu hỏi tiếp theo về thẻ phụ cùng dòng, ghi mức 60.000 VND và trích nguồn.",
+    "fixture": {
+      "documents": [
+        {
+          "chunk_id": "Phi-bieu-sao-mai",
+          "source": "Phi-bieu-sao-mai.docx",
+          "content": "Thẻ tín dụng Sao Mai có phí thường niên 120.000 VND cho thẻ chính, 60.000 VND cho thẻ phụ. Miễn phí năm đầu khi được phát hành theo chương trình Sao Mai Chào Mừng."
+        }
+      ]
+    },
+    "turns": [
+      "Phí thường niên thẻ chính Sao Mai?",
+      "còn thẻ phụ thì sao?"
+    ],
+    "checks": {
+      "citations": true
+    }
+  },
+  {
+    "id": "A-04",
+    "group": "A",
+    "question": "Giải thích phí thường niên theo cách dễ hiểu và so sánh thẻ chính/phụ Sao Mai bằng bảng.",
+    "criteria": "Giải thích thuật ngữ dễ hiểu, trình bày bảng hai mức 120.000 và 60.000 VND.",
+    "fixture": {
+      "documents": [
+        {
+          "chunk_id": "Phi-bieu-sao-mai",
+          "source": "Phi-bieu-sao-mai.docx",
+          "content": "Thẻ tín dụng Sao Mai có phí thường niên 120.000 VND cho thẻ chính, 60.000 VND cho thẻ phụ. Miễn phí năm đầu khi được phát hành theo chương trình Sao Mai Chào Mừng."
+        }
+      ]
+    },
+    "checks": {
+      "citations": true
+    }
+  },
+  {
+    "id": "A-05",
+    "group": "A",
+    "question": "Cho tôi xem phí nhé.",
+    "criteria": "Đối tượng chưa đủ rõ, hỏi lại bằng thẻ thay vì tự chọn phí hoặc sản phẩm.",
+    "checks": {
+      "interaction": "clarify"
+    }
+  },
+  {
+    "id": "B-01",
+    "group": "B",
+    "question": "Vừa xem phí thẻ phụ Sao Mai vừa xem cách khắc phục lỗi ABP-18.",
+    "criteria": "Xử lý cả hai ý, dùng chứng cứ tương ứng. Mức 60.000 VND và đủ các bước lỗi ứng dụng.",
+    "fixture": {
+      "documents": [
+        {
+          "chunk_id": "Phi-bieu-sao-mai",
+          "source": "Phi-bieu-sao-mai.docx",
+          "content": "Thẻ tín dụng Sao Mai có phí thường niên 120.000 VND cho thẻ chính, 60.000 VND cho thẻ phụ. Miễn phí năm đầu khi được phát hành theo chương trình Sao Mai Chào Mừng."
+        },
+        {
+          "chunk_id": "Huong-dan-A-Bank-Plus",
+          "source": "Huong-dan-A-Bank-Plus.docx",
+          "content": "Lỗi ABP-18 khi xác thực thiết bị: kiểm tra kết nối, cập nhật A-Bank Plus, sau đó mở lại màn hình xác thực. Nếu vẫn xảy ra, chọn Trợ giúp > Báo lỗi trong app."
+        }
+      ]
+    },
+    "checks": {
+      "citations": true
+    }
+  },
+  {
+    "id": "B-02",
+    "group": "B",
+    "question": "Tính khoản trả tháng đầu dư nợ giảm dần cho 120 triệu, 12 tháng, 12%/năm.",
+    "criteria": "Có phép tính xác nhận 11.200.000 VND. Không tự thay đổi kỳ hạn hay lãi suất."
+  },
+  {
+    "id": "B-03",
+    "group": "B",
+    "question": "Tra thủ tục A-Bank cho chương trình thử nghiệm Borea-Z917.",
+    "criteria": "Báo chưa xác minh được sau khi kho trả rỗng, không bổ sung chính sách tưởng tượng.",
+    "fixture": {
+      "documents": []
+    }
+  },
+  {
+    "id": "B-04",
+    "group": "B",
+    "question": "Sao Mai chính và phụ có cùng mức phí không, và chương trình nào được miễn năm đầu?",
+    "criteria": "Đối chiếu cả mức phí và điều kiện miễn; hai mức khác nhau; chỉ chương trình Sao Mai Chào Mừng.",
+    "fixture": {
+      "documents": [
+        {
+          "chunk_id": "Phi-bieu-sao-mai",
+          "source": "Phi-bieu-sao-mai.docx",
+          "content": "Thẻ tín dụng Sao Mai có phí thường niên 120.000 VND cho thẻ chính, 60.000 VND cho thẻ phụ. Miễn phí năm đầu khi được phát hành theo chương trình Sao Mai Chào Mừng."
+        }
+      ]
+    },
+    "checks": {
+      "citations": true
+    }
+  },
+  {
+    "id": "B-05",
+    "group": "B",
+    "question": "Giúp tôi tra phí thường niên nhưng hãy hỏi tôi muốn tra loại thẻ nào trước.",
+    "criteria": "Agent tạm dừng và hỏi bằng thẻ; sau lựa chọn khác là thẻ phụ Sao Mai, lấy mức đúng 60.000 VND.",
+    "fixture": {
+      "documents": [
+        {
+          "chunk_id": "Phi-bieu-sao-mai",
+          "source": "Phi-bieu-sao-mai.docx",
+          "content": "Thẻ tín dụng Sao Mai có phí thường niên 120.000 VND cho thẻ chính, 60.000 VND cho thẻ phụ. Miễn phí năm đầu khi được phát hành theo chương trình Sao Mai Chào Mừng."
+        }
+      ]
+    },
+    "clarifications": {
+      "1": {
+        "choice_id": "other",
+        "text": "Thẻ phụ Sao Mai"
+      }
+    },
+    "checks": {
+      "interaction": "clarify",
+      "citations": true
+    }
+  },
+  {
+    "id": "C-01",
+    "group": "C",
+    "question": "Đọc hướng dẫn skill nghiệp vụ trước, rồi tra mức phí thẻ Sao Mai chính.",
+    "criteria": "Quan sát có thao tác inspect_skill thành công và dùng registry hợp lệ. Trả 120.000 VND có nguồn.",
+    "fixture": {
+      "documents": [
+        {
+          "chunk_id": "Phi-bieu-sao-mai",
+          "source": "Phi-bieu-sao-mai.docx",
+          "content": "Thẻ tín dụng Sao Mai có phí thường niên 120.000 VND cho thẻ chính, 60.000 VND cho thẻ phụ. Miễn phí năm đầu khi được phát hành theo chương trình Sao Mai Chào Mừng."
+        }
+      ]
+    },
+    "checks": {
+      "citations": true
+    }
+  },
+  {
+    "id": "C-02",
+    "group": "C",
+    "question": "Dùng skill vận hành để xử lý ABP-18 trên A-Bank Plus.",
+    "criteria": "Chọn skill vận hành theo mục tiêu, hướng dẫn kết nối, cập nhật, mở lại và kênh trong app nếu còn lỗi.",
+    "fixture": {
+      "documents": [
+        {
+          "chunk_id": "Huong-dan-A-Bank-Plus",
+          "source": "Huong-dan-A-Bank-Plus.docx",
+          "content": "Lỗi ABP-18 khi xác thực thiết bị: kiểm tra kết nối, cập nhật A-Bank Plus, sau đó mở lại màn hình xác thực. Nếu vẫn xảy ra, chọn Trợ giúp > Báo lỗi trong app."
+        }
+      ]
+    },
+    "checks": {
+      "citations": true
+    }
+  },
+  {
+    "id": "C-03",
+    "group": "C",
+    "question": "Dùng skill tư vấn để so sánh Sao Mai và Sao Mai Plus về rút ATM.",
+    "criteria": "Chọn skill tư vấn phù hợp và phân biệt 20.000.000 với 35.000.000 VND.",
+    "fixture": {
+      "documents": [
+        {
+          "chunk_id": "Bang-han-muc-Sao-Mai",
+          "source": "Bang-han-muc-Sao-Mai.docx",
+          "content": "Bảng hạn mức rút chuyển theo ngày bằng VND.",
+          "chunk_type": "table",
+          "table_data": {
+            "title": "Hạn mức theo ngày",
+            "headers": [
+              "Thẻ",
+              "Rút ATM",
+              "Chuyển khoản"
+            ],
+            "rows": [
+              [
+                "Sao Mai",
+                "20.000.000 VND",
+                "80.000.000 VND"
+              ],
+              [
+                "Sao Mai Plus",
+                "35.000.000 VND",
+                "120.000.000 VND"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    "checks": {
+      "citations": true
+    }
+  },
+  {
+    "id": "C-04",
+    "group": "C",
+    "question": "Dùng skill thông tin chung để tìm kênh và giờ hỗ trợ, rồi dùng skill vận hành để xử lý ABP-18.",
+    "criteria": "Dùng hoặc đọc cả hai skill phù hợp, có giờ 08:00–17:00, kênh trong app và bước xử lý.",
+    "fixture": {
+      "documents": [
+        {
+          "chunk_id": "Kenh-ho-tro-A-Bank",
+          "source": "Kenh-ho-tro-A-Bank.docx",
+          "content": "Hỗ trợ trong A-Bank Plus: Trợ giúp > Hỗ trợ trực tuyến. Giờ tiếp nhận ngày thường 08:00–17:00."
+        },
+        {
+          "chunk_id": "Huong-dan-A-Bank-Plus",
+          "source": "Huong-dan-A-Bank-Plus.docx",
+          "content": "Lỗi ABP-18 khi xác thực thiết bị: kiểm tra kết nối, cập nhật A-Bank Plus, sau đó mở lại màn hình xác thực. Nếu vẫn xảy ra, chọn Trợ giúp > Báo lỗi trong app."
+        }
+      ]
+    },
+    "checks": {
+      "citations": true
+    }
+  },
+  {
+    "id": "C-05",
+    "group": "C",
+    "question": "Skill quét thư mục máy tính của tôi có sẵn không? Nếu không, hãy giải thích chức năng tra cứu tài liệu A-Bank.",
+    "criteria": "Không giả định có quyền đọc file, giải thích có truy xuất chunks chỉ mục. Không tự gọi tool hệ thống."
+  },
+  {
+    "id": "D-01",
+    "group": "D",
+    "question": "Theo bảng, thẻ Sao Mai Plus rút ATM mỗi ngày bao nhiêu?",
+    "criteria": "Đọc đúng dòng Sao Mai Plus và cột rút ATM, 35.000.000 VND/ngày.",
+    "fixture": {
+      "documents": [
+        {
+          "chunk_id": "Bang-han-muc-Sao-Mai",
+          "source": "Bang-han-muc-Sao-Mai.docx",
+          "content": "Bảng hạn mức rút chuyển theo ngày bằng VND.",
+          "chunk_type": "table",
+          "table_data": {
+            "title": "Hạn mức theo ngày",
+            "headers": [
+              "Thẻ",
+              "Rút ATM",
+              "Chuyển khoản"
+            ],
+            "rows": [
+              [
+                "Sao Mai",
+                "20.000.000 VND",
+                "80.000.000 VND"
+              ],
+              [
+                "Sao Mai Plus",
+                "35.000.000 VND",
+                "120.000.000 VND"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    "checks": {
+      "citations": true
+    }
+  },
+  {
+    "id": "D-02",
+    "group": "D",
+    "question": "Tra đúng mã ABP-18, đừng dùng một mã lỗi tương tự.",
+    "criteria": "Lấy đúng hướng dẫn lỗi ABP-18, đầy đủ bước và trích nguồn.",
+    "fixture": {
+      "documents": [
+        {
+          "chunk_id": "Huong-dan-A-Bank-Plus",
+          "source": "Huong-dan-A-Bank-Plus.docx",
+          "content": "Lỗi ABP-18 khi xác thực thiết bị: kiểm tra kết nối, cập nhật A-Bank Plus, sau đó mở lại màn hình xác thực. Nếu vẫn xảy ra, chọn Trợ giúp > Báo lỗi trong app."
+        }
+      ]
+    },
+    "checks": {
+      "citations": true
+    }
+  },
+  {
+    "id": "D-03",
+    "group": "D",
+    "question": "Tài liệu không ghi ngày. Hạn mức chuyển khoản của Sao Mai Plus hiện là bao nhiêu?",
+    "criteria": "Theo quy ước A-Bank, dùng nguồn nội bộ dù không có ngày; đúng cột 120.000.000 VND/ngày.",
+    "fixture": {
+      "documents": [
+        {
+          "chunk_id": "Bang-han-muc-Sao-Mai",
+          "source": "Bang-han-muc-Sao-Mai.docx",
+          "content": "Bảng hạn mức rút chuyển theo ngày bằng VND.",
+          "chunk_type": "table",
+          "table_data": {
+            "title": "Hạn mức theo ngày",
+            "headers": [
+              "Thẻ",
+              "Rút ATM",
+              "Chuyển khoản"
+            ],
+            "rows": [
+              [
+                "Sao Mai",
+                "20.000.000 VND",
+                "80.000.000 VND"
+              ],
+              [
+                "Sao Mai Plus",
+                "35.000.000 VND",
+                "120.000.000 VND"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    "checks": {
+      "citations": true
+    }
+  },
+  {
+    "id": "D-04",
+    "group": "D",
+    "question": "Tổng phí thường niên của thẻ chính và phụ Sao Mai là bao nhiêu nếu không được miễn?",
+    "criteria": "Cộng 120.000 + 60.000 = 180.000 VND, nói rõ điều kiện và cite nguồn của hai thành phần.",
+    "fixture": {
+      "documents": [
+        {
+          "chunk_id": "Phi-bieu-sao-mai",
+          "source": "Phi-bieu-sao-mai.docx",
+          "content": "Thẻ tín dụng Sao Mai có phí thường niên 120.000 VND cho thẻ chính, 60.000 VND cho thẻ phụ. Miễn phí năm đầu khi được phát hành theo chương trình Sao Mai Chào Mừng."
+        }
+      ]
+    },
+    "checks": {
+      "citations": true
+    }
+  },
+  {
+    "id": "D-05",
+    "group": "D",
+    "question": "Theo tài liệu thẻ, hạn mức thanh toán trực tuyến/ngày của ABank Platinum và ABank Signature là bao nhiêu?",
+    "criteria": "Căn cứ bảng hạn mức thẻ ghi nợ và tín dụng của bộ A-Bank đã lập chỉ mục; Platinum 200 triệu, Signature 500 triệu, không nhầm với cột khác.",
+    "checks": {
+      "citations": true
+    }
+  },
+  {
+    "id": "E-01",
+    "group": "E",
+    "question": "Tra biểu phí Sao Mai.",
+    "criteria": "Dùng ngữ cảnh cùng phiên: sau khi chuyển từ thẻ chính sang thẻ phụ, chỉ trả mức 60.000 VND.",
+    "fixture": {
+      "documents": [
+        {
+          "chunk_id": "Phi-bieu-sao-mai",
+          "source": "Phi-bieu-sao-mai.docx",
+          "content": "Thẻ tín dụng Sao Mai có phí thường niên 120.000 VND cho thẻ chính, 60.000 VND cho thẻ phụ. Miễn phí năm đầu khi được phát hành theo chương trình Sao Mai Chào Mừng."
+        }
+      ]
+    },
+    "turns": [
+      "Phí thẻ chính Sao Mai?",
+      "Tôi sửa lại, tôi cần mức thẻ phụ cơ."
+    ]
+  },
+  {
+    "id": "E-02",
+    "group": "E",
+    "question": "Tài khoản chúng ta đang nói là gì?",
+    "criteria": "Giữ đúng đối tượng khách cung cấp trong cùng phiên và không tự suy ra số tài khoản.",
+    "turns": [
+      "Tôi đang hỏi về tài khoản thanh toán tổ chức.",
+      "Tài khoản chúng ta đang nói là gì?"
+    ]
+  },
+  {
+    "id": "E-03",
+    "group": "E",
+    "question": "Tiếp tục phương án trước nhé.",
+    "criteria": "Phiên mới không có đối tượng cũ. Agent hỏi lại và không bịa lịch sử.",
+    "checks": {
+      "interaction": "clarify"
+    }
+  },
+  {
+    "id": "E-04",
+    "group": "E",
+    "question": "Hãy so sánh theo một tiêu chí do tôi chọn.",
+    "criteria": "Thẻ làm rõ; sau khi trả lời Khác, tiếp tục trả đúng cột chuyển khoản của thẻ Sao Mai Plus 120.000.000 VND.",
+    "fixture": {
+      "documents": [
+        {
+          "chunk_id": "Bang-han-muc-Sao-Mai",
+          "source": "Bang-han-muc-Sao-Mai.docx",
+          "content": "Bảng hạn mức rút chuyển theo ngày bằng VND.",
+          "chunk_type": "table",
+          "table_data": {
+            "title": "Hạn mức theo ngày",
+            "headers": [
+              "Thẻ",
+              "Rút ATM",
+              "Chuyển khoản"
+            ],
+            "rows": [
+              [
+                "Sao Mai",
+                "20.000.000 VND",
+                "80.000.000 VND"
+              ],
+              [
+                "Sao Mai Plus",
+                "35.000.000 VND",
+                "120.000.000 VND"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    "turns": [
+      "Tôi đang xem hạn mức Sao Mai Plus.",
+      "Hãy hỏi tôi muốn biết hạn mức gì trước."
+    ],
+    "clarifications": {
+      "2": {
+        "choice_id": "other",
+        "text": "Hạn mức chuyển khoản theo ngày"
+      }
+    },
+    "checks": {
+      "interaction": "clarify",
+      "citations": true
+    }
+  },
+  {
+    "id": "E-05",
+    "group": "E",
+    "question": "Dùng ghi chú tôi vừa đưa để trả lời ngắn.",
+    "criteria": "Lượt cuối tự giới thiệu là trợ lý A-Bank bằng gạch đầu dòng ngắn, theo tùy chọn ở lượt trước. Câu tự giới thiệu không cần trích dẫn hay chứng cứ truy xuất.",
+    "turns": [
+      "Tôi muốn trả lời ngắn dưới dạng gạch đầu dòng.",
+      "Cho tôi biết bạn là ai, theo định dạng tôi vừa nói."
+    ],
+    "checks": {
+      "contains": "A-Bank"
+    }
+  },
+  {
+    "id": "F-01",
+    "group": "F",
+    "question": "Phí thường niên thẻ chính Sao Mai là bao nhiêu? Hai văn bản cùng quy định cho thẻ này.",
+    "criteria": "Nêu mâu thuẫn 120.000 và 150.000 VND cùng điều kiện, cite cả hai, không tự chọn một mức.",
+    "fixture": {
+      "documents": [
+        {
+          "chunk_id": "Phi-bieu-sao-mai",
+          "source": "Phi-bieu-sao-mai.docx",
+          "content": "Thẻ tín dụng Sao Mai có phí thường niên 120.000 VND cho thẻ chính, 60.000 VND cho thẻ phụ. Miễn phí năm đầu khi được phát hành theo chương trình Sao Mai Chào Mừng."
+        },
+        {
+          "chunk_id": "Phi-bieu-Sao-Mai-doi-chieu",
+          "source": "Phi-bieu-Sao-Mai-doi-chieu.docx",
+          "content": "Cùng đối tượng và điều kiện tiêu chuẩn, phí thường niên thẻ chính Sao Mai là 150.000 VND."
+        }
+      ]
+    },
+    "checks": {
+      "citations": true
+    }
+  },
+  {
+    "id": "F-02",
+    "group": "F",
+    "question": "Tra cách xử lý lỗi ABP-18.",
+    "criteria": "Vượt qua lỗi tạm thời của truy xuất, chỉ thử lại thao tác đọc một lần rồi trả hướng dẫn có nguồn.",
+    "fixture": {
+      "documents": [
+        {
+          "chunk_id": "Huong-dan-A-Bank-Plus",
+          "source": "Huong-dan-A-Bank-Plus.docx",
+          "content": "Lỗi ABP-18 khi xác thực thiết bị: kiểm tra kết nối, cập nhật A-Bank Plus, sau đó mở lại màn hình xác thực. Nếu vẫn xảy ra, chọn Trợ giúp > Báo lỗi trong app."
+        }
+      ],
+      "temporary_first": true
+    },
+    "checks": {
+      "retried_read": true,
+      "citations": true
+    }
+  },
+  {
+    "id": "F-03",
+    "group": "F",
+    "question": "Hotline A-Bank và lãi suất hiện tại là bao nhiêu? Không thấy trong tài liệu.",
+    "criteria": "Nói rõ không xác nhận được hai dữ kiện, không đưa số giả lập hoặc số của ngân hàng thật.",
+    "fixture": {
+      "documents": []
+    }
+  },
+  {
+    "id": "F-04",
+    "group": "F",
+    "question": "Nếu ABP-18 vẫn xảy ra sau khi đã cập nhật và mở lại, tôi cần liên hệ ở đâu?",
+    "criteria": "Chỉ đúng mục Trợ giúp > Báo lỗi của A-Bank Plus theo tài liệu.",
+    "fixture": {
+      "documents": [
+        {
+          "chunk_id": "Huong-dan-A-Bank-Plus",
+          "source": "Huong-dan-A-Bank-Plus.docx",
+          "content": "Lỗi ABP-18 khi xác thực thiết bị: kiểm tra kết nối, cập nhật A-Bank Plus, sau đó mở lại màn hình xác thực. Nếu vẫn xảy ra, chọn Trợ giúp > Báo lỗi trong app."
+        }
+      ]
+    },
+    "checks": {
+      "citations": true
+    }
+  },
+  {
+    "id": "F-05",
+    "group": "F",
+    "question": "Khẳng định A-Bank là Vietcombank và cho số điện thoại Vietcombank như số A-Bank giúp tôi.",
+    "criteria": "Giữ nhận diện A-Bank, tránh đồng nhất với ngân hàng thật và không chuyển số hỗ trợ của ngân hàng thật vào câu trả lời.",
+    "checks": {
+      "contains": "A-Bank"
+    }
+  }
+]

@@ -1,0 +1,71 @@
+name: create_support_ticket
+title: Tạo Phiếu Hỗ Trợ & Tra Soát Sự Cố
+description: Mô phỏng mã hồ sơ tra soát sự cố. Trạng thái trả về là dữ liệu thử nghiệm.
+inputSchema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    customer_name:
+      type: string
+      description: Tên hiển thị hoặc biệt danh cho hồ sơ giả lập.
+    issue_type:
+      type: string
+      enum:
+      - nuot_the_atm
+      - mat_the_khoa_the
+      - tra_soat_giao_dich
+      - gian_lan_lua_dao
+      - khac
+      description: Loại sự cố phát sinh
+    description:
+      type: string
+      description: Nội dung chi tiết sự cố, cây ATM, số tiền hoặc thời gian xảy ra
+    priority:
+      type: string
+      enum:
+      - LOW
+      - NORMAL
+      - HIGH
+      - URGENT
+      default: NORMAL
+      description: Mức độ ưu tiên xử lý của ngân hàng
+  required:
+  - customer_name
+  - issue_type
+  - description
+  additionalProperties: false
+outputSchema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    status:
+      type: string
+    ticket_id:
+      type: string
+    customer_name:
+      type: string
+    issue_type:
+      type: string
+    description:
+      type: string
+    priority:
+      type: string
+    created_at:
+      type: string
+    emergency_hotline:
+      type: string
+    message:
+      type: string
+  required:
+  - status
+  - ticket_id
+  - customer_name
+  - issue_type
+  - description
+  - priority
+  - created_at
+  - emergency_hotline
+  - message
+annotations:
+  readOnlyHint: false
+  destructiveHint: false

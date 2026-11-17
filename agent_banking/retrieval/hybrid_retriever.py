@@ -439,34 +439,37 @@ class HybridRetriever:
 
         # 6. Filter Zero-Result Fallback mechanism
         fallback_unfiltered = False
-        if (not dense_results and not bm25_results and norm_filter is not None
-                and "business_metadata.publication_scopes" not in norm_filter):
+        scope_key = "business_metadata.publication_scopes"
+        if not dense_results and not bm25_results and norm_filter and set(norm_filter) != {scope_key}:
             fallback_unfiltered = True
+            fallback_filter = None
+            if scope_key in norm_filter:
+                fallback_filter = {scope_key: norm_filter[scope_key]}
             if self.vector_store is not None and hasattr(self.vector_store, "search_vector"):
                 dense_results = self.vector_store.search_vector(
                     query_vector=query_vector,
                     top_k=effective_candidate_k,
-                    filter_dict=None
+                    filter_dict=fallback_filter
                 )
             if self.bm25_search is not None and hasattr(self.bm25_search, "search"):
                 bm25_results = self.bm25_search.search(
                     bm25_query_text,
                     top_k=effective_candidate_k,
-                    filter_dict=None
+                    filter_dict=fallback_filter
                 )
             elif self.vector_store is not None and hasattr(self.vector_store, "search_bm25"):
                 try:
                     bm25_results = self.vector_store.search_bm25(
                         query_text=bm25_query_text,
                         top_k=effective_candidate_k,
-                        filter_dict=None,
+                        filter_dict=fallback_filter,
                         breadcrumb_boost=effective_breadcrumb_boost
                     )
                 except TypeError:
                     bm25_results = self.vector_store.search_bm25(
                         query_text=bm25_query_text,
                         top_k=effective_candidate_k,
-                        filter_dict=None
+                        filter_dict=fallback_filter
                     )
 
         # 7. Reciprocal Rank Fusion (RRF k=60) merge

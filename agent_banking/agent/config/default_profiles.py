@@ -1,7 +1,7 @@
 """Default response styles when a checkout has no local prompt overrides."""
 
 PERSONA_PROFILES = {
-    "advisor": {"name": "Chuyên viên tư vấn", "description": "Giải thích rõ phương án và căn cứ."},
+    "advisor": {"name": "Tư vấn A-Bank", "description": "Giải thích rõ phương án và căn cứ."},
     "teller": {"name": "Giao dịch viên", "description": "Hướng dẫn từng bước bằng ngôn ngữ dễ hiểu."},
     "compliance": {"name": "Cố vấn tuân thủ", "description": "Nêu rõ phạm vi và căn cứ áp dụng."},
     "quick": {"name": "Hỗ trợ nhanh", "description": "Trả lời ngắn gọn, tối đa 120 từ."},

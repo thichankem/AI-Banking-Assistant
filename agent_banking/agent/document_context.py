@@ -1,5 +1,7 @@
 """Shared formatting for agent retrieval context."""
 
+from agent_banking.core.search_text import search_key
+
 def _unwrap_doc_dict(doc) -> dict:
     """Return canonical chunk dict whether wrapped in {'chunk': ...} or already flat."""
     if isinstance(doc, dict) and isinstance(doc.get("chunk"), dict):
@@ -9,7 +11,7 @@ def _unwrap_doc_dict(doc) -> dict:
     return {}
 
 
-def _render_table_data_text(table_data) -> str:
+def _render_table_data_text(table_data, query="", budget=None) -> str:
     """Render canonical chunk table_data (str, dict, or list) into concise Markdown."""
     if not table_data:
         return ""
@@ -33,24 +35,44 @@ def _render_table_data_text(table_data) -> str:
             return "\n".join(row_lines)
 
     rendered = []
+    query_terms = {term for term in search_key(query).split() if len(term) >= 3 or term.isdigit()}
     for tbl in tables[:3]:
         if not isinstance(tbl, dict):
             continue
         headers = tbl.get("headers") or tbl.get("header") or []
         rows = tbl.get("rows") or tbl.get("cells") or []
         lines = []
+        for key in ("title", "units", "unit", "conditions", "notes", "footnotes"):
+            value = tbl.get(key)
+            if isinstance(value, str) and value.strip():
+                lines.append(value.strip())
         if isinstance(headers, list) and headers:
             h_cells = [str(h).strip() for h in headers]
             lines.append("| " + " | ".join(h_cells) + " |")
             lines.append("| " + " | ".join(["---"] * len(h_cells)) + " |")
         if isinstance(rows, list):
-            for row in rows[:20]:
+            row_lines = []
+            for row in rows:
                 if isinstance(row, list):
                     r_cells = [str(c).strip() for c in row]
-                    lines.append("| " + " | ".join(r_cells) + " |")
+                    row_lines.append("| " + " | ".join(r_cells) + " |")
                 elif isinstance(row, dict):
                     r_vals = [str(v).strip() for v in row.values()]
-                    lines.append("| " + " | ".join(r_vals) + " |")
+                    row_lines.append("| " + " | ".join(r_vals) + " |")
+            ranked = sorted(range(len(row_lines)), key=lambda i: -len(query_terms.intersection(search_key(row_lines[i]).split())))
+            space = None if budget is None else budget - sum(len(line) + 1 for line in lines)
+            selected = []
+            for i in ranked:
+                length = len(row_lines[i]) + 1
+                if space is None or length <= space:
+                    selected.append(i)
+                    if space is not None:
+                        space -= length
+                if len(selected) == 20:
+                    break
+            if row_lines and not selected:
+                continue
+            lines.extend(row_lines[i] for i in sorted(selected))
         if lines:
             rendered.append("\n".join(lines))
         else:
@@ -83,7 +105,7 @@ def _render_images_text(images) -> str:
     return "; ".join(parts)
 
 
-def _format_retrieved_doc_context(doc, max_chars=None) -> str:
+def _format_retrieved_doc_context(doc, max_chars=None, query="") -> str:
     """Format a 13-key universal chunk (or wrapper dict) for grading or grounded generation."""
     d = _unwrap_doc_dict(doc)
     if not d:
@@ -126,16 +148,18 @@ def _format_retrieved_doc_context(doc, max_chars=None) -> str:
         meta_tags.append(category)
 
     body_parts = []
+    table_budget = None if max_chars is None else max_chars - 32
+    table_text = _render_table_data_text(d.get("table_data"), query, table_budget)
+    if table_text:
+        body_parts.append(f"[Bảng dữ liệu]:\n{table_text}")
     if situated:
         body_parts.append(f"[Ngữ cảnh]: {situated}")
 
     content = str(d.get("content") or "").strip()
+    if table_text:
+        content = "\n".join(line for line in content.splitlines() if not line.lstrip().startswith("|"))
     if content:
         body_parts.append(content)
-
-    table_text = _render_table_data_text(d.get("table_data"))
-    if table_text and table_text not in content:
-        body_parts.append(f"[Bảng dữ liệu]:\n{table_text}")
 
     image_text = _render_images_text(d.get("images"))
     if image_text and image_text not in content:

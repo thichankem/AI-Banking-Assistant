@@ -1,0 +1,10 @@
+category: KNOWLEDGE
+handler:
+  module: agent_banking.tools.extensions.banking_query
+  function: analyze_banking_query
+policy:
+  access: read_only
+  workers:
+  - financial_analysis
+  - policy_research
+  - service_research

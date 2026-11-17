@@ -1,0 +1,74 @@
+name: analyze_banking_query
+title: Phân tích truy vấn ngân hàng
+description: Chuẩn hóa câu hỏi, mở rộng từ viết tắt ngân hàng đã biết, báo nghĩa có
+  thể nhầm và trích từ khóa, số tiền, tham chiếu văn bản. Các trường trả về là dữ
+  liệu từ câu hỏi và gợi ý tìm kiếm. RAG đã tự chuẩn hóa khi gọi tra cứu.
+inputSchema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    query:
+      type: string
+      minLength: 1
+      maxLength: 500
+      description: Câu hỏi hoặc cụm từ ngân hàng cần phân tích.
+  required:
+  - query
+  additionalProperties: false
+outputSchema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    raw_query:
+      type: string
+    normalized_query:
+      type: string
+    keywords_str:
+      type: string
+    intent:
+      type: string
+    sub_intent:
+      type: string
+    domain:
+      type: string
+    expanded_query:
+      type: string
+    keywords:
+      type: array
+    detected_acronyms:
+      type: array
+    legal_references:
+      type: array
+    financial_amounts:
+      type: array
+    banks_mentioned:
+      type: array
+    entities:
+      type: array
+    suggested_filters:
+      type: object
+    ambiguous_acronyms:
+      type: object
+      additionalProperties:
+        type: array
+        items:
+          type: string
+  required:
+  - raw_query
+  - normalized_query
+  - keywords_str
+  - intent
+  - sub_intent
+  - domain
+  - expanded_query
+  - keywords
+  - detected_acronyms
+  - legal_references
+  - financial_amounts
+  - banks_mentioned
+  - entities
+  - suggested_filters
+  - ambiguous_acronyms
+annotations:
+  readOnlyHint: true
+  destructiveHint: false

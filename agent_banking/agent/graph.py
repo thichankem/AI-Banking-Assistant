@@ -20,27 +20,28 @@ def create_persistent_checkpointer(db_path: str = DEFAULT_SQLITE_DB):
     Initialize SqliteSaver to persist chat history across server restarts.
     If the sqlite checkpointer is unavailable, automatically fall back to MemorySaver safely.
     """
-    parent_dir = os.path.dirname(db_path)
-    if parent_dir != "":
-        if not os.path.exists(parent_dir):
-            os.makedirs(parent_dir, exist_ok=True)
-
+    conn = None
     try:
         from langgraph.checkpoint.sqlite import SqliteSaver
+        parent_dir = os.path.dirname(db_path)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
         conn = sqlite3.connect(db_path, check_same_thread=False)
         checkpointer = SqliteSaver(conn)
         checkpointer.setup()
         return checkpointer
     except Exception as e:
-        print(f"[Checkpointer] Fallback to MemorySaver (Reason: {e})")
-        fallback_memory = MemorySaver()
-        return fallback_memory
+        if conn is not None:
+            conn.close()
+        print(f"[Checkpointer] Fallback to MemorySaver ({type(e).__name__})")
+        return MemorySaver()
 
 
 ACTION_ROUTES = {
-    "tool": "react_action", "skill": "react_action",
+    "tool": "react_action", "skill": "react_action", "inspect_skill": "skill_inspect",
     "plan": "plan_update", "delegate": "subagent",
     "remember": "memory_update", "forget": "memory_update", "compact": "memory_update",
+    "clarify": "prepare_interaction", "confirm": "prepare_interaction",
     "final": "answer_review",
 }
 
@@ -67,12 +68,16 @@ def build_banking_agent_graph(
             pipeline_instance = BankingRAGPipeline(config=config)
         nodes = BankingDeepAgent(pipeline_instance, config)
 
+    if checkpointer is None:
+        checkpointer = create_persistent_checkpointer(sqlite_db_path)
+    durable = not isinstance(checkpointer, MemorySaver) and sqlite_db_path != ":memory:"
     workflow = StateGraph(dict)
     workflow.add_node("input_guardrail", nodes.input_guardrail)
     workflow.add_node("context_prepare", nodes.prepare_context)
     workflow.add_node("deep_decide", nodes.decide)
     actions = {
         "react_action": nodes.act,
+        "skill_inspect": nodes.inspect_skill,
         "plan_update": nodes.update_plan,
         "subagent": nodes.delegate,
         "memory_update": nodes.manage_memory,
@@ -81,6 +86,12 @@ def build_banking_agent_graph(
         workflow.add_node(name, action)
         workflow.add_edge(name, "deep_decide")
     workflow.add_node("answer_review", nodes.review)
+
+    def prepare_interaction(state):
+        return nodes.prepare_interaction(state, durable=durable)
+
+    workflow.add_node("prepare_interaction", prepare_interaction)
+    workflow.add_node("await_interaction", nodes.await_interaction)
     workflow.add_node("output_guardrail", nodes.output_guardrail)
     workflow.add_edge(START, "input_guardrail")
 
@@ -94,13 +105,23 @@ def build_banking_agent_graph(
             return "deep_decide"
         return "output_guardrail"
 
+    def after_prepare_interaction(state):
+        if state["interaction"]:
+            return "await_interaction"
+        return "output_guardrail"
+
+    def after_reply(state):
+        if state["final_answer"]:
+            return "output_guardrail"
+        return "deep_decide"
+
     workflow.add_conditional_edges("input_guardrail", after_input, ["context_prepare", "output_guardrail"])
     workflow.add_edge("context_prepare", "deep_decide")
     workflow.add_conditional_edges(
-        "deep_decide", _after_decision, [*actions, "answer_review", "output_guardrail"]
+        "deep_decide", _after_decision, [*actions, "answer_review", "prepare_interaction", "output_guardrail"]
     )
     workflow.add_conditional_edges("answer_review", after_review, ["deep_decide", "output_guardrail"])
+    workflow.add_conditional_edges("prepare_interaction", after_prepare_interaction, ["await_interaction", "output_guardrail"])
+    workflow.add_conditional_edges("await_interaction", after_reply, ["deep_decide", "output_guardrail"])
     workflow.add_edge("output_guardrail", END)
-    if checkpointer is None:
-        checkpointer = create_persistent_checkpointer(sqlite_db_path)
     return workflow.compile(checkpointer=checkpointer)

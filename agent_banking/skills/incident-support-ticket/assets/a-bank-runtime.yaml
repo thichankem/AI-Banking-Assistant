@@ -1,0 +1,45 @@
+parameters_schema:
+  type: object
+  properties:
+    issue_type:
+      type: string
+      enum:
+      - nuot_the_atm
+      - mat_the_khoa_the
+      - tra_soat_giao_dich
+      - gian_lan_lua_dao
+      default: tra_soat_giao_dich
+      description: Phân loại sự cố ngân hàng
+    user_contact:
+      type: string
+      default: KHACH_HANG_HOTLINE
+      description: Số điện thoại hoặc thông tin liên hệ của khách hàng
+    card_number:
+      type: string
+      default: ''
+      description: Số thẻ hoặc số tài khoản bị sự cố
+    details:
+      type: string
+      default: Tiếp nhận từ trợ lý AI.
+      description: Mô tả chi tiết sự việc, địa điểm, thời gian
+    urgency:
+      type: string
+      enum:
+      - NORMAL
+      - HIGH
+      - CRITICAL
+      default: HIGH
+      description: Mức độ khẩn cấp của sự cố
+output_schema:
+  type: object
+  properties:
+    ticket_info:
+      type: object
+    immediate_action_guide:
+      type: string
+    hotline_support:
+      type: string
+execution:
+  type: incident_dispatcher
+  function: create_support_ticket
+  hotline: 1900 6688 (24/7)

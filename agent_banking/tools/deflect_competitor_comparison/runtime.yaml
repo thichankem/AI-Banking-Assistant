@@ -1,0 +1,7 @@
+category: GUARDRAIL
+handler:
+  module: agent_banking.tools.banking_api_tools
+  function: deflect_competitor_comparison
+policy:
+  access: read_only
+  workers: []

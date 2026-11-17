@@ -4,6 +4,9 @@ import logging
 import math
 import time
 
+from httpx import NetworkError, TimeoutException
+from openai import APIConnectionError
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,6 +36,14 @@ class ModelFallbackError(RuntimeError):
         self.failures = tuple(failures)
         details = "; ".join(name + ": " + reason for name, reason in failures)
         super().__init__(module + ": all model candidates failed (" + details + ")")
+
+
+def is_temporary_error(error):
+    if isinstance(error, ModelFallbackError):
+        error = getattr(error, "last_error", None)
+    if isinstance(error, (TimeoutError, ConnectionError, APIConnectionError, NetworkError, TimeoutException)):
+        return True
+    return getattr(error, "status_code", None) in (408, 429, 500, 502, 503, 504)
 
 
 def run_fallback(module, candidates, operation, retry_delays=(1.0, 2.0, 4.0)):

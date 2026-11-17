@@ -1,0 +1,48 @@
+name: transfer_to_agent
+title: Chuyển Giao Tư Vấn Viên Trực Tuyến
+description: Mô phỏng trạng thái chuyển giao cho tư vấn viên theo khung giờ mẫu.
+inputSchema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    business_process:
+      type: string
+      default: request_human_agent
+      description: Nghiệp vụ hoặc lý do chuyển tiếp chuyên viên tư vấn
+    customer_segment:
+      type: string
+      default: individual
+      description: Phân khúc khách hàng ('individual' hoặc 'corporate')
+  additionalProperties: false
+outputSchema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    status:
+      type: string
+    handoff_status:
+      type: string
+    is_working_hour:
+      type: boolean
+    business_process:
+      type: string
+    customer_segment:
+      type: string
+    target_queue:
+      type: string
+    hotline:
+      type: string
+    customer_notice:
+      type: string
+  required:
+  - status
+  - handoff_status
+  - is_working_hour
+  - business_process
+  - customer_segment
+  - target_queue
+  - hotline
+  - customer_notice
+annotations:
+  readOnlyHint: false
+  destructiveHint: false

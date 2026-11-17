@@ -9,8 +9,8 @@ from agent_banking.guardrails.rag_guardrails import BankingGuardrailManager
 from agent_banking.agent.document_context import (
     _format_retrieved_doc_context, _unwrap_doc_dict
 )
-from agent_banking.skills.skill_registry import SkillRegistry, mapped_arguments
-from agent_banking.tools.tool_registry import BankingToolRegistry, ONCE_PER_TURN, is_extension
+from agent_banking.skills.skill_registry import SkillRegistry, mapped_arguments, resolve_skill
+from agent_banking.tools.tool_registry import BankingToolRegistry, ONCE_PER_TURN, is_extension, tool_contract, tool_input_schema
 
 
 MAX_EVIDENCE = 36
@@ -26,6 +26,38 @@ FINANCIAL_OPERATIONS = {
     "interest_rates": ("get_interest_rates", {"deposit_type": "deposit_type"}),
     "fx_rates": ("get_foreign_exchange_rates", {"currency": "currency"})
 }
+
+
+def verify_calculation(tool_name: str, data: dict, params: dict) -> bool:
+    if tool_name == "calculate_loan_amortization":
+        keys = ("principal_vnd", "total_interest_vnd", "total_payable_vnd",
+                "annual_rate_percent", "first_month_payment_vnd")
+        principal = params.get("principal_vnd", params.get("principal"))
+    elif tool_name == "calculate_savings_profit":
+        keys = ("principal_amount_vnd", "interest_earned_vnd", "total_at_maturity_vnd", "applicable_rate_percent")
+        principal = params.get("amount_vnd", params.get("principal"))
+    else:
+        return True
+    result = data.get("calculation_data", data)
+    if not isinstance(result, dict) or result.get("status") != "SUCCESS":
+        return False
+    values = [result.get(key) for key in keys]
+    if any(type(value) not in (int, float) or not 0 <= value <= 1e18 for value in values):
+        return False
+    months = result.get("term_months")
+    if values[0] != principal or type(months) is not int or months <= 0 or months != params.get("term_months"):
+        return False
+    monthly_rate = values[3] / 1200
+    if tool_name == "calculate_loan_amortization":
+        if values[3] != params.get("annual_rate_percent"):
+            return False
+        expected_interest = principal * monthly_rate * (months + 1) / 2
+        if abs(values[4] - principal * (1 / months + monthly_rate)) > 1:
+            return False
+    else:
+        expected_interest = principal * monthly_rate * months
+    # Monetary fields are independently rounded to whole VND.
+    return abs(values[1] - expected_interest) <= 1 and abs(values[0] + values[1] - values[2]) <= 1
 
 
 def _reference_numbers(answer: str, evidence_count: int) -> set[int]:
@@ -61,12 +93,9 @@ class BankingReActNodes:
 
     def catalog_view(self, snapshot: dict) -> dict:
         return {
-            "tool": {
-                name: {"description": spec.get("description", ""), "parameters": spec["parameters"]}
-                for name, spec in snapshot["tool"].items()
-            },
+            "tool": {name: tool_contract(spec) for name, spec in snapshot["tool"].items()},
             "skill": {
-                name: {"description": spec.get("description", ""), "parameters": spec["parameters_schema"]}
+                name: {"description": spec.get("description", ""), "category": spec.get("category", "GENERAL")}
                 for name, spec in snapshot["skill"].items()
             },
         }
@@ -148,7 +177,7 @@ class BankingReActNodes:
         spec = tools.get(name)
         if spec is None:
             return {}, "Tool chưa đăng ký."
-        error = self._schema_error(spec["parameters"], params)
+        error = self._schema_error(tool_input_schema(spec), params)
         if error:
             return {}, error
         if name == "search_banking_knowledge":
@@ -165,6 +194,8 @@ class BankingReActNodes:
             return {}, "", error
         execution = spec["execution"]
         mode = execution.get("type")
+        if mode == "guidance":
+            return {}, "", "Skill chỉ cung cấp hướng dẫn. Hãy dùng tool được cấp quyền khi cần."
         if mode == "registered_tool":
             target = execution["tool"]
             if target in ONCE_PER_TURN:
@@ -177,7 +208,10 @@ class BankingReActNodes:
             candidate_k = params.get("candidate_k", max(5, top_k))
             if not query.strip() or not 1 <= top_k <= 6 or not top_k <= candidate_k <= 20:
                 return {}, "", "Cần query có nội dung, top_k từ 1 đến 6 và candidate_k từ top_k đến 20."
-            guarded, error = self._guard_tool("search_banking_knowledge", {"query": query, "top_k": top_k}, tools)
+            search = {"query": query, "top_k": top_k}
+            if "exact" in params:
+                search["exact"] = params["exact"]
+            guarded, error = self._guard_tool("search_banking_knowledge", search, tools)
             return {**guarded, "candidate_k": candidate_k}, "", error
         if mode == "fact_checker_engine":
             if not evidence:
@@ -223,12 +257,13 @@ class BankingReActNodes:
         return skill_params, tool_name, error
 
     def _observe_retrieval(self, data: dict, evidence: list) -> dict:
+        previous_count = len(evidence)
         chunks = data.get("documents") or data.get("chunks", [])
         safe_chunks, blocked_count, _ = self.guardrails.guard_retrieved_chunks(chunks)
         references = []
         for chunk in safe_chunks:
             record = _unwrap_doc_dict(chunk)
-            context = _format_retrieved_doc_context(record, max_chars=1800)
+            context = _format_retrieved_doc_context(record, max_chars=2400, query=data.get("query", ""))
             if not context:
                 continue
             scan = getattr(self.guardrails, "indirect_guardrail", None)
@@ -236,7 +271,9 @@ class BankingReActNodes:
                 blocked_count += 1
                 continue
             source = str(record.get("source") or "Tài liệu ngân hàng")
-            identity = (source, record.get("chunk_id"), context)
+            meta = record.get("business_metadata") or {}
+            identity = (source, record.get("chunk_id"), meta.get("document_version"),
+                        meta.get("publication_revision") or record.get("content", ""))
             entry = next((item for item in evidence if tuple(item["identity"]) == identity), None)
             if entry is None:
                 if len(evidence) >= MAX_EVIDENCE:
@@ -246,8 +283,15 @@ class BankingReActNodes:
                     "index": len(evidence) + 1, "source": source
                 }
                 evidence.append(entry)
+            elif context not in entry["context"] and len(entry["context"]) + len(context) <= 5100:
+                entry = {**entry, "context": entry["context"] + "\n\n" + context}
+                evidence[entry["index"] - 1] = entry
             references.append({"label": f"[Nguồn {entry['index']}]", "text": entry["context"]})
-        return {"documents": references, "blocked_count": blocked_count}
+        result = {"documents": references, "blocked_count": blocked_count,
+                  "new_evidence": len(evidence) - previous_count}
+        if isinstance(data.get("retrieval_quality"), dict):
+            result["retrieval_quality"] = data["retrieval_quality"]
+        return result
 
     def act(self, state: dict) -> dict:
         turn = state["react_turn"]
@@ -257,7 +301,7 @@ class BankingReActNodes:
         attempts = list(turn["attempts"])
         snapshot = state["capabilities"]
         tools = snapshot["tool"]
-        definition = snapshot[kind].get(name)
+        definition = resolve_skill(snapshot["skill"], name) if kind == "skill" else tools.get(name)
         tool_name = name
         error = ""
         try:
@@ -280,14 +324,17 @@ class BankingReActNodes:
             else:
                 # Fact-checking documents come from state and need not be stored twice.
                 fingerprint_input = {k: v for k, v in params.items() if k != "documents"}
-                if kind == "skill" and name == "fact_checking_audit":
+                if kind == "skill" and name.replace("_", "-") == "fact-checking-audit":
                     fingerprint_input["evidence_count"] = len(evidence)
-                key = kind + ":" + name + ":" + json.dumps(fingerprint_input, ensure_ascii=False, sort_keys=True)
+                identity = definition["skill_id"] if kind == "skill" else name
+                key = kind + ":" + identity + ":" + json.dumps(fingerprint_input, ensure_ascii=False, sort_keys=True)
             if key in attempts:
                 error = "Hành động này đã được thực hiện trong lượt hiện tại. Hãy dùng kết quả đã có hoặc đổi tham số."
 
         calls = list(state.get("tool_outputs", []))
         observation = {"kind": kind, "name": name, "status": "ERROR", "error": error}
+        if error:
+            observation["error_code"] = "invalid_action"
         intent = state["intent"]
         searches = state.get("search_count", 0)
         if not error:
@@ -295,10 +342,21 @@ class BankingReActNodes:
             retrieval = tool_name == "search_banking_knowledge"
             if kind == "skill" and definition["execution"]["type"] == "rag_pipeline":
                 retrieval = True
+            execution = self.tools.execute_tool
+            arguments = (tool_name, params)
+            kwargs = {}
             if kind == "tool" or definition["execution"]["type"] == "registered_tool":
-                result = self.tools.execute_tool(tool_name, params, definition=tools[tool_name])
+                kwargs["definition"] = tools[tool_name]
             else:
-                result = self.skills.get_skill(name, definition=definition).execute(params)
+                execution = self.skills.get_skill(name, definition=definition).execute
+                arguments = (params,)
+            result = execution(*arguments, **kwargs)
+            retried = False
+            elapsed = result.get("latency_ms", 0.0)
+            if result.get("temporary") is True and tool_name not in ONCE_PER_TURN:
+                result = execution(*arguments, **kwargs)
+                elapsed += result.get("latency_ms", 0.0)
+                retried = True
             data = result.get("data")
             if result.get("status") == "SUCCESS" and isinstance(data, dict) and str(data.get("status", "")).lower() not in ("failed", "error"):
                 observation = {"kind": kind, "name": name, "status": "SUCCESS"}
@@ -308,31 +366,50 @@ class BankingReActNodes:
                     retrieval = True
                 if retrieval:
                     observation["retrieval"] = True
-                    data = self._observe_retrieval(data, evidence)
+                    data = self._observe_retrieval({**data, "query": params.get("query", "")}, evidence)
                     searches += 1
                     intent = "RAG_SEARCH"
                 elif intent != "RAG_SEARCH":
                     intent = "BANKING_ACTION"
                 if simulated:
                     observation["simulation"] = True
-                try:
-                    if retrieval:
-                        observation["data"] = data
-                    else:
+                if retrieval:
+                    observation["data"] = data
+                    if not data["documents"]:
+                        observation.update(status="ERROR", error_code="insufficient_evidence",
+                                           error="Chưa tìm thấy tài liệu phù hợp. Hãy đổi truy vấn hoặc nêu phần chưa xác minh.")
+                elif not verify_calculation(tool_name, data, params):
+                    observation.update(status="ERROR", error_code="verification_failed",
+                                       error="Không đối chiếu được kết quả tính toán với các tham số và số tổng.")
+                else:
+                    try:
                         observation["data"] = self.guard_payload(data)
-                except ValueError:
-                    observation.update(status="ERROR", error="Kết quả bị guardrail từ chối.")
+                    except ValueError:
+                        observation.update(status="ERROR", error_code="unsafe_result",
+                                           error="Kết quả bị guardrail từ chối.")
             else:
                 observation["error"] = "Công cụ chưa trả được kết quả cho yêu cầu này."
+                observation["error_code"] = "tool_failed"
+                if result.get("error") == "ToolInputError":
+                    observation.update(error_code="invalid_action", error="Tham số không khớp hợp đồng của công cụ.")
+                elif result.get("error") == "ToolOutputError":
+                    observation.update(error_code="invalid_tool_output", error="Kết quả không khớp hợp đồng đầu ra của công cụ.")
+                elif result.get("temporary") is True:
+                    observation["error_code"] = "temporary_failure"
+
+            if retried:
+                observation["retried"] = True
 
             if retrieval and isinstance(params.get("query"), str):
                 observation["query_used"] = params["query"]
 
             calls.append({
                 "kind": kind, "tool": name, "status": observation["status"],
-                "latency_ms": result.get("latency_ms", 0.0),
+                "latency_ms": elapsed,
                 "simulation": observation.get("simulation", False)
             })
+            if retried:
+                calls[-1]["retried"] = True
         return {
             **state, "intent": intent, "tool_outputs": calls,
             "search_count": searches, "retry_count": max(0, searches - 1),
@@ -361,6 +438,7 @@ class BankingReActNodes:
             citations.append({
                 "index": index, "label": f"[Nguồn {index}]", "source": entry["source"],
                 "chunk_id": chunk.get("chunk_id", ""), "breadcrumb": chunk.get("breadcrumb", ""),
-                "section_title": chunk.get("section_title", "")
+                "section_title": chunk.get("section_title", ""),
+                "document_version": (chunk.get("business_metadata") or {}).get("document_version", "")
             })
         return citations

@@ -1,0 +1,45 @@
+name: get_foreign_exchange_rates
+title: Tra Cứu Bảng Tỷ Giá Ngoại Tệ
+description: Đọc tỷ giá mẫu để mô phỏng. Không đại diện tỷ giá niêm yết hay thời gian
+  thực của A-Bank.
+inputSchema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    currency:
+      type: string
+      default: USD
+      description: Mã ngoại tệ 3 ký tự chuẩn ISO (USD, EUR, JPY, GBP, SGD, AUD, CAD,
+        CNY). Bỏ trống để lấy toàn bộ bảng tỷ giá.
+  additionalProperties: false
+outputSchema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    status:
+      type: string
+    effective_date:
+      type: string
+    bank:
+      type: string
+    rates:
+      type: object
+      additionalProperties:
+        type: object
+        properties:
+          name: {type: string}
+          buy_cash: {type: number}
+          buy_transfer: {type: number}
+          sell: {type: number}
+        required: [name, buy_cash, buy_transfer, sell]
+    note:
+      type: string
+  required:
+  - status
+  - effective_date
+  - bank
+  - rates
+  - note
+annotations:
+  readOnlyHint: true
+  destructiveHint: false
