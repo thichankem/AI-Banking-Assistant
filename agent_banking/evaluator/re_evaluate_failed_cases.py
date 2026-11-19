@@ -10,18 +10,17 @@ RULES COMPLIANCE:
 4. NO __INIT__.PY: Direct imports only.
 """
 
-import os
 import sys
 import time
-import json
 from pathlib import Path
 
-PROJECT_ROOT = Path(r"d:\Desktop\GitHub\AI Banking Asistant")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent_banking.agent_pipeline import BankingAgentPipeline
 from agent_banking.core.chat import FallbackChatClient
+from agent_banking.evaluator.config.settings import EvaluatorConfig, resolve_repo_path
 from agent_banking.evaluator.run_agent_785_eval_with_judge import (
     load_all_785_cases,
     load_cache,
@@ -30,11 +29,14 @@ from agent_banking.evaluator.run_agent_785_eval_with_judge import (
     export_to_excel
 )
 
+_OUT_CFG = EvaluatorConfig.CACHES_AND_OUTPUTS
+_J785 = EvaluatorConfig.JUDGE_785
+
+
 def fix_failed_cases():
-    base_dir = r"d:\Desktop\GitHub\AI Banking Asistant"
-    answers_cache_file = os.path.join(base_dir, "dataset", "agent_answers_785_cache.json")
-    scores_cache_file = os.path.join(base_dir, "dataset", "agent_eval_scores_785_cache.json")
-    excel_path = os.path.join(base_dir, "dataset", "A_Bank_golden_master_785_evaluation_llm.xlsx")
+    answers_cache_file = str(resolve_repo_path(_OUT_CFG["answers_785_cache_relpath"], root=PROJECT_ROOT))
+    scores_cache_file = str(resolve_repo_path(_OUT_CFG["scores_785_cache_relpath"], root=PROJECT_ROOT))
+    excel_path = str(resolve_repo_path(_OUT_CFG["master_eval_llm_excel_relpath"], root=PROJECT_ROOT))
 
     all_cases = load_all_785_cases()
     cases_by_id = {}
@@ -45,11 +47,12 @@ def fix_failed_cases():
     scores_cache = load_cache(scores_cache_file)
 
     # Identify all failed or low-score cases
+    min_score = float(_J785["re_eval_failed_score"])
     failed_ids = []
     for cid, sc in scores_cache.items():
         verdict = sc.get("verdict", "FAIL")
         score = float(sc.get("overall_score", 0.0))
-        if verdict == "FAIL" or score < 75.0:
+        if verdict == "FAIL" or score < min_score:
             failed_ids.append(cid)
 
     print("=" * 70)
@@ -63,10 +66,11 @@ def fix_failed_cases():
 
     print("\nInitializing Fixed LangGraph Pipeline and LLM Judge...")
     pipeline = BankingAgentPipeline()
-    judge_client = FallbackChatClient(module="generator")
+    judge_client = FallbackChatClient(module=str(_J785["judge_client_module"]))
 
     fixed_pass_count = 0
     start_total_time = time.time()
+    autosave_every = int(_J785["autosave_interval_fix"])
 
     for idx, cid in enumerate(failed_ids, 1):
         case_data = cases_by_id.get(cid, {})
@@ -125,8 +129,8 @@ def fix_failed_cases():
         except Exception as e:
             print(f"  -> ERROR fixing {cid}: {e}")
 
-        # Auto-save Excel every 5 cases
-        if idx % 5 == 0:
+        # Auto-save Excel periodically
+        if idx % autosave_every == 0:
             export_to_excel(all_cases, answers_cache, scores_cache, excel_path)
             print(f"  [Auto-Save] Excel synchronized (Fixed: {idx}/{len(failed_ids)})")
 
@@ -140,6 +144,7 @@ def fix_failed_cases():
     print(f"Total time: {total_elapsed}s")
     print(f"Updated Excel Workbook: {excel_path}")
     print("=" * 70)
+
 
 if __name__ == "__main__":
     fix_failed_cases()

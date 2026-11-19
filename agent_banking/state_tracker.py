@@ -14,11 +14,17 @@ MANDATORY RULES:
 4. 0% REGEX LAW: Strictly string methods only (in, split, startswith, endswith, strip, lower, replace, find).
 """
 
-import os
 import json
 import time
 import hashlib
 from pathlib import Path
+
+from agent_banking.core.config.settings import CoreConfig
+
+_ST_CFG = CoreConfig.CORE_STATE_TRACKER
+_READ_CHUNK_BYTES = int(_ST_CFG["read_chunk_bytes"])
+_SCHEMA_VERSION_V2 = str(_ST_CFG["schema_version_v2"])
+_TIMESTAMP_FORMAT = str(_ST_CFG["timestamp_format"])
 
 
 class StateTracker:
@@ -63,7 +69,7 @@ class StateTracker:
         hasher = hashlib.sha256()
         with open(p, "rb") as f:
             while True:
-                chunk = f.read(65536)
+                chunk = f.read(_READ_CHUNK_BYTES)
                 if not chunk:
                     break
                 hasher.update(chunk)
@@ -86,7 +92,7 @@ class StateTracker:
 
     def _active_records(self) -> dict:
         """Return the flat item map for both v1 and v2.0 state tracker schemas."""
-        if isinstance(self.records, dict) and self.records.get("schema_version") == "2.0":
+        if isinstance(self.records, dict) and self.records.get("schema_version") == _SCHEMA_VERSION_V2:
             nested = self.records.get("records")
             if isinstance(nested, dict):
                 return nested
@@ -126,7 +132,7 @@ class StateTracker:
         else:
             meta = {}
         meta["hash"] = content_hash
-        meta["processed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        meta["processed_at"] = time.strftime(_TIMESTAMP_FORMAT)
         target = self._active_records()
         if target is self.records:
             self.records[item_id] = meta

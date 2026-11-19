@@ -1,9 +1,18 @@
 """Decision-model table headings, titles, and cross-page continuation."""
 from copy import deepcopy
 
+from agent_banking.chunking.config.prompt_config import (
+    TABLE_CONTINUATION_PROMPT,
+    TABLE_STRUCTURE_TITLE_PROMPT,
+    render_prompt,
+)
+from agent_banking.chunking.config.settings import get_config_section
 from .images import adjacent_source
 from ..image_context import region_key
+from ...planning.source_spans import is_furniture_block
 from ...text.language import project_vietnamese
+
+_TABLE_DECISION_CFG = get_config_section("enrichment")["decisions"]["tables"]
 
 
 def resolve_table_structures_and_titles(ir, ask_decisions, cache=None):
@@ -43,9 +52,11 @@ def resolve_table_structures_and_titles(ir, ask_decisions, cache=None):
             continue
         tid = "t" + str(len(table_entries))
         width = len(grid[0])
-        top_rows = [[text[:160] for text in row[:12]] for row in grid[:4]]
+        max_cols = _TABLE_DECISION_CFG["max_cols_preview"]
+        cell_chars = _TABLE_DECISION_CFG["cell_preview_chars"]
+        top_rows = [[text[:cell_chars] for text in row[:max_cols]] for row in grid[:_TABLE_DECISION_CFG["top_rows_count"]]]
         row_bold = []
-        for r_idx in range(min(3, len(grid))):
+        for r_idx in range(min(_TABLE_DECISION_CFG["bold_check_rows"], len(grid))):
             r_cells = [c for c in table.get("cells", []) if c["row"] == r_idx and c.get("text", "").strip()]
             is_b = bool(r_cells) and all(c.get("all_text_bold", False) for c in r_cells)
             row_bold.append(is_b)
@@ -54,12 +65,8 @@ def resolve_table_structures_and_titles(ir, ask_decisions, cache=None):
                        and cell.get("col_span", cell.get("column_span", 1)) == width), "")
         preceding = adjacent_source(blocks, idx, -1, {"paragraph", "caption", "heading"})
         following = adjacent_source(blocks, idx, 1, {"caption", "paragraph"})
-        title_criteria = {
-            "PREV_BLOCK": "The immediately preceding block introduces or titles this table",
-            "NEXT_BLOCK": "The immediately following block is the caption/title of this table",
-            "ROW_0_BANNER": "Row 0 of the table itself is a full-width banner title",
-            "SECTION_HEADING": "The enclosing section heading is the best title for this table",
-        }
+        title_spec = deepcopy(TABLE_STRUCTURE_TITLE_PROMPT["title"])
+        title_criteria = title_spec["criteria"]
         if preceding and caption_conflicts(preceding["id"], block["id"]):
             preceding = None
             del title_criteria["PREV_BLOCK"]
@@ -88,32 +95,33 @@ def resolve_table_structures_and_titles(ir, ask_decisions, cache=None):
             "row_0_banner": bool(banner),
             "existing_header_count": table.get("header_row_count", 0),
             "prev_type": prev_type,
-            "prev_text": prev_text[:200],
+            "prev_text": prev_text[:_TABLE_DECISION_CFG["prev_text_chars"]],
             "next_type": next_type,
-            "next_text": next_text[:200],
-            "section_heading": heading[:200],
+            "next_text": next_text[:_TABLE_DECISION_CFG["next_text_chars"]],
+            "section_heading": heading[:_TABLE_DECISION_CFG["section_heading_chars"]],
         }
         table_entries.append(entry)
-        table_map[tid] = (block, entry, banner, (heading, heading_id),
-                          (prev_text, preceding["id"] if preceding else None),
-                          (next_text, following["id"] if following else None))
-        if table.get("header_detection") == "unmarked" and len(grid) >= 2 and "row_provenance" not in table:
-            criteria = {
-                "HEADERS_1": "First row is the column header row",
-                "HEADERS_0": "No header row; all rows are data records",
-            }
-            if len(grid) > 2:
-                criteria["HEADERS_2"] = "First two rows form grouped column headers or a banner above column headers"
-            questions[tid + "_hdr"] = {
-                "type": "choice",
-                "instructions": "Determine how many leading rows in table " + tid + " are column header rows (not data records).",
-                "criteria": criteria,
-            }
-        questions[tid + "_title"] = {
-            "type": "choice",
-            "instructions": "Select the best descriptive title source for table " + tid + ".",
-            "criteria": title_criteria,
-        }
+        if preceding is not None:
+            prev_pair = (prev_text, preceding["id"])
+        else:
+            prev_pair = (prev_text, None)
+        if following is not None:
+            next_pair = (next_text, following["id"])
+        else:
+            next_pair = (next_text, None)
+        table_map[tid] = (block, entry, banner, (heading, heading_id), prev_pair, next_pair)
+        needs_header_check = (
+            table.get("header_detection") == "unmarked"
+            or (table.get("header_detection") == "visual_model_review" and not table.get("header_row_count"))
+        )
+        if needs_header_check and len(grid) >= 2 and "row_provenance" not in table:
+            hdr_spec = deepcopy(TABLE_STRUCTURE_TITLE_PROMPT["header"])
+            if len(grid) <= 2:
+                hdr_spec["criteria"].pop("HEADERS_2", None)
+            hdr_spec["instructions"] = render_prompt(hdr_spec["instructions"], tid=tid)
+            questions[tid + "_hdr"] = hdr_spec
+        title_spec["instructions"] = render_prompt(title_spec["instructions"], tid=tid)
+        questions[tid + "_title"] = title_spec
     if not table_entries:
         return
     answers = ask_decisions("table_structure_and_title", {"tables": table_entries}, questions, cache=cache)
@@ -167,6 +175,10 @@ def resolve_table_structures_and_titles(ir, ask_decisions, cache=None):
                 headers.append(" / ".join(labels))
             if "row_provenance" not in table:
                 table["headers"] = headers
+        elif not header_count and "row_provenance" not in table and table.get("headers") and all(
+            not str(label).strip() for label in table["headers"]
+        ):
+            table["headers"] = ["#" + str(column + 1) for column in range(width)]
         if not title_choice:
             continue
         table["title"] = resolved_title
@@ -181,16 +193,37 @@ def table_header_cells(table):
     return [cell for cell in table.get("cells", []) if cell["row"] < table["header_row_count"]]
 
 
+def _normalized_header_grid(grid):
+    return [[" ".join(str(cell).split()) for cell in row] for row in grid]
+
+
+def _header_cell_signatures(table):
+    signatures = []
+    for cell in table_header_cells(table):
+        col_span = cell.get("column_span")
+        if col_span is None:
+            col_span = cell.get("col_span", 1)
+        signatures.append((
+            cell["row"],
+            cell["column"],
+            cell["row_span"],
+            col_span,
+            " ".join(str(cell["text"]).split()),
+        ))
+    return sorted(signatures)
+
+
 def compatible_table_headers(first, continuation):
     count = continuation["header_row_count"]
     if not count:
         return True
-    if first["header_grid"] != continuation["header_grid"] or first["headers"] != continuation["headers"]:
+    if (_normalized_header_grid(first["header_grid"]) != _normalized_header_grid(continuation["header_grid"])
+            or [" ".join(str(h).split()) for h in first["headers"]] != [" ".join(str(h).split()) for h in continuation["headers"]]):
         return False
     cells = table_header_cells(continuation)
     if any(cell["row"] + cell["row_span"] > count for cell in cells):
         return False
-    return table_header_cells(first) == cells
+    return _header_cell_signatures(first) == _header_cell_signatures(continuation)
 
 
 def table_row_provenance(block):
@@ -216,43 +249,71 @@ def merge_continued_tables(ir, ask_decisions, cache=None):
     pairs = []
     questions = {}
     pair_indices = {}
-    for idx in range(1, len(blocks)):
-        prev = blocks[idx - 1]
+    last_table_idx = None
+    pair_spans = {}
+    for idx in range(len(blocks)):
         curr = blocks[idx]
-        if prev["type"] != "table" or curr["type"] != "table":
+        if curr["type"] != "table":
             continue
-        prev_page = prev.get("provenance", {}).get("page_index", -2)
-        curr_page = curr.get("provenance", {}).get("page_index", -1)
-        t1 = prev["table_data"]
-        t2 = curr["table_data"]
-        if prev_page >= 0 and curr_page == prev_page + 1 and len(t1["headers"]) == len(t2["headers"]) and len(t1["headers"]) > 0:
-            pid = "tbl_" + str(len(pairs))
-            prev_tail = []
-            if t1["rows"]:
-                prev_tail = [value[:160] for value in t1["rows"][-1][:12]]
-            curr_head = []
-            if t2["rows"]:
-                curr_head = [value[:160] for value in t2["rows"][0][:12]]
-            pairs.append({
-                "id": pid,
-                "prev_page": prev_page,
-                "curr_page": curr_page,
-                "prev_bbox": prev.get("provenance", {}).get("bbox", []),
-                "curr_bbox": curr.get("provenance", {}).get("bbox", []),
-                "prev_headers": [value[:160] for value in t1["headers"][:12]],
-                "curr_headers": [value[:160] for value in t2["headers"][:12]],
-                "prev_last_row": prev_tail,
-                "curr_first_row": curr_head,
-            })
-            pair_indices[pid] = idx
-            questions[pid] = {
-                "type": "choice",
-                "instructions": "Decide if table pair " + pid + " across consecutive pages is a single continued table split by a page break.",
-                "criteria": {
-                    "MERGE_CONTINUED": "Second table is a direct continuation of the first table across the page boundary",
-                    "KEEP_SEPARATE": "Second table is a distinct, independent table",
-                },
-            }
+        if last_table_idx is not None:
+            intervening = blocks[last_table_idx + 1:idx]
+            prev = blocks[last_table_idx]
+            prev_page = prev.get("provenance", {}).get("page_index", -2)
+            curr_page = curr.get("provenance", {}).get("page_index", -1)
+            t1 = prev["table_data"]
+            t2 = curr["table_data"]
+            if t1.get("grid"):
+                width1 = len(t1["grid"][0])
+            else:
+                width1 = len(t1.get("headers", []))
+            if t2.get("grid"):
+                width2 = len(t2["grid"][0])
+            else:
+                width2 = len(t2.get("headers", []))
+            max_intervening = _TABLE_DECISION_CFG["max_intervening_blocks"]
+            max_intervening_words = _TABLE_DECISION_CFG["max_intervening_words"]
+            label_chars = _TABLE_DECISION_CFG["intervening_label_chars"]
+            row_cols = _TABLE_DECISION_CFG["row_preview_cols"]
+            cell_chars = _TABLE_DECISION_CFG["cell_chars"]
+            hdr_cols = _TABLE_DECISION_CFG["header_preview_cols"]
+            non_furniture = [item for item in intervening if not is_furniture_block(item)]
+            bridgeable = (
+                len(non_furniture) <= max_intervening
+                and all(
+                    item["type"] in ("caption", "paragraph", "heading")
+                    and len(item.get("text", "").split()) <= max_intervening_words
+                    and item.get("provenance", {}).get("page_index") in (prev_page, curr_page)
+                    for item in non_furniture
+                )
+            )
+            if prev_page >= 0 and curr_page == prev_page + 1 and width1 > 0 and width1 == width2 and bridgeable:
+                pid = "tbl_" + str(len(pairs))
+                prev_tail = []
+                if t1["rows"]:
+                    prev_tail = [value[:cell_chars] for value in t1["rows"][-1][:row_cols]]
+                curr_head = []
+                if t2["rows"]:
+                    curr_head = [value[:cell_chars] for value in t2["rows"][0][:row_cols]]
+                pair_info = {
+                    "id": pid,
+                    "prev_page": prev_page,
+                    "curr_page": curr_page,
+                    "prev_bbox": prev.get("provenance", {}).get("bbox", []),
+                    "curr_bbox": curr.get("provenance", {}).get("bbox", []),
+                    "prev_headers": [value[:cell_chars] for value in t1["headers"][:hdr_cols]],
+                    "curr_headers": [value[:cell_chars] for value in t2["headers"][:hdr_cols]],
+                    "prev_last_row": prev_tail,
+                    "curr_first_row": curr_head,
+                }
+                if non_furniture:
+                    pair_info["intervening_labels"] = [item.get("text", "")[:label_chars] for item in non_furniture]
+                pairs.append(pair_info)
+                pair_indices[pid] = idx
+                pair_spans[idx] = last_table_idx
+                cont_spec = deepcopy(TABLE_CONTINUATION_PROMPT)
+                cont_spec["instructions"] = render_prompt(cont_spec["instructions"], pid=pid)
+                questions[pid] = cont_spec
+        last_table_idx = idx
     if not questions:
         return
     answers = ask_decisions("pdf_table_continuation", {"table_pairs": pairs}, questions, cache=cache)
@@ -264,37 +325,45 @@ def merge_continued_tables(ir, ask_decisions, cache=None):
         return
     merged_blocks = []
     merged_sources = {}
+    target_for_merged = {}
     for idx, block in enumerate(blocks):
-        if idx in merge_indices and merged_blocks and merged_blocks[-1]["type"] == "table":
-            prev = merged_blocks[-1]
-            t1 = prev["table_data"]
-            t2 = block["table_data"]
-            if not compatible_table_headers(t1, t2):
-                # Both headers are source data. Keep them in their own tables
-                # while recording the model-confirmed continuation.
-                ir["relations"].append({"from": block["id"], "to": prev["id"], "type": "continues"})
-                merged_blocks.append(block)
-                continue
-            row_offset = len(t1["header_grid"]) + len(t1["rows"])
-            t2_header_count = t2["header_row_count"]
-            if "row_provenance" not in t1:
-                t1["row_provenance"] = table_row_provenance(prev)
-                record_header_occurrence(t1, t1, t1["row_provenance"])
-            next_rows = table_row_provenance(block)
-            record_header_occurrence(t1, t2, next_rows)
-            t1["row_provenance"].extend(next_rows[t2_header_count:])
-            for cell in t2.get("cells", []):
-                if cell["row"] < t2_header_count:
+        if idx in merge_indices:
+            prev_idx = pair_spans[idx]
+            prev = target_for_merged.get(prev_idx, blocks[prev_idx])
+            if prev["type"] == "table":
+                t1 = prev["table_data"]
+                t2 = block["table_data"]
+                if not compatible_table_headers(t1, t2):
+                    # Both headers are source data. Keep them in their own tables
+                    # while recording the model-confirmed continuation.
+                    ir["relations"].append({"from": block["id"], "to": prev["id"], "type": "continues"})
+                    merged_blocks.append(block)
                     continue
-                shifted = deepcopy(cell)
-                shifted["row"] = row_offset + (cell["row"] - t2_header_count)
-                t1.setdefault("cells", []).append(shifted)
-            t1["rows"].extend(t2["rows"])
-            t1["grid"] = t1["header_grid"] + t1["rows"]
-            merged_sources[block["id"]] = (prev["id"], row_offset, t2_header_count)
-            continue
+                row_offset = len(t1["header_grid"]) + len(t1["rows"])
+                t2_header_count = t2["header_row_count"]
+                if "row_provenance" not in t1:
+                    t1["row_provenance"] = table_row_provenance(prev)
+                    record_header_occurrence(t1, t1, t1["row_provenance"])
+                next_rows = table_row_provenance(block)
+                record_header_occurrence(t1, t2, next_rows)
+                t1["row_provenance"].extend(next_rows[t2_header_count:])
+                for cell in t2.get("cells", []):
+                    if cell["row"] < t2_header_count:
+                        continue
+                    shifted = deepcopy(cell)
+                    shifted["row"] = row_offset + (cell["row"] - t2_header_count)
+                    t1.setdefault("cells", []).append(shifted)
+                t1["rows"].extend(t2["rows"])
+                t1["grid"] = t1["header_grid"] + t1["rows"]
+                merged_sources[block["id"]] = (prev["id"], row_offset, t2_header_count)
+                target_for_merged[idx] = prev
+                continue
         merged_blocks.append(block)
     if merged_sources:
+        for relation in ir.get("relations", []):
+            for endpoint_key in ("from", "to"):
+                if relation.get(endpoint_key) in merged_sources:
+                    relation[endpoint_key] = merged_sources[relation[endpoint_key]][0]
         for index, block in enumerate(merged_blocks):
             block["order"] = index
         for unit in ir["units"]:

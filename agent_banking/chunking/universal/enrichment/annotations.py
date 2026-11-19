@@ -1,9 +1,12 @@
 """Validate model annotations against their window and apply grounded metadata."""
+from agent_banking.chunking.config.settings import get_config_section, get_rules
 from .image_context import source_text
 
-
-ANNOTATION_ARRAYS = ("heading_levels", "relations", "contexts", "warnings", "reading_order")
-RELATION_TYPES = ("continues", "answer_to", "note_of", "exception_to", "refers_to")
+_ENRICH_RULES = get_rules("enrichment_rules")
+_DOCX_CFG = get_config_section("extraction")["docx"]
+ANNOTATION_ARRAYS = tuple(_ENRICH_RULES["annotation_arrays"])
+RELATION_TYPES = tuple(_ENRICH_RULES["relation_types"])
+_MAX_HEADING_LEVEL = _DOCX_CFG["max_heading_level"]
 
 
 class OptionalContextReferenceError(ValueError):
@@ -23,8 +26,8 @@ def _validate_heading_levels(items, supplied, editable):
             raise ValueError("Heading target must be an editable block ID")
         if supplied[identifier]["type"] not in ("paragraph", "heading"):
             raise ValueError("Heading targets must be paragraphs or headings")
-        if type(level) is not int or not 0 <= level <= 7:
-            raise ValueError("Heading level must be 0..7")
+        if type(level) is not int or not 0 <= level <= _MAX_HEADING_LEVEL:
+            raise ValueError("Heading level must be 0.." + str(_MAX_HEADING_LEVEL))
         if identifier in levels and levels[identifier] != level:
             raise ValueError("Conflicting heading levels for the same source ID")
         levels[identifier] = level
@@ -94,8 +97,71 @@ def validate_annotations(result, window, native_text, *, quarantine_context=Fals
     return result
 
 
+def _clean_identifier(value):
+    """Remove separator noise that models append to IDs, such as "b0," or " b3 "."""
+    if not isinstance(value, str):
+        return value
+    return value.strip().strip(",;:.").strip().strip("\"'").strip()
+
+
+def _clean_identifier_list(values):
+    if not isinstance(values, list):
+        return values
+    return [_clean_identifier(value) for value in values]
+
+
+def normalize_annotation_response(result):
+    """Fill omitted empty arrays and clean ID punctuation before validation.
+
+    Models frequently omit empty optional arrays or emit IDs with trailing commas.
+    When at least one annotation array is present, missing optional arrays are
+    defaulted to [] instead of costing another cloud round trip; completely empty
+    or unrelated objects (such as {}) still trigger schema repair.
+    """
+    if not isinstance(result, dict):
+        return result
+    if not any(isinstance(result.get(key), list) for key in ANNOTATION_ARRAYS):
+        return result
+    clean = dict(result)
+    for key in ANNOTATION_ARRAYS:
+        if key not in clean:
+            clean[key] = []
+    clean["reading_order"] = _clean_identifier_list(clean["reading_order"])
+    for key, fields, list_fields in (("heading_levels", ("block_id",), ()),
+                                     ("relations", ("from", "to"), ()),
+                                     ("contexts", ("block_id",), ("source_block_ids",)),
+                                     ("warnings", (), ("block_ids",))):
+        items = clean[key]
+        if not isinstance(items, list):
+            continue
+        repaired = []
+        for item in items:
+            if not isinstance(item, dict):
+                repaired.append(item)
+                continue
+            item = dict(item)
+            for field in fields:
+                item[field] = _clean_identifier(item.get(field))
+            for field in list_fields:
+                if field in item:
+                    item[field] = _clean_identifier_list(item[field])
+            if key == "contexts" and isinstance(item.get("context_quotes"), list):
+                quotes = []
+                for quote in item["context_quotes"]:
+                    if isinstance(quote, dict):
+                        quote = {**quote, "source_block_id": _clean_identifier(quote.get("source_block_id"))}
+                    quotes.append(quote)
+                item["context_quotes"] = quotes
+            if key == "heading_levels" and isinstance(item.get("level"), str) and item["level"].strip().isdigit():
+                item["level"] = int(item["level"].strip())
+            repaired.append(item)
+        clean[key] = repaired
+    return clean
+
+
 def filter_optional_annotations(result, window, native_text):
     """Keep grounded annotations even if the model also returned bad references."""
+    result = normalize_annotation_response(result)
     if not isinstance(result, dict) or any(not isinstance(result.get(key), list) for key in ANNOTATION_ARRAYS):
         raise ValueError("Structure response requires all annotation arrays")
     empty = dict.fromkeys(ANNOTATION_ARRAYS, [])
@@ -104,10 +170,16 @@ def filter_optional_annotations(result, window, native_text):
     levels = {}
     for key in ANNOTATION_ARRAYS:
         items = result[key]
-        candidates = [items] if key == "reading_order" and items else items
+        if key == "reading_order" and items:
+            candidates = [items]
+        else:
+            candidates = items
         accepted = []
         for item in candidates:
-            entry = item if key == "reading_order" else [item]
+            if key == "reading_order":
+                entry = item
+            else:
+                entry = [item]
             try:
                 validate_annotations({**empty, key: entry}, window, native_text)
             except ValueError as error:
@@ -116,7 +188,10 @@ def filter_optional_annotations(result, window, native_text):
             if key == "heading_levels":
                 levels.setdefault(item["block_id"], set()).add(item["level"])
             accepted.append(item)
-        clean[key] = accepted[0] if key == "reading_order" and accepted else accepted
+        if key == "reading_order" and accepted:
+            clean[key] = accepted[0]
+        else:
+            clean[key] = accepted
     headings = []
     for item in clean["heading_levels"]:
         if len(levels[item["block_id"]]) == 1:
@@ -153,7 +228,10 @@ def apply_annotations(ir, results, native_ids, by_id):
             level = item["level"]
             proposed[identifier] = {"block_id": identifier, "native_level": block.get("level", 0),
                                     "proposed_level": level}
-            block["type"] = "heading" if level else "paragraph"
+            if level:
+                block["type"] = "heading"
+            else:
+                block["type"] = "paragraph"
             block["level"] = level
         for relation in result["relations"]:
             key = (native_ids[relation["from"]], native_ids[relation["to"]], relation["type"])
@@ -178,5 +256,38 @@ def apply_annotations(ir, results, native_ids, by_id):
                     quotes.append(quote)
     ir["structure_proposals"] = list(proposed.values())
     ir["source_review"] = list(warnings.values())
+    if ir.get("page_reviews"):
+        _apply_reading_orders(ir, results, native_ids)
     for index, block in enumerate(ir["blocks"]):
         block["reading_order"] = index
+
+
+def _apply_reading_orders(ir, results, native_ids):
+    """Apply model reading orders on OCR pages, only inside one contiguous page run.
+
+    Authored DOCX order is never changed. For OCR pages the model may fix column
+    order, but only for blocks on the same page that are adjacent in the IR, so a
+    window can never move content across pages or across another window.
+    """
+    applied = []
+    for start, result in results:
+        order = result.get("reading_order") or []
+        if not order:
+            continue
+        identifiers = [native_ids[alias] for alias in order if alias in native_ids]
+        if len(identifiers) != len(order):
+            continue
+        positions = {block["id"]: index for index, block in enumerate(ir["blocks"])}
+        if any(identifier not in positions for identifier in identifiers):
+            continue
+        indexes = sorted(positions[identifier] for identifier in identifiers)
+        if indexes[-1] - indexes[0] + 1 != len(indexes):
+            continue
+        pages = {ir["blocks"][index]["provenance"].get("page_index") for index in indexes}
+        if len(pages) != 1:
+            continue
+        reordered = [ir["blocks"][positions[identifier]] for identifier in identifiers]
+        ir["blocks"][indexes[0]:indexes[-1] + 1] = reordered
+        applied.append(start)
+    if applied:
+        ir["reading_order_windows"] = applied

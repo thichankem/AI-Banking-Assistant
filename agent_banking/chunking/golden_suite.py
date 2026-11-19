@@ -13,56 +13,20 @@ from docx import Document
 from docx.oxml import OxmlElement
 import pymupdf
 
+from .config.settings import get_golden_suite_settings
 from .run_chunking import load_published_chunks, run_auto_chunking
 
+_GOLDEN = get_golden_suite_settings()
+_RENDER = _GOLDEN["render"]
 
-# These are authored source strings. Keep assertions independent of model output.
 SOURCE_CASES = {
-    "legal": (
-        ("Notice period", "Article 8: Appeals must be filed within 17 days.", "Exception: official holidays are excluded."),
-        ("Điều khoản chuyển tiếp", "Điều 12 áp dụng từ ngày 01/04/2030.", "Ngoại lệ: hồ sơ cũ áp dụng Điều 7."),
-        ("Retention schedule", "Section 9: Retain the archive for 27 months.", "Exception: a preservation order suspends deletion."),
-        ("Appeal rules", "Article 14: Submit the appeal within 21 days.", "See Article 6 for the only exception."),
-    ),
-    "economics": (
-        ("Price index", "The reference year is 2020.", "All observations use the same reference year."),
-        ("Báo cáo giá song ngữ", "Mức thuế là 7,25%.", "The tax does not apply to samples."),
-        ("Regional accounts", "Amounts are shown in thousands of euros.", "Negative balances are carried forward."),
-        ("Capacity statistics", "Survey coverage reached 82.4%.", "Percentages are weighted by output."),
-    ),
-    "internal": (
-        ("Access requests", "Approval requires two reviewers.", "Do not reuse expired access codes."),
-        ("Quy trình nội bộ", "Bước 2: Chọn Xác nhận.", "Chỉ quản trị viên được đặt lại quyền."),
-        ("Incident runbook", "Notify the on-call lead within 12 minutes.", "Use incident channel OPS-42."),
-        ("Warehouse instructions", "Set the scanner to inventory mode.", "Step 3: Select Confirm inventory."),
-    ),
-    "technical": (
-        ("Calibration", "Maximum deviation is 0.08 mm.", "Recalibrate after any mechanical adjustment."),
-        ("Electrical safety", "Do not exceed 48 V DC.", "Disconnect power before opening the panel."),
-        ("Cooling specification", "The inlet temperature must remain below 38 °C.", "Valve B must remain open."),
-        ("Pressure limits", "Maintain at least 2.5 bar.", "Stop the pump if the relief valve opens."),
-    ),
-    "academic": (
-        ("Sampling method", "The study retained 312 observations.", "Appendix C explains the exclusion criteria."),
-        ("研究データ", "調査期間は30日です。", "対照群は20人です。"),
-        ("Methods and results", "The confidence level is 95%.", "The null hypothesis was retained."),
-        ("Laboratory report", "The specimen mass is 8.25 g.", "Report mass in grams."),
-    ),
-    "banking": (
-        ("Loan schedule", "Interest accrues at 6.75% per annum.", "Fee waivers apply to the first payment only."),
-        ("Quy định phí", "Phí xử lý là 35.000 đồng.", "Khoản phí áp dụng một lần cho mỗi yêu cầu."),
-        ("Transfer help", "The daily transfer limit is 250,000 VND.", "Select Review transfer before confirming."),
-        ("Account controls", "Choose Lock card for this device.", "Enter the six-digit confirmation code."),
-    ),
+    domain: tuple(tuple(case) for case in cases)
+    for domain, cases in _GOLDEN["source_cases"].items()
 }
-
-SOURCE_REVISION = 1
-TABLE_FACTS = ("Baseline-27", "Final-48")
-FIGURE_LABEL = "Sensor channel R24"
-REAL_CASES = {
-    "HDSD 05": ["Khóa toàn bộ dịch vụ Ngân hàng số", "Nhập mã xác nhận 6 số"],
-    "HDSD 36": ["Đề nghị đóng và hủy hạn mức thấu chi", "Hạn mức thấu chi đã đóng thành công"],
-}
+SOURCE_REVISION = _GOLDEN["source_revision"]
+TABLE_FACTS = tuple(_GOLDEN["table_facts"])
+FIGURE_LABEL = _GOLDEN["figure_label"]
+REAL_CASES = dict(_GOLDEN["real_cases"])
 
 
 def _word(path, title, facts, structured):
@@ -73,26 +37,27 @@ def _word(path, title, facts, structured):
     if structured:
         table = document.add_table(rows=3, cols=2)
         header = table.cell(0, 0).merge(table.cell(0, 1))
-        header.text = "Reported measurement"
-        table.cell(1, 0).text = "Initial"
+        header.text = _RENDER["word_table_header"]
+        row_labels = _RENDER["word_table_rows"]
+        table.cell(1, 0).text = row_labels[0]
         table.cell(1, 1).text = TABLE_FACTS[0]
-        table.cell(2, 0).text = "Final"
+        table.cell(2, 0).text = row_labels[1]
         table.cell(2, 1).text = TABLE_FACTS[1]
         math = OxmlElement("m:oMath")
         run = OxmlElement("m:r")
         text = OxmlElement("m:t")
-        text.text = "x+y=17"
+        text.text = _RENDER["word_equation"]
         run.append(text)
         math.append(run)
         document.add_paragraph()._p.append(math)
         image = BytesIO()
         with pymupdf.open() as figure:
-            page = figure.new_page(width=400, height=80)
-            page.insert_text((16, 45), FIGURE_LABEL, fontsize=22)
+            page = figure.new_page(width=_RENDER["word_figure_width"], height=_RENDER["word_figure_height"])
+            page.insert_text(tuple(_RENDER["word_figure_pos"]), FIGURE_LABEL, fontsize=_RENDER["word_figure_fontsize"])
             image.write(page.get_pixmap().tobytes("png"))
         image.seek(0)
         document.add_picture(image)
-        document.add_paragraph("Figure 1. Instrument panel.", style="Caption")
+        document.add_paragraph(_RENDER["pdf_caption_text"], style="Caption")
     document.add_paragraph(facts[1])
     package = BytesIO()
     document.save(package)
@@ -101,8 +66,10 @@ def _word(path, title, facts, structured):
             frozen.writestr(ZipInfo(name), original.read(name), compress_type=ZIP_DEFLATED)
 
 
-def _place(page, text, box, fontsize=15):
-    font = pymupdf.Font("china-ss")
+def _place(page, text, box, fontsize=None):
+    if fontsize is None:
+        fontsize = _RENDER["pdf_default_fontsize"]
+    font = pymupdf.Font(_RENDER["pdf_font"])
     writer = pymupdf.TextWriter(page.rect)
     if writer.fill_textbox(pymupdf.Rect(*box), text, font=font, fontsize=fontsize):
         raise ValueError("Benchmark text exceeded its page box")
@@ -112,13 +79,13 @@ def _place(page, text, box, fontsize=15):
 def _pdf(path, title, facts, scanned, repeated_table):
     with pymupdf.open() as authored:
         page = authored.new_page()
-        _place(page, title, (42, 30, 553, 90), 22)
+        _place(page, title, tuple(_RENDER["pdf_title_box"]), _RENDER["pdf_title_fontsize"])
         if scanned:
             _place(page, facts[0], (42, 110, 277, 240))
             _place(page, facts[1], (312, 110, 553, 240))
             page.draw_rect((315, 250, 547, 351), color=(0, 0, 0))
             _place(page, FIGURE_LABEL, (326, 270, 530, 342))
-            _place(page, "Figure 1. Instrument panel.", (322, 355, 550, 420), 12)
+            _place(page, _RENDER["pdf_caption_text"], (322, 355, 550, 420), 12)
         else:
             _place(page, facts[0], (42, 110, 553, 190))
             _place(page, facts[1], (42, 210, 553, 300))
@@ -126,11 +93,14 @@ def _pdf(path, title, facts, scanned, repeated_table):
             for index, fact in enumerate(TABLE_FACTS):
                 if index:
                     page = authored.new_page()
-                y = 400 if index == 0 else 100
+                if index:
+                    y = 100
+                else:
+                    y = 400
                 for x in (42, 260):
                     for top in (y, y + 36):
                         page.draw_rect((x, top, x + 218, top + 36), color=(0, 0, 0))
-                for col, label in enumerate(("Period", "Observed result")):
+                for col, label in enumerate(_RENDER["pdf_table_headers"]):
                     x = 50 + col * 218
                     _place(page, label, (x, y + 6, x + 200, y + 34), 12)
                 _place(page, str(index + 1), (50, y + 42, 243, y + 70), 12)
@@ -141,7 +111,7 @@ def _pdf(path, title, facts, scanned, repeated_table):
             with pymupdf.open() as raster:
                 for original in authored:
                     scanned_page = raster.new_page(width=original.rect.width, height=original.rect.height)
-                    scanned_page.insert_image(scanned_page.rect, stream=original.get_pixmap(dpi=144).tobytes("png"))
+                    scanned_page.insert_image(scanned_page.rect, stream=original.get_pixmap(dpi=_RENDER["pdf_dpi"]).tobytes("png"))
                 raster.save(path, no_new_id=True)
 
 
@@ -152,7 +122,11 @@ def build_corpus(incoming, regression_input=None):
         folder.mkdir(parents=True, exist_ok=True)
         for variant, (title, *facts) in enumerate(cases):
             is_pdf = variant >= 2
-            path = folder / (domain + "-" + str(variant + 1) + (".pdf" if is_pdf else ".docx"))
+            if is_pdf:
+                ext = ".pdf"
+            else:
+                ext = ".docx"
+            path = folder / (domain + "-" + str(variant + 1) + ext)
             probes = list(facts)
             if is_pdf:
                 table = domain == "economics" and variant == 2
@@ -183,9 +157,12 @@ def _normalized(value):
     return " ".join(unicodedata.normalize("NFC", value).casefold().split())
 
 
-def score(publication, expected):
+def score(publication, expected, *, strict=True):
     chunks, manifest = load_published_chunks(publication, return_manifest=True)
     searchable = {}
+    heading_only = 0
+    parent_eq_child = 0
+    empty_table_headers = 0
     for chunk in chunks:
         metadata = chunk["business_metadata"]
         if metadata["retrieval"].get("role") == "attachment_only":
@@ -193,6 +170,17 @@ def score(publication, expected):
         if not metadata.get("provenance", {}).get("locations"):
             continue
         searchable.setdefault(chunk["source"], []).append(_normalized(chunk["content"]))
+        section_title = chunk.get("section_title", "").strip()
+        content_text = chunk.get("content", "").strip()
+        if section_title and content_text == section_title:
+            heading_only += 1
+        if chunk.get("parent_content", "").strip() == content_text:
+            parent_eq_child += 1
+        table_data = chunk.get("table_data")
+        if isinstance(table_data, dict):
+            headers = table_data.get("headers") or []
+            if headers and all(not str(label).strip() for label in headers):
+                empty_table_headers += 1
     documents = []
     for source, probes in expected.items():
         readings = searchable.get(source, [])
@@ -200,12 +188,30 @@ def score(publication, expected):
         documents.append({"source": source, "checks": len(probes), "missing": missing})
     count = sum(document["checks"] for document in documents)
     missing = sum(len(document["missing"]) for document in documents)
-    return {"revision": SOURCE_REVISION, "pipeline_fingerprint": manifest["pipeline_fingerprint"],
-            "files": len(expected), "failed_files": manifest["failed_files"], "chunks": len(chunks),
-            "critical_checks": count, "passed_critical_checks": count - missing,
-            "ocr_failed_pages": manifest["ocr_failed_pages"], "ocr_partial_pages": manifest["ocr_partial_pages"],
-            "passed": not missing and not manifest["failed_files"] and not manifest["ocr_failed_pages"],
-            "documents": documents}
+    index_ready = manifest.get("index_ready") is True
+    ocr_partial_pages = manifest.get("ocr_partial_pages", 0)
+    model_warnings = manifest.get("model_warning_count", 0)
+    passed = not missing and not manifest["failed_files"] and not manifest["ocr_failed_pages"] and index_ready
+    if strict:
+        passed = passed and not ocr_partial_pages and not empty_table_headers
+    return {
+        "revision": SOURCE_REVISION,
+        "pipeline_fingerprint": manifest["pipeline_fingerprint"],
+        "files": len(expected),
+        "failed_files": manifest["failed_files"],
+        "chunks": len(chunks),
+        "critical_checks": count,
+        "passed_critical_checks": count - missing,
+        "index_ready": index_ready,
+        "ocr_failed_pages": manifest["ocr_failed_pages"],
+        "ocr_partial_pages": ocr_partial_pages,
+        "model_warning_count": model_warnings,
+        "empty_table_headers": empty_table_headers,
+        "heading_only_chunks": heading_only,
+        "parent_eq_child_chunks": parent_eq_child,
+        "passed": passed,
+        "documents": documents,
+    }
 
 
 def main():
@@ -217,7 +223,9 @@ def main():
     with tempfile.TemporaryDirectory(prefix="chunking-golden-") as directory:
         incoming = Path(directory)
         expected = build_corpus(incoming, args.regression_input)
-        options = {"cache_db_path": args.cache} if args.cache is not None else {}
+        options = {}
+        if args.cache is not None:
+            options["cache_db_path"] = args.cache
         run_auto_chunking(incoming, args.output, search_language="all", ocr_docx_images=True,
                           retry_delays=(), **options)
         result = score(args.output, expected)

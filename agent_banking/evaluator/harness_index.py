@@ -9,8 +9,11 @@ from agent_banking.chunking.publication_io import file_hash
 from agent_banking.chunking.run_chunking import load_published_chunks
 from agent_banking.chunking.universal.extraction.sources import discover_documents, document_source_root
 from agent_banking.core.settings import Config
+from agent_banking.evaluator.config.settings import EvaluatorConfig
 from agent_banking.pipeline import BankingRAGPipeline
 from agent_banking.vector_db.qdrant_store import publication_scope
+
+_HARNESS = EvaluatorConfig.HARNESS
 
 
 def build_index(publication: Path, index: Path, corpus: Path) -> dict:
@@ -30,7 +33,7 @@ def build_index(publication: Path, index: Path, corpus: Path) -> dict:
     if any(records[name]["input_sha256"] != file_hash(path) for name, path in expected.items()):
         raise ValueError("A source document changed after publication")
     config.ABANK_QDRANT_STORAGE_PATH = str(index)
-    config.TRACE_DIR = index.parent / "index-traces"
+    config.TRACE_DIR = index.parent / str(_HARNESS["index_traces_dirname"])
     pipeline = BankingRAGPipeline(config=config)
     try:
         count = pipeline.ingest_published_chunks(publication, require_ready=True)
@@ -39,13 +42,18 @@ def build_index(publication: Path, index: Path, corpus: Path) -> dict:
             raise ValueError("Unexpected point count in isolated collection")
     finally:
         pipeline.close()
-    sqlite_path = index / "collection" / config.QDRANT_COLLECTION / "storage.sqlite"
+    sqlite_path = (
+        index
+        / str(_HARNESS["qdrant_collection_dir"])
+        / config.QDRANT_COLLECTION
+        / str(_HARNESS["qdrant_sqlite_filename"])
+    )
     with sqlite_path.open("rb") as contents:
         digest = file_digest(contents, "sha256").hexdigest()
     report = {"collection": config.QDRANT_COLLECTION, "points": points, "documents": len(records),
               "scope": publication_scope(publication), "index_digest": digest,
               "publication_digest": manifest["aggregate_sha256"]}
-    (index / "harness_snapshot.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    (index / str(_HARNESS["snapshot_filename"])).write_text(json.dumps(report, indent=2), encoding="utf-8")
     return report
 
 

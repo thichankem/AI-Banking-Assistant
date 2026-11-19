@@ -1,24 +1,31 @@
 """Read PDF pixels through the configured cloud vision candidates."""
 from copy import deepcopy
 import hashlib
+from html.parser import HTMLParser
 import io
 import json
 
-from agent_banking.chunking.config.prompt_config import CLOUD_OCR_PAGE_PROMPT as SCAN_PAGE_PROMPT, PDF_PROMPT_VERSION
+from agent_banking.chunking.config.prompt_config import (
+    CLOUD_OCR_PAGE_PROMPT as SCAN_PAGE_PROMPT,
+    PDF_PAGE_REPAIR_PROMPT,
+    PDF_PROMPT_VERSION,
+    PDF_REGION_CROP_INSTRUCTION,
+    PDF_SCHEMA_VERSION,
+)
+from agent_banking.chunking.config.settings import get_config_section, get_rules
+from agent_banking.tracing.agent_trace import annotate_span, trace_stage
 from .layout import has_meaningful_layout, merge_region_observation, normalize_visual_layout, reading_order, validate_page, validate_scan_pixels
 from .tables import table_from_html, validate_table
 
+_PDF_CFG = get_config_section("extraction")["pdf"]
+_PDF_RULES = get_rules("pdf")
 
-PDF_SCHEMA_VERSION = "pdf-ir-v7-page-citations"
-OCR_MAX_OUTPUT_TOKENS = 6_144
-_SCHEMA_ISSUES = {"review_metadata_missing", "unrecognized_review_verdict", "elements_skipped",
-                  "table_text_only"}
-_REPAIR_INSTRUCTION = (
-    "\nThe previous response did not match the requested schema. Read the same image again and return a complete JSON object. "
-    'Include elements, uncertainties, and review with verdict "accepted" or "unresolved". '
-    "Each element must include its type. Include table cell structure for every table. "
-    "Use uncertainties for unreadable source details."
-)
+OCR_MAX_OUTPUT_TOKENS = _PDF_CFG["ocr_max_output_tokens"]
+_SCHEMA_ISSUES = set(_PDF_RULES["schema_issues"])
+_ACCEPTED_VERDICTS = tuple(_PDF_RULES["accepted_verdicts"])
+_REPAIR_INSTRUCTION = "\n" + PDF_PAGE_REPAIR_PROMPT
+_MAX_CROP_DEPTH = _PDF_CFG["max_crop_depth"]
+_CROP_PAD_RATIO = _PDF_CFG["crop_pad_ratio"]
 
 
 
@@ -26,24 +33,82 @@ class CloudOCRUnavailable(ValueError):
     """No usable cloud transcription was returned for this page."""
 
 
+class _HTMLTextExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("tr", "p", "div", "li", "br"):
+            self.parts.append("\n")
+        elif tag in ("td", "th") and self.parts and not self.parts[-1].endswith(("\n", " | ")):
+            self.parts.append(" | ")
+
+    def handle_data(self, data):
+        text = " ".join(data.split())
+        if text:
+            if self.parts and not self.parts[-1].endswith(("\n", " | ")):
+                self.parts.append(" ")
+            self.parts.append(text)
+
+
+def _strip_html_text(markup):
+    if not isinstance(markup, str) or not markup.strip():
+        return ""
+    parser = _HTMLTextExtractor()
+    try:
+        parser.feed(markup)
+        parser.close()
+    except Exception:
+        return ""
+    lines = [" ".join(line.split()) for line in "".join(parser.parts).splitlines()]
+    return "\n".join(line for line in lines if line).strip()
+
+
+def _needs_table_repair(raw):
+    if not isinstance(raw, dict):
+        return False
+    for element in raw.get("elements") or ():
+        if not isinstance(element, dict) or element.get("type") != "table":
+            continue
+        try:
+            if element.get("table_html") is not None:
+                parsed = table_from_html(element["table_html"], element.get("header_row_count"))
+            else:
+                parsed = element.get("table_data")
+            validate_table(parsed, require_complete=True)
+        except (ValueError, TypeError, KeyError):
+            return True
+    return False
+
+
 class PdfVisualReviewer:
     def __init__(self, asset_dir, cache, client, reviewer, use_decision):
+        self.asset_dir = asset_dir
         self.cache = cache
         self.vision_client = client
         self.review_client = reviewer
+        self.use_decision = bool(use_decision)
 
+    @trace_stage("document.vision")
     def read(self, pixels, native, width, height, region_depth=0, *, allow_ocr_additions=False, attempt_budget=None):
         from ...models.text_client import CloudAttempts
         from ...models.vision_client import DocumentVisionClient, QwenVisionClient, VisionPageOverflow
         from agent_banking.core.fallback import ModelFallbackError
-        from agent_banking.core.models import chain_fingerprint, get_model_chain
+        from agent_banking.core.models import auto_routing_enabled, chain_fingerprint, get_model_chain
 
         primary = self.vision_client or DocumentVisionClient(max_tokens=OCR_MAX_OUTPUT_TOKENS)
         backup = self.review_client
         if (backup is None and self.vision_client is None
                 and any(endpoint.model for endpoint in get_model_chain("chunking.vision_review"))):
             backup = DocumentVisionClient(model_module="chunking.vision_review", max_tokens=OCR_MAX_OUTPUT_TOKENS)
-        clients = (primary,) if backup is None or backup is primary else (primary, backup)
+        if backup is None or backup is primary:
+            clients = (primary,)
+        else:
+            clients = (primary, backup)
+        routed = auto_routing_enabled()
+        if routed and region_depth and len(clients) == 2:
+            clients = (backup, primary)
         identity = {
             "schema": PDF_SCHEMA_VERSION, "version": PDF_PROMPT_VERSION, "prompt": SCAN_PAGE_PROMPT,
             "pixels": hashlib.sha256(pixels).hexdigest(), "depth": region_depth,
@@ -57,14 +122,14 @@ class PdfVisualReviewer:
                 evidence = cached["visual_review"]
                 if evidence.get("layout_sha256") == _layout_hash(cached):
                     _validate_layout(cached, pixels)
+                    annotate_span(cache_hit=True)
                     return deepcopy(cached)
             except (AttributeError, KeyError, TypeError, ValueError):
                 pass
 
         instructions = SCAN_PAGE_PROMPT
         if region_depth:
-            instructions += ("\nRead only the supplied crop. Keep visible fragments and do not complete clipped text. "
-                             "If available, include normalized bbox coordinates to help match overlapping crops.")
+            instructions += "\n" + PDF_REGION_CROP_INSTRUCTION
         if attempt_budget is None:
             attempt_budget = CloudAttempts()
         initial_budget = attempt_budget.remaining
@@ -81,14 +146,31 @@ class PdfVisualReviewer:
                     break
                 if index == 0 and len(clients) > 1 and attempt_budget.remaining == 1 and partial is None:
                     break
-                prompt = instructions + _REPAIR_INSTRUCTION if repair else instructions
+                if repair:
+                    prompt = instructions + _REPAIR_INSTRUCTION
+                else:
+                    prompt = instructions
                 try:
                     if isinstance(client, QwenVisionClient):
+                        routing = {}
+                        if routed and (repair or region_depth or index):
+                            routing["route_reason"] = "visual_review"
                         raw = client.analyze_page_layout(pixels, prompt, attempt_budget=attempt_budget,
-                                                         single_request=True)
+                                                         single_request=True, **routing)
                     else:
                         attempt_budget.consume()
                         raw = client.analyze_page_layout(pixels, prompt)
+                    if self.use_decision and self.asset_dir is not None and _needs_table_repair(raw):
+                        reviewer = backup or client
+                        if reviewer is not None:
+                            try:
+                                from pathlib import Path
+                                from .table_review import repair_tables
+                                candidate_raw = deepcopy(raw)
+                                repair_tables(candidate_raw, pixels, reviewer, Path(self.asset_dir), self.use_decision)
+                                raw = candidate_raw
+                            except Exception:
+                                pass
                     layout = _prepare_layout(raw)
                     _validate_layout(layout, pixels)
                 except VisionPageOverflow as error:
@@ -99,25 +181,33 @@ class PdfVisualReviewer:
                     failures.append(type(error).__name__)
                     repair = True
                     can_crop = True
+                    if routed and index == 0 and len(clients) > 1:
+                        break
                     continue
                 except (RuntimeError, OSError) as error:
                     failures.append(type(error).__name__)
-                    cause = getattr(error, "last_error", None) if isinstance(error, ModelFallbackError) else None
+                    if isinstance(error, ModelFallbackError):
+                        cause = getattr(error, "last_error", None)
+                    else:
+                        cause = None
                     if cause is not None and getattr(cause, "retryable", True) and index == len(clients) - 1:
                         continue
                     break
                 evidence = layout["visual_review"]
                 evidence["model"] = (layout.get("api") or {}).get("model") or getattr(client, "model", "unknown")
                 evidence["scope"] = "cloud_single_reading"
-                if _SCHEMA_ISSUES.intersection(evidence["issues"]):
+                if (_SCHEMA_ISSUES.intersection(evidence["issues"])
+                        or routed and (evidence["incomplete"] or layout["uncertainties"])):
                     if partial is None:
                         partial = layout
                     repair = True
+                    if routed and index == 0 and len(clients) > 1:
+                        break
                     continue
                 return self._finish(key, layout, width, height, failures, initial_budget - attempt_budget.remaining)
         if partial is not None:
             return self._finish(key, partial, width, height, failures, initial_budget - attempt_budget.remaining)
-        if can_crop and attempt_budget.remaining and region_depth < 2:
+        if can_crop and attempt_budget.remaining and region_depth < _MAX_CROP_DEPTH:
             layout = self._overflow_regions(pixels, width, height, region_depth, failures, attempt_budget)
             return self._finish(key, layout, width, height, failures, initial_budget - attempt_budget.remaining)
         raise CloudOCRUnavailable("Cloud OCR returned no usable page content (" + ", ".join(failures) + ")")
@@ -136,7 +226,7 @@ class PdfVisualReviewer:
         audit = []
         non_text = False
         incomplete = False
-        pad_x, pad_y = max(1, width // 8), max(1, height // 8)
+        pad_x, pad_y = max(1, width // _CROP_PAD_RATIO), max(1, height // _CROP_PAD_RATIO)
         x_bands = ((0, min(width, width // 2 + pad_x)), (max(0, width // 2 - pad_x), width))
         y_bands = ((0, min(height, height // 2 + pad_y)), (max(0, height // 2 - pad_y), height))
         with Image.open(io.BytesIO(pixels)) as image:
@@ -179,11 +269,14 @@ class PdfVisualReviewer:
                             incomplete = True
         if not observations and incomplete:
             raise CloudOCRUnavailable("Cloud OCR returned no usable content from the page regions")
+        region_issues = []
+        if incomplete:
+            region_issues = ["region_incomplete"]
         layout = {"elements": reading_order(observations), "uncertainties": [],
                   "review": {"non_text_only": non_text and not observations},
                   "region_audit": audit,
                   "visual_review": {"scope": "cloud_regions", "failed_candidates": failures,
-                                    "incomplete": incomplete, "issues": ["region_incomplete"] if incomplete else []}}
+                                    "incomplete": incomplete, "issues": region_issues}}
         try:
             _validate_layout(layout, pixels)
         except ValueError as error:
@@ -215,13 +308,18 @@ def _prepare_layout(result):
                 validate_table(element.get("table_data"), require_complete=True)
             except (ValueError, TypeError, KeyError):
                 table = element.get("table_data")
-                rows = table.get("header_grid", []) + table.get("rows", []) if isinstance(table, dict) and all(
-                    isinstance(table.get(key, []), list) for key in ("header_grid", "rows")
-                ) else []
-                text = element.get("text", "").strip() or "\n".join(
-                    " | ".join(cell for cell in row if isinstance(cell, str))
-                    for row in rows if isinstance(row, list)
-                ).strip()
+                if isinstance(table, dict) and all(isinstance(table.get(key, []), list) for key in ("header_grid", "rows")):
+                    rows = table.get("header_grid", []) + table.get("rows", [])
+                else:
+                    rows = []
+                text = element.get("text", "").strip()
+                if not text and rows:
+                    text = "\n".join(
+                        " | ".join(cell for cell in row if isinstance(cell, str))
+                        for row in rows if isinstance(row, list)
+                    ).strip()
+                if not text and element.get("table_html"):
+                    text = _strip_html_text(element.get("table_html"))
                 if not text:
                     skipped += 1
                     continue
@@ -253,12 +351,16 @@ def _prepare_layout(result):
         issues.append("elements_skipped")
     if downgraded:
         issues.append("table_text_only")
-    if isinstance(review.get("verdict"), str) and review["verdict"].strip().casefold() not in ("accepted", "ok", "unresolved"):
+    if isinstance(review.get("verdict"), str) and review["verdict"].strip().casefold() not in _ACCEPTED_VERDICTS:
         issues.append("unrecognized_review_verdict")
+    if isinstance(uncertainties, list):
+        uncertainty_count = len(uncertainties)
+    else:
+        uncertainty_count = None
     layout["visual_review"] = {
         "issues": issues,
         "provider_verdict": review.get("verdict"),
-        "uncertainty_count": len(uncertainties) if isinstance(uncertainties, list) else None,
+        "uncertainty_count": uncertainty_count,
         "skipped_elements": skipped,
         "downgraded_tables": downgraded,
         "incomplete": bool(issues),

@@ -1,18 +1,22 @@
 """LangGraph routes guarded banking harness actions and session checkpoints."""
 
 import os
+from pathlib import Path
 import sqlite3
 
-from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, StateGraph
 
-from pathlib import Path
-
-from agent_banking.core.settings import Config
+from agent_banking.agent.config.settings import get_setting
 from agent_banking.agent.deep import BankingDeepAgent
+from agent_banking.core.settings import Config
+from agent_banking.tracing.agent_trace import agent_span, fingerprint
 
 
-DEFAULT_SQLITE_DB = str(Path(__file__).resolve().parent.parent / "tracing" / "agent_memory.db")
+DEFAULT_SQLITE_DB = str(
+    Path(__file__).resolve().parent.parent / str(get_setting("default_sqlite_db_relpath", ""))
+)
+ACTION_ROUTES = dict(get_setting("action_routes") or {})
 
 
 def create_persistent_checkpointer(db_path: str = DEFAULT_SQLITE_DB):
@@ -37,19 +41,55 @@ def create_persistent_checkpointer(db_path: str = DEFAULT_SQLITE_DB):
         return MemorySaver()
 
 
-ACTION_ROUTES = {
-    "tool": "react_action", "skill": "react_action", "inspect_skill": "skill_inspect",
-    "plan": "plan_update", "delegate": "subagent",
-    "remember": "memory_update", "forget": "memory_update", "compact": "memory_update",
-    "clarify": "prepare_interaction", "confirm": "prepare_interaction",
-    "final": "answer_review",
-}
-
-
 def _after_decision(state: dict) -> str:
     if state.get("final_answer"):
         return "output_guardrail"
     return ACTION_ROUTES[state["react_turn"]["decision"]["kind"]]
+
+
+def _trace_node(name, action):
+    def traced(state):
+        with agent_span("graph." + name) as details:
+            result = action(state)
+            if name == "deep_decide":
+                decision = result["react_turn"].get("decision", {})
+                if result.get("final_answer"):
+                    decision_kind = None
+                else:
+                    decision_kind = decision.get("kind")
+                details.update(next_node=_after_decision(result),
+                               decision_kind=decision_kind,
+                               error_category=result.get("error_category"))
+            elif name in ("input_guardrail", "output_guardrail"):
+                guard = result.get("output_guard", result.get("input_guard", {}))
+                details.update(is_safe=guard.get("is_safe"), flag_count=len(guard.get("flags", [])),
+                               audit_status=result.get("audit_status"))
+                if name == "output_guardrail":
+                    details["citation_refs"] = [fingerprint(citation.get("chunk_id")) for citation in result["citations"]]
+            elif name == "answer_review":
+                details.update(audit_status=result["audit_status"], review=result["reviews"][-1],
+                               retries=result["hallucination_retries"], **result.get("verification", {}))
+            elif name in ("prepare_interaction", "await_interaction"):
+                details.update(interaction_pending=bool(result["interaction"]),
+                               accepted=bool(result.get("accepted_interaction_id")),
+                               audit_status=result["audit_status"])
+            elif name == "context_prepare":
+                details.update(history_count=len(result.get("chat_history", [])),
+                               compactions=result["compactions_this_turn"])
+            else:
+                observations = result["react_turn"]["observations"]
+                if observations:
+                    observation = observations[-1]
+                    details.update(action_kind=observation.get("kind"), action_status=observation.get("status"),
+                                   error_code=observation.get("error_code"), retried=bool(observation.get("retried")),
+                                   simulation=bool(observation.get("simulation")))
+                    # Failed actions may have been supplied with arbitrary model-generated names.
+                    if observation.get("status") == "SUCCESS":
+                        details["action_name"] = observation.get("name")
+                details.update(plan_revision=result["plan_revision"], search_count=result["search_count"],
+                               evidence_count=len(result["react_turn"]["evidence"]))
+            return result
+    return traced
 
 
 def build_banking_agent_graph(
@@ -72,9 +112,9 @@ def build_banking_agent_graph(
         checkpointer = create_persistent_checkpointer(sqlite_db_path)
     durable = not isinstance(checkpointer, MemorySaver) and sqlite_db_path != ":memory:"
     workflow = StateGraph(dict)
-    workflow.add_node("input_guardrail", nodes.input_guardrail)
-    workflow.add_node("context_prepare", nodes.prepare_context)
-    workflow.add_node("deep_decide", nodes.decide)
+    workflow.add_node("input_guardrail", _trace_node("input_guardrail", nodes.input_guardrail))
+    workflow.add_node("context_prepare", _trace_node("context_prepare", nodes.prepare_context))
+    workflow.add_node("deep_decide", _trace_node("deep_decide", nodes.decide))
     actions = {
         "react_action": nodes.act,
         "skill_inspect": nodes.inspect_skill,
@@ -83,16 +123,16 @@ def build_banking_agent_graph(
         "memory_update": nodes.manage_memory,
     }
     for name, action in actions.items():
-        workflow.add_node(name, action)
+        workflow.add_node(name, _trace_node(name, action))
         workflow.add_edge(name, "deep_decide")
-    workflow.add_node("answer_review", nodes.review)
+    workflow.add_node("answer_review", _trace_node("answer_review", nodes.review))
 
     def prepare_interaction(state):
         return nodes.prepare_interaction(state, durable=durable)
 
-    workflow.add_node("prepare_interaction", prepare_interaction)
-    workflow.add_node("await_interaction", nodes.await_interaction)
-    workflow.add_node("output_guardrail", nodes.output_guardrail)
+    workflow.add_node("prepare_interaction", _trace_node("prepare_interaction", prepare_interaction))
+    workflow.add_node("await_interaction", _trace_node("await_interaction", nodes.await_interaction))
+    workflow.add_node("output_guardrail", _trace_node("output_guardrail", nodes.output_guardrail))
     workflow.add_edge(START, "input_guardrail")
 
     def after_input(state):

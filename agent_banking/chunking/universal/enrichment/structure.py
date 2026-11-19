@@ -5,7 +5,15 @@ import os
 
 from agent_banking.core.fallback import ModelFallbackError
 from agent_banking.core.models import model_primary
-from agent_banking.chunking.config.prompt_config import STRUCTURE_SYSTEM_PROMPT
+from agent_banking.chunking.config.prompt_config import (
+    STRUCTURE_REPAIR_PROMPT,
+    STRUCTURE_SYSTEM_PROMPT,
+    STRUCTURE_TASK_BASE,
+    STRUCTURE_TASK_EDITABLE_SUFFIX,
+    STRUCTURE_TASK_OCR_ADDITION,
+    render_prompt,
+)
+from agent_banking.chunking.config.settings import get_config_section
 from .image_context import IMAGE_POLICY, source_text
 from ..text.language import vietnamese_projection
 from ..models.text_client import CloudAttempts, MAX_CLOUD_ATTEMPTS, IncompleteModelResponse, ordered_parallel
@@ -20,13 +28,17 @@ from .annotations import (
 
 
 logger = logging.getLogger("chunking.models")
-_STRUCTURE_WINDOW_BLOCKS = 6
-_STRUCTURE_WINDOW_BYTES = 4500
-_STRUCTURE_COMPLETION_TOKENS = 8192
+_STRUCT_CFG = get_config_section("enrichment")["structure"]
+_STRUCTURE_WINDOW_BLOCKS = _STRUCT_CFG["window_blocks"]
+_STRUCTURE_WINDOW_BYTES = _STRUCT_CFG["window_bytes"]
+_STRUCTURE_COMPLETION_TOKENS = _STRUCT_CFG["completion_tokens"]
+_DEFAULT_LLM_MAX_TOKENS = _STRUCT_CFG["default_llm_max_tokens"]
+_TEMPERATURE = _STRUCT_CFG["temperature"]
+_REQUEST_TIMEOUT = _STRUCT_CFG["request_timeout"]
 
 
 def structure_request_options(model, json_mode=None):
-    maximum = int(os.getenv("CHUNKING_LLM_MAX_TOKENS", "65536"))
+    maximum = int(os.getenv("CHUNKING_LLM_MAX_TOKENS", str(_DEFAULT_LLM_MAX_TOKENS)))
     if maximum <= 0:
         raise ValueError("CHUNKING_LLM_MAX_TOKENS must be positive")
     if json_mode is None:
@@ -34,7 +46,7 @@ def structure_request_options(model, json_mode=None):
         disabled = [name.strip().casefold() for name in names.split(",") if name.strip()]
         normalized = model.casefold()
         json_mode = not any(name in normalized for name in disabled)
-    options = {"temperature": 0.1, "max_tokens": min(maximum, _STRUCTURE_COMPLETION_TOKENS)}
+    options = {"temperature": _TEMPERATURE, "max_tokens": min(maximum, _STRUCTURE_COMPLETION_TOKENS)}
     if json_mode:
         options["response_format"] = {"type": "json_object"}
     else:
@@ -45,54 +57,30 @@ def structure_request_options(model, json_mode=None):
 def _source_preview(block, alias):
     location = block["provenance"]
     preview = {
-        "id": alias, "type": block["type"], "text": evidence_preview(vietnamese_projection(block), 600),
+        "id": alias, "type": block["type"], "text": evidence_preview(vietnamese_projection(block), _STRUCT_CFG["text_preview_chars"]),
         "level": block.get("level", 0),
         "location": {key: location[key] for key in ("region", "page_index", "bbox", "xpath") if key in location},
     }
     if "xpath" in preview["location"]:
-        preview["location"]["xpath"] = evidence_preview(preview["location"]["xpath"], 180)
+        preview["location"]["xpath"] = evidence_preview(preview["location"]["xpath"], _STRUCT_CFG["xpath_preview_chars"])
     for key in ("heading_format", "heading_evidence", "authored_level"):
         if key in block:
             preview[key] = block[key]
     if block["type"] == "table":
-        preview["grid"] = [[evidence_preview(cell, 60) for cell in row]
-                           for row in table_preview(block["table_data"]["grid"], rows=3)]
+        cell_limit = _STRUCT_CFG["table_cell_preview_chars"]
+        preview["grid"] = [[evidence_preview(cell, cell_limit) for cell in row]
+                           for row in table_preview(block["table_data"]["grid"], rows=_STRUCT_CFG["table_preview_rows"])]
     if block["type"] == "image":
         preview["image_context_status"] = block["image"].get("status", "unresolved")
     return preview
 
 
 def _structure_state(ir):
-    state = {"image_policy": ir.get("image_policy", IMAGE_POLICY), "task": (
-        "Interpret document structure only. Native text and numbers are immutable. Return raw JSON: "
-        "{heading_levels:[{block_id,level}], relations:[{from,to,type}], reading_order:[], "
-        "contexts:[{block_id,source_block_ids:[]}], warnings:[{code,block_ids,reason}]}. "
-        "Use existing block IDs only; heading level 1..7, or level 0 to correct an inferred heading back to body text. "
-        "Preserve authored_level headings, and recognize headings across all document genres. "
-        "Use heading_format and heading_evidence together with section wording and neighboring blocks. "
-        "A uniform bold font alone does not establish a heading. "
-        "Only propose changes when needed. Never infer missing articles, facts or dates. "
-        "Image text comes only from supplied native surrounding text; skipped image blocks are intentionally empty. "
-        "No pixel reading/OCR is expected. Do not flag skipped_no_text_support as missing extraction, invent visual facts or omit empty image IDs from reading_order. "
-        "Link lead-ins/lists, question/answer, table/note/exception, continued content and cross-references. "
-        "Relation type must be one of continues, answer_to, note_of, exception_to, refers_to. "
-        "Return reading_order:[] to keep source order. Text and table excerpts in this request can be incomplete. "
-        "For ambiguous short passages choose context SOURCE BLOCK IDs only; the backend will extract exact source text. "
-        "Do not emit context text or quotes. Context sources must be text, heading, caption or table blocks, not image descriptions. "
-        "Omit contexts when section titles already suffice. "
-        "Report conflicting claims as source warnings; do not repair their text.")}
+    task = STRUCTURE_TASK_BASE
     if ir.get("page_reviews"):
-        state["task"] += (
-            " These blocks contain cloud OCR transcriptions. "
-            "Their page/figure coordinates are available as source evidence. "
-            "Retain visual labels and table values exactly; do not treat scan text as absent. "
-            "Connect continued tables/paragraphs across pages with source-ID relations.")
-
-    state["task"] += (
-        " Annotate headings and context targets only for editable_block_ids. Surrounding blocks are context. "
-        "Choose optional context sources from context_source_ids. Omit unsupported optional annotations."
-    )
-    return state
+        task += " " + STRUCTURE_TASK_OCR_ADDITION
+    task += " " + STRUCTURE_TASK_EDITABLE_SUFFIX
+    return {"image_policy": ir.get("image_policy", IMAGE_POLICY), "task": task}
 
 
 def _context_preview(block, text_limit):
@@ -119,13 +107,19 @@ def _window_size(evidence):
 def _structure_windows(blocks):
     start = 0
     preceding = None
+    neighbor_chars = _STRUCT_CFG["neighbor_context_chars"]
+    compact_chars = _STRUCT_CFG["compact_context_chars"]
+    compact_rows = _STRUCT_CFG["compact_table_rows"]
+    compact_cols = _STRUCT_CFG["compact_table_cols"]
+    compact_cell = _STRUCT_CFG["compact_cell_chars"]
+    heading_chars = _STRUCT_CFG["preceding_heading_chars"]
     while start < len(blocks):
-        before = [_context_preview(block, 180) for block in blocks[max(0, start - 1):start]]
+        before = [_context_preview(block, neighbor_chars) for block in blocks[max(0, start - 1):start]]
         end = start
         window = None
         while end < min(start + _STRUCTURE_WINDOW_BLOCKS, len(blocks)):
             next_end = end + 1
-            after = [_context_preview(block, 180) for block in blocks[next_end:next_end + 1]]
+            after = [_context_preview(block, neighbor_chars) for block in blocks[next_end:next_end + 1]]
             candidate = _window_evidence(blocks[start:next_end], (before, after), preceding)
             if _window_size(candidate) > _STRUCTURE_WINDOW_BYTES:
                 break
@@ -133,15 +127,16 @@ def _structure_windows(blocks):
         if window is None:
             # Keep a large block editable in its own request without crowding its neighbors.
             block = blocks[start]
-            compact = _context_preview(block, 200)
+            compact = _context_preview(block, compact_chars)
             if block.get("grid"):
-                compact["grid"] = [[evidence_preview(cell, 40) for cell in row[:4]] for row in block["grid"][:2]]
+                compact["grid"] = [[evidence_preview(cell, compact_cell) for cell in row[:compact_cols]]
+                                   for row in block["grid"][:compact_rows]]
             end = start + 1
             window = _window_evidence([compact], ([], []), preceding)
         yield start, window
         for block in blocks[start:end]:
             if block["type"] == "heading":
-                preceding = {"text": evidence_preview(block["text"], 150), "level": block["level"]}
+                preceding = {"text": evidence_preview(block["text"], heading_chars), "level": block["level"]}
         start = end
 
 
@@ -162,7 +157,7 @@ def _review_window(start, window, native_text, endpoint, cloud_json):
         try:
             result = cloud_json(endpoint.url.rstrip("/") + "/chat/completions", endpoint.api_key,
                                 {"model": endpoint.model, "messages": messages, **options},
-                                timeout=240, max_output_tokens=options["max_tokens"],
+                                timeout=_REQUEST_TIMEOUT, max_output_tokens=options["max_tokens"],
                                 configure_payload=configure_payload, attempt_budget=attempt_budget)
         except ModelFallbackError as error:
             cause = getattr(error, "last_error", None)
@@ -182,12 +177,8 @@ def _review_window(start, window, native_text, endpoint, cloud_json):
                 json_mode = False
             logger.warning("Repairing structure window %s: %s", start, error)
             messages[2:] = [
-                {"role": "assistant", "content": evidence_preview(json.dumps(result, ensure_ascii=False), 1200)},
-                {"role": "user", "content": (
-                    "Repair the JSON annotations. Validation error: " + str(error)
-                    + ". Use only supplied IDs and return all arrays. "
-                    'Schema: {"heading_levels":[],"relations":[],"reading_order":[],"contexts":[],"warnings":[]}.'
-                )},
+                {"role": "assistant", "content": evidence_preview(json.dumps(result, ensure_ascii=False), _STRUCT_CFG["repair_preview_chars"])},
+                {"role": "user", "content": render_prompt(STRUCTURE_REPAIR_PROMPT, error=error)},
             ]
     raise RuntimeError("Structure repair exhausted")
 

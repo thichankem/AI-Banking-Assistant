@@ -9,7 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent_banking.chunking.config.settings import ChunkingConfig
+from agent_banking.chunking.config.settings import ChunkingConfig, get_config_section
 from agent_banking.chunking.publication import (
     _load_snapshot,
     _publish_document_files,
@@ -35,18 +35,32 @@ from agent_banking.chunking.universal.extraction.pdf.page_review import CloudOCR
 from agent_banking.chunking.universal.extraction.sources import discover_documents, document_source_root
 from agent_banking.chunking.universal.pipeline import LayoutAwareChunker
 
+_PIPELINE = get_config_section("pipeline")
+_DEFAULT_RETRY_DELAYS = tuple(_PIPELINE["retry_delays"])
+_LOAD_ATTEMPTS = _PIPELINE["load_attempts"]
+_SCHEMA_VERSION = _PIPELINE["schema_version"]
+_PROFILE = _PIPELINE["profile"]
+_DEFAULT_IMAGE_MODE = _PIPELINE["default_image_mode"]
+_DEFAULT_INPUT_SUBDIR = _PIPELINE["input_subdir"]
+_DEFAULT_OUTPUT_SUBDIR = _PIPELINE["output_subdir"]
+_DIAGNOSTICS_PREFIX = _PIPELINE["diagnostics_prefix"]
+_MANIFEST_FILENAME = _PIPELINE["manifest_filename"]
+_LAST_RUN_FILENAME = _PIPELINE["last_run_filename"]
+_STATE_TRACKER_FILENAME = _PIPELINE["state_tracker_filename"]
+_QUALITY_METRICS = tuple(_PIPELINE["quality_metrics"])
+
 
 def load_published_chunks(output_dir, require_ready=True, *, return_manifest=False):
     output = Path(output_dir)
-    manifest_path = output / "chunking_manifest.json"
+    manifest_path = output / _MANIFEST_FILENAME
     manifest_bytes = manifest_path.read_bytes()
-    for attempt in range(3):
+    for attempt in range(_LOAD_ATTEMPTS):
         manifest = json.loads(manifest_bytes)
         try:
             chunks = _load_snapshot(output, manifest, require_ready)
         except (OSError, ValueError):
             latest = manifest_path.read_bytes()
-            if attempt == 2 or manifest_bytes == latest:
+            if attempt == _LOAD_ATTEMPTS - 1 or manifest_bytes == latest:
                 raise
             # A successful --clean may have collected files from this earlier manifest.
             manifest_bytes = latest
@@ -58,19 +72,22 @@ def load_published_chunks(output_dir, require_ready=True, *, return_manifest=Fal
 
 def run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=None, *,
                       require_ready=None, clean_output=False,
-                      retry_delays=(30, 60, 120), **chunker_options):
+                      retry_delays=None, **chunker_options):
+    if retry_delays is None:
+        retry_delays = _DEFAULT_RETRY_DELAYS
     config = chunker_options.get("config")
     for option, setting in (("target_chunk_tokens", "CHUNK_SIZE_TOKENS"),
                             ("max_chunk_tokens", "CHUNK_MAX_TOKENS"),
                             ("min_chunk_tokens", "CHUNK_MIN_TOKENS"),
+                            ("table_rows_per_chunk", "TABLE_ROWS_PER_CHUNK"),
                             ("search_language", "CHUNK_SEARCH_LANGUAGE")):
         if option not in chunker_options:
             chunker_options[option] = getattr(config, setting, getattr(ChunkingConfig, setting))
-    output = Path(output_dir or Path(__file__).resolve().parent / "output")
+    output = Path(output_dir or Path(__file__).resolve().parent / _DEFAULT_OUTPUT_SUBDIR)
     if max_files is not None:
         if type(max_files) is not int or max_files < 0:
             raise ValueError("max_files must be a nonnegative integer")
-        output = output / "diagnostics" / f"accuracy-first-{max_files}"
+        output = output / "diagnostics" / (_DIAGNOSTICS_PREFIX + str(max_files))
     if clean_output and (output.exists() or output.is_symlink()) and _is_indirection(output.lstat()):
         raise ValueError("Refusing to clean an output directory link or junction")
     with publication_lock(output):
@@ -81,13 +98,15 @@ def run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=No
 
 def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=None, *,
                        require_ready=None, clean_output=False,
-                       retry_delays=(30, 60, 120), **chunker_options):
+                       retry_delays=None, **chunker_options):
+    if retry_delays is None:
+        retry_delays = _DEFAULT_RETRY_DELAYS
     module = Path(__file__).resolve().parent
-    incoming = Path(input_dir or module / "input").resolve()
-    output = Path(output_dir or module / "output")
+    incoming = Path(input_dir or module / _DEFAULT_INPUT_SUBDIR).resolve()
+    output = Path(output_dir or module / _DEFAULT_OUTPUT_SUBDIR)
     if not incoming.is_dir():
         raise FileNotFoundError("Input directory not found: " + str(incoming))
-    source_root = document_source_root(incoming, getattr(chunker_options.get("config"), "CHUNKING_INPUT_DIR", module / "input"))
+    source_root = document_source_root(incoming, getattr(chunker_options.get("config"), "CHUNKING_INPUT_DIR", module / _DEFAULT_INPUT_SUBDIR))
     discovered = discover_documents(incoming, reject_unsupported=True)
     files = {path.relative_to(source_root).as_posix(): path for path in discovered}
     active_sources = set(files)
@@ -100,12 +119,12 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
         force = True
     if max_files is not None:
         files = {path.relative_to(source_root).as_posix(): path for path in discovered[:max_files]}
-    state_path = output / ".state_tracker.json"
+    state_path = output / _STATE_TRACKER_FILENAME
     records = {}
     if state_path.exists():
         try:
             state = json.loads(state_path.read_text(encoding="utf-8"))
-            if state.get("schema_version") == "2.0":
+            if state.get("schema_version") == _SCHEMA_VERSION:
                 records = {name: value for name, value in state.get("records", {}).items() if name in active_sources}
         except (OSError, ValueError, TypeError, AttributeError):
             records = {}
@@ -143,7 +162,7 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
                     raise ValueError("Document has unresolved interpretation; index publication refused")
                 if cached is None:
                     records[source] = _publish_document_files(output, chunks, artifact, digest, fingerprint)
-                    atomic_json(state_path, {"schema_version": "2.0", "records": records})
+                    atomic_json(state_path, {"schema_version": _SCHEMA_VERSION, "records": records})
                     refreshed.add(source)
                 for asset in artifact["document"]["assets"].values():
                     active_asset_paths.add(publication_asset_path(output, asset["path"]))
@@ -205,20 +224,19 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
         ids = [chunk["chunk_id"] for chunk in all_chunks]
         if len(ids) != len(set(ids)):
             raise ValueError("Cross-document chunk ID collision; index publication refused")
-        manifest = {"module": "chunking", "schema_version": "2.0", "pipeline_fingerprint": fingerprint,
-                    "profile": "accuracy", "total_files": len(files), "failed_files": len(errors),
+        manifest = {"module": "chunking", "schema_version": _SCHEMA_VERSION, "pipeline_fingerprint": fingerprint,
+                    "profile": _PROFILE, "total_files": len(files), "failed_files": len(errors),
                     "skipped_files": sum(item["status"] == "SKIPPED_ALREADY_PROCESSED" for item in manifests),
                     "new_files": sum(item["status"] == "SUCCESS" for item in manifests),
                     "total_chunks": len(all_chunks), "total_elapsed_sec": round(time.perf_counter() - started, 3),
                     "index_ready": (not files or bool(completed))
                     and all(record["quality"]["index_ready"] for _, record in completed.values()),
                     "records": manifests}
-        for metric in ("source_pages", "pages_requiring_ocr", "ocr_pages_processed",
-                       "ocr_partial_pages", "ocr_failed_pages", "model_warning_count", "reviewed_pages"):
+        for metric in _QUALITY_METRICS:
             manifest[metric] = sum(item.get("quality", {}).get(metric, 0) for item in manifests)
-        atomic_json(state_path, {"schema_version": "2.0", "records": records})
+        atomic_json(state_path, {"schema_version": _SCHEMA_VERSION, "records": records})
         if errors and not completed:
-            atomic_json(output / "chunking_last_run.json", manifest)
+            atomic_json(output / _LAST_RUN_FILENAME, manifest)
             raise RuntimeError("Chunking failed for every document; previous publication retained")
         snapshot = publish_snapshot(output, all_chunks, manifest, aliases)
         if clean_output and not errors:
@@ -245,7 +263,7 @@ def main():
     rerun.add_argument("--force", action="store_true", help="Rebuild per-document artifacts using the model cache")
     rerun.add_argument("--keep-cache", action="store_true", help="Reuse validated document artifacts (default)")
     parser.add_argument("--max-files", type=int, default=None, help="Process at most this many files and publish under output/diagnostics")
-    parser.add_argument("--image-mode", choices=["text_context", "vision"], default="text_context",
+    parser.add_argument("--image-mode", choices=["text_context", "vision"], default=_DEFAULT_IMAGE_MODE,
                         help="Deprecated compatibility option. Standalone images are ignored in both modes.")
     parser.add_argument("--check-models", action="store_true", help="Probe configured cloud endpoints without processing documents")
     parser.add_argument("--ocr-docx-images", action="store_true", help="Transcribe embedded DOCX raster images via cloud vision")
@@ -258,10 +276,12 @@ def main():
         from agent_banking.chunking.universal.models.preflight import check_models
         checks = check_models()
         print(json.dumps(checks, ensure_ascii=False, indent=2))
-        return 1 if any(check["status"] == "failed" for check in checks) else 0
+        if any(check["status"] == "failed" for check in checks):
+            return 1
+        return 0
 
     module_dir = Path(__file__).resolve().parent
-    in_dir = args.input or module_dir / "input"
+    in_dir = args.input or module_dir / _DEFAULT_INPUT_SUBDIR
     options = {"ocr_docx_images": args.ocr_docx_images}
     if args.search_language is not None:
         options["search_language"] = args.search_language
@@ -274,10 +294,10 @@ def main():
         image_mode=args.image_mode,
         **options,
     )
-    output = args.output or module_dir / "output"
+    output = args.output or module_dir / _DEFAULT_OUTPUT_SUBDIR
     if args.max_files is not None:
-        output = output / "diagnostics" / f"accuracy-first-{args.max_files}"
-    last_run = json.loads((output / "chunking_last_run.json").read_text(encoding="utf-8"))
+        output = output / "diagnostics" / (_DIAGNOSTICS_PREFIX + str(args.max_files))
+    last_run = json.loads((output / _LAST_RUN_FILENAME).read_text(encoding="utf-8"))
     if last_run["failed_files"]:
         raise SystemExit(1)
 

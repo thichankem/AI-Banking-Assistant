@@ -1,16 +1,18 @@
 """Reranking model configuration; models in descending priority."""
 
-MODELS = [
-    {
-        "name": "primary",
-        "model_env": "RERANKER_MODEL",
-        "model_default": "",
-        "url_env": "RERANK_URL",
-        "base_url_env": "BASE_URL",
-        "base_url_default": "",
-        "path": "/rerank",
-        "api_key_env": "API_KEY",
-        "timeout": 20,
-        "attempts": 1,
-    },
-]
+from pathlib import Path
+import yaml
+
+
+def _load_models():
+    yaml_path = Path(__file__).resolve().parent / "settings" / "models.yaml"
+    if not yaml_path.is_file():
+        raise FileNotFoundError(f"Missing reranking models file: {yaml_path}")
+    with open(yaml_path, "r", encoding="utf-8-sig") as f:
+        data = yaml.safe_load(f)
+    if not isinstance(data, dict) or not isinstance(data.get("models"), list):
+        raise ValueError(f"Reranking models file must define a 'models' list: {yaml_path}")
+    return data["models"]
+
+
+MODELS = _load_models()

@@ -1,13 +1,21 @@
-"""Models in descending priority; credentials are environment references."""
+# -*- coding: utf-8 -*-
+"""Model chain loader for skills from YAML settings."""
 
-MODELS = [
-    {
-        "name": "primary",
-        "model_env": "MODEL",
-        "model_default": "",
-        "url_env": "BASE_URL",
-        "api_key_env": "API_KEY",
-        "timeout": 45,
-        "attempts": 1,
-    },
-]
+from pathlib import Path
+import yaml
+
+
+def _load_models():
+    yaml_path = Path(__file__).resolve().parent / "settings" / "models.yaml"
+    if yaml_path.is_file():
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8-sig"))
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            models = data.get("models", [])
+            if isinstance(models, list):
+                return models
+    return []
+
+
+MODELS = _load_models()

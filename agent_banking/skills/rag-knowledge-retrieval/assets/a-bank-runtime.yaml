@@ -8,6 +8,8 @@ parameters_schema:
     top_k:
       type: integer
       default: 3
+      minimum: 1
+      maximum: 6
       description: Số lượng đoạn văn bản chính xác nhất sau Rerank
     exact:
       type: string
@@ -15,7 +17,9 @@ parameters_schema:
       maxLength: 100
     candidate_k:
       type: integer
-      default: 5
+      default: 30
+      minimum: 1
+      maximum: 80
       description: Số ứng viên ban đầu thu thập từ Hybrid Retrieval
   required:
   - query

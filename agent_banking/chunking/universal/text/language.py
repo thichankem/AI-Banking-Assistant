@@ -1,35 +1,56 @@
 """Conservative block language detection for Vietnamese chunk boundaries."""
 import unicodedata
 
-import regex
-
+from agent_banking.chunking.config.settings import get_rules
 from .boundaries import protected_markup_spans
 
+_LANG_RULES = get_rules("language")
 
-VIETNAMESE_MARKS = frozenset("ăâđêôơưĂÂĐÊÔƠƯ")
-VIETNAMESE_TONES = frozenset("\u0300\u0301\u0303\u0309\u0323")
-VIETNAMESE_WORDS = set("""
-    va cua cho voi trong khong duoc nhung nguoi mot cac nay khi theo tiep tuc hien tai lieu
-    tieng viet thuc phai nhu the nao nam ve co la da de neu thi hay xem them doi sau truoc
-    tren duoi huong dan yeu cau noi dung
-""".split())
-OTHER_LATIN_WORDS = set("""
-    the and with for this that which from is are was were when where have has please only should
-    would must shall before after may not will can your you our these those step instructions requirements
-    les des une est dans avec pour vous aux pas sur eine einer auch nicht sind und der die das
-    dem den ein einen für mit ist zur sie bei auf para las los una del con por que esta este esto
-    ellos como está donde antes después durante può della degli delle uno sono nei nella ogni com
-    uma dos pelo pela isso você também não
-""".split())
-TEXT_TYPES = {"heading", "paragraph", "caption"}
-SENTENCE_ENDS = ".!?…"
-SENTENCE_CLOSERS = "\"'”’»)]}"
-INLINE_MARKUP = "\ufffc"
-IDENTIFIER_TOKEN = regex.compile(r"[\p{L}\p{M}\p{Nd}_./:@+\-\u2212]+")
+VIETNAMESE_MARKS = frozenset(_LANG_RULES["vietnamese_marks"])
+VIETNAMESE_TONES = frozenset(_LANG_RULES["vietnamese_tones"])
+VIETNAMESE_WORDS = set(_LANG_RULES["vietnamese_words"])
+OTHER_LATIN_WORDS = set(_LANG_RULES["other_latin_words"])
+TEXT_TYPES = set(_LANG_RULES["text_types"])
+SENTENCE_ENDS = _LANG_RULES["sentence_ends"]
+SENTENCE_CLOSERS = _LANG_RULES["sentence_closers"]
+INLINE_MARKUP = _LANG_RULES["inline_markup"]
+_IDENTIFIER_PUNCT = frozenset(_LANG_RULES["identifier_punct"])
+_VIETNAMESE_STRUCTURAL_CHARS = _LANG_RULES["vietnamese_structural_chars"]
+_VIETNAMESE_DIACRITICS = _LANG_RULES["vietnamese_diacritics"]
+_VIETNAMESE_HOOK_DOT = tuple(_LANG_RULES["vietnamese_hook_dot"])
+_VIETNAMESE_EXPLICIT_TAGS = set(_LANG_RULES["vietnamese_explicit_tags"])
+_FOREIGN_MIN_LATIN_WORDS = _LANG_RULES["foreign_min_latin_words"]
+_NON_LATIN_MIN_RUN = _LANG_RULES["non_latin_min_run"]
+_DEFAULT_FOREIGN_LABEL = _LANG_RULES["default_foreign_label"]
+
+
+def _is_identifier_char(ch):
+    if ch in _IDENTIFIER_PUNCT or ch.isalpha() or ch.isdecimal():
+        return True
+    return unicodedata.category(ch).startswith("M")
+
+
+def _iter_identifier_tokens(text):
+    start = None
+    for idx, ch in enumerate(text):
+        if _is_identifier_char(ch):
+            if start is None:
+                start = idx
+        elif start is not None:
+            yield start, idx, text[start:idx]
+            start = None
+    if start is not None:
+        yield start, len(text), text[start:]
 
 
 def _words(text):
-    return "".join(char if char.isalpha() else " " for char in text.lower()).split()
+    chars = []
+    for char in text.lower():
+        if char.isalpha():
+            chars.append(char)
+        else:
+            chars.append(" ")
+    return "".join(chars).split()
 
 
 def _profile(text):
@@ -47,9 +68,9 @@ def _profile(text):
             decomposed = unicodedata.normalize("NFD", char)
             tones = any(mark in VIETNAMESE_TONES for mark in decomposed[1:])
             structural = ord(char) > 127 and any((
-                char in "ăđơưĂĐƠƯ", char in VIETNAMESE_MARKS and tones,
-                any(mark in "\u0302\u0306\u031b" for mark in decomposed[1:]) and tones,
-                "\u0309" in decomposed or "\u0323" in decomposed,
+                char in _VIETNAMESE_STRUCTURAL_CHARS, char in VIETNAMESE_MARKS and tones,
+                any(mark in _VIETNAMESE_DIACRITICS for mark in decomposed[1:]) and tones,
+                _VIETNAMESE_HOOK_DOT[0] in decomposed or _VIETNAMESE_HOOK_DOT[1] in decomposed,
             ))
             if structural:
                 strong_vi = True
@@ -68,7 +89,7 @@ def _foreign_from_profile(profile):
     latin, other, marked, vi, foreign = profile
     if other and (not latin or other >= latin and not marked and not vi):
         return "non_latin"
-    if not other and not marked and foreign >= 2 and foreign > vi + 1:
+    if not other and not marked and foreign >= _FOREIGN_MIN_LATIN_WORDS and foreign > vi + 1:
         return "non_vietnamese_latin"
     return None
 
@@ -152,20 +173,20 @@ def _non_latin_runs(text):
                 last = index + 1
                 count += 1
             else:
-                if count >= 2:
+                if count >= _NON_LATIN_MIN_RUN:
                     yield left, last
                 left, count = None, 0
         elif char == INLINE_MARKUP:
-            if count >= 2:
+            if count >= _NON_LATIN_MIN_RUN:
                 yield left, last
             left, count = None, 0
         elif left is not None and unicodedata.category(char).startswith("M"):
             last = index + 1
         elif char.isdecimal() or not char.isspace():
-            if count >= 2:
+            if count >= _NON_LATIN_MIN_RUN:
                 yield left, last
             left, count = None, 0
-    if count >= 2:
+    if count >= _NON_LATIN_MIN_RUN:
         yield left, last
 
 
@@ -215,8 +236,7 @@ def _protected_spans(text):
     spans = protected_markup_spans(text)
     # A script transition within an identifier (such as 12中文-34 or AB中文CD)
     # is insufficient evidence to remove anything from the token.
-    for match in IDENTIFIER_TOKEN.finditer(text):
-        token = match.group()
+    for left, right, token in _iter_identifier_tokens(text):
         if token.isascii():
             continue
         non_latin = False
@@ -230,7 +250,7 @@ def _protected_spans(text):
             elif char.isdecimal():
                 identifier = True
             if non_latin and identifier:
-                spans.append(match.span())
+                spans.append((left, right))
                 break
     merged = []
     for left, right in sorted(spans):
@@ -282,7 +302,7 @@ def classify_text_blocks(blocks, *, search_language="vi"):
         language = None
         if isinstance(explicit, str) and explicit.strip():
             language = explicit.strip().casefold()
-            if language.split("-", 1)[0] in {"vi", "vie", "und", "zxx", "x"}:
+            if language.split("-", 1)[0] in _VIETNAMESE_EXPLICIT_TAGS:
                 language = None
         # Word's proofing language can reflect the active keyboard or a
         # template. Use it only to label text independently classified as foreign.
@@ -293,4 +313,10 @@ def classify_text_blocks(blocks, *, search_language="vi"):
             block["foreign_spans"] = spans
         else:
             kinds = {kind for _, _, kind in spans}
-            block["foreign_language"] = language or (kinds.pop() if len(kinds) == 1 else "non_vietnamese")
+            if language:
+                resolved = language
+            elif len(kinds) == 1:
+                resolved = kinds.pop()
+            else:
+                resolved = _DEFAULT_FOREIGN_LABEL
+            block["foreign_language"] = resolved

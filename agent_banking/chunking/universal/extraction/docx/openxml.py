@@ -5,20 +5,23 @@ from html import escape
 from docx.oxml.ns import nsmap, qn
 from lxml import etree
 
+from agent_banking.chunking.config.settings import get_config_section, get_rules
 
-MC = "{http://schemas.openxmlformats.org/markup-compatibility/2006}"
-SUPPORTED_CHOICE_NAMESPACES = {nsmap[prefix] for prefix in ("w", "a", "c", "dgm", "m", "pic", "wp")}
-SUPPORTED_CHOICE_NAMESPACES.add("urn:schemas-microsoft-com:vml")
-NONCONTENT = {"del", "moveFrom", "sectPr", "sdtPr", "sdtEndPr", "pPr", "rPr", "tblPr", "tblGrid", "trPr", "tcPr"}
-EMBEDDED_CONTENT = {"altChunk", "object", "contentPart"}
-TABLE_WRAPPERS = {"sdt", "sdtContent", "customXml", "ins", "moveTo"}
+_OPENXML_RULES = get_rules("openxml")
+_TYPO_CFG = get_config_section("extraction")["docx"]["typography"]
+
+MC = _OPENXML_RULES["mc_namespace"]
+SUPPORTED_CHOICE_NAMESPACES = {nsmap[prefix] for prefix in _OPENXML_RULES["supported_choice_prefixes"]}
+SUPPORTED_CHOICE_NAMESPACES.update(_OPENXML_RULES["supported_choice_uris"])
+NONCONTENT = set(_OPENXML_RULES["noncontent"])
+EMBEDDED_CONTENT = set(_OPENXML_RULES["embedded_content"])
+TABLE_WRAPPERS = set(_OPENXML_RULES["table_wrappers"])
 DELETED_ROW = "./" + qn("w:trPr") + "/" + qn("w:del")
-TEX_CHARACTERS = str.maketrans({
-    "\\": r"\backslash{}", "{": r"\{", "}": r"\}", "$": r"\$", "%": r"\%",
-    "#": r"\#", "&": r"\&", "_": r"\_", "^": r"\hat{}", "~": r"\sim{}",
-    "×": r"\times{}", "÷": r"\div{}", "≤": r"\le{}", "≥": r"\ge{}",
-    "≠": r"\ne{}", "±": r"\pm{}", "−": "-", "∞": r"\infty{}",
-})
+TEX_CHARACTERS = str.maketrans(_OPENXML_RULES["tex_characters"])
+_NARY_SYMBOLS = _OPENXML_RULES["nary_symbols"]
+_MAX_SYMBOL_CODEPOINT = _TYPO_CFG["max_symbol_codepoint"]
+_SURROGATE_MIN = _TYPO_CFG["surrogate_min"]
+_SURROGATE_MAX = _TYPO_CFG["surrogate_max"]
 
 
 def local_name(node):
@@ -98,16 +101,23 @@ def _math_latex(node):
     name = local_name(node)
     if name == "t":
         return (node.text or "").translate(TEX_CHARACTERS)
-    if name in ("rPr", "ctrlPr", "argPr", "oMathParaPr"):
+    if name in ("rPr", "ctrlPr", "argPr", "oMathParaPr", "fPr", "radPr", "dPr", "mPr", "naryPr", "funcPr", "limLowPr", "limUppPr", "accPr", "barPr", "boxPr"):
         return ""
-    if name in ("oMath", "oMathPara", "r", "e", "num", "den", "sup", "sub", "deg"):
+    if name in ("oMath", "oMathPara", "r", "e", "num", "den", "sup", "sub", "deg", "lim", "fName"):
         return "".join(_math_latex(child) for child in content_children(node))
-    arguments = {local_name(child): child for child in content_children(node)}
+    children_list = list(content_children(node))
+    arguments = {local_name(child): child for child in children_list}
 
     def arg(key):
         child = arguments.get(key)
         if child is None:
             raise ValueError("Missing OMML argument " + key)
+        return _math_latex(child)
+
+    def opt_arg(key):
+        child = arguments.get(key)
+        if child is None:
+            return ""
         return _math_latex(child)
 
     if name == "f":
@@ -127,8 +137,63 @@ def _math_latex(node):
         hidden = node.find(qn("m:radPr") + "/" + qn("m:degHide"))
         if hidden is not None and hidden.get(qn("m:val"), "1") not in ("0", "false", "off"):
             degree = ""
-        index = "[" + degree + "]" if degree else ""
+        if degree:
+            index = "[" + degree + "]"
+        else:
+            index = ""
         return r"\sqrt" + index + "{" + arg("e") + "}"
+    if name == "d":
+        props = arguments.get("dPr")
+        beg = "("
+        end = ")"
+        sep = ", "
+        if props is not None:
+            for item in content_children(props):
+                lname = local_name(item)
+                val = item.get(qn("m:val"))
+                if lname == "begChr" and val is not None:
+                    beg = val
+                elif lname == "endChr" and val is not None:
+                    end = val
+                elif lname == "sepChr" and val is not None:
+                    sep = val
+        items = [_math_latex(child) for child in children_list if local_name(child) == "e"]
+        if not items:
+            raise ValueError("Missing delimiter content")
+        return beg + sep.join(items) + end
+    if name == "m":
+        rows = []
+        for child in children_list:
+            if local_name(child) == "mr":
+                cells = [_math_latex(cell) for cell in content_children(child) if local_name(cell) == "e"]
+                rows.append(" & ".join(cells))
+        if not rows:
+            raise ValueError("Missing matrix rows")
+        return r"\begin{matrix} " + r" \\ ".join(rows) + r" \end{matrix}"
+    if name == "nary":
+        props = arguments.get("naryPr")
+        symbol = r"\int"
+        if props is not None:
+            chr_node = props.find(qn("m:chr"))
+            if chr_node is not None:
+                raw_sym = chr_node.get(qn("m:val"), "∫")
+                symbol = _NARY_SYMBOLS.get(raw_sym, raw_sym.translate(TEX_CHARACTERS))
+        sub = opt_arg("sub")
+        sup = opt_arg("sup")
+        out = symbol
+        if sub:
+            out += "_{" + sub + "}"
+        if sup:
+            out += "^{" + sup + "}"
+        return out + " " + arg("e")
+    if name == "func":
+        return opt_arg("fName") + "{" + arg("e") + "}"
+    if name == "limLow":
+        return opt_arg("e") + "_{" + opt_arg("lim") + "}"
+    if name == "limUpp":
+        return opt_arg("e") + "^{" + opt_arg("lim") + "}"
+    if name in ("acc", "bar", "box"):
+        return arg("e")
     raise ValueError("Unsupported OMML construct " + name)
 
 
@@ -172,7 +237,7 @@ def native_text(node, styles=None):
         return "\u00ad"
     if name == "sym":
         value = int(node.get(qn("w:char"), ""), 16)
-        if value < 1 or value > 0xFFFF or 0xD800 <= value <= 0xDFFF:
+        if value < 1 or value > _MAX_SYMBOL_CODEPOINT or _SURROGATE_MIN <= value <= _SURROGATE_MAX:
             raise ValueError("Invalid Word symbol code point")
         return chr(value)
     if name in ("footnoteReference", "endnoteReference"):

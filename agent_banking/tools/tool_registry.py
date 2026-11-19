@@ -16,45 +16,39 @@ from agent_banking.core.plugin_specs import check_parameters, load_yaml, public_
 from agent_banking.guardrails.tool_guardrail import (
     SENSITIVE_UNAPPROVED_ACTIONS, get_tool_guardrail
 )
+from agent_banking.tools.config.prompts import TOOL_TEMPLATES, get_tool_prompt_override
+from agent_banking.tools.config.settings import get_tool_runtime_config, get_tool_runtime_override
+
+_TYPE_CONVERTERS = {"float": float, "int": int, "str": str, "bool": bool}
 
 
-BANKING_MODULE = "agent_banking.tools.banking_api_tools"
-EXTENSIONS_MODULE = "agent_banking.tools.extensions"
-RAG_HANDLER = {"module": "agent_banking.tools.rag_tool", "class": "BankingRAGTool", "method": "execute"}
+def _build_builtin_args(raw_map: dict) -> dict:
+    built = {}
+    for tool_name, arg_specs in raw_map.items():
+        tool_entry = {}
+        for arg_name, spec in arg_specs.items():
+            converter = _TYPE_CONVERTERS.get(spec.get("type"))
+            alias = spec.get("alias")
+            if alias is not None:
+                tool_entry[arg_name] = (spec.get("default"), converter, alias)
+            else:
+                tool_entry[arg_name] = (spec.get("default"), converter)
+        built[tool_name] = tool_entry
+    return built
 
-# Retain the fixture runner's aliases, coercions and defaults for existing tools.
-BUILTIN_ARGS = {
-    "calculate_loan_amortization": {
-        "principal_vnd": (500000000.0, float), "annual_rate_percent": (7.5, float), "term_months": (12, int)
-    },
-    "calculate_savings_profit": {"amount_vnd": (100000000.0, float), "term_months": (6, int)},
-    "get_interest_rates": {"deposit_type": ("vnd", None)},
-    "get_foreign_exchange_rates": {"currency": ("USD", None)},
-    "check_biometric_compliance_qd2345": {
-        "single_tx_amount_vnd": (0.0, float, "transaction_amount"),
-        "daily_cumulative_amount_vnd": (0.0, float, "daily_accumulated_amount"),
-        "is_first_time_new_device": (False, bool, "is_new_device"),
-        "has_verified_chip_cccd": (True, bool, "has_cccd_chip_nfc")
-    },
-    "create_support_ticket": {
-        "customer_name": ("KHACH_HANG_HOTLINE", None, "user_contact"),
-        "issue_type": ("nuot_the_atm", None),
-        "description": ("Sự cố tiếp nhận qua AI Agent", None, "details"), "priority": ("NORMAL", None)
-    },
-    "parse_vietnamese_financial_params": {"query": ("", None)},
-    "check_complain_count": {"complain_count": (0, int)},
-    "transfer_to_agent": {
-        "business_process": ("request_human_agent", str, "reason"),
-        "customer_segment": ("individual", str, "department")
-    },
-    "rate_agent_csat": {
-        "rating_score": (5, int, "rating"), "user_message": ("", str, "feedback"), "channel": ("web", str)
-    },
-    "deflect_competitor_comparison": {"competitor_name": ("", str), "query": ("", str, "product_type")}
-}
-ONCE_PER_TURN = {"create_support_ticket", "transfer_to_agent", "rate_agent_csat"}
-PUBLIC_FIELDS = ("name", "title", "description", "inputSchema", "outputSchema", "annotations")
-ANNOTATIONS = {"readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"}
+
+_REG_CFG = get_tool_runtime_config()["registry"]
+BANKING_MODULE = str(_REG_CFG["banking_module"])
+EXTENSIONS_MODULE = str(_REG_CFG["extensions_module"])
+RAG_HANDLER = dict(_REG_CFG["rag_handler"])
+BUILTIN_ARGS = _build_builtin_args(_REG_CFG["builtin_args"])
+ONCE_PER_TURN = set(_REG_CFG["once_per_turn_tools"])
+PUBLIC_FIELDS = tuple(_REG_CFG["public_fields"])
+ANNOTATIONS = set(_REG_CFG["annotations"])
+ALLOWED_RUNTIME_FIELDS = set(_REG_CFG["allowed_runtime_fields"])
+DEFAULT_CATEGORY = str(_REG_CFG["default_category"])
+DEFAULT_RAG_TOP_K = int(_REG_CFG["default_rag_top_k"])
+_DEFAULT_TOOLS_DIR = Path(__file__).resolve().parent
 logger = logging.getLogger(__name__)
 
 
@@ -90,7 +84,9 @@ def _legacy_value(value, convert):
         if type(value) in (bool, int) and value in (0, 1):
             return bool(value)
         raise ValueError("Invalid boolean argument")
-    return convert(value) if convert is not None else value
+    if convert is not None:
+        return convert(value)
+    return value
 
 
 def is_extension(spec: dict) -> bool:
@@ -99,10 +95,13 @@ def is_extension(spec: dict) -> bool:
 
 class BankingToolRegistry:
     def __init__(self, tools_dir=None, pipeline_instance=None):
-        self.tools_dir = Path(__file__).resolve().parent
+        self.tools_dir = _DEFAULT_TOOLS_DIR
         if tools_dir is not None:
             self.tools_dir = Path(tools_dir)
         self.pipeline_instance = pipeline_instance
+
+    def _uses_default_dir(self) -> bool:
+        return self.tools_dir.resolve() == _DEFAULT_TOOLS_DIR
 
     def _extension_file(self, spec: dict) -> Path:
         handler = spec["handler"]
@@ -133,7 +132,10 @@ class BankingToolRegistry:
         ):
             raise ValueError("Invalid tool annotations")
         policy = spec.get("policy")
-        expected_access = "simulation" if name in ONCE_PER_TURN else "read_only"
+        if name in ONCE_PER_TURN:
+            expected_access = "simulation"
+        else:
+            expected_access = "read_only"
         if not isinstance(policy, dict) or set(policy) - {"access", "workers"} or policy.get("access") != expected_access:
             raise ValueError("Invalid local policy")
         if "readOnlyHint" in annotations and annotations["readOnlyHint"] != (expected_access == "read_only"):
@@ -171,6 +173,7 @@ class BankingToolRegistry:
         if not root.is_dir():
             return {}
         tools = {}
+        uses_default = self._uses_default_dir()
         for directory in sorted(root.iterdir()):
             if not public_name(directory.name) or not directory.is_dir() or directory.resolve() != directory:
                 continue
@@ -179,9 +182,16 @@ class BankingToolRegistry:
             try:
                 public = load_yaml(read_resource(directory, "tool.yaml"))
                 local = load_yaml(read_resource(directory, "runtime.yaml"))
+                if uses_default:
+                    prompt_override = get_tool_prompt_override(directory.name)
+                    if prompt_override:
+                        public = {**public, **prompt_override}
+                    runtime_override = get_tool_runtime_override(directory.name)
+                    if runtime_override:
+                        local = {**local, **runtime_override}
                 if set(public) - set(PUBLIC_FIELDS) or public.get("name") != directory.name:
                     raise ValueError("Invalid tool name or public field")
-                if set(local) - {"handler", "policy", "category"}:
+                if set(local) - ALLOWED_RUNTIME_FIELDS:
                     raise ValueError("Invalid runtime binding field")
                 spec = {**public, **local}
                 json.dumps(spec, allow_nan=False)
@@ -195,7 +205,7 @@ class BankingToolRegistry:
         return [
             {
                 "name": name, "display_name": spec.get("title", name),
-                "category": spec.get("category", "GENERAL"), "description": spec.get("description", "")
+                "category": spec.get("category", DEFAULT_CATEGORY), "description": spec.get("description", "")
             }
             for name, spec in self.snapshot().items()
         ]
@@ -224,7 +234,11 @@ class BankingToolRegistry:
             converted = {}
             try:
                 for key, (default, convert, *aliases) in BUILTIN_ARGS[name].items():
-                    value = params.get(key, params.get(aliases[0], default) if aliases else default)
+                    if aliases:
+                        fallback_val = params.get(aliases[0], default)
+                    else:
+                        fallback_val = default
+                    value = params.get(key, fallback_val)
                     converted[key] = _legacy_value(value, convert)
             except (TypeError, ValueError, OverflowError) as error:
                 raise ToolInputError("Invalid legacy tool arguments") from error
@@ -252,8 +266,8 @@ class BankingToolRegistry:
             from agent_banking.tools.rag_tool import BankingRAGTool
 
             return BankingRAGTool(pipeline_instance=self.pipeline_instance).execute(
-                query=params.get("query", ""), top_k=params.get("top_k", 3),
-                exact=params.get("exact", "")
+                query=params.get("query", ""), top_k=params.get("top_k", DEFAULT_RAG_TOP_K),
+                exact=params.get("exact", ""), source=params.get("source", ""), offset=params.get("offset")
             )
         if not is_extension(spec):
             return getattr(import_module(BANKING_MODULE), handler["function"])(**params)
@@ -275,7 +289,8 @@ class BankingToolRegistry:
         if spec is None:
             spec = self.get_tool_definition(name)
         if spec is None or spec["name"] != name:
-            return {"status": "ERROR", "message": f"Tool '{name}' not found in registry.", "latency_ms": 0.0}
+            msg_tpl = TOOL_TEMPLATES["tool_not_found_message"]
+            return {"status": "ERROR", "message": msg_tpl.format(name=name), "latency_ms": 0.0}
         try:
             args = self._prepare_arguments(spec, params, legacy_batch=legacy_batch)
             data = self._invoke(spec, args)

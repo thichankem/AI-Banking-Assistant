@@ -4,15 +4,13 @@ import hashlib
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import unicodedata
 
+from agent_banking.chunking.config.settings import get_rules
 
-SUPPORTED_EXTENSIONS = {".docx", ".pdf"}
-UNSUPPORTED_DOCUMENT_EXTENSIONS = {
-    ".azw", ".csv", ".djvu", ".doc", ".docm", ".epub", ".htm", ".html", ".json",
-    ".jsonl", ".md", ".mobi", ".odf", ".odp", ".ods", ".odt", ".pages", ".ppt",
-    ".pptm", ".pptx", ".rst", ".rtf", ".tex", ".tsv", ".txt", ".wps", ".xls",
-    ".xlsb", ".xlsm", ".xlsx", ".xml", ".xps", ".bmp", ".gif", ".jpeg", ".jpg",
-    ".png", ".tif", ".tiff", ".webp",
-}
+_SRC_RULES = get_rules("sources")
+SUPPORTED_EXTENSIONS = set(_SRC_RULES["supported_extensions"])
+UNSUPPORTED_DOCUMENT_EXTENSIONS = set(_SRC_RULES["unsupported_document_extensions"])
+_MAX_LISTED_UNSUPPORTED = _SRC_RULES["max_listed_unsupported"]
+_IN_MEMORY_HASH_LEN = _SRC_RULES["in_memory_hash_len"]
 
 
 def document_source_name(value):
@@ -79,9 +77,9 @@ def discover_documents(directory, extensions=None, *, reject_unsupported=False):
         elif reject_unsupported and extension in UNSUPPORTED_DOCUMENT_EXTENSIONS:
             unsupported.append(path.relative_to(directory).as_posix())
     if unsupported:
-        listing = "\n".join(unsupported[:20])
-        if len(unsupported) > 20:
-            listing += f"\n... and {len(unsupported) - 20} more"
+        listing = "\n".join(unsupported[:_MAX_LISTED_UNSUPPORTED])
+        if len(unsupported) > _MAX_LISTED_UNSUPPORTED:
+            listing += f"\n... and {len(unsupported) - _MAX_LISTED_UNSUPPORTED} more"
         raise ValueError("Unsupported documents found. This input accepts PDF and DOCX:\n" + listing)
     groups = {}
     for path in files:
@@ -155,7 +153,7 @@ def resolve_document_source(source=None, source_bytes=None, source_name=None, ex
             else:
                 fmt = "docx"
         if name is None:
-            name = "in_memory_" + hashlib.sha256(source_bytes).hexdigest()[:20] + "." + fmt
+            name = "in_memory_" + hashlib.sha256(source_bytes).hexdigest()[:_IN_MEMORY_HASH_LEN] + "." + fmt
         return bytes(source_bytes), name, fmt
     if not isinstance(source, (str, Path)):
         if source is None:
@@ -172,5 +170,8 @@ def resolve_document_source(source=None, source_bytes=None, source_name=None, ex
     fmt = ext[1:]
     if expected_format is not None and fmt != expected_format:
         raise ValueError(expected_format.upper() + " adapter requires ." + expected_format + " input")
-    name = _path_document_name(path, source_root) if source_name is None else _relative_document_name(source_name)
+    if source_name is None:
+        name = _path_document_name(path, source_root)
+    else:
+        name = _relative_document_name(source_name)
     return str(path), name, fmt

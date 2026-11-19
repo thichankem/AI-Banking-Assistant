@@ -8,6 +8,8 @@ from docx.enum.style import WD_STYLE_TYPE
 from docx.oxml import parse_xml
 from docx.oxml.ns import qn
 
+from agent_banking.chunking.config.settings import get_config_section
+from ...enrichment.image_context import IMAGE_POLICY
 from .typography import (
     MAX_HEADING_LEVEL,
     _authored_language,
@@ -29,6 +31,10 @@ from .openxml import (
     native_math,
 )
 
+_PIPELINE = get_config_section("pipeline")
+_DOCX_CFG = get_config_section("extraction")["docx"]
+_DEFAULT_SEARCH_LANG = get_config_section(None)["search_language"]
+
 
 def apply_typography_hierarchy(ir, cache=None):
     """Shared decision-model hierarchy and caption detector for both DOCX and PDF IRs."""
@@ -44,8 +50,8 @@ def link_visual_captions(ir, cache=None):
 
 class DocxExtractor:
     def __init__(self, asset_dir, render_figures=False, *, use_decision=True, decision_cache=None,
-                 search_language="all", ocr_images=False, vision_client=None, review_client=None,
-                 max_image_pixels=40_000_000):
+                 search_language=_DEFAULT_SEARCH_LANG, ocr_images=False, vision_client=None, review_client=None,
+                 max_image_pixels=_DOCX_CFG["max_image_pixels"]):
         self.asset_dir = Path(asset_dir)
         self.use_decision = use_decision
         self.decision_cache = decision_cache
@@ -68,9 +74,12 @@ class DocxExtractor:
         if self.use_decision:
             apply_typography_hierarchy(ir, cache=self.decision_cache)
             link_visual_captions(ir, cache=self.decision_cache)
-        ir["statistics"] = {"blocks": len(ir["blocks"]), "units": len(ir["units"]),
-                            "image_occurrences": sum(block["type"] == "image" for block in ir["blocks"]),
-                            "tables": sum(block["type"] == "table" for block in ir["blocks"])}
+        ir["statistics"].update({
+            "blocks": len(ir["blocks"]),
+            "units": len(ir["units"]),
+            "image_occurrences": sum(block["type"] == "image" for block in ir["blocks"]),
+            "tables": sum(block["type"] == "table" for block in ir["blocks"]),
+        })
         return ir
 
 
@@ -79,15 +88,16 @@ class _DocxReader:
         self.image_ocr = image_ocr
         digest = hashlib.sha256(data).hexdigest()
         identity = str(source_name).replace("\\", "/")
-        document_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
+        document_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:_DOCX_CFG["document_id_hex_len"]]
         self.document = docx.Document(io.BytesIO(data))
         self._hidden_run = hidden_run_checker(self.document)
         self._script_styles = {}
+        hops_limit = _DOCX_CFG["style_inheritance_hops"]
         for style in self.document.styles:
             if style.type != WD_STYLE_TYPE.CHARACTER:
                 continue
             inherited = style
-            for _ in range(10):
+            for _ in range(hops_limit):
                 if inherited is None:
                     break
                 script = inherited.element.find("./" + qn("w:rPr") + "/" + qn("w:vertAlign"))
@@ -97,7 +107,7 @@ class _DocxReader:
                         self._script_styles[style.style_id] = kind
                     break
                 inherited = getattr(inherited, "base_style", None)
-        self.ir = {"version": "2.0", "document_id": document_id,
+        self.ir = {"version": _PIPELINE["schema_version"], "document_id": document_id,
                    "document_version": digest, "source": identity, "blocks": [],
                    "units": [], "assets": {}, "warnings": [], "relations": []}
         self._unit_ids = set()
@@ -107,6 +117,13 @@ class _DocxReader:
         body, part = self.document.element.body, self.document.part
         self._walk_part(body, part, "body")
         self._walk_notes(body, part)
+        embedded_image_rels = sum(
+            1
+            for doc_part in self.document.part.package.iter_parts()
+            for rel in getattr(doc_part, "rels", {}).values()
+            if not rel.is_external and rel.reltype.endswith("/image")
+        )
+        self.ir["statistics"] = {"embedded_image_relationships": embedded_image_rels}
         return self.ir
 
     def _walk_notes(self, body, part):
@@ -143,7 +160,7 @@ class _DocxReader:
 
     def _append(self, kind, text, node, region, **attributes):
         index = len(self.ir["blocks"])
-        block_id = self.ir["document_id"] + ":v" + self.ir["document_version"][:16] + ":b" + str(index)
+        block_id = self.ir["document_id"] + ":v" + self.ir["document_version"][:_DOCX_CFG["version_prefix_len"]] + ":b" + str(index)
         block = {"id": block_id, "type": kind, "text": text, "order": index,
                  "provenance": {"part": self._part_name,
                                 "xpath": node.getroottree().getpath(node), "region": region}}
@@ -155,7 +172,7 @@ class _DocxReader:
         if not text.strip():
             return None
         key = self.ir["document_id"] + self.ir["document_version"] + region + ":" + node.getroottree().getpath(node)
-        unit_id = hashlib.sha256(key.encode("utf-8")).hexdigest()[:20]
+        unit_id = hashlib.sha256(key.encode("utf-8")).hexdigest()[:_DOCX_CFG["document_id_hex_len"]]
         if unit_id in self._unit_ids:
             return unit_id
         self._unit_ids.add(unit_id)
@@ -219,7 +236,7 @@ class _DocxReader:
             if kind == "heading":
                 block.update(level=min(level, MAX_HEADING_LEVEL), authored_level=level,
                              heading_format="openxml_outline")
-            if segment == 0:
+            if segment == 0 or kind != "paragraph":
                 typo = extract_paragraph_typography(paragraph, value, self._hidden_run)
                 if typo is not None:
                     block["typography"] = typo
@@ -236,10 +253,26 @@ class _DocxReader:
     def _append_image_text(self, node, part, region):
         relation_id = node.get(qn("r:embed")) or node.get(qn("r:id"))
         texts, digest = self.image_ocr.read(self.ir, part.rels.get(relation_id), node.getroottree().getpath(node))
-        for index, text in enumerate(texts):
-            block = self._append("paragraph", text, node, region)
-            block["provenance"].update(method="docx_cloud_image_ocr", image_asset_sha256=digest)
-            block["unit_ids"] = [self._unit(text, node, region + ":image:" + str(index), block["id"])]
+        cleaned = [item.strip() for item in texts if item and item.strip()]
+        if not cleaned:
+            return
+        combined = "\n\n".join(cleaned)
+        block = self._append("image", combined, node, region)
+        block["image"] = {
+            "sha256": digest,
+            "status": "ocr_transcribed",
+            "text_context_assessed": True,
+            "image_policy": IMAGE_POLICY,
+            "ocr_text": combined,
+            "description": combined,
+            "context_evidence": [{
+                "source_block_id": block["id"],
+                "quote": combined,
+                "source_span": [0, len(combined)],
+            }],
+        }
+        block["provenance"].update(method="docx_cloud_image_ocr", image_asset_sha256=digest)
+        block["unit_ids"] = [self._unit(combined, node, region + ":image:0", block["id"])]
 
     def _walk_textboxes(self, node, part, region):
         for textbox in content_nodes(node, stop_at=("txbxContent",), hidden_run=self._hidden_run):
@@ -248,8 +281,8 @@ class _DocxReader:
 
     def _table(self, node, part, region, parent_cell=None):
         xpath = node.getroottree().getpath(node)
-        table_key = hashlib.sha256(xpath.encode("utf-8")).hexdigest()[:20]
-        prefix = self.ir["document_id"] + ":v" + self.ir["document_version"][:16] + ":cell:" + table_key + ":"
+        table_key = hashlib.sha256(xpath.encode("utf-8")).hexdigest()[:_DOCX_CFG["document_id_hex_len"]]
+        prefix = self.ir["document_id"] + ":v" + self.ir["document_version"][:_DOCX_CFG["version_prefix_len"]] + ":cell:" + table_key + ":"
         table, units, attachments = read_table(
             node, self.document, part, self._script_styles, self._hidden_run, prefix, parent_cell,
             include_images=self.image_ocr is not None,

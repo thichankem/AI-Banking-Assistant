@@ -17,41 +17,51 @@ DESIGN INVARIANTS:
 """
 
 import math
+
 from agent_banking.core.settings import Config
+from agent_banking.guardrails.config.settings import (
+    GuardrailsConfig,
+    load_guardrail_patterns,
+    load_guardrail_prompts,
+    load_guardrail_rules,
+)
 
 
-APPROVED_READONLY_TOOLS = [
-    "get_interest_rates",
-    "get_foreign_exchange_rates",
-    "parse_vietnamese_financial_params",
-    "check_complain_count",
-    "transfer_to_agent",
-    "rate_agent_csat",
-    "deflect_competitor_comparison",
-    "search_banking_knowledge"
-]
+_patterns = load_guardrail_patterns()
+_rules = load_guardrail_rules()
+_tool_policy = dict(_rules.get("tool_policy") or {})
+_family_keywords = dict(_tool_policy.get("tool_family_keywords") or {})
+_bounds = dict(GuardrailsConfig.TOOL_BOUNDS_SETTINGS or {})
+_prompts = load_guardrail_prompts()
+_redaction_tokens = dict(getattr(_prompts, "REDACTION_TOKENS", {}) or {})
+_tool_errors = dict(getattr(_prompts, "TOOL_ERROR_MESSAGES", {}) or {})
 
-SENSITIVE_UNAPPROVED_ACTIONS = [
-    "transfer_money",
-    "make_transfer",
-    "send_money",
-    "execute_payment",
-    "withdraw_cash",
-    "delete_account",
-    "change_password",
-    "reset_pin",
-    "chuyen_khoan",
-    "thanh_toan",
-    "rut_tien",
-    "xoa_tai_khoan"
-]
+APPROVED_READONLY_TOOLS = list(_tool_policy.get("approved_readonly_tools") or [])
+SENSITIVE_UNAPPROVED_ACTIONS = list(_tool_policy.get("sensitive_unapproved_actions") or [])
+DANGEROUS_INPUT_CHARACTERS = list(_patterns.get("dangerous_input_characters") or [])
 
-DANGEROUS_INPUT_CHARACTERS = [
-    "<script", "</script", "javascript:", "<iframe>", "</iframe>",
-    "<style>", "</style>", "onerror=", "onload=", "window.location",
-    "--", "; drop ", "; delete ", "union select", "exec(", "' or 1=1",
-    "' or '1'='1", "/*", "*/", "xp_"
-]
+_SANITIZE_MAX_LEN = int(_bounds.get("sanitize_max_len", 0))
+_REDACTION_TOOL_INPUT = str(_redaction_tokens.get("tool_input") or "")
+
+_LOAN_BOUNDS = dict(_bounds.get("loan") or {})
+_SAVINGS_BOUNDS = dict(_bounds.get("savings") or {})
+_QD2345_BOUNDS = dict(_bounds.get("qd2345") or {})
+_TICKET_BOUNDS = dict(_bounds.get("ticket") or {})
+
+
+def _tool_err(key, **kwargs):
+    template = str(_tool_errors.get(key) or "")
+    if not template:
+        return key
+    return template.format(**kwargs)
+
+
+def _matches_family(name_lower, family_key):
+    keywords = _family_keywords.get(family_key) or []
+    for kw in keywords:
+        if kw in name_lower:
+            return True
+    return False
 
 
 class BankingToolGuardrail:
@@ -64,19 +74,24 @@ class BankingToolGuardrail:
         self.max_loan_tenure = Config.MAX_LOAN_TENURE_MONTHS
         self.min_savings_vnd = Config.MIN_SAVINGS_AMOUNT_VND
 
-    def _sanitize_string(self, text, max_len=500):
+    def _sanitize_string(self, text, max_len=None):
         """Sanitize text string, removing dangerous control characters (0% Regex)."""
         if not text:
             return ""
+
+        if max_len is None:
+            limit = _SANITIZE_MAX_LEN
+        else:
+            limit = max_len
 
         raw = str(text).strip()
         cleaned = raw
         for dang in DANGEROUS_INPUT_CHARACTERS:
             if dang in cleaned.lower():
-                cleaned = cleaned.replace(dang, "[REDACTED_INPUT]")
+                cleaned = cleaned.replace(dang, _REDACTION_TOOL_INPUT)
 
-        if len(cleaned) > max_len:
-            cleaned = cleaned[:max_len].strip()
+        if limit > 0 and len(cleaned) > limit:
+            cleaned = cleaned[:limit].strip()
 
         return cleaned
 
@@ -86,43 +101,43 @@ class BankingToolGuardrail:
         Returns: (is_valid, sanitized_val, error_message)
         """
         if val is None:
-            return False, None, f"Field '{field_name}' cannot be None."
+            return False, None, _tool_err("none_value", field_name=field_name)
 
         if isinstance(val, bool):
-            return False, None, f"Field '{field_name}' cannot be a boolean (True/False)."
+            return False, None, _tool_err("bool_value", field_name=field_name)
 
         try:
             f_val = float(val)
         except Exception:
-            return False, None, f"Field '{field_name}' is not a valid number."
+            return False, None, _tool_err("invalid_number", field_name=field_name)
 
         if f_val != f_val:
-            return False, None, f"Field '{field_name}' contains NaN value."
+            return False, None, _tool_err("nan_value", field_name=field_name)
 
         if math.isnan(f_val):
-            return False, None, f"Field '{field_name}' contains NaN value."
+            return False, None, _tool_err("nan_value", field_name=field_name)
 
         if math.isinf(f_val):
-            return False, None, f"Field '{field_name}' contains infinite value (Inf)."
+            return False, None, _tool_err("inf_value", field_name=field_name)
 
         if is_integer is True:
             try:
                 int_val = int(val)
             except Exception:
-                return False, None, f"Field '{field_name}' must be an integer."
+                return False, None, _tool_err("not_integer", field_name=field_name)
             if float(int_val) != f_val:
-                return False, None, f"Field '{field_name}' must be an integer, cannot contain fractional parts."
+                return False, None, _tool_err("fractional_integer", field_name=field_name)
             target_val = int_val
         else:
             target_val = f_val
 
         if min_val is not None:
             if target_val < min_val:
-                return False, None, f"Field '{field_name}' ({target_val}) is below minimum allowed value ({min_val}) - dưới mức tối thiểu cho phép."
+                return False, None, _tool_err("below_min", field_name=field_name, target_val=target_val, min_val=min_val)
 
         if max_val is not None:
             if target_val > max_val:
-                return False, None, f"Field '{field_name}' ({target_val}) vượt quá hạn mức tối đa / vượt quá quy định ({max_val})."
+                return False, None, _tool_err("above_max", field_name=field_name, target_val=target_val, max_val=max_val)
 
         return True, target_val, None
 
@@ -134,15 +149,19 @@ class BankingToolGuardrail:
             return {
                 "is_safe": False,
                 "sanitized_params": {},
-                "error_message": "Input parameters must be a dictionary."
+                "error_message": _tool_err("params_not_dict")
             }
 
-        principal = params.get("principal_vnd", 0.0)
-        rate = params.get("annual_rate_percent", 8.5)
-        tenure = params.get("term_months", 12)
+        principal = params.get("principal_vnd", _LOAN_BOUNDS.get("default_principal_vnd"))
+        rate = params.get("annual_rate_percent", _LOAN_BOUNDS.get("default_annual_rate_percent"))
+        tenure = params.get("term_months", _LOAN_BOUNDS.get("default_term_months"))
 
         valid_p, p_val, err_p = self._sanitize_numeric(
-            principal, "principal_vnd", min_val=1000000.0, max_val=self.max_loan_vnd, is_integer=False
+            principal,
+            "principal_vnd",
+            min_val=_LOAN_BOUNDS.get("min_principal_vnd"),
+            max_val=self.max_loan_vnd,
+            is_integer=False
         )
         if valid_p is False:
             return {
@@ -152,7 +171,11 @@ class BankingToolGuardrail:
             }
 
         valid_t, t_val, err_t = self._sanitize_numeric(
-            tenure, "term_months", min_val=1, max_val=self.max_loan_tenure, is_integer=True
+            tenure,
+            "term_months",
+            min_val=_LOAN_BOUNDS.get("min_term_months"),
+            max_val=self.max_loan_tenure,
+            is_integer=True
         )
         if valid_t is False:
             return {
@@ -162,7 +185,11 @@ class BankingToolGuardrail:
             }
 
         valid_r, r_val, err_r = self._sanitize_numeric(
-            rate, "annual_rate_percent", min_val=0.01, max_val=50.0, is_integer=False
+            rate,
+            "annual_rate_percent",
+            min_val=_LOAN_BOUNDS.get("min_annual_rate_percent"),
+            max_val=_LOAN_BOUNDS.get("max_annual_rate_percent"),
+            is_integer=False
         )
         if valid_r is False:
             return {
@@ -171,9 +198,11 @@ class BankingToolGuardrail:
                 "error_message": err_r
             }
 
+        p_digits = int(_LOAN_BOUNDS.get("principal_round_digits", 0))
+        r_digits = int(_LOAN_BOUNDS.get("rate_round_digits", 0))
         sanitized = {
-            "principal_vnd": round(p_val, 0),
-            "annual_rate_percent": round(r_val, 2),
+            "principal_vnd": round(p_val, p_digits),
+            "annual_rate_percent": round(r_val, r_digits),
             "term_months": t_val
         }
         return {
@@ -190,14 +219,18 @@ class BankingToolGuardrail:
             return {
                 "is_safe": False,
                 "sanitized_params": {},
-                "error_message": "Input parameters must be a dictionary."
+                "error_message": _tool_err("params_not_dict")
             }
 
-        amount = params.get("amount_vnd", 0.0)
-        tenure = params.get("term_months", 12)
+        amount = params.get("amount_vnd", _SAVINGS_BOUNDS.get("default_amount_vnd"))
+        tenure = params.get("term_months", _SAVINGS_BOUNDS.get("default_term_months"))
 
         valid_a, a_val, err_a = self._sanitize_numeric(
-            amount, "amount_vnd", min_val=self.min_savings_vnd, max_val=500000000000.0, is_integer=False
+            amount,
+            "amount_vnd",
+            min_val=self.min_savings_vnd,
+            max_val=_SAVINGS_BOUNDS.get("max_amount_vnd"),
+            is_integer=False
         )
         if valid_a is False:
             return {
@@ -207,7 +240,11 @@ class BankingToolGuardrail:
             }
 
         valid_t, t_val, err_t = self._sanitize_numeric(
-            tenure, "term_months", min_val=1, max_val=60, is_integer=True
+            tenure,
+            "term_months",
+            min_val=_SAVINGS_BOUNDS.get("min_term_months"),
+            max_val=_SAVINGS_BOUNDS.get("max_term_months"),
+            is_integer=True
         )
         if valid_t is False:
             return {
@@ -216,8 +253,9 @@ class BankingToolGuardrail:
                 "error_message": err_t
             }
 
+        a_digits = int(_SAVINGS_BOUNDS.get("amount_round_digits", 0))
         sanitized = {
-            "amount_vnd": round(a_val, 0),
+            "amount_vnd": round(a_val, a_digits),
             "term_months": t_val
         }
         return {
@@ -234,14 +272,18 @@ class BankingToolGuardrail:
             return {
                 "is_safe": False,
                 "sanitized_params": {},
-                "error_message": "Input parameters must be a dictionary."
+                "error_message": _tool_err("params_not_dict")
             }
 
-        single_tx = params.get("single_tx_amount_vnd", 0.0)
-        daily_cum = params.get("daily_cumulative_amount_vnd", 0.0)
+        single_tx = params.get("single_tx_amount_vnd", _QD2345_BOUNDS.get("default_single_tx_amount_vnd"))
+        daily_cum = params.get("daily_cumulative_amount_vnd", _QD2345_BOUNDS.get("default_daily_cumulative_amount_vnd"))
 
         valid_s, s_val, err_s = self._sanitize_numeric(
-            single_tx, "single_tx_amount_vnd", min_val=0.0, max_val=500000000000.0, is_integer=False
+            single_tx,
+            "single_tx_amount_vnd",
+            min_val=_QD2345_BOUNDS.get("min_tx_amount_vnd"),
+            max_val=_QD2345_BOUNDS.get("max_tx_amount_vnd"),
+            is_integer=False
         )
         if valid_s is False:
             return {
@@ -251,7 +293,11 @@ class BankingToolGuardrail:
             }
 
         valid_d, d_val, err_d = self._sanitize_numeric(
-            daily_cum, "daily_cumulative_amount_vnd", min_val=0.0, max_val=500000000000.0, is_integer=False
+            daily_cum,
+            "daily_cumulative_amount_vnd",
+            min_val=_QD2345_BOUNDS.get("min_tx_amount_vnd"),
+            max_val=_QD2345_BOUNDS.get("max_tx_amount_vnd"),
+            is_integer=False
         )
         if valid_d is False:
             return {
@@ -263,8 +309,8 @@ class BankingToolGuardrail:
         sanitized = {
             "single_tx_amount_vnd": s_val,
             "daily_cumulative_amount_vnd": d_val,
-            "is_first_time_new_device": bool(params.get("is_first_time_new_device", False)),
-            "has_verified_chip_cccd": bool(params.get("has_verified_chip_cccd", True))
+            "is_first_time_new_device": bool(params.get("is_first_time_new_device", _QD2345_BOUNDS.get("default_is_first_time_new_device"))),
+            "has_verified_chip_cccd": bool(params.get("has_verified_chip_cccd", _QD2345_BOUNDS.get("default_has_verified_chip_cccd")))
         }
         return {
             "is_safe": True,
@@ -284,23 +330,37 @@ class BankingToolGuardrail:
             return {
                 "is_safe": False,
                 "sanitized_params": {},
-                "error_message": "Input parameters must be a dictionary."
+                "error_message": _tool_err("params_not_dict")
             }
 
-        name = self._sanitize_string(params.get("customer_name", "Customer"), max_len=100)
-        issue = self._sanitize_string(params.get("issue_type", "Inquiry"), max_len=100)
-        desc = self._sanitize_string(params.get("description", ""), max_len=1000)
-        priority_raw = str(params.get("priority", "NORMAL")).strip().upper()
+        default_name = str(_TICKET_BOUNDS.get("default_customer_name") or "")
+        default_issue = str(_TICKET_BOUNDS.get("default_issue_type") or "")
+        default_priority = str(_TICKET_BOUNDS.get("default_priority") or "")
+        allowed_priorities = list(_TICKET_BOUNDS.get("allowed_priorities") or [])
 
-        if len(desc) < 3:
+        name = self._sanitize_string(
+            params.get("customer_name", default_name),
+            max_len=int(_TICKET_BOUNDS.get("customer_name_max_len", 0))
+        )
+        issue = self._sanitize_string(
+            params.get("issue_type", default_issue),
+            max_len=int(_TICKET_BOUNDS.get("issue_type_max_len", 0))
+        )
+        desc = self._sanitize_string(
+            params.get("description", ""),
+            max_len=int(_TICKET_BOUNDS.get("description_max_len", 0))
+        )
+        priority_raw = str(params.get("priority", default_priority)).strip().upper()
+
+        if len(desc) < int(_TICKET_BOUNDS.get("description_min_len", 0)):
             return {
                 "is_safe": False,
                 "sanitized_params": params,
-                "error_message": "Ticket description is too short. Please provide more details."
+                "error_message": _tool_err("ticket_description_too_short")
             }
 
-        if priority_raw not in ["URGENT", "HIGH", "NORMAL", "LOW"]:
-            priority = "NORMAL"
+        if priority_raw not in allowed_priorities:
+            priority = default_priority
         else:
             priority = priority_raw
 
@@ -333,7 +393,7 @@ class BankingToolGuardrail:
                 raise ValueError("Arguments must be an object")
             return {"is_safe": True, "sanitized_params": scrub(params), "error_message": None}
         except ValueError:
-            return {"is_safe": False, "sanitized_params": {}, "error_message": "Invalid read-only tool arguments."}
+            return {"is_safe": False, "sanitized_params": {}, "error_message": _tool_err("readonly_invalid_args")}
 
     def guard_tool_call(self, tool_name, params, *, registered_readonly=False):
         """
@@ -344,7 +404,7 @@ class BankingToolGuardrail:
             return {
                 "is_safe": False,
                 "sanitized_params": params,
-                "error_message": "Tool name cannot be empty."
+                "error_message": _tool_err("empty_tool_name")
             }
 
         name_lower = str(tool_name).strip().lower()
@@ -355,23 +415,20 @@ class BankingToolGuardrail:
                 return {
                     "is_safe": False,
                     "sanitized_params": params,
-                    "error_message": (
-                        f"Financial transaction or sensitive tool '{tool_name}' "
-                        f"requires multi-factor authentication and cannot be triggered automatically by AI Assistant."
-                    )
+                    "error_message": _tool_err("sensitive_tool_blocked", tool_name=tool_name)
                 }
 
         if registered_readonly:
             return self._guard_readonly(params)
 
         # 2. Route by tool family
-        if "loan" in name_lower or "amortization" in name_lower:
+        if _matches_family(name_lower, "loan"):
             return self.validate_loan_params(params)
-        elif "savings" in name_lower or "profit" in name_lower:
+        elif _matches_family(name_lower, "savings"):
             return self.validate_savings_params(params)
-        elif "biometric" in name_lower or "qd2345" in name_lower or "decision_2345" in name_lower:
+        elif _matches_family(name_lower, "biometric"):
             return self.validate_qd2345_params(params)
-        elif "ticket" in name_lower or "support" in name_lower:
+        elif _matches_family(name_lower, "ticket"):
             return self.validate_ticket_params(params)
 
         # 3. Check approved read-only tools
@@ -386,7 +443,7 @@ class BankingToolGuardrail:
             if isinstance(params, dict):
                 for k, v in params.items():
                     if isinstance(v, str):
-                        sanitized_params[k] = self._sanitize_string(v, max_len=500)
+                        sanitized_params[k] = self._sanitize_string(v, max_len=_SANITIZE_MAX_LEN)
                     else:
                         sanitized_params[k] = v
             else:
@@ -402,10 +459,7 @@ class BankingToolGuardrail:
         return {
             "is_safe": False,
             "sanitized_params": params,
-            "error_message": (
-                f"Tool '{tool_name}' is not in the approved banking tool whitelist "
-                f"(Fail-Closed policy). Tool call safely rejected."
-            )
+            "error_message": _tool_err("unrecognized_tool_blocked", tool_name=tool_name)
         }
 
 

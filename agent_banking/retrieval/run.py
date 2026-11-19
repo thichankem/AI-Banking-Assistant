@@ -25,12 +25,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from agent_banking.retrieval.config.settings import RetrievalConfig
 from agent_banking.retrieval.run_retrieval import run_retrieval
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Hybrid Retrieval (Dual-Index Dense + BM25 + RRF k=60)"
+        description="Hybrid Retrieval (Dual-Index Dense + BM25 + RRF)"
     )
     parser.add_argument(
         "--query",
@@ -43,8 +44,8 @@ def main():
         "--top-k",
         "-k",
         type=int,
-        default=5,
-        help="Number of Top-K retrieved documents (default: 5)"
+        default=RetrievalConfig.HYBRID_TOP_K,
+        help="Number of Top-K retrieved documents"
     )
     parser.add_argument(
         "--force",

@@ -32,6 +32,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent_banking.core.settings import Config
+from agent_banking.skills.config.prompts import SKILL_TEMPLATES
+from agent_banking.skills.config.settings import get_skills_config
 from agent_banking.skills.skill_registry import SkillRegistry
 from agent_banking.state_tracker import StateTracker
 
@@ -45,6 +47,11 @@ def run_auto_skills(
     Automatically process skills from input to output with deduplication.
     """
     cfg = Config()
+    runner_cfg = get_skills_config()["runner"]
+    default_in_name = runner_cfg["default_input_file"]
+    default_out_name = runner_cfg["default_output_file"]
+    tracker_name = runner_cfg["state_tracker_file"]
+
     in_dir = PROJECT_ROOT / "agent_banking" / "skills" / "input"
     in_dir.mkdir(parents=True, exist_ok=True)
 
@@ -54,7 +61,7 @@ def run_auto_skills(
         out_path = PROJECT_ROOT / "agent_banking" / "skills" / "output"
     out_path.mkdir(parents=True, exist_ok=True)
 
-    state_file = out_path / ".state_tracker.json"
+    state_file = out_path / tracker_name
     tracker = StateTracker(state_file)
     if force:
         tracker.clear()
@@ -64,7 +71,7 @@ def run_auto_skills(
     if input_file is not None:
         target_in_file = Path(input_file)
     else:
-        candidate = in_dir / "sample_skill_inputs.json"
+        candidate = in_dir / default_in_name
         if candidate.exists():
             target_in_file = candidate
 
@@ -85,7 +92,7 @@ def run_auto_skills(
 
     # 2. Read existing results for deduplication
     prev_results = {}
-    prev_file = out_path / "sample_skill_outputs.json"
+    prev_file = out_path / default_out_name
     if prev_file.exists() and not force:
         try:
             with open(prev_file, "r", encoding="utf-8") as fp:
@@ -113,6 +120,7 @@ def run_auto_skills(
     skipped_count = 0
     new_count = 0
     start_t = time.time()
+    not_found_tpl = SKILL_TEMPLATES["runner_skill_not_found_message"]
 
     for idx, item in enumerate(raw_items, start=1):
         skill_id = item.get("skill_id", "")
@@ -146,7 +154,7 @@ def run_auto_skills(
                     "skill_id": skill_id,
                     "status": "SKILL_NOT_FOUND",
                     "result": {},
-                    "message": f"Skill '{skill_id}' not found in SkillRegistry.",
+                    "message": not_found_tpl.format(skill_id=skill_id),
                     "latency_ms": dt_ms
                 }
 
@@ -159,7 +167,7 @@ def run_auto_skills(
     total_elapsed = round(time.time() - start_t, 2)
 
     # 3. Export output
-    out_file = out_path / "sample_skill_outputs.json"
+    out_file = out_path / default_out_name
     with open(out_file, "w", encoding="utf-8") as fp:
         json.dump(skill_outputs, fp, ensure_ascii=False, indent=2)
 

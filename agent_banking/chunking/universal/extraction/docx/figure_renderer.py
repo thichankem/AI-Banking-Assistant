@@ -18,8 +18,16 @@ try:
 except ImportError:
     import fitz
 
+from agent_banking.chunking.config.settings import get_config_section
 
-def render_docx_pages(docx_source, dpi=150):
+_DOCX_CFG = get_config_section("extraction")["docx"]
+_DEFAULT_DPI = _DOCX_CFG["figure_render_dpi"]
+_WORD_DPI = _DOCX_CFG["word_render_dpi"]
+_WORD_TIMEOUT = _DOCX_CFG["word_timeout"]
+_BLANK_VARIANCE = _DOCX_CFG["blank_variance_threshold"]
+
+
+def render_docx_pages(docx_source, dpi=_DEFAULT_DPI):
     if dpi <= 0:
         raise ValueError("dpi must be greater than 0")
     if docx_source is None:
@@ -50,7 +58,7 @@ def _render_pages(document, dpi):
     return pages
 
 
-def render_with_word(document_bytes, dpi=200):
+def render_with_word(document_bytes, dpi=_WORD_DPI):
     if os.name != "nt":
         raise RuntimeError("Native Word rendering requires Windows and Microsoft Word")
     script = r'''
@@ -85,7 +93,7 @@ try {
         environment["CHUNKING_WORD_INPUT"] = str(incoming)
         environment["CHUNKING_WORD_OUTPUT"] = str(outgoing)
         result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
-                                env=environment, capture_output=True, timeout=120,
+                                env=environment, capture_output=True, timeout=_WORD_TIMEOUT,
                                 creationflags=subprocess.CREATE_NO_WINDOW)
         if result.returncode or not outgoing.is_file():
             raise RuntimeError("Microsoft Word could not render the native Office figure")
@@ -132,13 +140,13 @@ def drawing_preview(document_bytes, document_element, reference, allow_blank=Fal
         values.sort(key=lambda item: item[0], reverse=True)
         return values
     try:
-        ranked = rank(render_docx_pages(output.getvalue(), dpi=200))
+        ranked = rank(render_docx_pages(output.getvalue(), dpi=_WORD_DPI))
     except RuntimeError:
         ranked = []
-    if not ranked or (ranked[0][0] < 0.01 and not allow_blank):
-        ranked = rank(render_with_word(output.getvalue(), dpi=200))
+    if not ranked or (ranked[0][0] < _BLANK_VARIANCE and not allow_blank):
+        ranked = rank(render_with_word(output.getvalue(), dpi=_WORD_DPI))
     if not ranked:
         raise RuntimeError("Office renderer did not render the native chart/diagram")
-    if ranked[0][0] < 0.01 and not allow_blank:
+    if ranked[0][0] < _BLANK_VARIANCE and not allow_blank:
         raise RuntimeError("Native Office figure rendered blank; visual review required")
     return ranked[0][1]

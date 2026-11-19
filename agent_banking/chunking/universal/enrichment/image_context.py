@@ -1,9 +1,15 @@
 """Associate images with literal surrounding text; never inspect image pixels."""
 import hashlib
 
-IMAGE_POLICY = "surrounding_text_only_v1"
-CONTEXT_UNAVAILABLE = "skipped_context_unavailable"
-RESOLVED_IMAGE_STATUSES = ("text_context_supported", "skipped_no_text_support", CONTEXT_UNAVAILABLE)
+from agent_banking.chunking.config.settings import get_config_section, get_rules
+
+_IMAGE_CFG = get_config_section("enrichment")["image_context"]
+_TRANSIENT_IMAGE_FIELDS = tuple(get_rules("enrichment_rules")["transient_image_fields"])
+
+IMAGE_POLICY = _IMAGE_CFG["policy"]
+CONTEXT_UNAVAILABLE = _IMAGE_CFG["context_unavailable_status"]
+RESOLVED_IMAGE_STATUSES = tuple(_IMAGE_CFG["resolved_statuses"])
+_DEFAULT_RADIUS = _IMAGE_CFG["default_radius"]
 
 
 def source_text(block):
@@ -24,7 +30,7 @@ def region_key(block):
     return region
 
 
-def surrounding_sources(ir, image_index, radius=8):
+def surrounding_sources(ir, image_index, radius=_DEFAULT_RADIUS):
     """Native neighbors and source-authored annotations, per image occurrence.
 
     Identical image bytes in different sections do not share an assessment.
@@ -52,7 +58,10 @@ def surrounding_sources(ir, image_index, radius=8):
                            "type": block["type"], "distance": index - image_index,
                            "text": text, "location": block["provenance"],
                            "explicit_caption_for_image": block["id"] in caption_ids})
-    title_field = "source_title" if image["image"].get("title_source") == "decision_model" else "title"
+    if image["image"].get("title_source") == "decision_model":
+        title_field = "source_title"
+    else:
+        title_field = "title"
     for field in ("caption", "alt_text", title_field):
         text = image["image"].get(field, "")
         if isinstance(text, str) and text.strip() and not any(item["text"] == text for item in candidates):
@@ -77,7 +86,10 @@ def validate_context_selection(result, candidates):
         if not isinstance(item, dict):
             raise ValueError("Image evidence must be an object")
         source_id = item.get("source_id")
-        source = sources.get(source_id) if isinstance(source_id, str) else None
+        if isinstance(source_id, str):
+            source = sources.get(source_id)
+        else:
+            source = None
         quote = item.get("quote")
         if source is None or not isinstance(quote, str) or not quote.strip() or quote not in source["text"]:
             raise ValueError("Image evidence must quote a supplied source verbatim")
@@ -88,7 +100,7 @@ def apply_context_selection(block, candidates, result, model):
     sources = {candidate["source_id"]: candidate for candidate in candidates}
     info = block["image"]
     # An old visual interpretation must never survive a policy migration.
-    for field in ("ocr_text", "nodes", "edges", "uncertainties", "visual_review_passes", "draft_sha256", "draft_model"):
+    for field in _TRANSIENT_IMAGE_FIELDS:
         info.pop(field, None)
     evidence = []
     quotes = []

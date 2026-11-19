@@ -5,6 +5,7 @@ from copy import deepcopy
 import hashlib
 import os
 
+from agent_banking.chunking.config.settings import get_config_section, get_rules
 from ..enrichment.image_context import IMAGE_POLICY, excluded_image
 from ..extraction.sources import document_source_name
 from ..text.language import classify_text_blocks, project_search_text, vietnamese_projection
@@ -30,9 +31,16 @@ from .table_rendering import (
 )
 from ..text.token_budget import TokenBudget, format_passage_fields
 
+_PIPELINE = get_config_section("pipeline")
+_PLAN_CFG = get_config_section("planning")
+_CTX_CFG = _PLAN_CFG["context_limits"]
+_PUB_RULES = get_rules("publication")
+_MAX_HEADING_LEVEL = get_config_section("extraction")["docx"]["max_heading_level"]
 
-DEPENDENT_RELATIONS = {"continues", "answer_to", "exception_to", "note_of"}
-_VISUAL_COORDINATES = {"bbox", "bbox_granularity", "coordinate_system", "region_pixel_box", "region_pixel_path"}
+DEPENDENT_RELATIONS = set(_PLAN_CFG["dependent_relations"])
+_VISUAL_COORDINATES = set(_PLAN_CFG["visual_coordinate_keys"])
+_DOC_ID_HEX_LEN = _PUB_RULES["document_id_hex_length"]
+_PREFIX_HEX_LEN = _PUB_RULES["prefix_hash_length"]
 
 
 def _drop_visual_coordinates(blocks):
@@ -66,9 +74,14 @@ def _page_citation(chunk):
 
 
 class ChunkPlanner:
-    def __init__(self, target_tokens=512, max_tokens=1024, max_words=None, table_rows=4, tokenizer=None,
-                 max_chars=None, min_words=30, min_chars=0, max_parent_words=650, *,
-                 use_decision=True, decision_cache=None, min_tokens=128, search_language="vi"):
+    def __init__(self, target_tokens=_PIPELINE["target_chunk_tokens"],
+                 max_tokens=_PIPELINE["max_chunk_tokens"], max_words=None,
+                 table_rows=_PIPELINE["table_rows_per_chunk"], tokenizer=None,
+                 max_chars=None, min_words=_PIPELINE["min_chunk_words"],
+                 min_chars=_PIPELINE["min_section_chars"],
+                 max_parent_words=_PIPELINE["max_parent_words"], *,
+                 use_decision=_PIPELINE["use_decision"], decision_cache=None,
+                 min_tokens=_PIPELINE["min_chunk_tokens"], search_language="vi"):
         positive = {"table_rows": table_rows}
         positive.update((name, value) for name, value in (("max_words", max_words), ("max_chars", max_chars))
                         if value is not None)
@@ -102,7 +115,7 @@ class ChunkPlanner:
         self.parents = {}
         self.foreign_elements = []
         self.base_metadata = infer_business_metadata(ir["source"])
-        self.base_metadata.update({"schema_version": "2.0", "document_id": ir["document_id"],
+        self.base_metadata.update({"schema_version": _PIPELINE["schema_version"], "document_id": ir["document_id"],
                                    "document_version": ir["document_version"]})
         self.block_map = {block["id"]: block for block in ir["blocks"]}
         ir["search_language"] = self.search_language
@@ -113,9 +126,13 @@ class ChunkPlanner:
         from ..enrichment.decisions.engine import decide_prompt_pairs
         self.dependent_pairs = set()
         if self.use_decision:
-            candidates = [block if not (block.get("foreign_language") or block.get("foreign_spans"))
-                          else {**block, "type": "foreign_language"} for block in ir["blocks"]]
-            self.dependent_pairs.update(decide_prompt_pairs(candidates, cache=self.decision_cache))
+            candidates = []
+            for block in ir["blocks"]:
+                if block.get("foreign_language") or block.get("foreign_spans"):
+                    candidates.append({**block, "type": "foreign_language"})
+                else:
+                    candidates.append(block)
+            self.dependent_pairs.update(decide_prompt_pairs(candidates, cache=self.decision_cache, ir=self.ir))
         for index, relation in enumerate(ir["relations"]):
             self.relations_by_block[relation["from"]].append(index)
             if relation["from"] != relation["to"]:
@@ -128,13 +145,13 @@ class ChunkPlanner:
         for boundary in ir.get("semantic_boundaries", []):
             self.boundaries_by_block[boundary["block_id"]].append(boundary)
         stack = []
-        revision_prefix = ir["document_id"] + ":v" + ir["document_version"][:16] + ":"
+        revision_prefix = ir["document_id"] + ":v" + ir["document_version"][:_PREFIX_HEX_LEN] + ":"
         section_prefix = revision_prefix + "section:"
         root_id = section_prefix + "root"
         title = self.base_metadata["document_name"]
         self.parents[root_id] = {"parent_id": "", "section_title": title, "breadcrumb": title, "content": "", "block_ids": []}
         current = root_id
-        self.document_context = self.budget.shorten(title, min(40, self.budget.maximum // 6))
+        self.document_context = self.budget.shorten(title, min(_CTX_CFG["doc_max_tokens"], self.budget.maximum // _CTX_CFG["doc_ratio"]))
         pending = []
         current_region = "body"
         blocks_list = ir["blocks"]
@@ -157,8 +174,21 @@ class ChunkPlanner:
                     self._keep_foreign(block, 0, len(block["text"]), None)
                 continue
             if block["type"] == "heading":
-                level = min(7, block.get("level", 1))
-                self._finish_section(pending, current)
+                level = min(_MAX_HEADING_LEVEL, block.get("level", 1))
+                carried = []
+                if (pending and stack and level > stack[-1][0]
+                        and not block.get("foreign_language")
+                        and all(item["type"] == "heading" for item in pending)
+                        and all(item["id"] in self.parents[current]["block_ids"] for item in pending)):
+                    carried = list(pending)
+                    pending.clear()
+                    carried_ids = {item["id"] for item in carried}
+                    self.parents[current]["block_ids"] = [
+                        identifier for identifier in self.parents[current]["block_ids"]
+                        if identifier not in carried_ids
+                    ]
+                else:
+                    self._finish_section(pending, current)
                 while stack and stack[-1][0] >= level:
                     stack.pop()
                 parent = root_id
@@ -170,6 +200,10 @@ class ChunkPlanner:
                 self.parents[current] = {"parent_id": parent, "section_title": section_title,
                                          "breadcrumb": breadcrumb, "content": "", "block_ids": []}
                 stack.append((level, current, section_title))
+                for item in carried:
+                    item["section_id"] = current
+                    self.parents[current]["block_ids"].append(item["id"])
+                    pending.append(item)
             self.parents[current]["block_ids"].append(block["id"])
             block["section_id"] = current
             if block.get("foreign_language"):
@@ -256,7 +290,10 @@ class ChunkPlanner:
         return captions
 
     def _keep_foreign(self, block, start, end, language):
-        kind = "source_spacing" if language is None else "foreign_language"
+        if language is None:
+            kind = "source_spacing"
+        else:
+            kind = "foreign_language"
         self.foreign_elements.append({
             "type": kind, "language": language, "original_type": block["type"],
             "block_id": block["id"], "source_span": [start, end], "text": block["text"][start:end],
@@ -311,8 +348,13 @@ class ChunkPlanner:
             adjacent = anchors[max(0, cursor - 1):cursor + 1]
             index = 0
             if adjacent:
-                index = min(adjacent, key=lambda item: (abs(item[0] - order),
-                            abs(item[1] - offset) if item[0] == order else 0, item[2]))[2]
+                def anchor_sort_key(item):
+                    if item[0] == order:
+                        span_delta = abs(item[1] - offset)
+                    else:
+                        span_delta = 0
+                    return (abs(item[0] - order), span_delta, item[2])
+                index = min(adjacent, key=anchor_sort_key)[2]
             self.chunks[index]["business_metadata"].setdefault("elements", []).append(element)
 
     def _finish_section(self, pending, parent_id):
@@ -359,14 +401,14 @@ class ChunkPlanner:
         measured_retrieval["role"] = "child"
         last["business_metadata"]["retrieval"] = measured_retrieval
         seed = self.ir["document_id"] + self.ir["document_version"] + str(len(self.chunks) - 1) + last["content"]
-        last["chunk_id"] = self.ir["document_id"] + ":c:" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:20]
+        last["chunk_id"] = self.ir["document_id"] + ":c:" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:_DOC_ID_HEX_LEN]
         pending.clear()
 
     def _retrieval(self, parent_id, evidence, kind="text"):
         parent = self.parents[parent_id]
         context = parent.get("retrieval_context")
         if context is None:
-            section_limit = min(44, self.budget.maximum // 6)
+            section_limit = min(_CTX_CFG["section_max"], max(_CTX_CFG["section_min"], self.budget.maximum // _CTX_CFG["section_ratio"]))
             document = self.document_context
             sections = []
             cursor = parent
@@ -375,30 +417,32 @@ class ChunkPlanner:
                 is_root_child = parent_node is not None and not parent_node.get("parent_id")
                 if is_root_child and len(sections) >= 2:
                     break
-                step_limit = 16
                 if not sections:
-                    step_limit = 22
+                    step_limit = _CTX_CFG["step_first"]
+                else:
+                    step_limit = _CTX_CFG["step_next"]
                 if step_limit > section_limit:
                     step_limit = section_limit
                 title = self.budget.shorten(cursor["section_title"], step_limit)
                 if title and title != document:
                     sections.append(title)
                     section_limit -= self.budget.count(title) + 2
-                if section_limit < 6:
+                if section_limit < _CTX_CFG["section_stop_min"]:
                     break
                 cursor = self.parents[cursor["parent_id"]]
             context = " > ".join(part for part in [document, *reversed(sections)] if part)
             parent["retrieval_context"] = context
         if kind == "table":
-            context = self.budget.shorten(context, 44)
+            context = self.budget.shorten(context, min(_CTX_CFG["table_max"], max(_CTX_CFG["table_min"], self.budget.maximum // _CTX_CFG["table_ratio"])))
         else:
-            context = self.budget.shorten(context, 56)
+            context = self.budget.shorten(context, min(_CTX_CFG["text_max"], max(_CTX_CFG["text_min"], self.budget.maximum // _CTX_CFG["text_ratio"])))
         tokenizer_name = os.getenv("EMBEDDING_MODEL", "embedding-tokenizer")
         retrieval = {"role": "child", "context": context, "tokenizer": tokenizer_name,
                      "tokenizer_sha256": self.budget.tokenizer_sha256, "max_tokens": self.budget.maximum}
         if evidence:
-            limit = min(48, self.budget.maximum // 6)
-            preview = [(item, project_search_text(item["text"][:1200], search_language=self.search_language).strip())
+            limit = min(_CTX_CFG["situated_max"], self.budget.maximum // _CTX_CFG["situated_ratio"])
+            preview_chars = _CTX_CFG["situated_preview_chars"]
+            preview = [(item, project_search_text(item["text"][:preview_chars], search_language=self.search_language).strip())
                        for item in evidence]
             used = [(item, value) for item, value in preview if value]
             if used:
@@ -415,7 +459,7 @@ class ChunkPlanner:
         metadata["retrieval"] = deepcopy(retrieval)
         metadata["provenance"] = {"block_ids": list(block_ids), "locations": [self.block_map[identifier]["provenance"] for identifier in block_ids],
                                    "method": self.ir.get("extraction_method", "docx_openxml"), "source_view": "final"}
-        metadata["quality"] = {"profile": self.ir.get("profile", "accuracy"), "warnings": self.ir.get("warnings", []),
+        metadata["quality"] = {"profile": self.ir.get("profile", _PIPELINE["profile"]), "warnings": self.ir.get("warnings", []),
                                "source_review": self.ir.get("source_review", []), "image_policy": self.ir.get("image_policy", IMAGE_POLICY),
                                "decision_route": self.ir.get("decision_review", {}).get("answers", {}).get("review_route", {}).get("choice")}
         return build_universal_chunk(source=self.ir["source"], chunk_type=kind,
@@ -440,7 +484,7 @@ class ChunkPlanner:
 
     def _emit(self, chunk):
         seed = self.ir["document_id"] + self.ir["document_version"] + str(len(self.chunks)) + chunk["content"]
-        chunk["chunk_id"] = self.ir["document_id"] + ":c:" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:20]
+        chunk["chunk_id"] = self.ir["document_id"] + ":c:" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:_DOC_ID_HEX_LEN]
         self.chunks.append(chunk)
 
     def _bound_passage(self, chunk, preferred=None):
@@ -450,7 +494,10 @@ class ChunkPlanner:
         if excluded_image(block):
             return
         image = deepcopy(block["image"])
-        if image.get("status") != "text_context_supported" or not image.get("context_evidence"):
+        status = image.get("status")
+        if status not in ("text_context_supported", "ocr_transcribed"):
+            raise ValueError("Image has no grounded text-context decision")
+        if status == "text_context_supported" and not image.get("context_evidence"):
             raise ValueError("Image has no grounded text-context decision")
         text = block.get("text", "")
         if not has_visible_text(text):
@@ -459,7 +506,9 @@ class ChunkPlanner:
         if image.get("title") and not retrieval.get("situated_context"):
             title = project_search_text(image["title"], search_language=self.search_language).strip()
             if title:
-                retrieval["situated_context"] = self.budget.shorten(title, min(48, self.budget.maximum // 6))
+                retrieval["situated_context"] = self.budget.shorten(
+                    title, min(_CTX_CFG["situated_max"], self.budget.maximum // _CTX_CFG["situated_ratio"])
+                )
 
         def fits(fragment):
             return self._measure(fragment, retrieval) is not None
@@ -467,16 +516,22 @@ class ChunkPlanner:
         def emit(content, source_spans, block_ids):
             image_span = next(span for span in source_spans if span["block_id"] == block["id"])
             chunk = self._prototype("multimodal", content, parent_id, block_ids, images=[image], retrieval=retrieval)
+            if status == "ocr_transcribed":
+                method = "docx_cloud_image_ocr"
+                representation = "docx_cloud_image_ocr"
+            else:
+                method = "native_surrounding_text"
+                representation = "image_text_context"
             chunk["business_metadata"]["provenance"].update({
                 "source_spans": source_spans,
                 "image_block_id": block["id"],
                 "image_text_span": [image_span["start"], image_span["end"]],
                 "image_chunk_span": [image_span["chunk_start"], image_span["chunk_end"]],
-                "method": "native_surrounding_text",
-                "context_evidence": image["context_evidence"],
+                "method": method,
+                "context_evidence": image.get("context_evidence", []),
             })
             chunk_retrieval = chunk["business_metadata"]["retrieval"]
-            chunk_retrieval["representation"] = "image_text_context"
+            chunk_retrieval["representation"] = representation
             projected = project_search_text(content, search_language=self.search_language)
             if projected != content:
                 chunk_retrieval["embedding_content"] = projected
@@ -485,8 +540,14 @@ class ChunkPlanner:
             self._bound_passage(chunk)
             self._emit(chunk)
 
-        lead = lead_in_blocks if lead_in_blocks is not None else []
-        trail = trailing_blocks if trailing_blocks is not None else []
+        if lead_in_blocks is not None:
+            lead = lead_in_blocks
+        else:
+            lead = []
+        if trailing_blocks is not None:
+            trail = trailing_blocks
+        else:
+            trail = []
         combined, spans, identifiers = build_lead_in([*lead, block, *trail])
         if fits(combined):
             emit(combined, spans, identifiers)

@@ -24,6 +24,16 @@ inputSchema:
       description: Số lượng tài liệu tinh lọc sau Rerank
       minimum: 1
       maximum: 6
+    source:
+      type: string
+      minLength: 2
+      maxLength: 400
+      description: Tên nguồn đã tìm thấy, hoặc đường dẫn nguồn đầy đủ để giới hạn đúng tài liệu.
+    offset:
+      type: integer
+      minimum: 0
+      maximum: 10000
+      description: Khi có source, đọc các đoạn liên tiếp theo thứ tự nguồn từ vị trí này, không rerank. Dùng next_offset để đọc tiếp hướng dẫn hoặc bảng bị chia đoạn.
   required:
   - query
   additionalProperties: false
@@ -43,6 +53,9 @@ outputSchema:
           content: {type: string}
           business_metadata: {type: object}
         required: [chunk_id, source, content]
+    related_documents:
+      $ref: '#/properties/documents'
+      description: Các đoạn liền kề có liên kết cùng mục hoặc cùng quy trình để bổ sung ngữ cảnh.
     sources:
       type: array
       items: {type: string}

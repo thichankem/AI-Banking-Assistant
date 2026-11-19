@@ -5,13 +5,25 @@ Module-specific parameters are maintained independently in each module's config 
 Complies with 0% Regex Law, Zero Ternary Law, and No Typing Library.
 """
 
+from agent_banking.core.config.settings import CoreConfig
 from agent_banking.core.environment import ROOT_DIR
 
-retrieval_dir = ROOT_DIR / "dataset" / "A_Bank_golden_400"
-dataset_abank_dir = ROOT_DIR / "dataset" / "A_Bank"
-chunking_input_dir = ROOT_DIR / "agent_banking" / "chunking" / "input"
-chunking_output_dir = ROOT_DIR / "agent_banking" / "chunking" / "output"
-chunking_abank_dir = chunking_input_dir / "A_Bank"
+
+def _resolve_relpath(relpath):
+    target = ROOT_DIR
+    for part in str(relpath).replace("\\", "/").split("/"):
+        if part:
+            target = target / part
+    return target
+
+
+_paths = CoreConfig.CORE_PATHS
+
+retrieval_dir = _resolve_relpath(_paths["retrieval_dataset_relpath"])
+dataset_abank_dir = _resolve_relpath(_paths["dataset_abank_relpath"])
+chunking_input_dir = _resolve_relpath(_paths["chunking_input_relpath"])
+chunking_output_dir = _resolve_relpath(_paths["chunking_output_relpath"])
+chunking_abank_dir = chunking_input_dir / _paths["chunking_abank_subdir"]
 
 if not retrieval_dir.exists():
     retrieval_dir = dataset_abank_dir
@@ -37,8 +49,8 @@ class PathConfig:
     CHUNKING_OUTPUT_DIR = chunking_output_dir
     CHUNKING_DATASET_DIR = chunking_dir
     DATASET_DIR = active_dataset_dir
-    STORAGE_DIR = ROOT_DIR / "agent_banking" / "vector_db"
-    TRACE_DIR = ROOT_DIR / "agent_banking" / "tracing" / "traces"
+    STORAGE_DIR = _resolve_relpath(_paths["storage_relpath"])
+    TRACE_DIR = _resolve_relpath(_paths["trace_relpath"])
 
 
 from agent_banking.chunking.config.settings import ChunkingConfig
@@ -49,7 +61,6 @@ from agent_banking.reranking.config.settings import RerankingConfig
 from agent_banking.tracing.config.settings import TracingConfig
 from agent_banking.guardrails.config.settings import GuardrailsConfig
 
-
 from agent_banking.agent.config.settings import AgentConfig
 from agent_banking.skills.config.settings import SkillsConfig
 from agent_banking.tools.config.settings import ToolsConfig
@@ -57,6 +68,7 @@ from agent_banking.tools.config.settings import ToolsConfig
 
 class Config(
     PathConfig,
+    CoreConfig,
     ChunkingConfig,
     EmbeddingConfig,
     VectorDBConfig,

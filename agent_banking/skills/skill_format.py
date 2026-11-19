@@ -4,8 +4,13 @@ import os
 from pathlib import Path
 
 from agent_banking.core.plugin_specs import MAX_PACKAGE_FILE, load_yaml
-MAX_FRONTMATTER = 16384
-FIELDS = {"name", "description", "license", "compatibility", "metadata", "allowed-tools"}
+from agent_banking.skills.config.settings import get_skill_runtime_config
+
+_FORMAT_CFG = get_skill_runtime_config()["format"]
+MAX_FRONTMATTER = int(_FORMAT_CFG["max_frontmatter"])
+MAX_DESCRIPTION_LENGTH = int(_FORMAT_CFG["max_description_length"])
+MAX_COMPATIBILITY_LENGTH = int(_FORMAT_CFG["max_compatibility_length"])
+FIELDS = set(_FORMAT_CFG["allowed_fields"])
 
 
 def valid_name(value) -> bool:
@@ -34,13 +39,16 @@ def read_skill(path: Path, *, body: bool = False, expected=None) -> tuple:
         else:
             raise ValueError("Unclosed YAML frontmatter")
         data = load_yaml("".join(lines))
-        return data, revision, stream.read(MAX_PACKAGE_FILE).strip() if body else ""
+        body_text = ""
+        if body:
+            body_text = stream.read(MAX_PACKAGE_FILE).strip()
+        return data, revision, body_text
 
 
 def validate_metadata(data: dict, directory_name: str) -> None:
     if set(data) - FIELDS or data.get("name") != directory_name or not valid_name(directory_name):
         raise ValueError("Invalid Agent Skill name or frontmatter field")
-    for key, maximum in (("description", 1024), ("compatibility", 500),
+    for key, maximum in (("description", MAX_DESCRIPTION_LENGTH), ("compatibility", MAX_COMPATIBILITY_LENGTH),
                          ("license", MAX_FRONTMATTER), ("allowed-tools", MAX_FRONTMATTER)):
         if key not in data and key != "description":
             continue
@@ -50,5 +58,3 @@ def validate_metadata(data: dict, directory_name: str) -> None:
     metadata = data.get("metadata", {})
     if not isinstance(metadata, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in metadata.items()):
         raise ValueError("Skill metadata keys and values must be strings")
-
-

@@ -4,6 +4,7 @@ import shlex
 
 from docx.oxml.ns import qn
 
+from agent_banking.chunking.config.settings import get_rules
 from .openxml import (
     EMBEDDED_CONTENT,
     MC,
@@ -16,9 +17,9 @@ from .openxml import (
     native_text,
 )
 
-
-TEXT_NODES = {"t", "tab", "ptab", "br", "cr", "noBreakHyphen", "softHyphen", "sym", "oMath", "oMathPara"}
-VISUAL_NODES = {"drawing", "pict", "txbxContent"}
+_OPENXML_RULES = get_rules("openxml")
+TEXT_NODES = set(_OPENXML_RULES["inline_text_nodes"])
+VISUAL_NODES = set(_OPENXML_RULES["inline_visual_nodes"])
 
 
 def paragraph_parts(paragraph, part, script_styles, hidden_run, *, include_images=False):
@@ -32,7 +33,10 @@ def paragraph_parts(paragraph, part, script_styles, hidden_run, *, include_image
                 yield "text", "".join(buffer), _links(fragments)
                 buffer.clear()
                 fragments.clear()
-            yield ("textbox" if kind == "visual" else kind), value, []
+            if kind == "visual":
+                yield "textbox", value, []
+            else:
+                yield kind, value, []
         elif kind == "field":
             marker = value.get(qn("w:fldCharType"))
             if marker == "begin":
@@ -113,8 +117,14 @@ def _inline_events(node, part, script_styles, hidden_run, link=None, *, include_
             events = _inline_events(child, part, script_styles, hidden_run, link, include_images=include_images)
             yield from _script_events(events, _run_script(child, script_styles), link)
         else:
-            target = _hyperlink_target(child, part) if name in ("hyperlink", "fldSimple") else None
-            child_link = (child, target) if target else link
+            if name in ("hyperlink", "fldSimple"):
+                target = _hyperlink_target(child, part)
+            else:
+                target = None
+            if target:
+                child_link = (child, target)
+            else:
+                child_link = link
             yield from _inline_events(child, part, script_styles, hidden_run, child_link, include_images=include_images)
 
 

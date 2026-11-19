@@ -18,6 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from agent_banking.core.config.settings import CoreConfig, get_core_messages
 from agent_banking.chunking.run_chunking import atomic_json, run_auto_chunking
 from agent_banking.embedding.run_embedding import run_auto_embedding
 from agent_banking.vector_db.run_vector_db import run_auto_indexing
@@ -27,6 +28,19 @@ from agent_banking.guardrails.run_guardrails import run_auto_guardrails
 from agent_banking.tracing.run_tracing import run_auto_tracing
 from agent_banking.skills.run_skills import run_auto_skills
 from agent_banking.tools.run_tools import run_auto_tools
+
+_NP_CFG = CoreConfig.CORE_NODE_PIPELINE
+_MESSAGES = get_core_messages("node_pipeline", "pipeline_messages.yaml", "NODE_PIPELINE_MESSAGES")
+
+_NODES = list(_NP_CFG["nodes"])
+_NODE_ALIASES = {k: tuple(v) for k, v in _NP_CFG["node_aliases"].items()}
+_INPUT_CANDIDATES = {k: list(v) for k, v in _NP_CFG["node_input_candidates"].items()}
+_PUBLISHED_MANIFEST = str(_NP_CFG["published_manifest_filename"])
+_PUBLISHED_EMBEDDINGS = str(_NP_CFG["published_embeddings_filename"])
+_EMBEDDING_CHUNKS = str(_NP_CFG["embedding_chunks_filename"])
+_DIAGNOSTICS_DIRNAME = str(_NP_CFG["diagnostics_dirname"])
+_DIAGNOSTICS_PREFIX = str(_NP_CFG["diagnostics_prefix"])
+_DEFAULT_POLL_INTERVAL_SEC = int(_NP_CFG["default_poll_interval_sec"])
 
 
 class NodePipeline:
@@ -42,13 +56,8 @@ class NodePipeline:
 
     def get_node_folders(self) -> dict:
         """Get input and output directories for all pipeline nodes."""
-        nodes = [
-            "chunking", "embedding", "vector_db",
-            "retrieval", "reranking", "guardrails",
-            "tracing", "skills", "tools"
-        ]
         res = {}
-        for n in nodes:
+        for n in _NODES:
             in_p = self.base_dir / n / "input"
             out_p = self.base_dir / n / "output"
             in_p.mkdir(parents=True, exist_ok=True)
@@ -77,7 +86,7 @@ class NodePipeline:
         f = self.get_node_folders()
         clean_name = node_name.strip().lower()
 
-        if clean_name in ("1", "chunking"):
+        if clean_name in _NODE_ALIASES["chunking"]:
             chunks = run_auto_chunking(
                 f["chunking"]["input"],
                 f["chunking"]["output"],
@@ -85,14 +94,14 @@ class NodePipeline:
                 max_files=max_files
             )
             return {"node": "chunking", "count": len(chunks)}
-        elif clean_name in ("2", "embedding"):
-            published = f["chunking"]["output"] / "chunking_manifest.json"
+        elif clean_name in _NODE_ALIASES["embedding"]:
+            published = f["chunking"]["output"] / _PUBLISHED_MANIFEST
             if published.is_file():
                 embed_in = published
             else:
                 embed_in = self._resolve_node_input(
                     f["embedding"]["input"],
-                    ["chunks.json", "chunking_manifest.json", "all_chunks.json"]
+                    _INPUT_CANDIDATES["embedding"]
                 )
             embeds = run_auto_embedding(
                 input_file=embed_in,
@@ -100,16 +109,16 @@ class NodePipeline:
                 force=force
             )
             return {"node": "embedding", "count": len(embeds)}
-        elif clean_name in ("3", "vector_db", "indexing"):
-            vdb_in = self._resolve_node_input(f["vector_db"]["input"], ["embedded_chunks.json"])
+        elif clean_name in _NODE_ALIASES["vector_db"]:
+            vdb_in = self._resolve_node_input(f["vector_db"]["input"], _INPUT_CANDIDATES["vector_db"])
             options = {}
             publication_dir = f["chunking"]["output"]
-            if (publication_dir / "chunking_manifest.json").is_file():
-                published_embeddings = f["embedding"]["output"] / "embedded_chunks.json"
+            if (publication_dir / _PUBLISHED_MANIFEST).is_file():
+                published_embeddings = f["embedding"]["output"] / _PUBLISHED_EMBEDDINGS
                 if published_embeddings.is_file():
                     vdb_in = published_embeddings
                 if not vdb_in.is_file():
-                    raise FileNotFoundError("Embed the current chunking publication before indexing")
+                    raise FileNotFoundError(_MESSAGES["embed_missing_error"])
                 options = {"snapshot": True, "publication_dir": publication_dir}
             vdb = run_auto_indexing(
                 input_file=vdb_in,
@@ -118,67 +127,70 @@ class NodePipeline:
                 **options,
             )
             return {"node": "vector_db", "manifest": vdb}
-        elif clean_name in ("5", "retrieval"):
-            ret_in = self._resolve_node_input(f["retrieval"]["input"], ["queries.json", "queries.txt", "latest_query.json", "parsed_queries.json"])
+        elif clean_name in _NODE_ALIASES["retrieval"]:
+            ret_in = self._resolve_node_input(f["retrieval"]["input"], _INPUT_CANDIDATES["retrieval"])
             ret = run_auto_retrieval(
                 input_file=ret_in,
                 output_dir=f["retrieval"]["output"],
                 force=force
             )
             return {"node": "retrieval", "count": len(ret)}
-        elif clean_name in ("6", "reranking"):
-            rr_in = self._resolve_node_input(f["reranking"]["input"], ["candidates.json"])
+        elif clean_name in _NODE_ALIASES["reranking"]:
+            rr_in = self._resolve_node_input(f["reranking"]["input"], _INPUT_CANDIDATES["reranking"])
             rerank = run_auto_reranking(
                 input_file=rr_in,
                 output_dir=f["reranking"]["output"],
                 force=force
             )
             return {"node": "reranking", "count": len(rerank)}
-        elif clean_name in ("8", "guardrails"):
+        elif clean_name in _NODE_ALIASES["guardrails"]:
             guards = self._run_aux_node(
                 run_auto_guardrails,
                 f["guardrails"]["input"],
                 f["guardrails"]["output"],
-                ["sample_queries.json", "queries.json"],
+                _INPUT_CANDIDATES["guardrails"],
                 force
             )
             return {"node": "guardrails", "count": len(guards)}
-        elif clean_name in ("9", "tracing"):
+        elif clean_name in _NODE_ALIASES["tracing"]:
             traces = self._run_aux_node(
                 run_auto_tracing,
                 f["tracing"]["input"],
                 f["tracing"]["output"],
-                ["sample_trace_inputs.json"],
+                _INPUT_CANDIDATES["tracing"],
                 force
             )
             return {"node": "tracing", "count": len(traces)}
-        elif clean_name in ("11", "skills"):
+        elif clean_name in _NODE_ALIASES["skills"]:
             skills = self._run_aux_node(
                 run_auto_skills,
                 f["skills"]["input"],
                 f["skills"]["output"],
-                ["sample_skill_inputs.json"],
+                _INPUT_CANDIDATES["skills"],
                 force
             )
             return {"node": "skills", "count": len(skills)}
-        elif clean_name in ("12", "tools"):
+        elif clean_name in _NODE_ALIASES["tools"]:
             tools = self._run_aux_node(
                 run_auto_tools,
                 f["tools"]["input"],
                 f["tools"]["output"],
-                ["sample_tool_inputs.json"],
+                _INPUT_CANDIDATES["tools"],
                 force
             )
             return {"node": "tools", "count": len(tools)}
         else:
-            print(f"[NodePipeline] Unrecognized node: '{node_name}'. Valid options: chunking, embedding, vector_db, retrieval, reranking, guardrails, tracing, skills, tools")
+            print(_MESSAGES["unrecognized_node_message"].format(
+                node_name=node_name,
+                valid_nodes=", ".join(_NODES)
+            ))
             return {"error": "UNKNOWN_NODE"}
 
     def run_indexing_pipeline(self, force: bool = False, max_files: int | None = None) -> dict:
         """Publish chunks and update the embedding and search indexes."""
         start_all = time.time()
         print("\n" + "#" * 80)
-        print("  UPDATING THE BANKING KNOWLEDGE INDEX")
+        print(_MESSAGES["indexing_banner"])
         print("#" * 80)
 
         f = self.get_node_folders()
@@ -188,16 +200,16 @@ class NodePipeline:
         # ---------------------------------------------------------------------
         chunk_out_dir = f["chunking"]["output"]
         if max_files is not None:
-            chunk_out_dir = chunk_out_dir / "diagnostics" / ("accuracy-first-" + str(max_files))
+            chunk_out_dir = chunk_out_dir / _DIAGNOSTICS_DIRNAME / (_DIAGNOSTICS_PREFIX + str(max_files))
 
         chunks = run_auto_chunking(input_dir=f["chunking"]["input"], output_dir=f["chunking"]["output"],
                                    force=force, max_files=max_files)
         if max_files is not None:
-            chunk_manifest = json.loads((chunk_out_dir / "chunking_manifest.json").read_text(encoding="utf-8"))
+            chunk_manifest = json.loads((chunk_out_dir / _PUBLISHED_MANIFEST).read_text(encoding="utf-8"))
             failed_files = [record["file_name"] for record in chunk_manifest["records"] if record["status"] == "FAILED"]
             return {"status": "DIAGNOSTICS", "total_chunks": len(chunks), "failed_files": failed_files,
                     "chunking_output": str(chunk_out_dir)}
-        atomic_json(f["embedding"]["input"] / "chunks.json", chunks)
+        atomic_json(f["embedding"]["input"] / _EMBEDDING_CHUNKS, chunks)
 
         # ---------------------------------------------------------------------
         # 2. Node 2: Embedding
@@ -207,7 +219,7 @@ class NodePipeline:
         failed_files = [record["file_name"] for record in chunk_manifest["records"] if record["status"] == "FAILED"]
 
         # Handover embedded_chunks.json to Node 3: Vector DB Input
-        vdb_in = f["vector_db"]["input"] / "embedded_chunks.json"
+        vdb_in = f["vector_db"]["input"] / _PUBLISHED_EMBEDDINGS
         atomic_json(vdb_in, embedded_chunks)
 
         # ---------------------------------------------------------------------
@@ -218,12 +230,17 @@ class NodePipeline:
             publication_dir=chunk_out_dir, publication_manifest=chunk_manifest)
         total_elapsed = round(time.time() - start_all, 2)
         print("\n" + "=" * 80)
-        print("  KNOWLEDGE INDEX UPDATE FINISHED")
+        print(_MESSAGES["indexing_finished"])
         print(f"  Execution time: {total_elapsed}s")
         print("=" * 80 + "\n")
 
+        if failed_files:
+            run_status = "PARTIAL_SUCCESS"
+        else:
+            run_status = "SUCCESS"
+
         return {
-            "status": "PARTIAL_SUCCESS" if failed_files else "SUCCESS",
+            "status": run_status,
             "failed_files": failed_files,
             "total_chunks": len(chunks),
             "embedded_chunks": len(embedded_chunks),
@@ -231,15 +248,17 @@ class NodePipeline:
             "elapsed_seconds": total_elapsed
         }
 
-    def watch_inputs(self, poll_interval_sec: int = 3) -> None:
+    def watch_inputs(self, poll_interval_sec: int | None = None) -> None:
         """
         Continuous directory watcher daemon:
         Monitors input directories across nodes. When new data is placed into an
         input directory, the system automatically triggers execution to output.
         """
-        print(f"\n[WATCHER DAEMON] Monitoring input directories in {self.base_dir}...")
-        print("Files placed into any input directory will be processed automatically.")
-        print("Press Ctrl+C to stop monitoring.\n")
+        if poll_interval_sec is None:
+            poll_interval_sec = _DEFAULT_POLL_INTERVAL_SEC
+        print(_MESSAGES["watcher_header"].format(base_dir=self.base_dir))
+        print(_MESSAGES["watcher_body"])
+        print(_MESSAGES["watcher_stop_hint"])
 
         last_hashes = {}
         folders = self.get_node_folders()
@@ -277,13 +296,13 @@ class NodePipeline:
                         except Exception as e:
                             print(f"[NodePipeline] Error while processing Node '{node_name}': {e}")
         except KeyboardInterrupt:
-            print("\n[NodePipeline] Watcher daemon stopped.")
+            print(_MESSAGES["watcher_stopped"])
 
 
 def main():
-    parser = argparse.ArgumentParser(description="AI Banking Assistant - Auto Folder-to-Folder Pipeline")
+    parser = argparse.ArgumentParser(description=_MESSAGES["cli_description"])
     parser.add_argument("--auto", action="store_true", help="Update the knowledge index")
-    parser.add_argument("--node", type=str, default=None, help="Run a specific single node (chunking, embedding, vector_db, retrieval, reranking, guardrails, tracing, skills, tools)")
+    parser.add_argument("--node", type=str, default=None, help=f"Run a specific single node ({', '.join(_NODES)})")
     parser.add_argument("--watch", action="store_true", help="Run automatic input folder watcher daemon")
     parser.add_argument("--force", action="store_true", help="Clear state caches and re-run all nodes from scratch")
     parser.add_argument("--max-files", type=int, default=None, help="Limit maximum number of document files during chunking")

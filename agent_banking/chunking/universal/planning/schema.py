@@ -2,86 +2,82 @@
 
 import hashlib
 
+from agent_banking.chunking.config.settings import get_rules
 
-REQUIRED_UNIVERSAL_SCHEMA_KEYS = (
-    "chunk_id",
-    "parent_id",
-    "source",
-    "chunk_type",
-    "breadcrumb",
-    "section_title",
-    "content",
-    "parent_content",
-    "business_metadata",
-    "prev_chunk_id",
-    "next_chunk_id",
-    "table_data",
-    "images",
-)
+_SCHEMA_RULES = get_rules("schema")
+
+REQUIRED_UNIVERSAL_SCHEMA_KEYS = tuple(_SCHEMA_RULES["required_universal_schema_keys"])
 
 # Standard allowed chunk types
-VALID_CHUNK_TYPES = ("text", "table", "multimodal")
+VALID_CHUNK_TYPES = tuple(_SCHEMA_RULES["valid_chunk_types"])
 
 # Retired metadata field names. Source-derived values may contain these terms.
-PROHIBITED_BANKING_TERMS = (
-    "the_tin_dung",
-    "tiet_kiem",
-    "vay_von",
-    "nghiep_vu_bank",
-    "chuong_trinh_the",
-    "van_ban_phap_ly",
-    "huong_dan_app",
-    "bao_mat_ekyc",
-    "the_ghi_no",
-    "phap_ly_tuan_thu",
-)
+PROHIBITED_BANKING_TERMS = tuple(_SCHEMA_RULES["prohibited_banking_terms"])
 
 # Directory names commonly used as generic container roots to be ignored in hierarchy extraction
-GENERIC_ROOT_NAMES = (
-    "input",
-    "inputs",
-    "output",
-    "outputs",
-    "data",
-    "dataset",
-    "datasets",
-    "docs",
-    "documents",
-    "files",
-    "source",
-    "sources",
-    "test_docs",
-    "agent_banking",
-    "chunking",
-    "raw",
-    "processed",
-)
+GENERIC_ROOT_NAMES = tuple(_SCHEMA_RULES["generic_root_names"])
+
+_TYPE_ALIASES = _SCHEMA_RULES["chunk_type_aliases"]
+_TABLE_ALIASES = set(_TYPE_ALIASES["table"])
+_MULTIMODAL_ALIASES = set(_TYPE_ALIASES["multimodal"])
+_A_BANK_DOMAIN_RULES = _SCHEMA_RULES["a_bank_domain_rules"]
+_DOC_TYPE_PREFIXES = tuple(tuple(pair) for pair in _SCHEMA_RULES["doc_type_prefixes"])
+_DEFAULT_DOMAIN = _SCHEMA_RULES["default_domain"]
+_DEFAULT_FOLDER = _SCHEMA_RULES["default_folder"]
+_DEFAULT_FILE_TYPE = _SCHEMA_RULES["default_file_type"]
+_DEFAULT_UNKNOWN_NAME = _SCHEMA_RULES["default_unknown_name"]
+_DEFAULT_SOURCE_FILENAME = _SCHEMA_RULES["default_source_filename"]
 
 
 def normalize_chunk_type(raw_type):
     """Map older aliases to their canonical chunk type."""
     clean_type = str(raw_type).strip().lower()
-    if clean_type in ("table", "data_table", "grid", "spreadsheet"):
+    if clean_type in _TABLE_ALIASES:
         return "table"
-    if clean_type in ("multimodal", "image", "figure", "chart", "diagram", "picture", "caption"):
+    if clean_type in _MULTIMODAL_ALIASES:
         return "multimodal"
     return "text"
 
 
 def clean_path_segment(segment):
     """Return a display form of a path segment."""
-    return "" if segment is None else str(segment).strip()
+    if segment is None:
+        return ""
+    return str(segment).strip()
+
+
+def _infer_semantic_domain(folder_segments, default_domain):
+    if len(folder_segments) >= 2 and folder_segments[0].casefold() == "a_bank":
+        cat = folder_segments[1].casefold()
+        for rule in _A_BANK_DOMAIN_RULES:
+            if any(keyword in cat for keyword in rule["keywords"]):
+                return rule["domain"]
+        return folder_segments[1]
+    return default_domain
+
+
+def _infer_doc_type(stem, domain, extension):
+    upper = stem.strip().upper()
+    for prefix, label in _DOC_TYPE_PREFIXES:
+        if upper.startswith(prefix):
+            return label
+    if domain and domain != _DEFAULT_DOMAIN:
+        return domain
+    return extension.lower()
 
 
 def infer_business_metadata(file_path):
-    """Derive category and document title from the meaningful path segments."""
+    """Derive category, semantic domain, doc_type and document title from meaningful path segments."""
     segments = []
     if file_path is not None:
         for segment in str(file_path).replace("\\", "/").split("/"):
             segment = clean_path_segment(segment)
             if segment and segment not in (".", "..") and not segment.endswith(":"):
                 segments.append(segment)
-    filename = segments[-1] if segments else "unknown"
+    if segments:
+        filename = segments[-1]
+    else:
+        filename = _DEFAULT_UNKNOWN_NAME
     folder_segments = segments[:-1]
     for index in range(len(folder_segments) - 1, -1, -1):
         if folder_segments[index].lower() in GENERIC_ROOT_NAMES:
@@ -89,14 +85,26 @@ def infer_business_metadata(file_path):
             break
     stem, separator, extension = filename.rpartition(".")
     if not separator:
-        stem, extension = filename, "docx"
+        stem, extension = filename, _DEFAULT_FILE_TYPE
 
-    domain = folder_segments[0] if folder_segments else "general"
-    category = folder_segments[1] if len(folder_segments) > 1 else domain
+    if folder_segments:
+        raw_domain = folder_segments[0]
+    else:
+        raw_domain = _DEFAULT_DOMAIN
+    domain = _infer_semantic_domain(folder_segments, raw_domain)
+    if len(folder_segments) > 1:
+        category = folder_segments[1]
+    else:
+        category = raw_domain
+    if folder_segments:
+        folder_name = folder_segments[-1]
+    else:
+        folder_name = _DEFAULT_FOLDER
     return {
         "domain": domain,
         "category": category,
-        "folder": folder_segments[-1] if folder_segments else "root",
+        "doc_type": _infer_doc_type(stem, domain, extension),
+        "folder": folder_name,
         "document_name": stem,
         "file_type": extension.lower(),
         "path_hierarchy": folder_segments,
@@ -126,13 +134,15 @@ def generate_chunk_id(source, index, content=None, prefix=None):
 
 
 def _as_text(value):
-    return "" if value is None else str(value)
+    if value is None:
+        return ""
+    return str(value)
 
 
 def build_universal_chunk(
     chunk_id=None,
     parent_id=None,
-    source="unknown.docx",
+    source=_DEFAULT_SOURCE_FILENAME,
     chunk_type="text",
     breadcrumb="",
     section_title="",
@@ -148,12 +158,20 @@ def build_universal_chunk(
     """Assemble the canonical chunk, preserving source names and content exactly."""
     source = _as_text(source)
     if not source.strip():
-        source = "unknown.docx"
+        source = _DEFAULT_SOURCE_FILENAME
     if chunk_id is None:
         chunk_id = generate_chunk_id(source, 0, content=content)
     if not isinstance(business_metadata, dict):
         business_metadata = infer_business_metadata(source)
 
+    if isinstance(table_data, (list, dict)):
+        clean_table_data = table_data
+    else:
+        clean_table_data = None
+    if isinstance(images, list):
+        clean_images = list(images)
+    else:
+        clean_images = []
     return {
         "chunk_id": str(chunk_id).strip(),
         "parent_id": _as_text(parent_id).strip(),
@@ -166,8 +184,8 @@ def build_universal_chunk(
         "business_metadata": dict(business_metadata),
         "prev_chunk_id": _as_text(prev_chunk_id).strip(),
         "next_chunk_id": _as_text(next_chunk_id).strip(),
-        "table_data": table_data if isinstance(table_data, (list, dict)) else None,
-        "images": list(images) if isinstance(images, list) else [],
+        "table_data": clean_table_data,
+        "images": clean_images,
     }
 
 
@@ -204,7 +222,10 @@ def require_index_ready(chunks):
     """Reject explicitly unresolved canonical chunks at ingestion boundaries."""
     for chunk in chunks:
         metadata = chunk.get("business_metadata")
-        quality = metadata.get("quality") if isinstance(metadata, dict) else None
+        if isinstance(metadata, dict):
+            quality = metadata.get("quality")
+        else:
+            quality = None
         if isinstance(quality, dict) and quality.get("index_ready") is False:
             raise ValueError("Chunk is not ready for indexing: " + str(chunk.get("chunk_id") or "unknown"))
 

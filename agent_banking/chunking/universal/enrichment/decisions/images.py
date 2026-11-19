@@ -1,7 +1,18 @@
 """Caption links and literal source evidence for figure chunks."""
+from copy import deepcopy
+
+from agent_banking.chunking.config.prompt_config import (
+    CAPTION_ATTACHMENT_PROMPT,
+    IMAGE_TITLE_CONTEXT_PROMPT,
+    render_prompt,
+)
+from agent_banking.chunking.config.settings import get_config_section
 from agent_banking.core.models import model_primary
 
 from ..image_context import apply_context_selection, region_key
+
+_DECISION_IMG_CFG = get_config_section("enrichment")["decisions"]["images"]
+_DECISION_REASON = get_config_section("enrichment")["image_context"]["decision_reason"]
 
 
 def _attach_caption(ir, caption_block, target_block, existing):
@@ -37,20 +48,14 @@ def attach_visual_captions(ir, ask_decisions, cache=None):
             qid = "cap_" + str(len(ambiguous))
             ambiguous.append({
                 "id": qid,
-                "caption_text": block["text"][:200],
+                "caption_text": block["text"][:_DECISION_IMG_CFG["caption_preview_chars"]],
                 "prev_visual_type": prev_visual["type"],
                 "next_visual_type": next_visual["type"],
             })
             ambiguous_map[qid] = (block, prev_visual, next_visual)
-            questions[qid] = {
-                "type": "choice",
-                "instructions": "Determine whether caption " + qid + " labels the preceding visual or introduces the following visual.",
-                "criteria": {
-                    "ATTACH_PREV": "Caption describes or labels the immediately preceding visual/table",
-                    "ATTACH_NEXT": "Caption/title introduces the immediately following visual/table",
-                    "STANDALONE": "Independent text not labeling either visual",
-                },
-            }
+            cap_spec = deepcopy(CAPTION_ATTACHMENT_PROMPT)
+            cap_spec["instructions"] = render_prompt(cap_spec["instructions"], qid=qid)
+            questions[qid] = cap_spec
     if questions:
         answers = ask_decisions("caption_attachment", {"candidates": ambiguous}, questions, cache=cache)
         for qid, (block, prev_visual, next_visual) in ambiguous_map.items():
@@ -96,6 +101,7 @@ def _image_inputs(ir):
     claimed_captions = {block["id"] for entries in captions.values() for block in entries}
     heading = None
     paragraphs = []
+    para_window = _DECISION_IMG_CFG["preceding_paragraphs_window"]
     for index, block in enumerate(blocks):
         if region_key(block) != "body":
             continue
@@ -105,7 +111,7 @@ def _image_inputs(ir):
         elif block["type"] == "paragraph":
             if _text(block):
                 paragraphs.append(block)
-                paragraphs = paragraphs[-4:]
+                paragraphs = paragraphs[-para_window:]
         elif block["type"] == "image":
             preceding = adjacent_source(blocks, index, -1, {"paragraph", "caption", "heading"})
             following = adjacent_source(blocks, index, 1, {"paragraph", "caption"})
@@ -172,7 +178,7 @@ def _record_evidence(context, choice, bundle, model, ir, existing):
     apply_context_selection(block, candidates, {
         "include": bool(evidence),
         "evidence": evidence,
-        "reason": "decision_model_image_title_and_context",
+        "reason": _DECISION_REASON,
     }, model)
     info.update({"title": title, "title_source": "decision_model",
                  "section_title": _text(heading), "bundle_preceding": bundle and bool(evidence)})
@@ -188,39 +194,29 @@ def resolve_image_titles_and_context(ir, ask_decisions, cache=None):
         iid = "img_" + str(len(entries))
         info = block["image"]
         embedded = _native_title(info) or info.get("alt_text", "") or info.get("native_text", "")
-        next_type = "none" if following is None else following["type"]
+        if following is None:
+            next_type = "none"
+        else:
+            next_type = following["type"]
         entries.append({
             "id": iid,
-            "section_heading": _text(heading)[:200],
-            "prev_1_text": _text(preceding)[:200],
+            "section_heading": _text(heading)[:_DECISION_IMG_CFG["section_heading_chars"]],
+            "prev_1_text": _text(preceding)[:_DECISION_IMG_CFG["prev_1_chars"]],
             "prev_paragraphs_count": len(paragraphs),
-            "prev_paragraphs_preview": [_text(item)[:180] for item in paragraphs],
+            "prev_paragraphs_preview": [_text(item)[:_DECISION_IMG_CFG["prev_paragraph_chars"]] for item in paragraphs],
             "next_1_type": next_type,
-            "next_1_text": _text(following)[:200],
-            "embedded_text": embedded[:200],
-            "attached_captions": [_text(item)[:200] for item in explicit],
+            "next_1_text": _text(following)[:_DECISION_IMG_CFG["next_1_chars"]],
+            "embedded_text": embedded[:_DECISION_IMG_CFG["embedded_chars"]],
+            "attached_captions": [_text(item)[:_DECISION_IMG_CFG["attached_caption_chars"]] for item in explicit],
         })
         contexts[iid] = context
-        questions[iid + "_title"] = {
-            "type": "choice",
-            "instructions": "Select the best source for the descriptive title of image/figure " + iid + ".",
-            "criteria": {
-                "NEXT_CAPTION": "The immediately following block is an explicit title or caption",
-                "PREV_BLOCK": "The immediately preceding block is a direct title or lead-in",
-                "SECTION_HEADING": "The enclosing section heading best titles the figure",
-                "EMBEDDED_META": "The embedded alt text, title or native text best titles the figure",
-                "DECORATIVE_SKIP": "Decorative image with no meaningful surrounding title, caption or explanation",
-            },
-        }
+        title_spec = deepcopy(IMAGE_TITLE_CONTEXT_PROMPT["title"])
+        title_spec["instructions"] = render_prompt(title_spec["instructions"], iid=iid)
+        questions[iid + "_title"] = title_spec
         if paragraphs:
-            questions[iid + "_bundle"] = {
-                "type": "choice",
-                "instructions": "Decide whether the preceding blocks should be bundled with image " + iid + ".",
-                "criteria": {
-                    "BUNDLE_PRECEDING": "Preceding blocks are diagram labels, step boxes or direct lead-in",
-                    "CAPTION_ONLY": "Preceding blocks are independent body prose",
-                },
-            }
+            bundle_spec = deepcopy(IMAGE_TITLE_CONTEXT_PROMPT["bundle"])
+            bundle_spec["instructions"] = render_prompt(bundle_spec["instructions"], iid=iid)
+            questions[iid + "_bundle"] = bundle_spec
     if not entries:
         return
     answers = ask_decisions("image_title_and_context", {"images": entries}, questions, cache=cache)
@@ -233,4 +229,5 @@ def resolve_image_titles_and_context(ir, ask_decisions, cache=None):
         if title_choice is None:
             continue
         bundle = answers.get(iid + "_bundle", {}).get("choice") == "BUNDLE_PRECEDING"
-        _record_evidence(context, title_choice, bundle, model, ir, existing)
+        executed_model = answers[iid + "_title"].get("_routing", {}).get("model", model)
+        _record_evidence(context, title_choice, bundle, executed_model, ir, existing)

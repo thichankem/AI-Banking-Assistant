@@ -2,11 +2,11 @@
 Automated Tracing Collection Runner (Auto Tracing Node with Deduplication).
 ===========================================================================
 Features:
-1. Reads trace inputs from tracing/input/sample_trace_inputs.json.
+1. Reads trace inputs from configured tracing input file.
 2. Computes SHA-256 hash of each trace request.
 3. Checks StateTracker: Reuses previously traced requests (SKIP).
 4. Records spans and metrics for new trace queries.
-5. Emits results to: sample_trace_outputs.json.
+5. Emits results to configured tracing output file.
 
 MANDATORY INVARIANTS:
 1. NO __INIT__.PY.
@@ -15,10 +15,10 @@ MANDATORY INVARIANTS:
 4. 0% REGEX LAW.
 """
 
-import sys
 import json
-import time
 from pathlib import Path
+import sys
+import time
 
 if sys.platform == "win32":
     try:
@@ -32,8 +32,21 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent_banking.core.settings import Config
-from agent_banking.tracing.tracer import BankingTracer
 from agent_banking.state_tracker import StateTracker
+from agent_banking.tracing.config.settings import TracingConfig, load_tracing_prompts
+from agent_banking.tracing.tracer import BankingTracer
+
+
+_runner_cfg = dict(TracingConfig.RUNNER_SETTINGS or {})
+_prompts = load_tracing_prompts()
+_runner_msgs = dict(getattr(_prompts, "RUNNER_MESSAGES", {}) or {})
+
+
+def _msg(key, **kwargs):
+    tpl = str(_runner_msgs.get(key) or "")
+    if not tpl:
+        return ""
+    return tpl.format(**kwargs)
 
 
 def run_auto_tracing(
@@ -41,51 +54,60 @@ def run_auto_tracing(
     output_dir=None,
     force=False
 ):
-    """
-    Tu dong xu ly tracing tu input sang output kem co che chong trung lap.
-    """
+    """Run automated tracing collection with state deduplication."""
     cfg = Config()
-    in_dir = PROJECT_ROOT / "agent_banking" / "tracing" / "input"
+    input_dir_name = str(_runner_cfg.get("input_dir_name") or "input")
+    output_dir_name = str(_runner_cfg.get("output_dir_name") or "output")
+    input_filename = str(_runner_cfg.get("input_filename") or "")
+    output_filename = str(_runner_cfg.get("output_filename") or "")
+    state_filename = str(_runner_cfg.get("state_filename") or "")
+    default_session_id = str(_runner_cfg.get("default_session_id") or "")
+    sim_parser_ms = float(_runner_cfg.get("simulated_parser_duration_ms") or 0.0)
+    sim_embed_ms = float(_runner_cfg.get("simulated_embedding_duration_ms") or 0.0)
+    sim_embed_dim = int(_runner_cfg.get("simulated_embedding_dimension") or 0)
+    preview_chars = int(_runner_cfg.get("query_preview_chars") or 0)
+
+    in_dir = PROJECT_ROOT / "agent_banking" / "tracing" / input_dir_name
     in_dir.mkdir(parents=True, exist_ok=True)
 
     if output_dir is not None:
         out_path = Path(output_dir)
     else:
-        out_path = PROJECT_ROOT / "agent_banking" / "tracing" / "output"
+        out_path = PROJECT_ROOT / "agent_banking" / "tracing" / output_dir_name
     out_path.mkdir(parents=True, exist_ok=True)
 
-    state_file = out_path / ".state_tracker.json"
+    state_file = out_path / state_filename
     tracker = StateTracker(state_file)
     if force:
         tracker.clear()
 
-    # 1. Tim nguon input
+    # 1. Locate trace input source
     target_in_file = None
     if input_file is not None:
         target_in_file = Path(input_file)
     else:
-        candidate = in_dir / "sample_trace_inputs.json"
+        candidate = in_dir / input_filename
         if candidate.exists():
             target_in_file = candidate
 
     if target_in_file is None or not target_in_file.exists():
-        print(f"⚠️ Khong tim thay tap tin trace input trong: {in_dir}")
+        print(_msg("missing_input_file", in_dir=in_dir))
         return []
 
-    print(f"\n{'='*75}")
-    print(f"▶ [MODULE 9: TRACING] Input: {target_in_file.name} -> Output: {out_path}")
-    print(f"{'='*75}")
+    print(f"\n{'=' * 75}")
+    print(_msg("banner_line_template", input_name=target_in_file.name, out_path=out_path))
+    print(f"{'=' * 75}")
 
     with open(target_in_file, "r", encoding="utf-8-sig") as fp:
         raw_traces = json.load(fp)
 
     if not raw_traces:
-        print("⚠️ Danh sach trace input rong.")
+        print(_msg("empty_input"))
         return []
 
-    # 2. Doc ket qua cu de tai su dung
+    # 2. Load previous trace outputs for reuse
     prev_results = {}
-    prev_file = out_path / "sample_trace_outputs.json"
+    prev_file = out_path / output_filename
     if prev_file.exists() and not force:
         try:
             with open(prev_file, "r", encoding="utf-8") as fp:
@@ -99,11 +121,11 @@ def run_auto_tracing(
                 for item in raw_traces:
                     tid = item.get("trace_id", "")
                     q = item.get("query", "")
-                    sess = item.get("session_id", "default")
+                    sess = item.get("session_id", default_session_id)
                     t_hash_map[tid] = tracker.compute_text_hash(f"{tid}:{q}:{sess}")
                 if tracker.are_all_items_processed(t_hash_map):
-                    print(f"  ⏭️ [SKIP ALL] Tat ca {len(raw_traces)} traces da duoc ghi log truoc do. Bo qua toan bo trong 0.0s!")
-                    print(f"✅ [Tracing Hoan Tat] Da xuat {len(prev_list)} trace records vao: {prev_file} trong 0.0s")
+                    print(_msg("skip_all_template", total=len(raw_traces)))
+                    print(_msg("skip_all_done_template", total=len(prev_list), prev_file=prev_file))
                     return prev_list
         except Exception:
             prev_results = {}
@@ -117,8 +139,7 @@ def run_auto_tracing(
     for item in raw_traces:
         tid = item.get("trace_id", "tr_" + str(len(trace_outputs) + 1))
         q = item.get("query", "")
-        sess = item.get("session_id", "default")
-        meta = item.get("metadata", {})
+        sess = item.get("session_id", default_session_id)
 
         trace_hash = tracker.compute_text_hash(f"{tid}:{q}:{sess}")
         is_done = tracker.is_processed(tid, trace_hash)
@@ -127,17 +148,17 @@ def run_auto_tracing(
             cached_res = dict(prev_results[tid])
             trace_outputs.append(cached_res)
             skipped_count += 1
-            print(f"  [{tid}] [SKIP] '{q[:35]}...' (Da ghi trace)")
+            print(_msg("skip_item_template", tid=tid, q_preview=q[:preview_chars]))
         else:
             t0 = time.time()
             with tracer.trace_query(query=q) as trace:
                 trace.record_query_parser(
                     input_query=q,
                     parsed=type("DummyParsed", (), {"normalized_query": q, "keywords": q.split()})(),
-                    duration_ms=0.5
+                    duration_ms=sim_parser_ms
                 )
-                trace.record_embedding(num_texts=1, dimension=1024, duration_ms=1.2)
-                trace.finish(answer="Trace record simulated successfully", is_blocked=False)
+                trace.record_embedding(num_texts=1, dimension=sim_embed_dim, duration_ms=sim_embed_ms)
+                trace.finish(answer=_msg("simulated_answer"), is_blocked=False)
 
             dt_ms = round((time.time() - t0) * 1000, 2)
             res = {
@@ -152,17 +173,17 @@ def run_auto_tracing(
             trace_outputs.append(res)
             tracker.record_processed(tid, trace_hash, {"status": "RECORDED"})
             new_count += 1
-            print(f"  [{tid}] [NEW]  '{q[:35]}...' -> Ghi trace thanh cong ({dt_ms}ms)")
+            print(_msg("new_item_template", tid=tid, q_preview=q[:preview_chars], dt_ms=dt_ms))
 
     tracker.save()
     total_elapsed = round(time.time() - start_t, 2)
 
-    # 3. Xuat ket qua
-    out_file = out_path / "sample_trace_outputs.json"
+    # 3. Export trace outputs
+    out_file = out_path / output_filename
     with open(out_file, "w", encoding="utf-8") as fp:
         json.dump(trace_outputs, fp, ensure_ascii=False, indent=2)
 
-    print(f"✅ [Tracing Hoan Tat] Da xuat {len(trace_outputs)} trace records vao: {out_file} (Moi: {new_count}, Bo qua: {skipped_count}) trong {total_elapsed}s")
+    print(_msg("done_template", total=len(trace_outputs), out_file=out_file, new_count=new_count, skipped_count=skipped_count, elapsed=total_elapsed))
     return trace_outputs
 
 

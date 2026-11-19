@@ -33,6 +33,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent_banking.core.settings import Config
 from agent_banking.chunking.universal.planning.schema import payload_index_key
+from agent_banking.reranking.config.settings import RerankingConfig
 from agent_banking.reranking.rag_reranker import BankingReranker
 from agent_banking.state_tracker import StateTracker
 
@@ -44,10 +45,14 @@ def extract_candidate_ids(candidates):
     cand_ids = []
     if not isinstance(candidates, list):
         return cand_ids
+    hash_len = RerankingConfig.RERANKING_CANDIDATE_TEXT_HASH_LEN
     for idx, c in enumerate(candidates):
         if isinstance(c, dict):
             chunk_obj = c.get("chunk")
-            cid = payload_index_key(chunk_obj) if isinstance(chunk_obj, dict) else None
+            if isinstance(chunk_obj, dict):
+                cid = payload_index_key(chunk_obj)
+            else:
+                cid = None
             if not cid:
                 cid = payload_index_key(c) or c.get("id")
             if not cid and isinstance(chunk_obj, dict):
@@ -59,7 +64,7 @@ def extract_candidate_ids(candidates):
         elif isinstance(c, str):
             c_text = c.strip()
             if c_text != "":
-                cand_ids.append(StateTracker.compute_text_hash(c_text)[:16])
+                cand_ids.append(StateTracker.compute_text_hash(c_text)[:hash_len])
             else:
                 cand_ids.append(str(idx))
         else:
@@ -79,7 +84,7 @@ def _write_reranking_manifest(
     """
     Emit reranking_manifest.json with execution metrics.
     """
-    manifest_file = out_path / "reranking_manifest.json"
+    manifest_file = out_path / RerankingConfig.RERANKING_MANIFEST_FILENAME
     manifest_data = {
         "module": "reranking",
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -90,9 +95,9 @@ def _write_reranking_manifest(
         "skipped_queries": skipped_queries,
         "duration_ms": duration_ms,
         "files": {
-            "reranked_chunks": "output/reranked_chunks.json",
-            "latest_reranked": "output/latest_reranked.json",
-            "state_tracker": "output/.state_tracker.json"
+            "reranked_chunks": "output/" + RerankingConfig.RERANKING_OUTPUT_CHUNKS_FILENAME,
+            "latest_reranked": "output/" + RerankingConfig.RERANKING_LATEST_OUTPUT_FILENAME,
+            "state_tracker": "output/" + RerankingConfig.RERANKING_STATE_TRACKER_FILENAME
         }
     }
     try:
@@ -107,11 +112,11 @@ def sync_downstream_generator(out_file):
     """
     Synchronize reranking output to generator/input/top_chunks.json.
     """
-    downstream_in = PROJECT_ROOT / "agent_banking" / "generator" / "input"
+    downstream_in = PROJECT_ROOT / RerankingConfig.RERANKING_DOWNSTREAM_GENERATOR_INPUT_DIR
     if downstream_in.exists():
         try:
             import shutil
-            shutil.copy2(str(out_file), str(downstream_in / "top_chunks.json"))
+            shutil.copy2(str(out_file), str(downstream_in / RerankingConfig.RERANKING_DOWNSTREAM_OUTPUT_FILENAME))
         except Exception:
             pass
 
@@ -119,7 +124,7 @@ def sync_downstream_generator(out_file):
 def run_auto_reranking(
     input_file=None,
     output_dir=None,
-    top_k=3,
+    top_k=None,
     force=False
 ):
     """
@@ -127,36 +132,40 @@ def run_auto_reranking(
     """
     start_t = time.time()
     cfg = Config()
-    in_dir = PROJECT_ROOT / "agent_banking" / "reranking" / "input"
+    if top_k is None:
+        top_k = getattr(cfg, "RERANK_TOP_K", RerankingConfig.RERANK_TOP_K)
+
+    in_dir = PROJECT_ROOT / RerankingConfig.RERANKING_INPUT_DIR
     in_dir.mkdir(parents=True, exist_ok=True)
 
     if output_dir is not None:
         out_path = Path(output_dir)
     else:
-        out_path = PROJECT_ROOT / "agent_banking" / "reranking" / "output"
+        out_path = PROJECT_ROOT / RerankingConfig.RERANKING_OUTPUT_DIR
     out_path.mkdir(parents=True, exist_ok=True)
 
-    state_file = out_path / ".state_tracker.json"
+    state_file = out_path / RerankingConfig.RERANKING_STATE_TRACKER_FILENAME
     tracker = StateTracker(state_file)
     if force:
         tracker.clear()
 
     # 1. Locate retrieval candidates source
+    candidates_filename = RerankingConfig.RERANKING_CANDIDATES_FILENAME
     target_in_file = None
     if input_file is not None:
         target_in_file = Path(input_file)
     else:
-        candidates_in = in_dir / "candidates.json"
+        candidates_in = in_dir / candidates_filename
         if candidates_in.exists():
             target_in_file = candidates_in
         else:
-            ret_out = PROJECT_ROOT / "agent_banking" / "retrieval" / "output" / "retrieval_candidates.json"
+            ret_out = PROJECT_ROOT / RerankingConfig.RERANKING_RETRIEVAL_OUTPUT_CANDIDATES_PATH
             if ret_out.exists():
                 target_in_file = ret_out
 
     if target_in_file is None or not target_in_file.exists():
-        print(f"[Warning] candidates.json not found in: {in_dir}")
-        print("Please provide 'candidates.json' to agent_banking/reranking/input/")
+        print(f"[Warning] {candidates_filename} not found in: {in_dir}")
+        print(f"Please provide '{candidates_filename}' to {RerankingConfig.RERANKING_INPUT_DIR}/")
         return []
 
     print(f"\n{'='*75}")
@@ -177,7 +186,7 @@ def run_auto_reranking(
             raw_retrieval = [raw_retrieval]
 
     # Sync file to in_dir (auto mode only)
-    in_copy = in_dir / "candidates.json"
+    in_copy = in_dir / candidates_filename
     if input_file is None and output_dir is None and target_in_file != in_copy:
         try:
             with open(in_copy, "w", encoding="utf-8") as fp:
@@ -187,7 +196,10 @@ def run_auto_reranking(
 
     # 2. Read previous reranked results for deduplication
     prev_results = {}
-    prev_file = out_path / "reranked_chunks.json"
+    out_chunks_filename = RerankingConfig.RERANKING_OUTPUT_CHUNKS_FILENAME
+    latest_filename = RerankingConfig.RERANKING_LATEST_OUTPUT_FILENAME
+    rerank_model = getattr(cfg, "RERANKER_MODEL", RerankingConfig.RERANKER_MODEL)
+    prev_file = out_path / out_chunks_filename
     if prev_file.exists():
         if not force:
             try:
@@ -213,7 +225,7 @@ def run_auto_reranking(
                                 q_hash_map[iq] = tracker.compute_text_hash(f"{iq}:{icand_str}:{top_k}")
                         if tracker.are_all_items_processed(q_hash_map):
                             print(f"  [SKIP ALL] All {len(raw_retrieval)} queries already reranked. Skipping in 0.0s.")
-                            latest_file = out_path / "latest_reranked.json"
+                            latest_file = out_path / latest_filename
                             if prev_list:
                                 try:
                                     with open(latest_file, "w", encoding="utf-8") as fp:
@@ -223,7 +235,7 @@ def run_auto_reranking(
                             duration_ms = round((time.time() - start_t) * 1000, 2)
                             _write_reranking_manifest(
                                 out_path=out_path,
-                                rerank_model=cfg.RERANKER_MODEL,
+                                rerank_model=rerank_model,
                                 top_k=top_k,
                                 total_queries=len(raw_retrieval),
                                 processed_queries=0,
@@ -238,12 +250,13 @@ def run_auto_reranking(
                 prev_results = {}
 
     reranker = BankingReranker(
-        model_name=cfg.RERANKER_MODEL
+        model_name=rerank_model
     )
 
     reranked_results = []
     skipped_count = 0
     new_count = 0
+    preview_chars = RerankingConfig.RERANKING_QUERY_PREVIEW_CHARS
 
     for idx, item in enumerate(raw_retrieval, start=1):
         if not isinstance(item, dict):
@@ -277,7 +290,7 @@ def run_auto_reranking(
                 cached_res["query_id"] = q_id
                 reranked_results.append(cached_res)
                 skipped_count += 1
-                display_q = q[:40]
+                display_q = q[:preview_chars]
                 print(f"  [{q_id:02d}] [SKIP] '{display_q}...' (Cached)")
                 continue
 
@@ -306,7 +319,7 @@ def run_auto_reranking(
         reranked_results.append(res)
         tracker.record_processed(q, q_hash, {"reranked_count": len(top_chunks)})
         new_count += 1
-        display_q = q[:40]
+        display_q = q[:preview_chars]
         print(f"  [{q_id:02d}] [NEW]  '{display_q}...' -> Refined Top-{len(top_chunks)} chunks ({dt_ms}ms)")
 
     tracker.save()
@@ -314,18 +327,18 @@ def run_auto_reranking(
     total_duration_ms = round((time.time() - start_t) * 1000, 2)
 
     # 3. Export results
-    out_file = out_path / "reranked_chunks.json"
+    out_file = out_path / out_chunks_filename
     with open(out_file, "w", encoding="utf-8") as fp:
         json.dump(reranked_results, fp, ensure_ascii=False, indent=2)
 
     if reranked_results:
-        latest_file = out_path / "latest_reranked.json"
+        latest_file = out_path / latest_filename
         with open(latest_file, "w", encoding="utf-8") as fp:
             json.dump(reranked_results[-1], fp, ensure_ascii=False, indent=2)
 
     _write_reranking_manifest(
         out_path=out_path,
-        rerank_model=cfg.RERANKER_MODEL,
+        rerank_model=rerank_model,
         top_k=top_k,
         total_queries=len(raw_retrieval),
         processed_queries=new_count,

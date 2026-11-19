@@ -1,4 +1,4 @@
-"""Response profiles for the ReAct agent, with optional local overrides."""
+"""Response profiles and prompts for the ReAct agent, loaded from local prompts config."""
 
 from importlib import import_module
 
@@ -10,6 +10,26 @@ except ModuleNotFoundError as exc:
     from agent_banking.agent.config import default_profiles as _profiles
 
 
-PERSONA_PROFILES = _profiles.PERSONA_PROFILES
-TONE_PROFILES = _profiles.TONE_PROFILES
-FORMAT_PROFILES = _profiles.FORMAT_PROFILES
+PERSONA_PROFILES = getattr(_profiles, "PERSONA_PROFILES", {})
+TONE_PROFILES = getattr(_profiles, "TONE_PROFILES", {})
+FORMAT_PROFILES = getattr(_profiles, "FORMAT_PROFILES", {})
+SPECIALIST_PROMPTS = getattr(_profiles, "SPECIALIST_PROMPTS", {})
+MESSAGES = getattr(_profiles, "MESSAGES", {})
+
+
+def get_prompt(name: str, default: str = "") -> str:
+    value = getattr(_profiles, name, default)
+    if isinstance(value, str):
+        return value
+    return default
+
+
+def get_messages(section: str = "") -> dict:
+    if not isinstance(MESSAGES, dict):
+        return {}
+    if not section:
+        return MESSAGES
+    value = MESSAGES.get(section, {})
+    if isinstance(value, dict):
+        return value
+    return {}

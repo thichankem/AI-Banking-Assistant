@@ -1,13 +1,21 @@
-"""Models in descending priority; credentials are environment references."""
+"""Model specifications loaded from local YAML configuration."""
 
-MODELS = [
-    {
-        "name": "primary",
-        "model_env": "MODEL",
-        "model_default": "",
-        "url_env": "BASE_URL",
-        "api_key_env": "API_KEY",
-        "timeout": 45,
-        "attempts": 1,
-    },
-]
+from pathlib import Path
+import yaml
+
+
+def _load_models() -> list:
+    yaml_path = Path(__file__).resolve().parent / "settings" / "models.yaml"
+    if not yaml_path.is_file():
+        return []
+    with open(yaml_path, "r", encoding="utf-8-sig") as f:
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        raise ValueError("Agent models configuration must be a mapping")
+    models = data.get("models", [])
+    if not isinstance(models, list):
+        raise ValueError("Agent models configuration 'models' must be a list")
+    return list(models)
+
+
+MODELS = _load_models()

@@ -47,7 +47,10 @@ def table_fragment_data(block, rows, row_start):
             "html": render_structured_html_table(headers, rows, title, cells=[*header_cells, *cells],
                                                  header_grid=header_grid, row_start=row_start)}
     row_provenance = table.get("row_provenance", [])
-    source_rows = row_provenance[row_start:row_end] if table["rows"] else row_provenance[:header_count]
+    if table["rows"]:
+        source_rows = row_provenance[row_start:row_end]
+    else:
+        source_rows = row_provenance[:header_count]
     if source_rows:
         data["row_provenance"] = source_rows
     for key in ("parent_cell", "title_source_block_id", "header_occurrences"):
@@ -94,7 +97,10 @@ def render_structured_html_table(headers, rows, title="", *, cells=(), header_gr
     if title:
         parts.append("<caption>" + escape_html(title) + "</caption>")
     if header_grid is None:
-        header_grid = [headers] if headers else []
+        if headers:
+            header_grid = [headers]
+        else:
+            header_grid = []
     if row_start is None:
         row_start = len(header_grid)
     selected = list(enumerate(header_grid)) + list(enumerate(rows, row_start))
@@ -117,7 +123,10 @@ def render_structured_html_table(headers, rows, title="", *, cells=(), header_gr
     # heading/body boundary, which separate thead/tbody groups cannot render.
     parts.append("<tbody>")
     for index, (_, row) in enumerate(selected):
-        tag = "th" if index < len(header_grid) else "td"
+        if index < len(header_grid):
+            tag = "th"
+        else:
+            tag = "td"
         parts.append("<tr>")
         for column, value in enumerate(row):
             if (index, column) in hidden:

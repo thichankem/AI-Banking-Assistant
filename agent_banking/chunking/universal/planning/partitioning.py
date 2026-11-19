@@ -2,10 +2,19 @@
 import math
 from bisect import bisect_right
 
+from agent_banking.chunking.config.settings import get_config_section
 from ..text.boundaries import safe_boundaries
 
+_PART_CFG = get_config_section("planning")["partitioning"]
+_DEFAULT_STRIDE = _PART_CFG["stride"]
+_MAX_RAW_CHARS_PER_ATOM = _PART_CFG["max_raw_chars_per_atom"]
+_COHESION_WEIGHT = _PART_CFG["cohesion_weight"]
+_COHESION_POWER = _PART_CFG["cohesion_power"]
+_BOUNDARY_WEIGHT = _PART_CFG["boundary_weight"]
+_SIZE_PENALTY_WEIGHT = _PART_CFG["size_penalty_weight"]
 
-def atoms_for(blocks, budget, stride=96):
+
+def atoms_for(blocks, budget, stride=_DEFAULT_STRIDE):
     if type(stride) is not int or stride < 1:
         raise ValueError("Semantic atom stride must be a positive integer")
     atoms = []
@@ -19,8 +28,8 @@ def atoms_for(blocks, budget, stride=96):
         ends.add(len(text))
         # Some tokenizers normalize large runs of whitespace or invisible
         # characters to a handful of tokens. Cap model input by raw length too.
-        if len(text) > 960:
-            ends.update(range(960, len(text), 960))
+        if len(text) > _MAX_RAW_CHARS_PER_ATOM:
+            ends.update(range(_MAX_RAW_CHARS_PER_ATOM, len(text), _MAX_RAW_CHARS_PER_ATOM))
         safe = safe_boundaries(text, protect_markup=False)
         ends = {safe[bisect_right(safe, position) - 1] for position in ends}
         start = 0
@@ -48,7 +57,7 @@ def optimal_partition(text, candidates, fits, count, target, *, first_start=None
     costs[0] = 0
     interior = [0.0]
     for index, point in enumerate(points):
-        loss = 3 * candidates.get(point, 0.0) ** 4
+        loss = _COHESION_WEIGHT * candidates.get(point, 0.0) ** _COHESION_POWER
         if index > 0 and not text[points[index - 1]:point].strip():
             loss = 0.0
         interior.append(interior[-1] + loss)
@@ -79,10 +88,10 @@ def optimal_partition(text, candidates, fits, count, target, *, first_start=None
                 continue
             score = candidates.get(points[right], 0.0)
             cohesion_loss = interior[right] - interior[left + 1]
-            size_penalty = 24 * ((size - target) / target) ** 2
-            cost = costs[left] + 1 + 5 * (1 - score) + cohesion_loss + size_penalty
+            size_penalty = _SIZE_PENALTY_WEIGHT * ((size - target) / target) ** 2
+            cost = costs[left] + 1 + _BOUNDARY_WEIGHT * (1 - score) + cohesion_loss + size_penalty
             if right == len(points) - 1:
-                cost -= 5 * (1 - score)
+                cost -= _BOUNDARY_WEIGHT * (1 - score)
             if penalty is not None:
                 cost += penalty(part, score, size)
             if cost < costs[right]:

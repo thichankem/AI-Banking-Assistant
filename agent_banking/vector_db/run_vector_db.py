@@ -40,6 +40,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent_banking.core.settings import Config
 from agent_banking.chunking.universal.extraction.sources import legacy_source_resolver, source_key
 from agent_banking.chunking.universal.planning.schema import require_index_ready
+from agent_banking.vector_db.config.settings import VectorDBConfig
 from agent_banking.vector_db.qdrant_store import QdrantBankingStore, mark_publication_chunks, publication_scope
 from agent_banking.state_tracker import StateTracker
 
@@ -69,16 +70,16 @@ def run_auto_indexing(
         input_file = None
 
     cfg = Config()
-    in_dir = PROJECT_ROOT / "agent_banking" / "vector_db" / "input"
+    in_dir = PROJECT_ROOT / VectorDBConfig.VECTOR_DB_INPUT_DIR
     in_dir.mkdir(parents=True, exist_ok=True)
 
     if output_dir is not None:
         out_path = Path(output_dir)
     else:
-        out_path = PROJECT_ROOT / "agent_banking" / "vector_db" / "output"
+        out_path = PROJECT_ROOT / VectorDBConfig.VECTOR_DB_OUTPUT_DIR
     out_path.mkdir(parents=True, exist_ok=True)
 
-    state_file = out_path / ".state_tracker.json"
+    state_file = out_path / VectorDBConfig.VECTOR_DB_STATE_TRACKER_FILENAME
     tracker = StateTracker(state_file)
     previous_records = tracker._active_records().copy()
     if force and not snapshot:
@@ -86,13 +87,14 @@ def run_auto_indexing(
 
     # 1. Tim nguon va dong bo embedded chunks
     target_in_file = None
-    in_copy = in_dir / "embedded_chunks.json"
+    in_chunks_name = VectorDBConfig.VECTOR_DB_INPUT_CHUNKS_FILENAME
+    in_copy = in_dir / in_chunks_name
 
     if embedded_chunks is None:
         if input_file is not None:
             target_in_file = Path(input_file)
         else:
-            embed_out = PROJECT_ROOT / "agent_banking" / "embedding" / "output" / "embedded_chunks.json"
+            embed_out = PROJECT_ROOT / VectorDBConfig.VECTOR_DB_EMBEDDING_OUTPUT_CHUNKS_PATH
             if embed_out.exists():
                 need_copy = not in_copy.exists() or embed_out.read_bytes() != in_copy.read_bytes()
                 if need_copy:
@@ -100,13 +102,13 @@ def run_auto_indexing(
                         if embed_out.resolve() != in_copy.resolve():
                             shutil.copyfile(str(embed_out), str(in_copy))
                     except Exception as e_sync:
-                        print(f"⚠️ [Sync Warning] Khong the dong bo embedded_chunks.json: {e_sync}")
+                        print(f"⚠️ [Sync Warning] Khong the dong bo {in_chunks_name}: {e_sync}")
                 target_in_file = in_copy
             elif in_copy.exists():
                 target_in_file = in_copy
         if target_in_file is None:
             print(f"⚠️ Khong tim thay tap tin embedded chunks trong: {in_dir}")
-            print("Vui long bo file 'embedded_chunks.json' vao agent_banking/vector_db/input/")
+            print(f"Vui long bo file '{in_chunks_name}' vao {VectorDBConfig.VECTOR_DB_INPUT_DIR}/")
             return {}
         if not target_in_file.exists():
             print(f"⚠️ Tap tin embedded chunks khong ton tai: {target_in_file}")
@@ -163,15 +165,11 @@ def run_auto_indexing(
             except Exception:
                 pass
 
-    canonical_payload_indexes = [
-        "source",
-        "chunk_type",
-        "parent_id",
-        "business_metadata.domain",
-        "business_metadata.category"
-    ]
+    canonical_payload_indexes = list(VectorDBConfig.VECTOR_DB_PAYLOAD_INDEX_FIELDS)
 
-    manifest_file = out_path / "indexing_manifest.json"
+    manifest_file = out_path / VectorDBConfig.VECTOR_DB_MANIFEST_FILENAME
+    collection_name = getattr(cfg, "QDRANT_COLLECTION", VectorDBConfig.QDRANT_COLLECTION)
+    embedding_dim = getattr(cfg, "EMBEDDING_DIM", VectorDBConfig.QDRANT_VECTOR_SIZE)
 
     # Kiem tra nhanh: Neu khong force va khong use_memory, kiem tra xem tat ca chunks da xu ly chua
     if not force and not snapshot:
@@ -210,12 +208,12 @@ def run_auto_indexing(
                             json.dump(cached_manifest, fp, ensure_ascii=False, indent=2)
 
                         total_pts = cached_manifest["total_points"]
-                        print(f"✅ [Vector DB Hoan Tat] Collection '{cfg.QDRANT_COLLECTION}' hien co {total_pts} points trong 0.0s")
+                        print(f"✅ [Vector DB Hoan Tat] Collection '{collection_name}' hien co {total_pts} points trong 0.0s")
                         return cached_manifest
                 except Exception:
                     pass
 
-    raw_storage = getattr(cfg, "QDRANT_STORAGE_PATH", "agent_banking/vector_db/qdrant_db")
+    raw_storage = getattr(cfg, "QDRANT_STORAGE_PATH", VectorDBConfig.QDRANT_STORAGE_PATH)
     storage_candidate = Path(str(raw_storage))
     if storage_candidate.is_absolute():
         resolved_storage = str(storage_candidate)
@@ -223,8 +221,8 @@ def run_auto_indexing(
         resolved_storage = str((PROJECT_ROOT / storage_candidate).resolve())
 
     store = QdrantBankingStore(
-        collection_name=cfg.QDRANT_COLLECTION,
-        dimension=cfg.EMBEDDING_DIM,
+        collection_name=collection_name,
+        dimension=embedding_dim,
         storage_path=resolved_storage,
         use_memory=use_memory
     )
@@ -234,7 +232,7 @@ def run_auto_indexing(
 
     # Snapshot mode upserts verified replacements before removing obsolete chunks.
     if force and not snapshot:
-        print(f"[*] Co --force duoc kich hoat -> Thuc hien Clean Rebuild collection '{cfg.QDRANT_COLLECTION}'...")
+        print(f"[*] Co --force duoc kich hoat -> Thuc hien Clean Rebuild collection '{collection_name}'...")
         store.recreate_collection()
         tracker.clear()
 
@@ -242,7 +240,10 @@ def run_auto_indexing(
     start_t = time.time()
     chunks_to_index = []
     skipped_count = 0
-    existing_ids = store.chunk_ids(scope=scope, index_keys=True) if snapshot and not force else set()
+    if snapshot and not force:
+        existing_ids = store.chunk_ids(scope=scope, index_keys=True)
+    else:
+        existing_ids = set()
     active_index_keys = set()
 
     for idx, c in enumerate(raw_chunks):
@@ -253,7 +254,7 @@ def run_auto_indexing(
 
         if snapshot:
             vector = c.get("vector")
-            if (not isinstance(vector, list) or len(vector) != cfg.EMBEDDING_DIM
+            if (not isinstance(vector, list) or len(vector) != embedding_dim
                     or not all(type(value) in (int, float) and isfinite(value) for value in vector)
                     or not any(vector)):
                 store.close()
@@ -362,8 +363,8 @@ def run_auto_indexing(
         "bm25_corpus_size": bm25_count,
         "total_elapsed_sec": total_elapsed,
         "module": "vector_db",
-        "collection_name": cfg.QDRANT_COLLECTION,
-        "dimension": cfg.EMBEDDING_DIM
+        "collection_name": collection_name,
+        "dimension": embedding_dim
     }
 
     with open(manifest_file, "w", encoding="utf-8") as fp:
@@ -371,7 +372,7 @@ def run_auto_indexing(
 
     store.close()
 
-    print(f"✅ [Vector DB Hoan Tat] Collection '{cfg.QDRANT_COLLECTION}' hien co {total_count} points (Nap moi: {len(chunks_to_index)}, Bo qua: {skipped_count}) trong {total_elapsed}s")
+    print(f"✅ [Vector DB Hoan Tat] Collection '{collection_name}' hien co {total_count} points (Nap moi: {len(chunks_to_index)}, Bo qua: {skipped_count}) trong {total_elapsed}s")
     return manifest_data
 
 

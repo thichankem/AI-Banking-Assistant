@@ -72,11 +72,14 @@ __pycache__/
 .pyre/
 .pytype/
 .hypothesis/
+.nox/
 build/
 dist/
 eggs/
 *.egg
 *.egg-info/
+*.whl
+pip-wheel-metadata/
 develop-eggs/
 .installed.cfg
 
@@ -94,6 +97,8 @@ develop-eggs/
 .cursor/
 .windsurf/
 .clinerules/
+.claude/
+.codex/
 .fleet/
 .zed/
 .aider*
@@ -136,8 +141,13 @@ pnpm-debug.log*
 *.dmp
 *.dump
 *.stackdump
+*.pid
+nohup.out
+*.interrupted-*.bin
 temp/
+**/temp/
 tmp/
+**/tmp/
 
 # ==============================================================================
 # Package Managers & Lock Files (Local Lock Files)
@@ -210,6 +220,8 @@ input/
 **/input/
 output/
 **/output/
+outputs/
+**/outputs/
 chunks_per_file/
 **/chunks_per_file/
 **/chunks_per_file/**
@@ -255,6 +267,7 @@ okbank_*
 chunk_*.json
 *embeddings*.json
 *.jsonl
+*.ndjson
 *.parquet
 *.csv
 *.tsv
@@ -300,12 +313,15 @@ visual_audit_report.json
 *.db
 *.db-shm
 *.db-wal
+*.db-journal
 *.sqlite
 *.sqlite3
 *.sqlite-shm
 *.sqlite-wal
+*.sqlite-journal
 *.sqlite3-shm
 *.sqlite3-wal
+*.sqlite3-journal
 *.wasm
 *.cache
 .cache/
@@ -320,11 +336,14 @@ phoenix_db/
 **/phoenix_db/
 qdrant_db/
 **/qdrant_db/
+qdrant_*/
+**/qdrant_*/
 traces/
 **/traces/
 embedding_cache.db
 **/embedding_cache.db
 agent_banking/agent_banking/
+agent_banking/*/agent_banking/
 
 # ==============================================================================
 # Documentation, Reports, Proposals & Office Files (local only)
@@ -377,6 +396,7 @@ doc/
 *.md
 !agent_banking/chunking/README.md
 !/agent_banking/agent/README.md
+!/agent_banking/agent/TUNING.md
 !/agent_banking/skills/*/SKILL.md
 !/agent_banking/skills/*/references/*.md
 *.markdown
@@ -433,6 +453,8 @@ run_*tests.py
 !/agent_banking/agent/tests/test_deep_agent.py
 !/agent_banking/agent/tests/test_interactions.py
 !/agent_banking/agent/tests/test_harness_quality.py
+!/agent_banking/agent/tests/test_model_routing.py
+!/agent_banking/agent/tests/test_tuning_regressions.py
 audit_*.py
 *_audit.py
 verify_upgrade.py
@@ -468,6 +490,10 @@ playwright-report/
 blob-report/
 **/blob-report/
 playwright/.cache/
+.playwright/
+**/.playwright/
+.playwright-mcp/
+**/.playwright-mcp/
 .chrome/
 .local-chromium/
 

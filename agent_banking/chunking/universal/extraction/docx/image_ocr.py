@@ -6,13 +6,16 @@ from warnings import catch_warnings, simplefilter
 
 from PIL import Image
 
+from agent_banking.chunking.config.settings import get_config_section
 from agent_banking.chunking.publication_io import atomic_bytes, file_hash
 from ...enrichment.model_warnings import record_model_warning
 from ..pdf.page_review import CloudOCRUnavailable, PdfVisualReviewer
 
+_MAX_IMAGE_BYTES = get_config_section("extraction")["docx"]["max_image_bytes"]
+
 
 def _raster_image(blob, max_pixels):
-    if len(blob) > 16_000_000:
+    if len(blob) > _MAX_IMAGE_BYTES:
         raise ValueError("Embedded image exceeds the input size limit")
     with catch_warnings():
         simplefilter("error", Image.DecompressionBombWarning)
@@ -25,7 +28,7 @@ def _raster_image(blob, max_pixels):
             with Image.new("RGB", src.size, "white") as background:
                 background.paste(rgba, mask=rgba.getchannel("A"))
                 background.save(stream, format="PNG")
-    if len(stream.getbuffer()) > 16_000_000:
+    if len(stream.getbuffer()) > _MAX_IMAGE_BYTES:
         raise ValueError("Rendered embedded image exceeds the input size limit")
     return stream.getvalue(), width, height
 

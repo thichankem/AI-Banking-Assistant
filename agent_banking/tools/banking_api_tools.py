@@ -2,7 +2,7 @@
 """
 Banking API Tools (Digital Banking Business Toolset v4.0)
 ======================================================================
-Provides execution tools for AI Agents:
+Provides execution tools for AI Agents, driven by gitignored YAML/prompt configs:
 1. get_interest_rates: Deposit interest rates schedule.
 2. get_foreign_exchange_rates: Foreign exchange rates today.
 3. calculate_savings_profit: Automated savings profit calculator.
@@ -21,59 +21,44 @@ RULES:
 - NO TYPING LIBRARY: Native Python types.
 """
 
-import time
 import datetime
+import time
+
+from agent_banking.tools.config.prompts import COMPETITOR_DEFLECTION_DIRECTIVE, TOOL_TEMPLATES
+from agent_banking.tools.config.settings import get_banking_data, get_query_rules
+
+_DATA = get_banking_data()
+_PARSER_RULES = get_query_rules().get("financial_param_parser", {})
 
 
 def get_interest_rates(deposit_type: str = "vnd") -> dict:
     """Return the deposit interest rates used in the simulation."""
+    cfg = _DATA["interest_rates"]
     dep_type = deposit_type.strip().lower()
-    if dep_type == "vnd" or dep_type == "dong":
-        rates = [
-            {"term": "Không kỳ hạn", "rate_percent_per_year": 0.1, "note": "Rút linh hoạt mọi lúc"},
-            {"term": "1 tháng", "rate_percent_per_year": 1.6, "note": "Lãi cuối kỳ"},
-            {"term": "3 tháng", "rate_percent_per_year": 1.9, "note": "Lãi cuối kỳ"},
-            {"term": "6 tháng", "rate_percent_per_year": 2.9, "note": "Lãi cuối kỳ"},
-            {"term": "9 tháng", "rate_percent_per_year": 2.9, "note": "Lãi cuối kỳ"},
-            {"term": "12 tháng (1 năm)", "rate_percent_per_year": 4.6, "note": "Kỳ hạn phổ biến nhất"},
-            {"term": "24 tháng (2 năm)", "rate_percent_per_year": 4.7, "note": "Lãi suất cao nhất cho khách hàng cá nhân"},
-            {"term": "36 - 60 tháng", "rate_percent_per_year": 4.7, "note": "Tiền gửi dài hạn"}
-        ]
+    if dep_type in cfg["vnd_aliases"]:
         return {
             "status": "success",
-            "currency": "VND",
-            "effective_date": "2026-10-25",
-            "bank": "Ngân hàng Thương mại",
-            "interest_rates": rates,
-            "disclaimer": "Đây là lãi suất mẫu dùng để mô phỏng."
+            "currency": cfg["vnd_currency"],
+            "effective_date": cfg["effective_date"],
+            "bank": cfg["bank"],
+            "interest_rates": [dict(row) for row in cfg["vnd_rates"]],
+            "disclaimer": TOOL_TEMPLATES["interest_rates_vnd_disclaimer"]
         }
-    else:
-        return {
-            "status": "success",
-            "currency": "USD",
-            "effective_date": "2026-10-25",
-            "bank": "Ngân hàng Thương mại",
-            "interest_rates": [
-                {"term": "Mọi kỳ hạn", "rate_percent_per_year": 0.0, "note": "Giá trị mẫu cho USD"}
-            ],
-            "disclaimer": "Đây là lãi suất USD mẫu dùng để mô phỏng."
-        }
+    return {
+        "status": "success",
+        "currency": cfg["usd_currency"],
+        "effective_date": cfg["effective_date"],
+        "bank": cfg["bank"],
+        "interest_rates": [dict(row) for row in cfg["usd_rates"]],
+        "disclaimer": TOOL_TEMPLATES["interest_rates_usd_disclaimer"]
+    }
 
 
 def get_foreign_exchange_rates(currency: str = "USD") -> dict:
     """Return the foreign exchange rates used in the simulation."""
+    cfg = _DATA["foreign_exchange_rates"]
     curr = currency.strip().upper()
-
-    rate_table = {
-        "USD": {"name": "Đô la Mỹ", "buy_cash": 25120.0, "buy_transfer": 25150.0, "sell": 25480.0},
-        "EUR": {"name": "Đồng Euro", "buy_cash": 27150.0, "buy_transfer": 27260.0, "sell": 28620.0},
-        "JPY": {"name": "Yên Nhật", "buy_cash": 162.8, "buy_transfer": 164.4, "sell": 172.3},
-        "GBP": {"name": "Bảng Anh", "buy_cash": 32350.0, "buy_transfer": 32670.0, "sell": 33730.0},
-        "SGD": {"name": "Đô la Singapore", "buy_cash": 18890.0, "buy_transfer": 19080.0, "sell": 19690.0},
-        "AUD": {"name": "Đô la Úc", "buy_cash": 16540.0, "buy_transfer": 16700.0, "sell": 17240.0},
-        "CAD": {"name": "Đô la Canada", "buy_cash": 18120.0, "buy_transfer": 18300.0, "sell": 18890.0},
-        "CNY": {"name": "Nhân dân tệ", "buy_cash": 3480.0, "buy_transfer": 3510.0, "sell": 3630.0}
-    }
+    rate_table = {code: dict(vals) for code, vals in cfg["rates"].items()}
 
     if curr in rate_table:
         selected_rate = {curr: rate_table[curr]}
@@ -82,10 +67,10 @@ def get_foreign_exchange_rates(currency: str = "USD") -> dict:
 
     return {
         "status": "success",
-        "effective_date": "2026-10-25",
-        "bank": "Ngân hàng Thương mại",
+        "effective_date": cfg["effective_date"],
+        "bank": cfg["bank"],
         "rates": selected_rate,
-        "note": "Đây là bảng tỷ giá mẫu dùng để mô phỏng."
+        "note": TOOL_TEMPLATES["fx_rates_note"]
     }
 
 
@@ -97,21 +82,15 @@ def calculate_savings_profit(amount_vnd: float, term_months: int) -> dict:
     if amount_vnd <= 0:
         return {
             "status": "ERROR",
-            "message": "Số tiền gửi phải lớn hơn 0 VND."
+            "message": TOOL_TEMPLATES["savings_amount_error"]
         }
 
-    if term_months < 1:
-        rate = 0.1
-    elif term_months < 3:
-        rate = 1.6
-    elif term_months < 6:
-        rate = 1.9
-    elif term_months < 12:
-        rate = 2.9
-    elif term_months < 24:
-        rate = 4.6
-    else:
-        rate = 4.7
+    sav_cfg = _DATA["savings_profit"]
+    rate = float(sav_cfg["default_rate_percent"])
+    for tier in sav_cfg["tiers"]:
+        if term_months < int(tier["max_term_months"]):
+            rate = float(tier["rate_percent"])
+            break
 
     interest_earned = amount_vnd * (rate / 100.0) * (term_months / 12.0)
     total_received = amount_vnd + interest_earned
@@ -123,10 +102,12 @@ def calculate_savings_profit(amount_vnd: float, term_months: int) -> dict:
         "applicable_rate_percent": rate,
         "interest_earned_vnd": round(interest_earned, 0),
         "total_at_maturity_vnd": round(total_received, 0),
-        "formatted_summary": (
-            f"Với số tiền gửi {amount_vnd:,.0f} VND kỳ hạn {term_months} tháng "
-            f"(lãi suất {rate}%/năm), tiền lãi dự kiến nhận được là {interest_earned:,.0f} VND. "
-            f"Tổng số tiền nhận được khi đáo hạn là {total_received:,.0f} VND."
+        "formatted_summary": TOOL_TEMPLATES["savings_summary"].format(
+            amount_vnd=amount_vnd,
+            term_months=term_months,
+            rate=rate,
+            interest_earned=interest_earned,
+            total_received=total_received
         )
     }
 
@@ -142,15 +123,16 @@ def calculate_loan_amortization(
     if principal_vnd <= 0:
         return {
             "status": "ERROR",
-            "message": "Số tiền vay gốc phải lớn hơn 0 VNĐ."
+            "message": TOOL_TEMPLATES["loan_principal_error"]
         }
 
     if term_months <= 0:
         return {
             "status": "ERROR",
-            "message": "Kỳ hạn vay (tháng) phải lớn hơn 0."
+            "message": TOOL_TEMPLATES["loan_term_error"]
         }
 
+    preview_months = int(_DATA["loan_amortization"]["preview_leading_months"])
     monthly_principal = principal_vnd / float(term_months)
     monthly_rate = (annual_rate_percent / 100.0) / 12.0
 
@@ -164,7 +146,7 @@ def calculate_loan_amortization(
         total_interest = total_interest + interest_for_month
 
         should_record = False
-        if month_idx <= 3:
+        if month_idx <= preview_months:
             should_record = True
         elif month_idx == term_months:
             should_record = True
@@ -187,7 +169,7 @@ def calculate_loan_amortization(
 
     return {
         "status": "SUCCESS",
-        "calculation_method": "Dư nợ giảm dần (Declining Balance)",
+        "calculation_method": TOOL_TEMPLATES["loan_calculation_method"],
         "principal_vnd": round(principal_vnd, 0),
         "annual_rate_percent": annual_rate_percent,
         "term_months": term_months,
@@ -206,39 +188,39 @@ def check_biometric_compliance_qd2345(
 ) -> dict:
     """
     Evaluate biometric authentication requirements under Decision 2345 & Circular 50.
-    - Single transaction > 10,000,000 VND
-    - Daily cumulative amount > 20,000,000 VND
-    - First activation or login on new mobile device.
     """
+    cfg = _DATA["biometric_qd2345"]
+    single_threshold = float(cfg["single_tx_threshold_vnd"])
+    daily_threshold = float(cfg["daily_cumulative_threshold_vnd"])
     requires_biometric = False
     reasons = []
 
     if is_first_time_new_device is True:
         requires_biometric = True
-        reasons.append("Kích hoạt ứng dụng lần đầu hoặc đăng nhập trên thiết bị di động mới.")
+        reasons.append(TOOL_TEMPLATES["qd2345_reason_new_device"])
 
-    if single_tx_amount_vnd > 10000000.0:
+    if single_tx_amount_vnd > single_threshold:
         requires_biometric = True
-        reasons.append("Giá trị giao dịch chuyển tiền đơn lẻ vượt ngưỡng 10.000.000 VNĐ/lần (Quyết định 2345/QĐ-NHNN).")
+        reasons.append(TOOL_TEMPLATES["qd2345_reason_single_tx"])
 
-    if daily_cumulative_amount_vnd > 20000000.0:
+    if daily_cumulative_amount_vnd > daily_threshold:
         requires_biometric = True
-        reasons.append("Tổng giá trị giao dịch chuyển tiền cộng dồn trong ngày vượt ngưỡng 20.000.000 VNĐ/ngày (Quyết định 2345/QĐ-NHNN).")
+        reasons.append(TOOL_TEMPLATES["qd2345_reason_daily_cumulative"])
 
     can_proceed_immediately = True
-    action_required = "Giao dịch có thể thực hiện ngay bằng mã xác thực Smart OTP / SMS OTP thông thường."
+    action_required = TOOL_TEMPLATES["qd2345_action_normal_otp"]
 
     if requires_biometric is True:
         if has_verified_chip_cccd is True:
             can_proceed_immediately = True
-            action_required = "BẮT BUỘC quét khuôn mặt sinh trắc học (Facepay) kết hợp Smart OTP để hoàn tất giao dịch."
+            action_required = TOOL_TEMPLATES["qd2345_action_facepay_otp"]
         else:
             can_proceed_immediately = False
-            action_required = "CHẶN GIAO DỊCH TẠM THỜI: Khách hàng bắt buộc phải cập nhật Căn cước công dân gắn chip trước khi thực hiện giao dịch này."
+            action_required = TOOL_TEMPLATES["qd2345_action_blocked_cccd"]
 
     return {
         "status": "SUCCESS",
-        "regulation_reference": "Quyết định 2345/QĐ-NHNN & Thông tư 50/2024/TT-NHNN",
+        "regulation_reference": cfg["regulation_reference"],
         "single_tx_amount_vnd": round(single_tx_amount_vnd, 0),
         "daily_cumulative_amount_vnd": round(daily_cumulative_amount_vnd, 0),
         "requires_biometric": requires_biometric,
@@ -256,12 +238,13 @@ def create_support_ticket(
     priority: str = "NORMAL"
 ) -> dict:
     """Create customer support ticket and dispatch to banking specialist."""
+    cfg = _DATA["support_ticket"]
     ts = int(time.time())
-    ticket_id = f"TK-{ts}"
+    ticket_id = f"{cfg['ticket_id_prefix']}{ts}"
 
     clean_priority = priority.strip().upper()
-    if clean_priority not in ["URGENT", "HIGH", "NORMAL", "LOW"]:
-        clean_priority = "NORMAL"
+    if clean_priority not in cfg["allowed_priorities"]:
+        clean_priority = cfg["default_priority"]
 
     return {
         "status": "created",
@@ -270,21 +253,18 @@ def create_support_ticket(
         "issue_type": issue_type.strip(),
         "description": description.strip(),
         "priority": clean_priority,
-        "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "emergency_hotline": "1900 6688 (Phục vụ 24/7)",
-        "message": (
-            f"Hệ thống đã tạo thành công phiếu yêu cầu hỗ trợ mã [{ticket_id}]. "
-            "Chuyên viên chăm sóc khách hàng sẽ liên hệ xác minh trong vòng 15-30 phút. "
-            "Trong trường hợp khẩn cấp (mất thẻ, nghi ngờ lộ thông tin), vui lòng gọi ngay Tổng đài để khóa dịch vụ tức thì."
-        )
+        "created_at": datetime.datetime.now().strftime(cfg["timestamp_format"]),
+        "emergency_hotline": cfg["emergency_hotline"],
+        "message": TOOL_TEMPLATES["support_ticket_created_message"].format(ticket_id=ticket_id)
     }
 
 
 def _clean_token_number_str(token: str) -> str:
+    strip_chars = _PARSER_RULES["strip_punctuation"]
     cleaned = token.strip()
-    while len(cleaned) > 0 and cleaned[-1] in "?!:,;()[]{}*":
+    while len(cleaned) > 0 and cleaned[-1] in strip_chars:
         cleaned = cleaned[:-1]
-    while len(cleaned) > 0 and cleaned[0] in "?!:,;()[]{}*":
+    while len(cleaned) > 0 and cleaned[0] in strip_chars:
         cleaned = cleaned[1:]
     return cleaned
 
@@ -338,8 +318,14 @@ def parse_vietnamese_financial_params(query: str) -> dict:
     daily_cumulative_amount_vnd = 0.0
     term_months = 0
     annual_rate_percent = 0.0
-
     amounts_found = []
+
+    percent_tokens = _PARSER_RULES["percent_tokens"]
+    year_tokens = _PARSER_RULES["year_tokens"]
+    month_tokens = _PARSER_RULES["month_tokens"]
+    amount_multipliers = _PARSER_RULES["amount_multipliers"]
+    min_raw_amount = float(_PARSER_RULES["min_raw_amount_vnd"])
+    ctx_window = int(_PARSER_RULES["context_window_words"])
 
     for i in range(len(words)):
         raw_tok = words[i]
@@ -353,7 +339,7 @@ def parse_vietnamese_financial_params(query: str) -> dict:
                 continue
         elif i + 1 < len(words):
             next_clean = _clean_token_number_str(words[i + 1])
-            if next_clean in ["%", "phần trăm", "phan tram"]:
+            if next_clean in percent_tokens:
                 num = _parse_float_or_int(clean_tok)
                 if num is not None:
                     annual_rate_percent = num
@@ -362,12 +348,12 @@ def parse_vietnamese_financial_params(query: str) -> dict:
         # 2. Parse term (months / years)
         if i + 1 < len(words):
             next_clean = _clean_token_number_str(words[i + 1])
-            if next_clean in ["năm", "nam"]:
+            if next_clean in year_tokens:
                 num = _parse_float_or_int(clean_tok)
                 if num is not None:
                     term_months = int(num * 12)
                     continue
-            elif next_clean in ["tháng", "thang"]:
+            elif next_clean in month_tokens:
                 num = _parse_float_or_int(clean_tok)
                 if num is not None:
                     term_months = int(num)
@@ -380,30 +366,27 @@ def parse_vietnamese_financial_params(query: str) -> dict:
             has_suffix = False
             if i + 1 < len(words):
                 next_clean = _clean_token_number_str(words[i + 1])
-                if next_clean in ["tỷ", "ty", "tỉ"]:
-                    multiplier = 1000000000.0
-                    has_suffix = True
-                elif next_clean in ["triệu", "trieu", "tr"]:
-                    multiplier = 1000000.0
-                    has_suffix = True
-                elif next_clean in ["nghìn", "ngàn", "k"]:
-                    multiplier = 1000.0
-                    has_suffix = True
+                for rule in amount_multipliers:
+                    if next_clean in rule["tokens"]:
+                        multiplier = float(rule["multiplier"])
+                        has_suffix = True
+                        break
 
             if has_suffix is True:
                 total_val = num * multiplier
-                start_context = max(0, i - 4)
+                start_context = max(0, i - ctx_window)
                 context_prev = " ".join(words[start_context:i])
                 amounts_found.append((total_val, context_prev))
             else:
-                if num >= 10000.0:
-                    start_context = max(0, i - 4)
+                if num >= min_raw_amount:
+                    start_context = max(0, i - ctx_window)
                     context_prev = " ".join(words[start_context:i])
                     amounts_found.append((num, context_prev))
 
     # Allocate single vs daily cumulative amounts
+    daily_kws = _PARSER_RULES["daily_context_keywords"]
     for val, ctx in amounts_found:
-        if "tổng" in ctx or "cộng dồn" in ctx or "trong ngày" in ctx or "đã chuyển" in ctx:
+        if any(kw in ctx for kw in daily_kws):
             if daily_cumulative_amount_vnd == 0.0:
                 daily_cumulative_amount_vnd = val
         else:
@@ -422,27 +405,26 @@ def parse_vietnamese_financial_params(query: str) -> dict:
 
     # Detect new device activation
     is_first_time_new_device = False
-    device_kws = ["thiết bị mới", "thiet bi moi", "lần đầu", "lan dau", "đổi máy", "doi may", "đăng nhập lần đầu"]
-    for dkw in device_kws:
+    for dkw in _PARSER_RULES["new_device_keywords"]:
         if dkw in cleaned_q:
             is_first_time_new_device = True
             break
 
     # Detect chip CCCD verification status
     has_verified_chip_cccd = True
-    no_cccd_markers = ["chưa có cccd", "chưa gắn chip", "chưa xác thực", "chưa cập nhật cccd", "chưa đối soát", "chưa cập nhật"]
-    for ncm in no_cccd_markers:
+    for ncm in _PARSER_RULES["no_cccd_keywords"]:
         if ncm in cleaned_q:
             has_verified_chip_cccd = False
             break
 
     # Biometric requirement evaluation under Decision 2345
+    qd_cfg = _DATA["biometric_qd2345"]
     requires_biometric = False
     if is_first_time_new_device is True:
         requires_biometric = True
-    if single_tx_amount_vnd > 10000000.0:
+    if single_tx_amount_vnd > float(qd_cfg["single_tx_threshold_vnd"]):
         requires_biometric = True
-    if daily_cumulative_amount_vnd > 20000000.0:
+    if daily_cumulative_amount_vnd > float(qd_cfg["daily_cumulative_threshold_vnd"]):
         requires_biometric = True
 
     return {
@@ -458,20 +440,17 @@ def parse_vietnamese_financial_params(query: str) -> dict:
 
 
 def check_complain_count(complain_count: int = 0) -> dict:
-    """Track complaint counts and suggest human agent escalation if >= 2."""
+    """Track complaint counts and suggest human agent escalation at threshold."""
+    threshold = int(_DATA["complain_escalation"]["escalation_threshold"])
     updated_count = int(complain_count) + 1
     escalate_to_human = False
-    if updated_count >= 2:
+    if updated_count >= threshold:
         escalate_to_human = True
 
     if escalate_to_human:
-        message = (
-            "Hệ thống ghi nhận Quý khách đang gặp vấn đề chưa hài lòng. "
-            "Để hỗ trợ Quý khách giải quyết nhanh chóng và chu đáo nhất, "
-            "hệ thống đề xuất kết nối trực tiếp với Tư vấn viên chuyên trách."
-        )
+        message = TOOL_TEMPLATES["complain_escalate_message"]
     else:
-        message = "Hệ thống rất tiếc vì sự bất tiện của Quý khách và đang nỗ lực hỗ trợ tốt nhất."
+        message = TOOL_TEMPLATES["complain_standard_message"]
 
     return {
         "status": "success",
@@ -487,31 +466,24 @@ def transfer_to_agent(
     customer_segment: str = "individual"
 ) -> dict:
     """Transfer session to Live Agent based on operating hours."""
+    cfg = _DATA["transfer_to_agent"]
     now_vn = datetime.datetime.now()
     current_hour = now_vn.hour
 
     is_working_hour = False
-    if current_hour >= 7 and current_hour < 23:
+    if current_hour >= int(cfg["working_hour_start"]) and current_hour < int(cfg["working_hour_end"]):
         is_working_hour = True
 
-    queue_name = "LIVE_AGENT_INDIVIDUAL_QUEUE"
-    if customer_segment.lower() in ["corporate", "doanh_nghiep", "doanh nghiệp"]:
-        queue_name = "LIVE_AGENT_CORPORATE_QUEUE"
+    queue_name = cfg["individual_queue"]
+    if customer_segment.lower() in cfg["corporate_aliases"]:
+        queue_name = cfg["corporate_queue"]
 
     if is_working_hour:
         handoff_status = "queued"
-        customer_notice = (
-            "Dạ, yêu cầu của Quý khách đã được chuyển tới hàng đợi Chuyên viên Tư vấn. "
-            "Chuyên viên sẽ tiếp nhận và phản hồi Quý khách trong ít phút. "
-            "Quý khách vui lòng giữ kết nối màn hình trò chuyện."
-        )
+        customer_notice = TOOL_TEMPLATES["transfer_queued_notice"]
     else:
         handoff_status = "offline_hours"
-        customer_notice = (
-            "Hiện tại đang ngoài khung giờ hỗ trợ trực tuyến của Chuyên viên (7h00 - 23h00 hàng ngày). "
-            "Để được xử lý khẩn cấp (như khóa thẻ, tra soát giao dịch), Quý khách vui lòng liên hệ ngay "
-            "Tổng đài Trung tâm Hỗ trợ Khách hàng A-Bank 24/7 qua số hotline: 1900 6688."
-        )
+        customer_notice = TOOL_TEMPLATES["transfer_offline_notice"]
 
     return {
         "status": "success",
@@ -520,7 +492,7 @@ def transfer_to_agent(
         "business_process": business_process,
         "customer_segment": customer_segment,
         "target_queue": queue_name,
-        "hotline": "1900 6688",
+        "hotline": cfg["hotline"],
         "customer_notice": customer_notice
     }
 
@@ -531,21 +503,23 @@ def rate_agent_csat(
     channel: str = "web"
 ) -> dict:
     """Record customer CSAT rating from 1 to 5 stars."""
+    cfg = _DATA["csat"]
+    min_score = int(cfg["min_score"])
+    max_score = int(cfg["max_score"])
     score = int(rating_score)
-    if score < 1:
-        score = 1
-    if score > 5:
-        score = 5
+    if score < min_score:
+        score = min_score
+    if score > max_score:
+        score = max_score
 
-    feedback_map = {
-        1: "Ngân hàng chân thành xin lỗi vì trải nghiệm chưa được như mong đợi của Quý khách. Chúng tôi xin ghi nhận ý kiến để cải thiện chất lượng phục vụ ngay lập tức.",
-        2: "Ngân hàng rất tiếc khi trải nghiệm hôm nay của Quý khách chưa thực sự hài lòng. Đội ngũ phát triển sẽ rà soát và nâng cao năng lực hỗ trợ.",
-        3: "Ngân hàng cảm ơn phản hồi của Quý khách. Chúng tôi sẽ không ngừng nỗ lực để mang lại trải nghiệm tốt hơn trong các lần giao dịch tới.",
-        4: "Ngân hàng rất vui khi đã hỗ trợ được Quý khách. Chúc Quý khách một ngày làm việc hiệu quả và nhiều niềm vui!",
-        5: "Ngân hàng xin chân thành cảm ơn Quý khách đã tin tưởng và đánh giá 5 sao. Rất vinh hạnh được đồng hành cùng Quý khách!"
-    }
-
-    response_text = feedback_map.get(score, "Cảm ơn Quý khách đã đóng góp ý kiến cho Ngân hàng.")
+    feedback_map = TOOL_TEMPLATES["csat_feedback_map"]
+    default_feedback = TOOL_TEMPLATES["csat_default_feedback"]
+    if score in feedback_map:
+        response_text = feedback_map[score]
+    elif str(score) in feedback_map:
+        response_text = feedback_map[str(score)]
+    else:
+        response_text = default_feedback
 
     return {
         "status": "success",
@@ -561,13 +535,11 @@ def deflect_competitor_comparison(
     query: str = ""
 ) -> dict:
     """Deflect competitor comparison queries with bank strength highlights."""
+    cfg = _DATA["competitor_deflection"]
     return {
         "status": "success",
-        "strategy": "deflection",
-        "directive": (
-            "Hỏi tiêu chí cần so sánh. Giải thích tính năng A-Bank dựa trên tài liệu đã truy xuất. "
-            "Không suy rộng tài liệu A-Bank sang ngân hàng khác."
-        ),
+        "strategy": cfg["strategy"],
+        "directive": COMPETITOR_DEFLECTION_DIRECTIVE,
         "competitor_mentioned": competitor_name,
         "original_query": query
     }

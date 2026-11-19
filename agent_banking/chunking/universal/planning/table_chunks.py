@@ -1,11 +1,16 @@
 """Build table chunks and searchable views of the preserved rows."""
 from copy import deepcopy
 
+from agent_banking.chunking.config.settings import get_config_section
 from ..text.language import project_search_text, source_foreign_spans, without_foreign_spans
 from .source_spans import build_lead_in, has_visible_text
 from .text_chunks import flush_text
 from .table_rendering import markdown_row, table_fragment_data, table_markdown
 from ..text.token_budget import format_passage_fields
+
+_PLAN_CFG = get_config_section("planning")
+_CTX_CFG = _PLAN_CFG["context_limits"]
+_TBL_CFG = _PLAN_CFG["table_chunks"]
 
 
 def plan_table(planner, block, parent_id, lead_in_blocks=None):
@@ -47,7 +52,9 @@ def plan_table(planner, block, parent_id, lead_in_blocks=None):
     if table_title and not retrieval.get("situated_context"):
         title_projection = project_search_text(table_title, search_language=planner.search_language).strip()
         if title_projection:
-            retrieval["situated_context"] = planner.budget.shorten(title_projection, min(48, planner.budget.maximum // 6))
+            retrieval["situated_context"] = planner.budget.shorten(
+                title_projection, min(_CTX_CFG["situated_max"], planner.budget.maximum // _CTX_CFG["situated_ratio"])
+            )
     lead_text, lead_spans, lead_ids = build_lead_in(lead_in_blocks)
     lead_attached = not bool(lead_text)
     if not lead_text and lead_in_blocks is not None:
@@ -130,7 +137,10 @@ def plan_table(planner, block, parent_id, lead_in_blocks=None):
         if lead_attached and not (carries_header or has_searchable_data):
             chunk["business_metadata"]["retrieval"]["role"] = "attachment_only"
         if selected:
-            labels = [planner.budget.shorten(header, min(36, planner.budget.maximum // 8)) for header in projected_headers]
+            labels = [
+                planner.budget.shorten(header, min(_TBL_CFG["header_shorten_max"], planner.budget.maximum // _TBL_CFG["header_shorten_ratio"]))
+                for header in projected_headers
+            ]
             preferred = with_lead(table_markdown(labels, filtered_rows))
             if not fits(preferred):
                 preferred = "\n".join(markdown_row(row) for row in filtered_rows)

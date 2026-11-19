@@ -38,14 +38,17 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent_banking.core.settings import Config
+from agent_banking.embedding.config.settings import EmbeddingConfig
 from agent_banking.embedding.embedder import BankingEmbedder
+from agent_banking.vector_db.config.settings import VectorDBConfig
 from agent_banking.vector_db.qdrant_store import QdrantBankingStore
+from agent_banking.retrieval.config.settings import RetrievalConfig
 from agent_banking.retrieval.hybrid_retriever import HybridRetriever
 from agent_banking.tools.extensions.banking_query import ParsedQuery, parse_banking_query
 from agent_banking.state_tracker import StateTracker
 
 
-def init_retrieval_engine(config=None, use_memory=False, top_k=5):
+def init_retrieval_engine(config=None, use_memory=False, top_k=None):
     """
     Lightweight Direct Engine Initialization:
     Khoi tao truc tiep BankingEmbedder va QdrantBankingStore,
@@ -56,14 +59,23 @@ def init_retrieval_engine(config=None, use_memory=False, top_k=5):
     else:
         cfg = Config()
 
+    if top_k is None:
+        top_k = getattr(cfg, "HYBRID_TOP_K", RetrievalConfig.HYBRID_TOP_K)
+
+    cache_filename = Path(EmbeddingConfig.EMBEDDING_CACHE_DB_PATH).name
+    if hasattr(cfg, "STORAGE_DIR"):
+        cache_db_path = str(cfg.STORAGE_DIR / cache_filename)
+    else:
+        cache_db_path = str(PROJECT_ROOT / EmbeddingConfig.EMBEDDING_CACHE_DB_PATH)
+
     embedder = BankingEmbedder(
-        dimension=cfg.EMBEDDING_DIM,
-        model_name=cfg.EMBEDDING_MODEL_1024,
-        embedding_url=cfg.EMBEDDING_URL,
-        cache_db_path=str(cfg.STORAGE_DIR / "embedding_cache.db")
+        dimension=getattr(cfg, "EMBEDDING_DIM", EmbeddingConfig.EMBEDDING_DIM),
+        model_name=getattr(cfg, "EMBEDDING_MODEL_1024", EmbeddingConfig.EMBEDDING_MODEL_1024),
+        embedding_url=getattr(cfg, "EMBEDDING_URL", EmbeddingConfig.EMBEDDING_URL),
+        cache_db_path=cache_db_path
     )
 
-    raw_storage = getattr(cfg, "QDRANT_STORAGE_PATH", "agent_banking/vector_db/qdrant_db")
+    raw_storage = getattr(cfg, "QDRANT_STORAGE_PATH", VectorDBConfig.QDRANT_STORAGE_PATH)
     storage_candidate = Path(str(raw_storage))
     if storage_candidate.is_absolute():
         resolved_storage = str(storage_candidate)
@@ -71,15 +83,15 @@ def init_retrieval_engine(config=None, use_memory=False, top_k=5):
         resolved_storage = str((PROJECT_ROOT / storage_candidate).resolve())
 
     store = QdrantBankingStore(
-        collection_name=cfg.QDRANT_COLLECTION,
-        dimension=cfg.EMBEDDING_DIM,
+        collection_name=getattr(cfg, "QDRANT_COLLECTION", VectorDBConfig.QDRANT_COLLECTION),
+        dimension=getattr(cfg, "EMBEDDING_DIM", EmbeddingConfig.EMBEDDING_DIM),
         storage_path=resolved_storage,
         use_memory=use_memory
     )
 
-    bm25_k1 = getattr(cfg, "BM25_K1", None)
-    bm25_b = getattr(cfg, "BM25_B", None)
-    bc_boost = getattr(cfg, "BREADCRUMB_BOOST", 1.5)
+    bm25_k1 = getattr(cfg, "BM25_K1", RetrievalConfig.BM25_K1)
+    bm25_b = getattr(cfg, "BM25_B", RetrievalConfig.BM25_B)
+    bc_boost = getattr(cfg, "BREADCRUMB_BOOST", RetrievalConfig.BREADCRUMB_BOOST)
     bm25_changed = False
     if bm25_k1 is not None and abs(float(bm25_k1) - store.k1) > 1e-6:
         store.k1 = float(bm25_k1)
@@ -92,15 +104,9 @@ def init_retrieval_engine(config=None, use_memory=False, top_k=5):
     if bm25_changed and store._bm25_corpus:
         store._build_bm25_index(store._bm25_corpus, breadcrumb_boost=float(bc_boost))
 
-    rrf_k_val = 60
-    if hasattr(cfg, "RRF_K"):
-        rrf_k_val = cfg.RRF_K
-
-    dense_weight_val = 0.5
-    if hasattr(cfg, "DENSE_WEIGHT"):
-        dense_weight_val = cfg.DENSE_WEIGHT
-
-    candidate_k_val = getattr(cfg, "HYBRID_CANDIDATE_K", None)
+    rrf_k_val = getattr(cfg, "RRF_K", RetrievalConfig.RRF_K)
+    dense_weight_val = getattr(cfg, "DENSE_WEIGHT", RetrievalConfig.DENSE_WEIGHT)
+    candidate_k_val = getattr(cfg, "HYBRID_CANDIDATE_K", RetrievalConfig.HYBRID_CANDIDATE_K)
     retriever = HybridRetriever(
         vector_store=store,
         embedding_model=embedder,
@@ -113,7 +119,7 @@ def init_retrieval_engine(config=None, use_memory=False, top_k=5):
     return retriever
 
 
-def resolve_retriever(pipeline=None, retriever=None, config=None, use_memory=False, top_k=5):
+def resolve_retriever(pipeline=None, retriever=None, config=None, use_memory=False, top_k=RetrievalConfig.HYBRID_TOP_K):
     """
     Dieu phoi bo truy van retriever:
     1. Uu tien retriever truyen truc tiep.
@@ -132,7 +138,7 @@ def resolve_retriever(pipeline=None, retriever=None, config=None, use_memory=Fal
     return init_retrieval_engine(config=config, use_memory=use_memory, top_k=top_k)
 
 
-def execute_retrieval(retriever_obj, query_obj, top_k=5, filter_dict=None):
+def execute_retrieval(retriever_obj, query_obj, top_k=RetrievalConfig.HYBRID_TOP_K, filter_dict=None):
     """
     Thuc thi truy van tren retriever_obj hoac pipeline.
     Tuong thich ca HybridRetriever lan BankingRAGPipeline.
@@ -203,12 +209,12 @@ def write_retrieval_manifest(
     """
     Xuat ban tep retrieval_manifest.json ghi nhan chi tiet so lieu thuc thi.
     """
-    manifest_file = out_path / "retrieval_manifest.json"
+    manifest_file = out_path / RetrievalConfig.RETRIEVAL_MANIFEST_FILENAME
     manifest_data = {
         "module": "hybrid_retrieval",
         "version": "2.0.0",
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "collection": cfg.QDRANT_COLLECTION,
+        "collection": getattr(cfg, "QDRANT_COLLECTION", VectorDBConfig.QDRANT_COLLECTION),
         "total_queries": total_queries,
         "processed_queries": processed_queries,
         "skipped_queries": skipped_queries,
@@ -218,9 +224,9 @@ def write_retrieval_manifest(
         "avg_dense_latency_ms": round(avg_dense, 1),
         "avg_bm25_latency_ms": round(avg_bm25, 1),
         "files": {
-            "retrieval_candidates": "output/retrieval_candidates.json",
-            "latest_candidates": "output/latest_candidates.json",
-            "state_tracker": "output/.state_tracker.json"
+            "retrieval_candidates": "output/" + RetrievalConfig.RETRIEVAL_OUTPUT_CANDIDATES_FILENAME,
+            "latest_candidates": "output/" + RetrievalConfig.RETRIEVAL_LATEST_CANDIDATES_FILENAME,
+            "state_tracker": "output/" + RetrievalConfig.RETRIEVAL_STATE_TRACKER_FILENAME
         }
     }
     try:
@@ -235,11 +241,12 @@ def sync_downstream_candidates(out_file):
     """
     Tu dong dong bo tep ket qua retrieval sang reranking/input/candidates.json neu thu muc ton tai.
     """
-    downstream_in = PROJECT_ROOT / "agent_banking" / "reranking" / "input"
+    downstream_in = PROJECT_ROOT / RetrievalConfig.RETRIEVAL_DOWNSTREAM_RERANKING_INPUT_DIR
+    downstream_file = RetrievalConfig.RETRIEVAL_DOWNSTREAM_CANDIDATES_FILENAME
     if downstream_in.exists():
         try:
-            shutil.copy2(str(out_file), str(downstream_in / "candidates.json"))
-            print("🔄 [Downstream-Sync] Da cap nhat ket qua sang reranking/input/candidates.json")
+            shutil.copy2(str(out_file), str(downstream_in / downstream_file))
+            print(f"🔄 [Downstream-Sync] Da cap nhat ket qua sang {RetrievalConfig.RETRIEVAL_DOWNSTREAM_RERANKING_INPUT_DIR}/{downstream_file}")
         except Exception:
             pass
 
@@ -301,9 +308,10 @@ def print_retrieval_summary(query_text, candidates, duration_ms=None):
             print(f"   🏷️ Section   : {title}")
         print(f"   📄 Source    : {source} [{chunk_type}]")
 
+        snippet_chars = RetrievalConfig.RETRIEVAL_PREVIEW_SNIPPET_CHARS
         clean_text = content.strip().replace("\r\n", " ").replace("\n", " ")
-        if len(clean_text) > 200:
-            snippet = clean_text[:200].strip() + "..."
+        if len(clean_text) > snippet_chars:
+            snippet = clean_text[:snippet_chars].strip() + "..."
         else:
             snippet = clean_text
         print(f"   📝 Content   :\n      \"{snippet}\"")
@@ -313,7 +321,7 @@ def print_retrieval_summary(query_text, candidates, duration_ms=None):
 
 def run_single_query(
     query,
-    top_k=5,
+    top_k=RetrievalConfig.HYBRID_TOP_K,
     filter_dict=None,
     use_memory=False,
     pipeline=None,
@@ -331,7 +339,7 @@ def run_single_query(
     if output_dir is not None:
         out_path = Path(output_dir)
     else:
-        out_path = PROJECT_ROOT / "agent_banking" / "retrieval" / "output"
+        out_path = PROJECT_ROOT / RetrievalConfig.RETRIEVAL_OUTPUT_DIR
     out_path.mkdir(parents=True, exist_ok=True)
 
     clean_query_str = str(query).strip()
@@ -353,9 +361,9 @@ def run_single_query(
     norm_query_str = clean_query_str
     exp_query_str = ""
     kws_str = ""
-    intent_val = "hoi_dap_chung"
-    sub_intent_val = "tra_cuu_thong_tin"
-    domain_val = "ngan_hang_chung"
+    intent_val = RetrievalConfig.RETRIEVAL_DEFAULT_INTENT
+    sub_intent_val = RetrievalConfig.RETRIEVAL_DEFAULT_SUB_INTENT
+    domain_val = RetrievalConfig.RETRIEVAL_DEFAULT_DOMAIN
 
     if hasattr(query_obj, "raw_query"):
         raw_query_str = query_obj.raw_query
@@ -370,9 +378,9 @@ def run_single_query(
         norm_query_str = query_obj.get("normalized_query", clean_query_str)
         exp_query_str = query_obj.get("expanded_query", "")
         kws_str = query_obj.get("keywords_str", "")
-        intent_val = query_obj.get("intent", "hoi_dap_chung")
-        sub_intent_val = query_obj.get("sub_intent", "tra_cuu_thong_tin")
-        domain_val = query_obj.get("domain", "ngan_hang_chung")
+        intent_val = query_obj.get("intent", RetrievalConfig.RETRIEVAL_DEFAULT_INTENT)
+        sub_intent_val = query_obj.get("sub_intent", RetrievalConfig.RETRIEVAL_DEFAULT_SUB_INTENT)
+        domain_val = query_obj.get("domain", RetrievalConfig.RETRIEVAL_DEFAULT_DOMAIN)
 
     t0 = time.time()
     candidates = execute_retrieval(engine, query_obj, top_k=top_k, filter_dict=filter_dict)
@@ -403,15 +411,15 @@ def run_single_query(
     }
 
     # Xuat vao latest_candidates.json
-    latest_file = out_path / "latest_candidates.json"
+    latest_file = out_path / RetrievalConfig.RETRIEVAL_LATEST_CANDIDATES_FILENAME
     try:
         with open(latest_file, "w", encoding="utf-8") as fp:
             json.dump(single_result, fp, ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"⚠️ Khong the ghi latest_candidates.json: {e}")
+        print(f"⚠️ Khong the ghi {latest_file.name}: {e}")
 
     # Xuat hoac cap nhat vao retrieval_candidates.json
-    out_file = out_path / "retrieval_candidates.json"
+    out_file = out_path / RetrievalConfig.RETRIEVAL_OUTPUT_CANDIDATES_FILENAME
     existing_list = []
     if out_file.exists():
         try:
@@ -440,7 +448,7 @@ def run_single_query(
         with open(out_file, "w", encoding="utf-8") as fp:
             json.dump(merged_list, fp, ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"⚠️ Khong the ghi retrieval_candidates.json: {e}")
+        print(f"⚠️ Khong the ghi {out_file.name}: {e}")
 
     dense_lat = 0.0
     bm25_lat = 0.0
@@ -473,7 +481,7 @@ def run_single_query(
 def run_batch_retrieval(
     input_file=None,
     output_dir=None,
-    top_k=5,
+    top_k=RetrievalConfig.HYBRID_TOP_K,
     force=False,
     use_memory=False,
     pipeline=None,
@@ -483,16 +491,16 @@ def run_batch_retrieval(
     Run hybrid retrieval over raw or preprocessed query files with deduplication.
     """
     cfg = Config()
-    in_dir = PROJECT_ROOT / "agent_banking" / "retrieval" / "input"
+    in_dir = PROJECT_ROOT / RetrievalConfig.RETRIEVAL_INPUT_DIR
     in_dir.mkdir(parents=True, exist_ok=True)
 
     if output_dir is not None:
         out_path = Path(output_dir)
     else:
-        out_path = PROJECT_ROOT / "agent_banking" / "retrieval" / "output"
+        out_path = PROJECT_ROOT / RetrievalConfig.RETRIEVAL_OUTPUT_DIR
     out_path.mkdir(parents=True, exist_ok=True)
 
-    state_file = out_path / ".state_tracker.json"
+    state_file = out_path / RetrievalConfig.RETRIEVAL_STATE_TRACKER_FILENAME
     tracker = StateTracker(state_file)
     if force:
         tracker.clear()
@@ -504,14 +512,15 @@ def run_batch_retrieval(
         if p_in.exists():
             target_in_file = p_in
     else:
-        for name in ("queries.json", "queries.txt", "latest_query.json", "parsed_queries.json"):
+        for name in RetrievalConfig.RETRIEVAL_CANDIDATE_INPUT_FILENAMES:
             candidate = in_dir / name
             if candidate.is_file():
                 target_in_file = candidate
                 break
 
     if target_in_file is None or not target_in_file.is_file():
-        print(f"No query file found in {in_dir}. Use queries.json, queries.txt, latest_query.json or parsed_queries.json.")
+        expected_names = ", ".join(RetrievalConfig.RETRIEVAL_CANDIDATE_INPUT_FILENAMES)
+        print(f"No query file found in {in_dir}. Use {expected_names}.")
         return []
 
     print(f"\n{'=' * 75}")
@@ -526,7 +535,7 @@ def run_batch_retrieval(
 
     # 3. Kiem tra cache cu tu StateTracker (chong trung lap)
     prev_results = {}
-    prev_file = out_path / "retrieval_candidates.json"
+    prev_file = out_path / RetrievalConfig.RETRIEVAL_OUTPUT_CANDIDATES_FILENAME
     if prev_file.exists() and not force:
         try:
             with open(prev_file, "r", encoding="utf-8") as fp:
@@ -651,19 +660,19 @@ def run_batch_retrieval(
 
         intent_val = item.get("intent")
         if intent_val is None or not str(intent_val).strip():
-            intent_val = "hoi_dap_chung"
+            intent_val = RetrievalConfig.RETRIEVAL_DEFAULT_INTENT
         else:
             intent_val = str(intent_val).strip()
 
         sub_intent_val = item.get("sub_intent")
         if sub_intent_val is None or not str(sub_intent_val).strip():
-            sub_intent_val = "tra_cuu_thong_tin"
+            sub_intent_val = RetrievalConfig.RETRIEVAL_DEFAULT_SUB_INTENT
         else:
             sub_intent_val = str(sub_intent_val).strip()
 
         domain_val = item.get("domain")
         if domain_val is None or not str(domain_val).strip():
-            domain_val = "ngan_hang_chung"
+            domain_val = RetrievalConfig.RETRIEVAL_DEFAULT_DOMAIN
         else:
             domain_val = str(domain_val).strip()
 
@@ -704,7 +713,8 @@ def run_batch_retrieval(
 
             retrieval_results.append(cached_res)
             skipped_count += 1
-            print(f"  [{q_id:02d}] [SKIP] '{raw_q[:40]}...' (Da co candidates)")
+            preview_len = RetrievalConfig.RETRIEVAL_QUERY_PREVIEW_CHARS
+            print(f"  [{q_id:02d}] [SKIP] '{raw_q[:preview_len]}...' (Da co candidates)")
         else:
             # Tai tao 100% 13 truong ParsedQuery
             parsed_obj = ParsedQuery(
@@ -764,18 +774,19 @@ def run_batch_retrieval(
             retrieval_results.append(res)
             tracker.record_processed(raw_q, q_hash, {"candidates_count": len(candidates)})
             new_count += 1
-            print(f"  [{q_id:02d}] [NEW]  '{raw_q[:40]}...' -> Tim duoc {len(candidates)} candidates ({dt_ms}ms)")
+            preview_len = RetrievalConfig.RETRIEVAL_QUERY_PREVIEW_CHARS
+            print(f"  [{q_id:02d}] [NEW]  '{raw_q[:preview_len]}...' -> Tim duoc {len(candidates)} candidates ({dt_ms}ms)")
 
     tracker.save()
     total_elapsed = round(time.time() - start_t, 2)
 
     # 6. Xuat ban cac tep ket qua
-    out_file = out_path / "retrieval_candidates.json"
+    out_file = out_path / RetrievalConfig.RETRIEVAL_OUTPUT_CANDIDATES_FILENAME
     with open(out_file, "w", encoding="utf-8") as fp:
         json.dump(retrieval_results, fp, ensure_ascii=False, indent=2)
 
     if retrieval_results:
-        latest_file = out_path / "latest_candidates.json"
+        latest_file = out_path / RetrievalConfig.RETRIEVAL_LATEST_CANDIDATES_FILENAME
         with open(latest_file, "w", encoding="utf-8") as fp:
             json.dump(retrieval_results[-1], fp, ensure_ascii=False, indent=2)
 
@@ -819,7 +830,7 @@ def run_retrieval(
     query=None,
     input_file=None,
     output_dir=None,
-    top_k=5,
+    top_k=RetrievalConfig.HYBRID_TOP_K,
     force=False,
     use_memory=False,
     pipeline=None,
@@ -855,7 +866,7 @@ def run_retrieval(
 def run_auto_retrieval(
     input_file=None,
     output_dir=None,
-    top_k=5,
+    top_k=RetrievalConfig.HYBRID_TOP_K,
     force=False,
     use_memory=False,
     query=None,
@@ -892,7 +903,7 @@ if __name__ == "__main__":
     parser.add_argument("--query", "-q", type=str, default=None, help="Cau hoi don le can truy van")
     parser.add_argument("--input", "-i", type=str, default=None, help="Path to raw or preprocessed query input (JSON or TXT)")
     parser.add_argument("--output", "-o", type=str, default=None, help="Thu muc output")
-    parser.add_argument("--top-k", "-k", type=int, default=5, help="So luong candidates (default: 5)")
+    parser.add_argument("--top-k", "-k", type=int, default=RetrievalConfig.HYBRID_TOP_K, help="So luong candidates")
     parser.add_argument("--force", "-f", action="store_true", help="Chay lai toan bo bo qua cache")
     parser.add_argument("--use-memory", action="store_true", help="Chay Qdrant In-Memory")
     args = parser.parse_args()

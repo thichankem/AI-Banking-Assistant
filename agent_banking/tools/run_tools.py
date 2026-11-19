@@ -31,8 +31,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent_banking.tools.tool_registry import BankingToolRegistry
 from agent_banking.state_tracker import StateTracker
+from agent_banking.tools.config.settings import get_tools_config
+from agent_banking.tools.tool_registry import BankingToolRegistry
 
 
 def run_auto_tools(
@@ -43,6 +44,11 @@ def run_auto_tools(
     """
     Automatically execute tools from input to output with deduplication.
     """
+    runner_cfg = get_tools_config()["runner"]
+    default_in_name = runner_cfg["default_input_file"]
+    default_out_name = runner_cfg["default_output_file"]
+    tracker_name = runner_cfg["state_tracker_file"]
+
     in_dir = PROJECT_ROOT / "agent_banking" / "tools" / "input"
     in_dir.mkdir(parents=True, exist_ok=True)
 
@@ -52,7 +58,7 @@ def run_auto_tools(
         out_path = PROJECT_ROOT / "agent_banking" / "tools" / "output"
     out_path.mkdir(parents=True, exist_ok=True)
 
-    state_file = out_path / ".state_tracker.json"
+    state_file = out_path / tracker_name
     tracker = StateTracker(state_file)
     if force:
         tracker.clear()
@@ -62,7 +68,7 @@ def run_auto_tools(
     if input_file is not None:
         target_in_file = Path(input_file)
     else:
-        candidate = in_dir / "sample_tool_inputs.json"
+        candidate = in_dir / default_in_name
         if candidate.exists():
             target_in_file = candidate
 
@@ -83,7 +89,7 @@ def run_auto_tools(
 
     # 2. Read existing results for deduplication
     prev_results = {}
-    prev_file = out_path / "sample_tool_outputs.json"
+    prev_file = out_path / default_out_name
     if prev_file.exists() and not force:
         try:
             with open(prev_file, "r", encoding="utf-8") as fp:
@@ -146,7 +152,7 @@ def run_auto_tools(
     total_elapsed = round(time.time() - start_t, 2)
 
     # 3. Export output
-    out_file = out_path / "sample_tool_outputs.json"
+    out_file = out_path / default_out_name
     with open(out_file, "w", encoding="utf-8") as fp:
         json.dump(tool_outputs, fp, ensure_ascii=False, indent=2)
 

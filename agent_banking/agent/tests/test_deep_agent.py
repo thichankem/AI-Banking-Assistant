@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 import yaml
+import pytest
 
 from agent_banking.core.fallback import ModelFallbackError
 from agent_banking.core.settings import Config
@@ -66,6 +67,83 @@ def plan(*items):
         {"id": index + 1, "task": title, "status": status}
         for index, (title, status) in enumerate(items)
     ]}
+
+
+@pytest.mark.parametrize("verify_partial", [True, False])
+def test_final_partial_recovery_requires_its_own_approval(tmp_path, monkeypatch, verify_partial):
+    reason = {"verdict": "revise", "feedback": "", "claims": [],
+              "coverage": [{"item": "Điều kiện miễn phí", "status": "missing"}],
+              "issues": [{"item": "Điều kiện miễn phí", "problem": "Chưa có chứng cứ cho thẻ phụ.",
+                          "draft_line": 1, "source": "[Nguồn 1]"}]}
+    partial_verdict = reason
+    if verify_partial:
+        partial_verdict = {"verdict": "approve", "feedback": "",
+                           "coverage": [{"item": "Phí thẻ chính", "status": "answered"},
+                                        {"item": "Điều kiện thẻ phụ", "status": "limited"}],
+                           "claims": [{"draft_line": 1, "source": "[Nguồn 1]", "line": 2}]}
+    script = [{"kind": "tool", "name": "search_banking_knowledge", "arguments": {"query": "phí thẻ"}}]
+    for _ in range(MAX_REVISIONS + 1):
+        script.extend([final("Cả hai thẻ đều miễn phí [Nguồn 1]."), reason])
+    script.extend([final("Thẻ chính miễn phí [Nguồn 1]. Chưa đủ căn cứ về điều kiện miễn phí thẻ phụ."), partial_verdict])
+    runtime, graph, seen = make_agent(monkeypatch, tmp_path / "partial.sqlite", script)
+    monkeypatch.setattr(runtime.tools, "execute_tool", lambda *args, **kwargs: {
+        "status": "SUCCESS", "data": {"documents": [
+            {"chunk_id": "card", "source": "policy.pdf", "content": "Thẻ chính miễn phí."}
+        ]}
+    })
+    try:
+        state = run(graph, "Phí thẻ chính và điều kiện miễn phí thẻ phụ là gì?")
+        revisions = [request["review_feedback"] for request in seen if "review_feedback" in request]
+        assert revisions and all("D1" in value and "[Nguồn 1]" in value for value in revisions)
+        assert all("Chưa có chứng cứ cho thẻ phụ" in value for value in revisions)
+        if verify_partial:
+            assert state["audit_status"] == "PASS"
+            assert "Thẻ chính miễn phí" in state["final_answer"] and "Chưa đủ căn cứ" in state["final_answer"]
+            assert "Cả hai thẻ" not in state["final_answer"]
+            assert state["verification"]["partial_recovery"] is True
+            assert state["verification"]["limited_items"] == 1
+            assert state["sources"] == ["policy.pdf"]
+        else:
+            assert state["audit_status"] == "FAIL"
+            assert state["final_answer"] == FALLBACK_ANSWER and not state["sources"]
+            assert not state["chat_history"]
+    finally:
+        graph.checkpointer.conn.close()
+
+
+@pytest.mark.parametrize("same_document", [True, False])
+def test_recovery_counts_documents_instead_of_cited_passages(tmp_path, monkeypatch, same_document):
+    steps = ["Mở ứng dụng", "Chọn cài đặt", "Chọn ngôn ngữ", "Lưu lựa chọn"]
+    text = "\n".join(f"{step} [Nguồn {index}]." for index, step in enumerate(steps, 1))
+    reason = {"verdict": "revise", "feedback": "Cần kiểm tra đủ từng bước.", "claims": [],
+              "coverage": [{"item": "Các bước chỉnh ngôn ngữ", "status": "missing"}]}
+    script = [{"kind": "tool", "name": "search_banking_knowledge", "arguments": {"query": "cách đổi ngôn ngữ"}}]
+    for _ in range(MAX_REVISIONS + 1):
+        script.extend([final("Chọn cài đặt [Nguồn 2]."), reason])
+    script.extend([final(text), approval()])
+    runtime, graph, _ = make_agent(monkeypatch, tmp_path / "workflow.sqlite", script)
+    documents = []
+    for index, step in enumerate(steps, 1):
+        source = "guide.pdf"
+        if not same_document:
+            source = f"guide-{index}.pdf"
+        documents.append({"chunk_id": str(index), "source": source, "content": step})
+    monkeypatch.setattr(runtime.tools, "execute_tool", lambda *args, **kwargs: {
+        "status": "SUCCESS", "data": {"documents": documents}
+    })
+    try:
+        state = run(graph, "Cho tôi đầy đủ các bước đổi ngôn ngữ trên app.")
+        if same_document:
+            assert state["audit_status"] == "PASS"
+            assert state["final_answer"] == text
+            assert state["verification"]["partial_recovery"] is True
+            assert state["verification"]["limited_items"] == 0
+            assert state["sources"] == ["guide.pdf"] and len(state["citations"]) == 4
+        else:
+            assert state["audit_status"] == "FAIL" and state["final_answer"] == FALLBACK_ANSWER
+            assert state["reviews"][-1] == "citation_failed"
+    finally:
+        graph.checkpointer.conn.close()
 
 
 def test_delegation_isolated_feedback_replans_and_remaps_citations(tmp_path, monkeypatch):

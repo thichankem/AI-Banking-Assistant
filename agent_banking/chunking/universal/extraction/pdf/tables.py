@@ -1,6 +1,20 @@
 """Parse and validate lossless cell grids for PDF tables."""
 from html.parser import HTMLParser
 
+from agent_banking.chunking.config.settings import get_config_section, get_rules
+
+_PDF_RULES = get_rules("pdf")
+_LAYOUT_CFG = get_config_section("extraction")["pdf"]["layout"]
+_SECTION_TAGS = tuple(_PDF_RULES["table_section_tags"])
+_SCRIPT_TAGS = tuple(_PDF_RULES["table_script_tags"])
+_BLOCK_TAGS = tuple(_PDF_RULES["table_block_tags"])
+_FORMAT_TAGS = tuple(_PDF_RULES["table_format_tags"])
+_COL_TAGS = tuple(_PDF_RULES["table_col_tags"])
+_SERIALIZATION_VERSION = _PDF_RULES["table_serialization_version"]
+_MAX_ROWS = _PDF_RULES["table_max_rows"]
+_MAX_COLS = _PDF_RULES["table_max_cols"]
+_TABLE_ERROR_PREVIEW = _LAYOUT_CFG["table_error_preview_chars"]
+
 
 class _Cells(HTMLParser):
     def __init__(self):
@@ -22,7 +36,7 @@ class _Cells(HTMLParser):
             if self.in_table or self.finished:
                 raise ValueError("Expected exactly one nonnested serialized table")
             self.in_table = True
-        elif tag in ("thead", "tbody", "tfoot"):
+        elif tag in _SECTION_TAGS:
             if not self.in_table or self.in_row or self.section is not None:
                 raise ValueError("Invalid table section")
             self.section = tag
@@ -30,7 +44,7 @@ class _Cells(HTMLParser):
             if not self.in_table or self.in_row:
                 raise ValueError("Invalid table row")
             self.row += 1
-            if self.row >= 4096:
+            if self.row >= _MAX_ROWS:
                 raise ValueError("Serialized table exceeds row limit")
             self.column = 0
             self.in_row = True
@@ -45,7 +59,7 @@ class _Cells(HTMLParser):
             if not raw_rowspan.isdecimal() or not raw_colspan.isdecimal():
                 raise ValueError("Invalid non-integer span attribute")
             height, width = int(raw_rowspan), int(raw_colspan)
-            if not 1 <= height <= 4096 or not 1 <= width <= 256 or self.row + height > 4096 or self.column + width > 256:
+            if not 1 <= height <= _MAX_ROWS or not 1 <= width <= _MAX_COLS or self.row + height > _MAX_ROWS or self.column + width > _MAX_COLS:
                 raise ValueError("Serialized table exceeds span limits")
             locations = {(r, c) for r in range(self.row, self.row + height)
                          for c in range(self.column, self.column + width)}
@@ -57,15 +71,15 @@ class _Cells(HTMLParser):
             self.cell_tag = tag
         elif tag == "br" and self.cell is not None:
             self.cell["text"] += "\n"
-        elif tag in ("p", "div", "li") and self.cell is not None:
+        elif tag in _BLOCK_TAGS and self.cell is not None:
             if self.cell["text"] and not self.cell["text"].endswith("\n"):
                 self.cell["text"] += "\n"
-        elif tag in ("sub", "sup") and self.cell is not None:
+        elif tag in _SCRIPT_TAGS and self.cell is not None:
             self.formats.append(tag)
             self.cell["text"] += "<" + tag + ">"
-        elif tag in ("b", "i", "em", "strong", "span", "u", "code", "font", "small", "mark", "ul", "ol") and self.cell is not None:
+        elif tag in _FORMAT_TAGS and self.cell is not None:
             pass
-        elif tag in ("colgroup", "col") and self.in_table and not self.in_row:
+        elif tag in _COL_TAGS and self.in_table and not self.in_row:
             pass
         else:
             raise ValueError("Unsupported serialized table tag: " + tag)
@@ -94,20 +108,16 @@ class _Cells(HTMLParser):
                 raise ValueError("Unclosed serialized row or section")
             self.in_table = False
             self.finished = True
-        elif tag in ("sub", "sup"):
+        elif tag in _SCRIPT_TAGS:
             if self.cell is None or not self.formats or self.formats[-1] != tag:
                 raise ValueError("Unbalanced formula format in serialized cell")
             self.formats.pop()
             self.cell["text"] += "</" + tag + ">"
-        elif tag in ("thead", "tbody", "tfoot"):
+        elif tag in _SECTION_TAGS:
             if self.section != tag or self.in_row:
                 raise ValueError("Unexpected serialized table section ending")
             self.section = None
-        elif tag not in (
-            "b", "i", "em", "strong", "span",
-            "u", "code", "br", "p", "div", "li", "font",
-            "small", "mark", "ul", "ol", "colgroup", "col",
-        ):
+        elif tag not in _FORMAT_TAGS and tag not in _BLOCK_TAGS and tag not in _COL_TAGS and tag != "br":
             raise ValueError("Unexpected serialized tag ending")
 
 
@@ -136,7 +146,7 @@ def table_from_html(markup, header_rows):
                         grid[r][c] = cell["text"]
     headers = _header_labels(parser.cells, header_rows, width)
     return {"headers": headers, "header_row_count": header_rows, "header_grid": grid[:header_rows],
-            "rows": grid[header_rows:], "cells": parser.cells, "serialization": "model_declared_html_cells_v1"}
+            "rows": grid[header_rows:], "cells": parser.cells, "serialization": _SERIALIZATION_VERSION}
 
 
 def _header_labels(cells, count, width):
@@ -166,9 +176,12 @@ def validate_table(table, *, require_complete=False):
     if header_grid is None:
         if count > 1:
             raise ValueError("Multirow PDF headers require header_grid")
-        header_grid = [headers] if count else []
+        if count:
+            header_grid = [headers]
+        else:
+            header_grid = []
     if not isinstance(header_grid, list) or len(header_grid) != count or any(not isinstance(row, list) or len(row) != len(headers) or any(not isinstance(value, str) for value in row) for row in header_grid):
-        raise ValueError("Invalid PDF header grid: expected " + str(count) + " rows of " + str(len(headers)) + " string cells; received " + repr(header_grid)[:300])
+        raise ValueError("Invalid PDF header grid: expected " + str(count) + " rows of " + str(len(headers)) + " string cells; received " + repr(header_grid)[:_TABLE_ERROR_PREVIEW])
     grid = header_grid + rows
     occupied = set()
     cells = table.get("cells", [])

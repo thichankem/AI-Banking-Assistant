@@ -12,14 +12,27 @@ from ..models.text_client import CloudAttempts, MAX_CLOUD_ATTEMPTS, cloud_json, 
 from ..text.language import classify_text_blocks
 from .partitioning import atoms_for as atoms_for, optimal_partition as optimal_partition
 from agent_banking.core.models import model_primary, chain_fingerprint
-from agent_banking.chunking.config.prompt_config import START_PROMPT, BOUNDARY_PROMPT
+from agent_banking.chunking.config.prompt_config import (
+    ATOM_SCORE_VERSION,
+    BOUNDARY_PROMPT,
+    BOUNDARY_REPAIR_PROMPT,
+    BOUNDARY_VERSION,
+    START_PROMPT,
+    START_REPAIR_PROMPT,
+    render_prompt,
+)
+from agent_banking.chunking.config.settings import get_config_section
 
-BOUNDARY_VERSION = "semantic-lattice-v4-combined-source-starts"
-ATOM_SCORE_VERSION = "semantic-lattice-v2-anchored-cuts"
-START_SCORE = 0.85
-UNAVAILABLE_METHOD = "token_lattice_model_unavailable"
-ATOMS_PER_WINDOW = 12
-CONTEXT_ATOMS = 3
+_SEM_CFG = get_config_section("planning")["semantic_boundaries"]
+START_SCORE = _SEM_CFG["start_score"]
+UNAVAILABLE_METHOD = _SEM_CFG["unavailable_method"]
+ATOMS_PER_WINDOW = _SEM_CFG["atoms_per_window"]
+CONTEXT_ATOMS = _SEM_CFG["context_atoms"]
+_START_QUOTE_MIN_LEN = _SEM_CFG["start_quote_min_len"]
+_START_QUOTE_MAX_LEN = _SEM_CFG["start_quote_max_len"]
+_MAX_TOKENS = _SEM_CFG["max_tokens"]
+_TEMPERATURE = _SEM_CFG["temperature"]
+_ERROR_PREVIEW_CHARS = _SEM_CFG["error_preview_chars"]
 
 
 def _valid_score(score):
@@ -41,8 +54,10 @@ def source_starts(source, value):
             quote = proposal.get("start_quote")
         else:
             quote = None
-        if not isinstance(quote, str) or not 15 <= len(quote) <= 100 or quote[0].isspace():
-            raise ValueError("Source start requires a verbatim 15 to 100 character prefix")
+        if not isinstance(quote, str) or not _START_QUOTE_MIN_LEN <= len(quote) <= _START_QUOTE_MAX_LEN or quote[0].isspace():
+            raise ValueError(
+                "Source start requires a verbatim " + str(_START_QUOTE_MIN_LEN) + " to " + str(_START_QUOTE_MAX_LEN) + " character prefix"
+            )
         offset = source.find(quote)
         if offset <= 0 or offset != source.rfind(quote) or offset in anchors:
             raise ValueError("Source start must identify one unique interior offset")
@@ -77,9 +92,9 @@ class SemanticBoundaryScorer:
             for attempt in range(MAX_CLOUD_ATTEMPTS):
                 response = optional_model_call(ir, "semantic_source_starts", lambda: cloud_json(
                     endpoint.url.rstrip("/") + "/chat/completions", endpoint.api_key,
-                    {"model": endpoint.model, "messages": messages, "temperature": 0,
-                     "chat_template_kwargs": {"enable_thinking": False}, "max_tokens": 4096},
-                    max_output_tokens=4096, attempt_budget=attempt_budget))
+                    {"model": endpoint.model, "messages": messages, "temperature": _TEMPERATURE,
+                     "chat_template_kwargs": {"enable_thinking": False}, "max_tokens": _MAX_TOKENS},
+                    max_output_tokens=_MAX_TOKENS, attempt_budget=attempt_budget))
                 if response is None:
                     break
                 try:
@@ -88,8 +103,9 @@ class SemanticBoundaryScorer:
                     if attempt == MAX_CLOUD_ATTEMPTS - 1 or not attempt_budget.remaining:
                         record_model_warning(ir, "semantic_source_starts", type(error).__name__)
                         break
-                    messages[2:] = [{"role": "user", "content": "Repair the exact source anchors: " + str(error)[:300] +
-                        ". Return a complete starts array using only unique verbatim prefixes from the supplied text."}]
+                    messages[2:] = [{"role": "user", "content": render_prompt(
+                        START_REPAIR_PROMPT, error=str(error)[:_ERROR_PREVIEW_CHARS]
+                    )}]
                     continue
                 self.cache.put(key, response, 0, 0)
                 anchors.extend((first + offset, quote) for offset, quote in valid)
@@ -109,7 +125,10 @@ class SemanticBoundaryScorer:
             begin = 0
             for left, right, _ in [*block["foreign_spans"], (len(text), len(text), None)]:
                 if begin < left and text[begin:left].strip():
-                    blocks.append({**block, "source_start": begin, "text": text[begin:left]})
+                    fragment = {key: value for key, value in block.items() if key != "foreign_spans"}
+                    fragment["source_start"] = begin
+                    fragment["text"] = text[begin:left]
+                    blocks.append(fragment)
                 begin = right
         atoms = atoms_for(blocks, self.budget)
         ir["semantic_boundaries"] = []
@@ -121,14 +140,17 @@ class SemanticBoundaryScorer:
         if endpoint is None:
             ir["segmentation_method"] = UNAVAILABLE_METHOD
             return ir
-        long_blocks = [block for block in blocks if not block.get("foreign_spans")
-                       and self.budget.count(block["text"]) > self.budget.maximum]
+        long_blocks = [block for block in blocks if self.budget.count(block["text"]) > self.budget.maximum]
         by_block = defaultdict(list)
         for atom in atoms:
             by_block[atom["block_id"]].append(atom)
         proposed_starts = ordered_parallel(lambda block: self._start_proposals(block, by_block[block["id"]], endpoint, ir),
             long_blocks, self.workers)
-        starts = {block["id"]: proposals for block, proposals in zip(long_blocks, proposed_starts) if proposals}
+        starts = {}
+        for block, proposals in zip(long_blocks, proposed_starts):
+            if proposals:
+                base_offset = block.get("source_start", 0)
+                starts[block["id"]] = [(base_offset + offset, quote) for offset, quote in proposals]
 
         def window(start):
             end = start + ATOMS_PER_WINDOW
@@ -191,9 +213,9 @@ class SemanticBoundaryScorer:
             attempt_budget = CloudAttempts()
             for attempt in range(MAX_CLOUD_ATTEMPTS):
                 result = cloud_json(endpoint.url.rstrip("/") + "/chat/completions", endpoint.api_key,
-                    {"model": endpoint.model, "messages": messages, "temperature": 0,
-                     "chat_template_kwargs": {"enable_thinking": False}, "max_tokens": 4096},
-                    max_output_tokens=4096, attempt_budget=attempt_budget)
+                    {"model": endpoint.model, "messages": messages, "temperature": _TEMPERATURE,
+                     "chat_template_kwargs": {"enable_thinking": False}, "max_tokens": _MAX_TOKENS},
+                    max_output_tokens=_MAX_TOKENS, attempt_budget=attempt_budget)
                 try:
                     checked = validate(result)
                     self.cache.put(key, checked, 0, 0)
@@ -201,9 +223,11 @@ class SemanticBoundaryScorer:
                 except (ValueError, TypeError) as error:
                     if attempt == MAX_CLOUD_ATTEMPTS - 1 or not attempt_budget.remaining:
                         raise
-                    messages[2:] = [{"role": "user", "content": "Repair scores: " + str(error)[:300] +
-                        ". Return exactly these editable IDs once each: " + json.dumps(state["editable_ids"]) +
-                        ". Return a complete boundaries array and optional source-grounded proposals, not a patch."}]
+                    messages[2:] = [{"role": "user", "content": render_prompt(
+                        BOUNDARY_REPAIR_PROMPT,
+                        error=str(error)[:_ERROR_PREVIEW_CHARS],
+                        editable_ids=json.dumps(state["editable_ids"]),
+                    )}]
 
         window_starts = list(range(0, len(atoms), ATOMS_PER_WINDOW))
         results = ordered_parallel(lambda start: optional_model_call(ir, "semantic_boundaries", lambda: window(start)),
@@ -225,5 +249,8 @@ class SemanticBoundaryScorer:
                                                    "source_ending": proposal["end_quote"]})
         ir["segmentation_method"] = UNAVAILABLE_METHOD
         if results or starts:
-            ir["segmentation_method"] = BOUNDARY_VERSION if len(results) == len(window_starts) else BOUNDARY_VERSION + "-partial"
+            if len(results) == len(window_starts):
+                ir["segmentation_method"] = BOUNDARY_VERSION
+            else:
+                ir["segmentation_method"] = BOUNDARY_VERSION + "-partial"
         return ir

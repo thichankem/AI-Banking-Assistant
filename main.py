@@ -42,6 +42,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
+from agent_banking.core.config.settings import CoreConfig, get_core_messages
 from agent_banking.core.settings import Config
 from agent_banking.pipeline import BankingRAGPipeline
 from agent_banking.node_pipeline import NodePipeline
@@ -52,29 +53,48 @@ from agent_banking.agent.config.response_profiles import (
     FORMAT_PROFILES
 )
 
+_API_CFG = CoreConfig.CORE_API
+_AP_CFG = CoreConfig.CORE_AGENT_PIPELINE
+_API_MESSAGES = get_core_messages(None, "api_messages.yaml", "API_MESSAGES")
+_SSE_DESCRIPTIONS = dict(_API_MESSAGES.get("sse_node_descriptions", {}))
+_FORMAT_PREFIXES = tuple(_API_MESSAGES.get("format_prefixes", []))
+_STARTUP_BANNER = dict(_API_MESSAGES.get("startup_banner", {}))
+
+_DEFAULT_PERSONA = str(_AP_CFG["default_persona"])
+_DEFAULT_TONE = str(_AP_CFG["default_tone"])
+_DEFAULT_FORMAT_TYPE = str(_AP_CFG["default_format_type"])
+_DEFAULT_CUSTOM_PERSONA = str(_AP_CFG["default_custom_persona"])
+
+_STATIC_DIR_NAME = str(_API_CFG["static_dir"])
+_INDEX_FILE_NAME = str(_API_CFG["index_file"])
+_STREAM_STEP_DELAY = float(_API_CFG["stream_step_delay_sec"])
+_STREAM_TOKEN_DELAY = float(_API_CFG["stream_token_delay_sec"])
+_FINAL_METADATA_KEYS = tuple(_API_CFG["final_metadata_keys"])
+_TRACE_METADATA_KEYS = tuple(_API_CFG["trace_metadata_keys"])
+
 # Initialize FastAPI application
 app = FastAPI(
-    title="A-Bank AI Assistant",
-    description="A-Bank chat, knowledge retrieval, and indexing API",
-    version="3.0.0"
+    title=str(_API_CFG["title"]),
+    description=str(_API_CFG["description"]),
+    version=str(_API_CFG["version"])
 )
 
 # Mount static directory for frontend assets
-static_dir = ROOT_DIR / "static"
+static_dir = ROOT_DIR / _STATIC_DIR_NAME
 if static_dir.exists():
-    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+    app.mount("/" + _STATIC_DIR_NAME, StaticFiles(directory=str(static_dir)), name=_STATIC_DIR_NAME)
 
 # Initialize Config & BankingRAGPipeline
 config = Config()
 use_memory_env = False
-if os.environ.get("USE_MEMORY_STORE", "0") == "1":
+if os.environ.get(str(_API_CFG["use_memory_env"]), "0") == "1":
     use_memory_env = True
 
 try:
     rag_pipeline = BankingRAGPipeline(config=config, use_memory=use_memory_env)
 except RuntimeError as lock_err:
     if "already accessed by another instance" in str(lock_err):
-        print("[Lock Warning] Vector store locked by another process -> Falling back to In-Memory store.")
+        print(_API_MESSAGES["lock_warning"])
         rag_pipeline = BankingRAGPipeline(config=config, use_memory=True)
     else:
         raise
@@ -86,21 +106,30 @@ node_pipe = NodePipeline()
 # Pydantic Schemas
 class ChatRequest(BaseModel):
     message: str
-    persona: str | None = "advisor"
-    tone: str | None = "formal"
-    format_style: str | None = "standard"
-    custom_persona: str | None = ""
+    persona: str | None = _DEFAULT_PERSONA
+    tone: str | None = _DEFAULT_TONE
+    format_style: str | None = _DEFAULT_FORMAT_TYPE
+    custom_persona: str | None = _DEFAULT_CUSTOM_PERSONA
     session_id: str | None = None
 
 
 class SessionRequest(BaseModel):
-    session_id: str = Field(min_length=1, max_length=256)
+    session_id: str = Field(
+        min_length=int(_API_CFG["session_id_min_length"]),
+        max_length=int(_API_CFG["session_id_max_length"])
+    )
 
 
 class ResumeRequest(SessionRequest):
-    interaction_id: str = Field(min_length=32, max_length=32)
-    choice_id: str = Field(min_length=1, max_length=32)
-    text: str | None = Field(default=None, max_length=500)
+    interaction_id: str = Field(
+        min_length=int(_API_CFG["interaction_id_length"]),
+        max_length=int(_API_CFG["interaction_id_length"])
+    )
+    choice_id: str = Field(
+        min_length=int(_API_CFG["choice_id_min_length"]),
+        max_length=int(_API_CFG["choice_id_max_length"])
+    )
+    text: str | None = Field(default=None, max_length=int(_API_CFG["resume_text_max_length"]))
 
 
 # -----------------------------------------------------------------------------
@@ -108,7 +137,7 @@ class ResumeRequest(SessionRequest):
 # -----------------------------------------------------------------------------
 @app.get("/")
 def serve_index():
-    index_file = ROOT_DIR / "static" / "index.html"
+    index_file = ROOT_DIR / _STATIC_DIR_NAME / _INDEX_FILE_NAME
     if index_file.exists():
         return FileResponse(
             str(index_file),
@@ -118,7 +147,7 @@ def serve_index():
                 "Expires": "0"
             }
         )
-    return {"message": "AI Banking Assistant Server is running."}
+    return {"message": _API_MESSAGES["server_running"]}
 
 
 # -----------------------------------------------------------------------------
@@ -140,7 +169,9 @@ def get_persona_profiles():
     format_list = []
     for k, v in FORMAT_PROFILES.items():
         if ":" in v:
-            f_name = v.split(":")[0].replace("Format ", "").replace("Định dạng ", "")
+            f_name = v.split(":")[0]
+            for prefix in _FORMAT_PREFIXES:
+                f_name = f_name.replace(prefix, "")
         else:
             f_name = v
         format_list.append({"id": k, "name": f_name, "description": v})
@@ -164,38 +195,32 @@ def get_config():
     total_points = rag_pipeline.vector_store.count()
     return {
         "default_model": config.AGENT_LLM_MODEL,
-        "agent_mode": "deep",
+        "agent_mode": str(_API_CFG["agent_mode"]),
         "embedding_model": config.EMBEDDING_MODEL_1024,
         "reranker_model": config.RERANKER_MODEL,
         "qdrant_collection": config.QDRANT_COLLECTION,
         "points_count": total_points,
         "tracing_enabled": rag_pipeline.tracer.is_phoenix_active,
-        "phoenix_url": "http://127.0.0.1:6006",
-        "nodes": [
-            {"id": "chunking", "name": "Node 1: Chunking"},
-            {"id": "embedding", "name": "Node 2: Embedding"},
-            {"id": "vector_db", "name": "Node 3: Vector DB & BM25"},
-            {"id": "retrieval", "name": "Hybrid Retrieval"},
-            {"id": "reranking", "name": "Cross-Encoder Reranker"}
-        ]
+        "phoenix_url": str(_API_CFG["phoenix_url"]),
+        "nodes": list(_API_CFG["nodes"])
     }
 
 
 def _resolve_chat_style(req: ChatRequest) -> dict:
     """Normalize persona, tone, format_style, and custom_persona fields from ChatRequest."""
-    persona_val = "advisor"
+    persona_val = _DEFAULT_PERSONA
     if req.persona:
         persona_val = req.persona
 
-    tone_val = "formal"
+    tone_val = _DEFAULT_TONE
     if req.tone:
         tone_val = req.tone
 
-    format_style_val = "standard"
+    format_style_val = _DEFAULT_FORMAT_TYPE
     if req.format_style:
         format_style_val = req.format_style
 
-    custom_persona_val = ""
+    custom_persona_val = _DEFAULT_CUSTOM_PERSONA
     if req.custom_persona:
         custom_persona_val = req.custom_persona
 
@@ -227,7 +252,7 @@ def handle_agent_chat(req: ChatRequest):
     """
     query_text = req.message.strip()
     if not query_text:
-        raise HTTPException(status_code=400, detail="Query message cannot be empty.")
+        raise HTTPException(status_code=400, detail=_API_MESSAGES["empty_query_error"])
 
     session_id = req.session_id or uuid4().hex
 
@@ -246,7 +271,7 @@ def handle_agent_chat(req: ChatRequest):
         return result
     except Exception as error:
         print(f"[Deep agent chat] {type(error).__name__}")
-        raise HTTPException(status_code=500, detail="Tạm thời chưa thể hoàn tất phản hồi.") from None
+        raise HTTPException(status_code=500, detail=_API_MESSAGES["chat_internal_error"]) from None
 
 
 @app.post("/api/agent/status")
@@ -268,7 +293,7 @@ def agent_resume(req: ResumeRequest):
         headers = None
         if getattr(error, "trace_id", None):
             headers = {"X-Trace-ID": error.trace_id}
-        raise HTTPException(status_code=500, detail="Tạm thời chưa thể tiếp tục yêu cầu.", headers=headers) from None
+        raise HTTPException(status_code=500, detail=_API_MESSAGES["resume_internal_error"], headers=headers) from None
 
 
 @app.post("/api/agent/stream")
@@ -278,7 +303,7 @@ async def stream_agent_chat(req: ChatRequest):
     """
     query_text = req.message.strip()
     if query_text == "":
-        raise HTTPException(status_code=400, detail="Query message cannot be empty.")
+        raise HTTPException(status_code=400, detail=_API_MESSAGES["empty_query_error"])
 
     session_id = req.session_id or uuid4().hex
 
@@ -309,21 +334,9 @@ async def stream_agent_chat(req: ChatRequest):
                     if "audit_status" in node_state:
                         audit_status_used = str(node_state["audit_status"])
 
-                    descriptions = {
-                        "input_guardrail": "Đã kiểm tra yêu cầu",
-                        "context_prepare": "Đã chuẩn bị ngữ cảnh phiên",
-                        "deep_decide": "Đã chọn bước tiếp theo",
-                        "plan_update": "Đã cập nhật kế hoạch",
-                        "subagent": "Đã nhận kết quả từ subagent",
-                        "memory_update": "Đã xử lý bộ nhớ",
-                        "skill_inspect": "Đã nạp hướng dẫn skill",
-                        "prepare_interaction": "Đang chuẩn bị câu hỏi",
-                        "answer_review": "Đã kiểm tra dự thảo",
-                        "output_guardrail": "Đã kiểm tra phản hồi"
-                    }
-                    node_description = descriptions.get(node_name, node_name)
+                    node_description = _SSE_DESCRIPTIONS.get(node_name, node_name)
                     if node_name == "answer_review" and node_state["audit_status"] == "RETRY":
-                        node_description = "Cần bổ sung hoặc sửa sau kiểm tra"
+                        node_description = _SSE_DESCRIPTIONS.get("answer_review_retry", node_description)
                     action = node_state.get("last_action")
                     if action:
                         node_description = f"{action['kind']} · {action['name']} · {action['status']}"
@@ -332,9 +345,9 @@ async def stream_agent_chat(req: ChatRequest):
                         citations = node_state["citations"]
                         sources = node_state["sources"]
                         final_metadata = {
-                            key: node_state[key] for key in ("plan", "delegations", "review_outcomes", "verification", "memory")
+                            key: node_state[key] for key in _FINAL_METADATA_KEYS
                         }
-                        final_metadata.update({key: node_state[key] for key in ("trace_id", "turn_id") if key in node_state})
+                        final_metadata.update({key: node_state[key] for key in _TRACE_METADATA_KEYS if key in node_state})
 
                     step_payload = {
                         "event_type": "node_progress",
@@ -348,7 +361,7 @@ async def stream_agent_chat(req: ChatRequest):
                         step_payload["audit_status"] = node_state["audit_status"]
                     data_str = json.dumps(step_payload, ensure_ascii=False)
                     yield f"data: {data_str}\n\n"
-                    await asyncio.sleep(0.02)
+                    await asyncio.sleep(_STREAM_STEP_DELAY)
 
             words = final_response_text.split(" ")
             for word in words:
@@ -358,7 +371,7 @@ async def stream_agent_chat(req: ChatRequest):
                 }
                 token_str = json.dumps(token_payload, ensure_ascii=False)
                 yield f"data: {token_str}\n\n"
-                await asyncio.sleep(0.015)
+                await asyncio.sleep(_STREAM_TOKEN_DELAY)
 
             done_payload = {
                 "event_type": "done",
@@ -378,7 +391,7 @@ async def stream_agent_chat(req: ChatRequest):
             print(f"[Deep agent stream] {type(err).__name__}")
             error_payload = {
                 "event_type": "error",
-                "message": "Tạm thời chưa thể hoàn tất phản hồi."
+                "message": _API_MESSAGES["chat_internal_error"]
             }
             if getattr(err, "trace_id", None):
                 error_payload["trace_id"] = err.trace_id
@@ -445,19 +458,19 @@ def get_node_file_content(node_name: str, io_type: str, file_name: str):
     """
     folders = node_pipe.get_node_folders()
     if node_name not in folders:
-        raise HTTPException(status_code=404, detail=f"Node not found: {node_name}")
+        raise HTTPException(status_code=404, detail=_API_MESSAGES["node_not_found"].format(node_name=node_name))
     if io_type not in ["input", "output"]:
-        raise HTTPException(status_code=400, detail="Directory type must be 'input' or 'output'")
+        raise HTTPException(status_code=400, detail=_API_MESSAGES["invalid_io_type"])
 
     target_dir = folders[node_name][io_type]
     base_resolved = target_dir.resolve()
     target_file = (target_dir / file_name).resolve()
 
     if not target_file.is_relative_to(base_resolved):
-        raise HTTPException(status_code=403, detail="Access denied: invalid file path")
+        raise HTTPException(status_code=403, detail=_API_MESSAGES["invalid_file_path"])
 
     if not target_file.exists() or not target_file.is_file():
-        raise HTTPException(status_code=404, detail=f"File not found: {file_name}")
+        raise HTTPException(status_code=404, detail=_API_MESSAGES["file_not_found"].format(file_name=file_name))
 
     try:
         if target_file.suffix.lower() == ".json":
@@ -469,13 +482,15 @@ def get_node_file_content(node_name: str, io_type: str, file_name: str):
                 raw_text = fp.read()
             return {"file_name": file_name, "is_json": False, "content": raw_text}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unable to read file: {e}")
+        raise HTTPException(status_code=500, detail=_API_MESSAGES["unable_to_read_file"].format(error=e))
 
 
 if __name__ == "__main__":
+    host = str(_API_CFG["host"])
+    port = int(_API_CFG["port"])
     print("=" * 70)
-    print("  AI BANKING ASSISTANT SERVER")
-    print("  * Web UI : http://127.0.0.1:8000")
-    print("  * API Doc: http://127.0.0.1:8000/docs")
+    print(_STARTUP_BANNER["title"])
+    print(_STARTUP_BANNER["web_ui_prefix"].format(host=host, port=port))
+    print(_STARTUP_BANNER["api_doc_prefix"].format(host=host, port=port))
     print("=" * 70)
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host=host, port=port)

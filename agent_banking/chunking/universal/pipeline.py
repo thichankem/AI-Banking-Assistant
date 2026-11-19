@@ -1,10 +1,12 @@
 """Grounded PDF/DOCX ingestion, cloud semantics and exact passage budgets."""
 import hashlib
 import json
+import os
 import threading
 import time
 from pathlib import Path
 
+from agent_banking.chunking.config.settings import ChunkingConfig, get_config_section
 from .models.response_cache import PageVisionCache
 from .extraction.docx.extractor import DocxExtractor
 from .planning.planner import ChunkPlanner
@@ -22,7 +24,10 @@ from .planning.schema import (
     generate_chunk_id, REQUIRED_UNIVERSAL_SCHEMA_KEYS, VALID_CHUNK_TYPES,
 )
 
-PIPELINE_VERSION = "universal-pdf-docx-7.0-cloud"
+_PIPELINE = get_config_section("pipeline")
+_ENRICH_IMAGE_CFG = get_config_section("enrichment")["image_context"]
+
+PIPELINE_VERSION = _PIPELINE["version"]
 MODULE = Path(__file__).resolve().parent.parent
 _DOCUMENT_LOCK = threading.RLock()
 
@@ -67,28 +72,33 @@ def _parse_markdown_table_to_2d_list(text):
 
 class UniversalDocxChunker:
     def __init__(self, cache_db_path=None, base_url=None, api_key=None, model=None,
-                 dpi=200, max_chunk_words=None, cache=None, vision_client=None,
-                 target_chunk_tokens=512, max_chunk_tokens=1024,
-                 table_rows_per_chunk=4, asset_dir=None, workers=2,
-                 use_llm=True, use_decision=True, tokenizer=None,
-                 max_chunk_chars=None, min_chunk_words=30, min_section_chars=0, review_vision_client=None,
-                 semantic=True, image_mode="text_context", max_pdf_pages=2000, max_page_pixels=40_000_000,
-                 max_chunk_size=None, min_section_size=None, config=None, min_chunk_tokens=128,
-                 search_language=None, ocr_docx_images=False):
+                 dpi=_PIPELINE["dpi"], max_chunk_words=None, cache=None, vision_client=None,
+                 target_chunk_tokens=_PIPELINE["target_chunk_tokens"],
+                 max_chunk_tokens=_PIPELINE["max_chunk_tokens"],
+                 table_rows_per_chunk=_PIPELINE["table_rows_per_chunk"], asset_dir=None,
+                 workers=_PIPELINE["workers"],
+                 use_llm=_PIPELINE["use_llm"], use_decision=_PIPELINE["use_decision"], tokenizer=None,
+                 max_chunk_chars=None, min_chunk_words=_PIPELINE["min_chunk_words"],
+                 min_section_chars=_PIPELINE["min_section_chars"], review_vision_client=None,
+                 semantic=_PIPELINE["semantic"], image_mode=_PIPELINE["default_image_mode"],
+                 max_pdf_pages=_PIPELINE["max_pdf_pages"],
+                 max_page_pixels=_PIPELINE["max_page_pixels"],
+                 max_chunk_size=None, min_section_size=None, config=None,
+                 min_chunk_tokens=_PIPELINE["min_chunk_tokens"],
+                 search_language=None, ocr_docx_images=_PIPELINE["ocr_docx_images"]):
         if max_chunk_chars is None and max_chunk_size is not None:
             max_chunk_chars = max_chunk_size
         if min_section_size is not None and min_section_chars == 0:
             min_section_chars = min_section_size
         self.config = config
         if search_language is None:
-            from ..config.settings import ChunkingConfig
             search_language = getattr(config, "CHUNK_SEARCH_LANGUAGE", ChunkingConfig.CHUNK_SEARCH_LANGUAGE)
         self.ocr_docx_images = ocr_docx_images
         self.dpi = dpi
         self.max_chunk_words = max_chunk_words
         if type(workers) is not int or workers < 1:
             raise ValueError("workers must be a positive integer")
-        self.workers = min(workers, 2)
+        self.workers = min(workers, _PIPELINE["max_workers"])
         self.use_llm = use_llm
         self.use_decision = use_decision
         if image_mode not in ("vision", "text_context"):
@@ -97,6 +107,7 @@ class UniversalDocxChunker:
         self.image_mode = "ignore_standalone_images"
         from .extraction.pdf.extractor import PdfExtractor
 
+        explicit_vision = vision_client is not None
         if vision_client is None and any(value is not None for value in (base_url, api_key, model)):
             from .extraction.pdf.page_review import OCR_MAX_OUTPUT_TOKENS
             from .models.vision_client import DocumentVisionClient
@@ -105,12 +116,16 @@ class UniversalDocxChunker:
         self._owns_cache = cache is None
         self.cache = cache
         if self.cache is None:
-            self.cache = PageVisionCache(str(cache_db_path or MODULE / "cache/grounded_models.db"))
+            self.cache = PageVisionCache(str(cache_db_path or MODULE / _PIPELINE["cache_db_relpath"]))
+        if explicit_vision:
+            ocr_workers = 1
+        else:
+            ocr_workers = max(1, int(os.getenv("CHUNKING_OCR_WORKERS", getattr(config, "OCR_WORKERS", ChunkingConfig.OCR_WORKERS))))
         try:
             self.pdf_extractor = PdfExtractor(
-                asset_dir or MODULE / "output/assets", self.cache, vision_client, review_vision_client,
+                asset_dir or MODULE / _PIPELINE["asset_dir_relpath"], self.cache, vision_client, review_vision_client,
                 dpi, max_pdf_pages, max_page_pixels, use_decision,
-                search_language=search_language,
+                search_language=search_language, workers=ocr_workers,
             )
             self.planner = ChunkPlanner(
                 target_chunk_tokens, max_chunk_tokens, max_chunk_words, table_rows_per_chunk, tokenizer,
@@ -123,14 +138,18 @@ class UniversalDocxChunker:
                 vision_client=vision_client, review_client=review_vision_client, max_image_pixels=max_page_pixels,
             )
             source_root = Path(__file__).resolve().parent
+            excluded_parts = set(_PIPELINE["code_snapshot_excluded_parts"])
+            excluded_files = set(_PIPELINE["code_snapshot_excluded_files"])
             self._code_snapshot = {
                 path.relative_to(source_root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
                 for path in sorted(source_root.rglob("*.py"))
+                if not excluded_parts.intersection(path.parts) and path.name not in excluded_files
             }
         except BaseException:
             self.close()
             raise
         self._result = threading.local()
+        self._doc_lock = threading.RLock()
 
     def fingerprint(self):
         return chunker_fingerprint(self, PIPELINE_VERSION)
@@ -143,13 +162,26 @@ class UniversalDocxChunker:
         return self.extractor.extract(source, name)
 
     def chunk_document(self, docx_path=None, docx_bytes=None, source_name=None, expected_format=None):
-        with _DOCUMENT_LOCK:
+        with self._doc_lock:
             self.last_artifact = None
             source_root = getattr(self.config, "CHUNKING_INPUT_DIR", MODULE / "input")
             source, name, fmt = self._resolve_source(
                 docx_path, docx_bytes, source_name, expected_format, source_root=source_root,
             )
-            return self._process_ir(self._extract_ir(source, name, fmt))
+            from agent_banking.tracing.agent_trace import AgentRun
+
+            trace_dir = None
+            trace_config = self.config
+            if trace_config is None:
+                from agent_banking.tracing.config.settings import TracingConfig
+                trace_config = TracingConfig()
+            if getattr(trace_config, "ENABLE_TRACING", False):
+                trace_dir = getattr(trace_config, "TRACE_DIR", None)
+            with AgentRun(trace_dir, "document", name).capture() as run:
+                run.details["format"] = fmt
+                chunks = self._process_ir(self._extract_ir(source, name, fmt))
+                run.details["chunks"] = len(chunks)
+                return chunks
 
     @property
     def last_artifact(self):
@@ -165,7 +197,7 @@ class UniversalDocxChunker:
     def _process_ir(self, ir):
         from .text.language import classify_text_blocks
 
-        ir["profile"] = "accuracy"
+        ir["profile"] = _PIPELINE["profile"]
         ir["search_language"] = self.planner.search_language
         ir.setdefault("visual_policy", self.image_mode)
         classify_text_blocks(ir["blocks"], search_language=ir["search_language"])
@@ -183,13 +215,16 @@ class UniversalDocxChunker:
         if self.use_decision and has_searchable_content:
             ir["deterministic_coverage"] = artifact["quality"].copy()
             enricher.review(ir)
-        decision_route = ir.get("decision_review", {}).get("answers", {}).get("review_route", {}).get("choice")
+        decision_review = ir.get("decision_review", {})
+        decision_route = decision_review.get("answers", {}).get("review_route", {}).get("choice")
         artifact["pipeline_version"] = PIPELINE_VERSION
         artifact["pipeline_fingerprint"] = self.fingerprint()
         ready = all(block["image"].get("status") in RESOLVED_IMAGE_STATUSES
                     for block in ir["blocks"] if block["type"] == "image")
         statistics = ir.get("statistics", {})
         ready = ready and self.use_llm and self.semantic
+        if decision_route == "REPAIR_EXTRACTION" and decision_review.get("status") != "advisory":
+            ready = False
         artifact["quality"]["empty_searchable_content"] = not has_searchable_content
         artifact["quality"]["index_ready"] = bool(ready and not any(
             warning.get("requires_review") for warning in ir["warnings"]
@@ -263,7 +298,7 @@ class UniversalDocxChunker:
         stats = {
             "total_chunks": len(all_chunks),
             "elapsed_seconds": elapsed,
-            "speed_chunks_per_sec": round(len(all_chunks) / max(elapsed, 0.001), 1),
+            "speed_chunks_per_sec": round(len(all_chunks) / max(elapsed, _PIPELINE["speed_min_elapsed"]), 1),
         }
         if output_dir:
             out_p = Path(output_dir)

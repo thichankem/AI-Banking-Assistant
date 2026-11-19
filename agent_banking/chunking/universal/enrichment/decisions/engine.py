@@ -6,7 +6,16 @@ import json
 import math
 from pathlib import Path
 
-from agent_banking.core.models import chain_fingerprint, model_primary
+from agent_banking.chunking.config.prompt_config import (
+    BREADCRUMB_HIERARCHY_PROMPT,
+    DECISION_ENGINE_VERSION,
+    PERIOD_BOUNDARIES_PROMPT,
+    PROMPT_PAIRS_PROMPT,
+    render_prompt,
+)
+from agent_banking.chunking.config.settings import get_config_section
+from agent_banking.core.models import auto_routing_enabled, chain_fingerprint, model_primary
+from agent_banking.tracing.agent_trace import annotate_span, trace_stage
 from ...extraction.docx.extractor import MAX_HEADING_LEVEL
 from .images import attach_visual_captions, resolve_image_titles_and_context
 from .tables import (
@@ -22,7 +31,11 @@ from ...text.language import classify_text_blocks
 from ...models.text_client import cloud_json, ordered_parallel, validate_decisions
 from ...models.response_cache import PageVisionCache
 
-DECISION_ENGINE_VERSION = "decision-engine-v2.0"
+_DECISIONS_CFG = get_config_section("enrichment")["decisions"]
+_CACHE_CFG = get_config_section("cache")
+_BREADCRUMB_CFG = _DECISIONS_CFG["breadcrumb"]
+_PAIR_CFG = _DECISIONS_CFG["prompt_pairs"]
+_PERIOD_CFG = _DECISIONS_CFG["period_boundaries"]
 _DEFAULT_CACHE = None
 
 
@@ -31,12 +44,13 @@ def get_decision_cache(cache=None):
     if cache is not None:
         return cache
     if _DEFAULT_CACHE is None:
-        db_path = Path(__file__).resolve().parents[3] / "cache" / "grounded_models.db"
+        db_path = Path(__file__).resolve().parents[3] / get_config_section("pipeline")["cache_db_relpath"]
         _DEFAULT_CACHE = PageVisionCache(str(db_path))
     return _DEFAULT_CACHE
 
 
-def ask_decisions(role, state, questions, cache=None, batch_size=6, workers=2, *, ir=None):
+def ask_decisions(role, state, questions, cache=None, batch_size=_DECISIONS_CFG["batch_size"],
+                  workers=_DECISIONS_CFG["workers"], *, ir=None):
     """Execute and cache batched /systemone decision queries."""
     if type(batch_size) is not int or batch_size < 1:
         raise ValueError("Decision batch size must be a positive integer")
@@ -49,17 +63,24 @@ def ask_decisions(role, state, questions, cache=None, batch_size=6, workers=2, *
     if endpoint is None:
         return {}
     model = endpoint.model
+    routing = {}
+    if auto_routing_enabled():
+        reason = _DECISIONS_CFG["route_reasons"]
+        routing["route_reason"] = reason.get(role, _DECISIONS_CFG["default_route_reason"])
     namespace = {
         "engine": DECISION_ENGINE_VERSION,
         "decisions": chain_fingerprint("chunking.decision"),
         "provider": endpoint.url,
+        **routing,
     }
     q_items = list(questions.items())
     batches = []
     for start in range(0, len(q_items), batch_size):
         batches.append(dict(q_items[start:start + batch_size]))
 
+    @trace_stage("document.decision")
     def run_batch(batch_questions):
+        annotate_span(role=role, questions=len(batch_questions))
         batch_state = {}
         def relevant(identifier, selected):
             return isinstance(identifier, str) and any(
@@ -85,7 +106,8 @@ def ask_decisions(role, state, questions, cache=None, batch_size=6, workers=2, *
         if cached is not None:
             try:
                 validate_decisions(cached, batch_questions)
-                return {name: deepcopy(cached["answers"][name]) for name in batch_questions}
+                annotate_span(cache_hit=True)
+                return answers_with_provenance(cached, batch_questions)
             except (ValueError, TypeError, KeyError):
                 active_cache.delete(key)
         def request():
@@ -93,8 +115,9 @@ def ask_decisions(role, state, questions, cache=None, batch_size=6, workers=2, *
                 endpoint.url.rstrip("/") + "/systemone",
                 endpoint.api_key,
                 {"model": model, "state": batch_state, "questions": batch_questions},
-                timeout=60,
+                timeout=_DECISIONS_CFG["timeout"],
                 model_module="chunking.decision",
+                **routing,
             )
             validate_decisions(result, batch_questions)
             return result
@@ -103,11 +126,22 @@ def ask_decisions(role, state, questions, cache=None, batch_size=6, workers=2, *
         if result is None:
             return {}
         active_cache.put(key, result)
-        return {name: deepcopy(result["answers"][name]) for name in batch_questions}
+        return answers_with_provenance(result, batch_questions)
+
+    def answers_with_provenance(result, batch_questions):
+        answers = {name: deepcopy(result["answers"][name]) for name in batch_questions}
+        provenance = result.get("_routing")
+        if provenance:
+            annotate_span(**provenance)
+            for answer in answers.values():
+                answer["_routing"] = deepcopy(provenance)
+            if ir is not None:
+                ir.setdefault("decision_model_routes", []).append({"role": role, **provenance})
+        return answers
 
     if len(batches) == 1:
         return run_batch(batches[0])
-    batch_results = ordered_parallel(run_batch, batches, min(2, workers, len(batches)))
+    batch_results = ordered_parallel(run_batch, batches, min(_DECISIONS_CFG["max_parallel_workers"], workers, len(batches)))
     merged = {}
     for ans_dict in batch_results:
         merged.update(ans_dict)
@@ -130,49 +164,60 @@ def decide_breadcrumb_hierarchy(ir, cache=None):
         if typo is not None:
             for sz, count in typo.get("size_chars", {}).items():
                 char_by_size[sz] = char_by_size.get(sz, 0) + count
-    if not char_by_size:
-        return
-    body_font_pt = 10.5
+    has_typography = bool(char_by_size)
+    body_font_pt = _BREADCRUMB_CFG["default_body_font_pt"]
     max_chars = -1
     for sz, count in char_by_size.items():
         if count > max_chars:
             max_chars = count
             body_font_pt = sz
-    ir["typography_profile"] = {
-        "body_font_pt": body_font_pt,
-        "char_distribution": {str(k): v for k, v in sorted(char_by_size.items())},
-    }
+    if has_typography:
+        ir["typography_profile"] = {
+            "body_font_pt": body_font_pt,
+            "char_distribution": {str(k): v for k, v in sorted(char_by_size.items())},
+        }
+    else:
+        ir["typography_profile"] = {"body_font_pt": None, "char_distribution": {}}
     candidates = []
     questions = {}
     candidate_blocks = {}
     level_map = {"LEVEL_" + str(level): level for level in range(1, MAX_HEADING_LEVEL + 1)}
     criteria = {
-        "LEVEL_1": "Document title or primary top-level heading, based on peer heading patterns",
-        **{key: "Heading at document outline level " + str(level)
-           + "; determine relative depth from the surrounding hierarchy and recurring typography"
+        "LEVEL_1": BREADCRUMB_HIERARCHY_PROMPT["level_1_description"],
+        **{key: render_prompt(BREADCRUMB_HIERARCHY_PROMPT["level_n_description"], level=level)
            for key, level in level_map.items() if level > 1},
-        "CAPTION": "Text directly labeling a nearby figure or table",
-        "BODY": "Paragraph, list item, or label with no evidence that it begins a section",
+        "CAPTION": BREADCRUMB_HIERARCHY_PROMPT["caption_description"],
+        "BODY": BREADCRUMB_HIERARCHY_PROMPT["body_description"],
     }
+    max_heading_words = _BREADCRUMB_CFG["max_heading_words"]
+    max_heading_lines = _BREADCRUMB_CFG["max_heading_lines"]
+    bold_label_words = _BREADCRUMB_CFG["starts_bold_label_max_words"]
+    text_preview_chars = _BREADCRUMB_CFG["text_preview_chars"]
+    upper_num = _BREADCRUMB_CFG["upper_ratio_num"]
+    upper_den = _BREADCRUMB_CFG["upper_ratio_den"]
     for idx, block in enumerate(body):
         if block["type"] not in ("paragraph", "heading", "caption"):
             continue
         if block.get("authored_level") or block.get("heading_format") == "openxml_outline":
             continue
-        typo = block.get("typography")
-        if typo is None or not typo.get("single_line"):
-            continue
         text = block.get("text", "").strip()
-        if not text or len(text.split()) > 45:
+        if not text or len(text.split()) > max_heading_words:
             continue
-        is_distinct = (
-            typo.get("all_bold")
-            or typo.get("centered")
-            or typo.get("all_italic")
-            or typo.get("font_pt") != body_font_pt
-            or block["type"] == "heading"
-        )
-        if not is_distinct:
+        typo = block.get("typography")
+        if typo is not None:
+            if len(text.splitlines()) > max_heading_lines:
+                continue
+            is_distinct = (
+                typo.get("all_bold")
+                or typo.get("centered")
+                or typo.get("all_italic")
+                or (typo.get("starts_bold_label") and len(text.split()) <= bold_label_words and block["type"] == "heading")
+                or typo.get("font_pt") != body_font_pt
+                or block["type"] == "heading"
+            )
+            if not is_distinct:
+                continue
+        elif block["type"] not in ("heading", "caption"):
             continue
         cid = "c" + str(len(candidates))
         if idx > 0:
@@ -183,16 +228,33 @@ def decide_breadcrumb_hierarchy(ir, cache=None):
             next_type = body[idx + 1]["type"]
         else:
             next_type = "none"
+        page_index = block.get("provenance", {}).get("page_index")
+        if typo is not None:
+            font_pt = typo["font_pt"]
+            font_delta = round(typo["font_pt"] - body_font_pt, 1)
+            all_bold = typo["all_bold"]
+            all_italic = typo["all_italic"]
+            centered = typo["centered"]
+            is_upper = typo["is_upper"]
+        else:
+            letters = [ch for ch in text if ch.isalpha()]
+            is_upper = bool(letters) and sum(1 for ch in letters if ch.isupper()) * upper_num >= len(letters) * upper_den
+            font_pt = None
+            font_delta = 0.0
+            all_bold = False
+            all_italic = False
+            centered = False
         candidates.append({
             "id": cid,
             "block_index": idx,
-            "text": text[:220],
-            "font_pt": typo["font_pt"],
-            "font_delta": round(typo["font_pt"] - body_font_pt, 1),
-            "all_bold": typo["all_bold"],
-            "all_italic": typo["all_italic"],
-            "centered": typo["centered"],
-            "is_upper": typo["is_upper"],
+            "page_index": page_index,
+            "text": text[:text_preview_chars],
+            "font_pt": font_pt,
+            "font_delta": font_delta,
+            "all_bold": all_bold,
+            "all_italic": all_italic,
+            "centered": centered,
+            "is_upper": is_upper,
             "prev_type": prev_type,
             "next_type": next_type,
             "source_role": block["type"],
@@ -201,22 +263,24 @@ def decide_breadcrumb_hierarchy(ir, cache=None):
         candidate_blocks[cid] = (block, typo)
         questions[cid] = {
             "type": "choice",
-            "instructions": (
-                "Classify the structural breadcrumb hierarchy level or block role for candidate "
-                + cid
-                + " using its typography (font_pt vs body_font_pt, bold, italic, centered, uppercase), "
-                + "neighboring block roles and text. Keep peer headings at consistent levels. "
-                + "Proximity to an image does not determine the role or level."
-            ),
+            "instructions": render_prompt(BREADCRUMB_HIERARCHY_PROMPT["instructions"], cid=cid),
             "criteria": criteria,
         }
     if not candidates:
         return
+    # Every batch sees the same compact outline so peer headings in different
+    # batches receive consistent levels.
+    outline_limit = _BREADCRUMB_CFG["outline_max_candidates"]
+    outline_chars = _BREADCRUMB_CFG["outline_text_chars"]
+    outline = [{"text": item["text"][:outline_chars], "font_pt": item["font_pt"], "all_bold": item["all_bold"],
+                "centered": item["centered"], "is_upper": item["is_upper"]} for item in candidates[:outline_limit]]
     state = {
         "typography_profile": ir["typography_profile"],
+        "document_outline": outline,
         "candidates": candidates,
     }
     answers = ask_decisions("breadcrumb_hierarchy", state, questions, cache=cache, ir=ir)
+    min_conf = _BREADCRUMB_CFG["min_confidence_same_size"]
     for cid, (block, typo) in candidate_blocks.items():
         ans = answers.get(cid)
         if ans is None:
@@ -224,7 +288,10 @@ def decide_breadcrumb_hierarchy(ir, cache=None):
         choice = ans["choice"]
         try:
             raw_confidence = ans.get("confidence", 1.0)
-            confidence = math.nan if isinstance(raw_confidence, bool) else float(raw_confidence)
+            if isinstance(raw_confidence, bool):
+                confidence = math.nan
+            else:
+                confidence = float(raw_confidence)
         except (ValueError, TypeError, OverflowError):
             confidence = math.nan
         if not 0 <= confidence <= 1:
@@ -233,27 +300,24 @@ def decide_breadcrumb_hierarchy(ir, cache=None):
         if choice == "CAPTION":
             block["type"] = "caption"
             block.pop("level", None)
-            block["caption_evidence"] = {
-                "source": "decision_model_hierarchy",
-                "font_pt": typo["font_pt"],
-                "body_font_pt": body_font_pt,
-                "confidence": confidence,
-            }
+            evidence_meta = {"source": "decision_model_hierarchy", "confidence": confidence}
+            if typo is not None:
+                evidence_meta["font_pt"] = typo["font_pt"]
+                evidence_meta["body_font_pt"] = body_font_pt
+            block["caption_evidence"] = evidence_meta
         elif choice in level_map:
-            if typo["font_pt"] <= body_font_pt and confidence < 0.72 and block["type"] != "heading":
+            if typo is not None and typo["font_pt"] <= body_font_pt and confidence < min_conf and block["type"] != "heading":
                 block["type"] = "paragraph"
                 block.pop("level", None)
                 continue
             lvl = level_map[choice]
             block["type"] = "heading"
             block["level"] = lvl
-            block["heading_evidence"] = {
-                "source": "decision_model_hierarchy",
-                "font_pt": typo["font_pt"],
-                "body_font_pt": body_font_pt,
-                "level": lvl,
-                "confidence": confidence,
-            }
+            evidence_meta = {"source": "decision_model_hierarchy", "level": lvl, "confidence": confidence}
+            if typo is not None:
+                evidence_meta["font_pt"] = typo["font_pt"]
+                evidence_meta["body_font_pt"] = body_font_pt
+            block["heading_evidence"] = evidence_meta
         else:
             if block["type"] == "heading":
                 block["type"] = "paragraph"
@@ -280,11 +344,15 @@ def decide_continued_tables(ir, cache=None):
     merge_continued_tables(ir, partial(ask_decisions, ir=ir), cache=cache)
 
 
-def decide_prompt_pairs(blocks, cache=None):
+def decide_prompt_pairs(blocks, cache=None, ir=None):
     """Use decision model to identify prompt/question blocks that must stay paired with the next block."""
     candidates = []
     questions = {}
     index_map = {}
+    max_first = _PAIR_CFG["max_first_words"]
+    max_second = _PAIR_CFG["max_second_words"]
+    first_chars = _PAIR_CFG["first_text_chars"]
+    second_chars = _PAIR_CFG["second_text_chars"]
     for idx in range(len(blocks) - 1):
         block = blocks[idx]
         next_block = blocks[idx + 1]
@@ -296,7 +364,7 @@ def decide_prompt_pairs(blocks, cache=None):
             continue
         w_count = len(text.split())
         next_words = len(next_text.split())
-        if w_count > 45 or next_words > 220:
+        if w_count > max_first or next_words > max_second:
             continue
         typo = block.get("typography") or {}
         has_signal = (
@@ -310,23 +378,18 @@ def decide_prompt_pairs(blocks, cache=None):
         pid = "pair_" + str(len(candidates))
         candidates.append({
             "id": pid,
-            "first_text": text[:200],
-            "second_text": next_text[:240],
+            "first_text": text[:first_chars],
+            "second_text": next_text[:second_chars],
             "first_bold": typo.get("all_bold", False),
             "starts_bold_label": typo.get("starts_bold_label", False),
         })
         index_map[pid] = (block.get("id", str(idx)), next_block.get("id", str(idx + 1)))
-        questions[pid] = {
-            "type": "choice",
-            "instructions": "Decide whether " + pid + " is a tightly coupled prompt-response (Q&A) or lead-in pair that must stay in the same retrieval chunk.",
-            "criteria": {
-                "PAIR_TOGETHER": "First block is a question, prompt, or lead-in directly answered or completed by the second block",
-                "SEPARATE": "The two blocks are ordinary sequential paragraphs that do not form a prompt-response pair",
-            },
-        }
+        pair_spec = deepcopy(PROMPT_PAIRS_PROMPT)
+        pair_spec["instructions"] = render_prompt(pair_spec["instructions"], pid=pid)
+        questions[pid] = pair_spec
     if not questions:
         return set()
-    answers = ask_decisions("prompt_response_pairing", {"pairs": candidates}, questions, cache=cache)
+    answers = ask_decisions("prompt_response_pairing", {"pairs": candidates}, questions, cache=cache, ir=ir)
     paired_ids = set()
     for pid, (id1, id2) in index_map.items():
         if answers.get(pid, {}).get("choice") == "PAIR_TOGETHER":
@@ -334,17 +397,18 @@ def decide_prompt_pairs(blocks, cache=None):
     return paired_ids
 
 
-def decide_period_boundaries(text, candidate_positions, cache=None):
+def decide_period_boundaries(text, candidate_positions, cache=None, ir=None):
     """Use decision model to disambiguate ambiguous period '.' positions (sentence break vs abbreviation)."""
     if not candidate_positions:
         return set()
     items = []
     questions = {}
     pos_map = {}
+    ctx_chars = _PERIOD_CFG["context_window_chars"]
     for idx, (dot_index, gap_end, token) in enumerate(candidate_positions):
         qid = "dot_" + str(idx)
-        left_start = max(0, dot_index - 45)
-        right_end = min(len(text), gap_end + 45)
+        left_start = max(0, dot_index - ctx_chars)
+        right_end = min(len(text), gap_end + ctx_chars)
         items.append({
             "id": qid,
             "token": token,
@@ -352,15 +416,10 @@ def decide_period_boundaries(text, candidate_positions, cache=None):
             "right_context": text[gap_end:right_end],
         })
         pos_map[qid] = gap_end
-        questions[qid] = {
-            "type": "choice",
-            "instructions": "Decide whether the period in token '" + token + "' at " + qid + " marks the end of a sentence or an inline abbreviation/title/number prefix.",
-            "criteria": {
-                "SENTENCE_BREAK": "The period ends a complete sentence and is followed by a new sentence",
-                "INLINE_ABBREVIATION": "The period is part of an abbreviation, title, honorific, code, or numbering prefix inside the same sentence",
-            },
-        }
-    answers = ask_decisions("period_boundary", {"candidates": items}, questions, cache=cache)
+        period_spec = deepcopy(PERIOD_BOUNDARIES_PROMPT)
+        period_spec["instructions"] = render_prompt(period_spec["instructions"], token=token, qid=qid)
+        questions[qid] = period_spec
+    answers = ask_decisions("period_boundary", {"candidates": items}, questions, cache=cache, ir=ir)
     valid_breaks = set()
     for qid, gap_end in pos_map.items():
         if answers.get(qid, {}).get("choice") == "SENTENCE_BREAK":

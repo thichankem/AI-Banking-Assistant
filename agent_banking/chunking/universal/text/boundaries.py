@@ -1,12 +1,110 @@
 """Source offsets at safe Unicode and authored-markup boundaries."""
 import unicodedata
 
-import regex
+from agent_banking.chunking.config.settings import get_rules
+
+_BOUNDARY_RULES = get_rules("boundaries")
+MARKUP_DELIMITERS = tuple(tuple(pair) for pair in _BOUNDARY_RULES["markup_delimiters"])
 
 
-MARKUP_DELIMITERS = (("<sup>", "</sup>"), ("<sub>", "</sub>"), ("\\(", "\\)"), ("\\[", "\\]"),
-                     ('<code data-format="omml">', "</code>"), ("$$", "$$"), ("$", "$"))
-GRAPHEME = regex.compile(r"\X")
+def _is_regional_indicator(code):
+    return 0x1F1E6 <= code <= 0x1F1FF
+
+
+def _is_extend(char, code):
+    if code in (0x200C, 0x200D) or 0xFE00 <= code <= 0xFE0F or 0xE0100 <= code <= 0xE01EF:
+        return True
+    if unicodedata.category(char) in ("Mn", "Me", "Mc"):
+        return True
+    return False
+
+
+def _is_control(char, code):
+    if code in (0x200C, 0x200D):
+        return False
+    return char in ("\r", "\n") or unicodedata.category(char) in ("Cc", "Zl", "Zp")
+
+
+def _is_pictographic(code):
+    return (
+        0x1F000 <= code <= 0x1FAFF
+        or 0x2600 <= code <= 0x27BF
+        or 0x2300 <= code <= 0x23FF
+        or 0x2B00 <= code <= 0x2BFF
+        or code in (0x203C, 0x2049, 0x2122, 0x2139, 0x3030, 0x303D, 0x3297, 0x3299)
+    )
+
+
+def _hangul_kind(code):
+    if 0x1100 <= code <= 0x115F or 0xA960 <= code <= 0xA97C:
+        return "L"
+    if 0x1160 <= code <= 0x11A7 or 0xD7B0 <= code <= 0xD7C6:
+        return "V"
+    if 0x11A8 <= code <= 0x11FF or 0xD7CB <= code <= 0xD7FB:
+        return "T"
+    if 0xAC00 <= code <= 0xD7A3:
+        if (code - 0xAC00) % 28 == 0:
+            return "LV"
+        return "LVT"
+    return None
+
+
+def _grapheme_end_positions(text):
+    """Yield end indices of Unicode Extended Grapheme Clusters without regex."""
+    n = len(text)
+    if not n:
+        return
+    ri_odd = False
+    pic_extend = False
+    seen_zwj = False
+    for idx in range(n):
+        ch = text[idx]
+        code = ord(ch)
+        if idx == 0:
+            ri_odd = _is_regional_indicator(code)
+            pic_extend = _is_pictographic(code)
+            seen_zwj = False
+            continue
+        prev = text[idx - 1]
+        prev_code = ord(prev)
+        can_join = False
+        if prev == "\r" and ch == "\n":
+            can_join = True
+        elif _is_control(prev, prev_code) or _is_control(ch, code):
+            can_join = False
+        elif _is_extend(ch, code):
+            can_join = True
+        elif seen_zwj and _is_pictographic(code):
+            can_join = True
+        elif ri_odd and _is_regional_indicator(code):
+            can_join = True
+        else:
+            ph = _hangul_kind(prev_code)
+            ch_h = _hangul_kind(code)
+            if ph == "L" and ch_h in ("L", "V", "LV", "LVT"):
+                can_join = True
+            elif ph in ("LV", "V") and ch_h in ("V", "T"):
+                can_join = True
+            elif ph in ("LVT", "T") and ch_h == "T":
+                can_join = True
+
+        if not can_join:
+            yield idx
+            ri_odd = _is_regional_indicator(code)
+            pic_extend = _is_pictographic(code)
+            seen_zwj = False
+        else:
+            if _is_regional_indicator(code):
+                ri_odd = not ri_odd
+            if code == 0x200D and pic_extend:
+                seen_zwj = True
+            else:
+                seen_zwj = False
+            if _is_pictographic(code):
+                pic_extend = True
+            elif not _is_extend(ch, code):
+                pic_extend = False
+    yield n
 
 
 def _escaped_at(text, position):
@@ -60,10 +158,12 @@ def protected_markup_spans(text):
 def safe_boundaries(text, *, protect_markup=True):
     """Use Unicode grapheme boundaries outside protected authored markup."""
     boundaries = [0]
-    blocked = iter(protected_markup_spans(text) if protect_markup else ())
+    if protect_markup:
+        blocked = iter(protected_markup_spans(text))
+    else:
+        blocked = iter(())
     left, right = next(blocked, (len(text), len(text)))
-    for grapheme in GRAPHEME.finditer(text):
-        position = grapheme.end()
+    for position in _grapheme_end_positions(text):
         while position >= right:
             following = next(blocked, None)
             if following is None:

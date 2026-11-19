@@ -1,19 +1,32 @@
 """Extract native PDF text and reconstruct tables and page furniture."""
 from collections import Counter
-import re
 from threading import Lock
 
+from agent_banking.chunking.config.settings import get_config_section, get_rules
 from .layout import compact, inside_box, is_inline_list_marker, layout_text, reading_order
 from .raster_text import region_may_contain_text
 from .tables import validate_table
 from .visibility import hidden_glyphs, visible_span
 
+_NATIVE_CFG = get_config_section("extraction")["pdf"]["native_text"]
+_FURNITURE_PREFIXES = tuple(get_rules("pdf")["furniture_prefixes"])
 NATIVE_TABLE_LOCK = Lock()
-_UNRELIABLE_NUMERIC_GLYPH = re.compile(r"\u00ad\s*\d")
+
+
+def _has_soft_hyphen_digit(text):
+    cursor = text.find("\u00ad")
+    while cursor != -1:
+        pos = cursor + 1
+        while pos < len(text) and text[pos].isspace():
+            pos += 1
+        if pos < len(text) and text[pos].isdecimal():
+            return True
+        cursor = text.find("\u00ad", cursor + 1)
+    return False
 
 
 def unreliable_native_text(text):
-    return "\ufffd" in text or _UNRELIABLE_NUMERIC_GLYPH.search(text) is not None
+    return "\ufffd" in text or _has_soft_hyphen_digit(text)
 
 
 def normalized_page_box(page, bounds):
@@ -31,7 +44,10 @@ def native_text_elements(page, clip=None, *, hidden=None):
     flags = pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_IMAGES & ~pymupdf.TEXT_USE_CID_FOR_UNKNOWN_UNICODE
     if hidden is None:
         hidden = hidden_glyphs(page)
-    form = "rawdict" if hidden else "dict"
+    if hidden:
+        form = "rawdict"
+    else:
+        form = "dict"
     blocks = page.get_text(form, clip=clip, flags=flags)["blocks"]
     elements = []
     for block in blocks:
@@ -48,8 +64,9 @@ def native_text_elements(page, clip=None, *, hidden=None):
                 if value.strip():
                     if span["flags"] & pymupdf.TEXT_FONT_SUPERSCRIPT:
                         value = "<sup>" + value + "</sup>"
-                    elif (largest is not None and line["dir"][0] > 0.99 and span["size"] < largest["size"] * 0.8
-                          and span["origin"][1] - largest["origin"][1] > largest["size"] * 0.05):
+                    elif (largest is not None and line["dir"][0] > _NATIVE_CFG["line_dir_threshold"]
+                          and span["size"] < largest["size"] * _NATIVE_CFG["subscript_size_ratio"]
+                          and span["origin"][1] - largest["origin"][1] > largest["size"] * _NATIVE_CFG["subscript_origin_ratio"]):
                         value = "<sub>" + value + "</sub>"
                 fragments.append(value)
             text = "".join(fragments)
@@ -59,12 +76,16 @@ def native_text_elements(page, clip=None, *, hidden=None):
                 lines.append((text, bbox, largest["size"]))
         # MuPDF groups distant text on the same row into one block. Recover
         # the individual line boxes where such a block crosses a column gap.
+        col_gap = _NATIVE_CFG["column_gap_threshold"]
         separated = any(
             min(right[3], left[3]) - max(right[1], left[1]) >= min(right[3] - right[1], left[3] - left[1]) / 2
-            and max(right[0] - left[2], left[0] - right[2]) >= 0.035
+            and max(right[0] - left[2], left[0] - right[2]) >= col_gap
             for index, (_, left, _) in enumerate(lines) for _, right, _ in lines[index + 1:]
         )
-        groups = [[item] for item in lines] if separated else [lines]
+        if separated:
+            groups = [[item] for item in lines]
+        else:
+            groups = [lines]
         for group in groups:
             if not group:
                 continue
@@ -99,7 +120,7 @@ def page_requires_scan(page, elements):
     # pasted paragraph or table among visible native text.
     boxes = [(Rect(image["bbox"]) * page.rotation_matrix) & page.rect for image in page.get_image_info()]
     boxes = {tuple(box) for box in boxes if not box.is_empty}
-    if _image_area_reaches(boxes, page_area * 0.65):
+    if _image_area_reaches(boxes, page_area * _NATIVE_CFG["scan_image_area_ratio"]):
         return True
     return any(region_may_contain_text(page, box, elements) for box in sorted(boxes))
 
@@ -135,9 +156,9 @@ def _image_area_reaches(boxes, threshold):
 def furniture_key(element):
     top, bottom = element["bbox"][1], element["bbox"][3]
     text = compact(element["text"])
-    if bottom <= 0.1:
+    if bottom <= _NATIVE_CFG["furniture_top_max"]:
         return "top", text
-    if top >= 0.9:
+    if top >= _NATIVE_CFG["furniture_bottom_min"]:
         return "bottom", text
     return None
 
@@ -149,7 +170,7 @@ def furniture_signature(element, key):
 def native_page_number(text):
     text = text.strip("-–— ")
     prefixed = False
-    for prefix in ("trang ", "page "):
+    for prefix in _FURNITURE_PREFIXES:
         if text.casefold().startswith(prefix):
             text = text[len(prefix):]
             prefixed = True
@@ -172,7 +193,7 @@ def is_furniture(element, repeated, page_elements=(), page_number=None, page_cou
         return False
     left, top, right, bottom = element["bbox"]
     side = key[0]
-    extreme_margin = (side == "top" and bottom <= 0.06) or (side == "bottom" and top >= 0.94)
+    extreme_margin = (side == "top" and bottom <= _NATIVE_CFG["extreme_top_max"]) or (side == "bottom" and top >= _NATIVE_CFG["extreme_bottom_min"])
     number = native_page_number(key[1])
     if number:
         prefixed, values = number
@@ -180,7 +201,7 @@ def is_furniture(element, repeated, page_elements=(), page_number=None, page_cou
         center = (left + right) / 2
         matching_label = values[0] == page_number and (len(values) == 1 or values[1] == page_count)
         return (prefixed and matching_label
-                or extreme_margin and center >= 0.4 and (prefixed or matching_label))
+                or extreme_margin and center >= _NATIVE_CFG["center_min"] and (prefixed or matching_label))
     if furniture_signature(element, key) not in repeated:
         return False
     if not extreme_margin:
@@ -188,12 +209,18 @@ def is_furniture(element, repeated, page_elements=(), page_number=None, page_cou
     body = [item for item in page_elements if furniture_key(item) is None]
     if not body:
         return False
-    nearest_gap = min(item["bbox"][1] - bottom if side == "top" else top - item["bbox"][3] for item in body)
+    gaps = []
+    for item in body:
+        if side == "top":
+            gaps.append(item["bbox"][1] - bottom)
+        else:
+            gaps.append(top - item["bbox"][3])
+    nearest_gap = min(gaps)
     # Repetition alone is ordinary in procedures and multi-page tables. Only
     # exclude isolated marginal text with supporting typographic evidence.
     size = element.get("native_font_size", 0)
     body_size = sorted(item.get("native_font_size", 0) for item in body)[len(body) // 2]
-    return nearest_gap >= 0.025 and 0 < size <= 0.85 * body_size
+    return nearest_gap >= _NATIVE_CFG["furniture_nearest_gap_min"] and 0 < size <= _NATIVE_CFG["furniture_font_ratio_max"] * body_size
 
 
 def native_table_elements(page, *, hidden=None):
@@ -219,9 +246,10 @@ def native_table_elements(page, *, hidden=None):
                 for column_index, cell in enumerate(row):
                     if cell is None:
                         continue
+                    span_tol = _NATIVE_CFG["table_span_tolerance"]
                     text = "\n".join(item["text"] for item in native_text_elements(page, clip=Rect(cell), hidden=hidden))
-                    row_span = 1 + sum(y_positions[row_index] < y < cell[3] - 0.5 for y in y_positions)
-                    column_span = 1 + sum(x_positions[column_index] < x < cell[2] - 0.5 for x in x_positions)
+                    row_span = 1 + sum(y_positions[row_index] < y < cell[3] - span_tol for y in y_positions)
+                    column_span = 1 + sum(x_positions[column_index] < x < cell[2] - span_tol for x in x_positions)
                     cells.append({"row": row_index, "column": column_index, "row_span": row_span,
                                   "column_span": column_span, "text": text})
                     grid[row_index][column_index] = text
@@ -239,8 +267,9 @@ def native_table_elements(page, *, hidden=None):
                 # when its first cell spans the group. Require merged-cell
                 # evidence and align the boundary to a real row start.
                 stop = table.header.bbox[3]
-                count = sum(y < stop - 0.5 for y in y_positions)
-                if (1 < count < len(grid) and abs(y_positions[count] - stop) <= 0.5
+                span_tol = _NATIVE_CFG["table_span_tolerance"]
+                count = sum(y < stop - span_tol for y in y_positions)
+                if (1 < count < len(grid) and abs(y_positions[count] - stop) <= span_tol
                         and any(cell["row"] < count and cell["column_span"] > 1 for cell in cells)
                         and not any(cell["row"] < count < cell["row"] + cell["row_span"] for cell in cells)):
                     header_count = count

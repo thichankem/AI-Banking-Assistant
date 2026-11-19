@@ -6,6 +6,17 @@ import sqlite3
 from threading import Lock
 import time
 
+from agent_banking.chunking.config.settings import get_config_section
+
+_CACHE_CFG = get_config_section("cache")
+_DEFAULT_DB_PATH = _CACHE_CFG["default_db_path"]
+_DEFAULT_MAX_L1_ENTRIES = _CACHE_CFG["max_l1_entries"]
+_SQLITE_TIMEOUT = _CACHE_CFG["sqlite_timeout"]
+_WAL_DEADLINE = _CACHE_CFG["wal_deadline"]
+_WAL_POLL_INTERVAL = _CACHE_CFG["wal_poll_interval"]
+_SQLITE_CACHE_SIZE = _CACHE_CFG["sqlite_cache_size"]
+_SQLITE_MMAP_SIZE = _CACHE_CFG["sqlite_mmap_size"]
+
 _SCHEMA_LOCK = Lock()
 _TABLE = """
 CREATE TABLE IF NOT EXISTS page_vision_cache (
@@ -23,7 +34,7 @@ VALUES (?, ?, ?, ?, ?)
 
 
 def _enable_wal(connection):
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + _WAL_DEADLINE
     while True:
         try:
             connection.execute("PRAGMA journal_mode=WAL").fetchone()
@@ -32,7 +43,7 @@ def _enable_wal(connection):
             if (getattr(error, "sqlite_errorcode", None) not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
                     or time.monotonic() >= deadline):
                 raise
-            time.sleep(0.05)
+            time.sleep(_WAL_POLL_INTERVAL)
 
 
 def _key_is_valid(key):
@@ -63,7 +74,7 @@ def _encode_entry(key, value, width=0, height=0):
 class PageVisionCache:
     """Store JSON results under their content and configuration fingerprints."""
 
-    def __init__(self, db_path="cache/page_vision_cache.db", max_l1_entries=10000):
+    def __init__(self, db_path=_DEFAULT_DB_PATH, max_l1_entries=_DEFAULT_MAX_L1_ENTRIES):
         self.db_path = str(db_path)
         self.max_l1_entries = max_l1_entries
         self._l1_cache = OrderedDict()
@@ -80,16 +91,20 @@ class PageVisionCache:
 
     def _connection(self):
         if self._conn is None:
-            connection = sqlite3.connect(self.db_path, timeout=30, check_same_thread=False)
+            connection = sqlite3.connect(self.db_path, timeout=_SQLITE_TIMEOUT, check_same_thread=False)
             try:
                 with _SCHEMA_LOCK, connection:
                     mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
                     if mode not in ("wal", "memory"):
                         _enable_wal(connection)
                     connection.execute("PRAGMA synchronous=NORMAL")
-                    connection.execute("PRAGMA cache_size=-64000")
-                    connection.execute("PRAGMA mmap_size=268435456")
+                    connection.execute("PRAGMA cache_size=" + str(_SQLITE_CACHE_SIZE))
+                    connection.execute("PRAGMA mmap_size=" + str(_SQLITE_MMAP_SIZE))
                     connection.execute(_TABLE)
+                    connection.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_page_vision_cache_created_at "
+                        "ON page_vision_cache(created_at)"
+                    )
             except BaseException:
                 connection.close()
                 raise
@@ -190,11 +205,42 @@ class PageVisionCache:
                 connection.execute("DELETE FROM page_vision_cache")
             self._l1_cache.clear()
 
+    def prune(self, *, max_age_seconds=None, max_entries=None):
+        """Remove expired or oldest SQLite entries beyond configured retention limits."""
+        removed = 0
+        with self._lock:
+            connection = self._connection()
+            with connection:
+                if max_age_seconds is not None and max_age_seconds > 0:
+                    cutoff = time.time() - float(max_age_seconds)
+                    cursor = connection.execute(
+                        "DELETE FROM page_vision_cache WHERE created_at < ?",
+                        (cutoff,),
+                    )
+                    removed += cursor.rowcount
+                if max_entries is not None and max_entries >= 0:
+                    total = connection.execute("SELECT COUNT(*) FROM page_vision_cache").fetchone()[0]
+                    excess = total - int(max_entries)
+                    if excess > 0:
+                        cursor = connection.execute(
+                            "DELETE FROM page_vision_cache WHERE page_sha256 IN ("
+                            "SELECT page_sha256 FROM page_vision_cache ORDER BY created_at ASC LIMIT ?)",
+                            (excess,),
+                        )
+                        removed += cursor.rowcount
+            if removed:
+                self._l1_cache.clear()
+        return removed
+
     def stats(self):
         with self._lock:
             connection = self._connection()
             hits = self._l1_hits + self._l2_hits
             total_queries = hits + self._misses
+            if total_queries:
+                hit_ratio = round(hits / total_queries, 4)
+            else:
+                hit_ratio = 0.0
             return {
                 "l1_entries": len(self._l1_cache),
                 "l2_entries": connection.execute("SELECT COUNT(*) FROM page_vision_cache").fetchone()[0],
@@ -203,7 +249,7 @@ class PageVisionCache:
                 "misses": self._misses,
                 "puts": self._puts,
                 "total_queries": total_queries,
-                "hit_ratio": round(hits / total_queries, 4) if total_queries else 0.0,
+                "hit_ratio": hit_ratio,
             }
 
     def close(self):

@@ -2,26 +2,6 @@
 Script to format A_Bank_golden_master_785.xlsx to contain ONLY ONE sheet:
 'Master 785 Golden (Chưa chấm)'
 
-Columns kept:
-1. STT
-2. ID Câu hỏi
-3. Mã VB
-4. Tiêu chí Kiểm thử
-5. Độ khó
-6. Câu hỏi Tình huống (Question)
-7. Đáp án Chuẩn (Reference Answer)
-8. Tiêu chí Bắt buộc (Must Include)
-9. Đường dẫn Nguồn (Source Path)
-10. Câu trả lời của Trợ lý AI Banking (Agent Answer)
-
-Columns removed as requested by user:
-- Nhóm nghiệp vụ
-- Dạng bài toán
-- Lỗi cần tránh (Must Avoid)
-- Mục tiêu kiểm chứng / kiểm thử (Table/Figure)
-- Điều khoản tham chiếu
-- Bằng chứng trích dẫn
-
 MANDATORY CODING RULES:
 1. 0% REGEX LAW
 2. ZERO TERNARY LAW (Explicit if/else)
@@ -31,62 +11,63 @@ MANDATORY CODING RULES:
 
 import os
 import json
+from pathlib import Path
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
-def format_excel():
-    base_dir = r"d:\Desktop\GitHub\AI Banking Asistant"
+from agent_banking.evaluator.config.settings import (
+    EvaluatorConfig,
+    get_evaluator_messages,
+    resolve_repo_path,
+)
 
-    groups_info = [
-        os.path.join(base_dir, "dataset", "A_Bank_golden_the", "a_bank_the_golden.json"),
-        os.path.join(base_dir, "dataset", "A_Bank_golden_compliance", "a_bank_compliance_golden.json"),
-        os.path.join(base_dir, "dataset", "A_Bank_golden_app", "a_bank_app_golden.json"),
-        os.path.join(base_dir, "dataset", "A_Bank_golden_specialized", "a_bank_specialized_golden.json")
-    ]
+_DS_CFG = EvaluatorConfig.DATASETS
+_OUT_CFG = EvaluatorConfig.CACHES_AND_OUTPUTS
+_EXCEL_CFG = EvaluatorConfig.EXCEL
+_FEEDBACK = get_evaluator_messages("feedback")
+_EXCEL_LABELS = get_evaluator_messages("excel")
+
+
+def format_excel():
+    base_dir = Path(__file__).resolve().parents[2]
+    template = _DS_CFG["group_path_template"]
 
     all_cases = []
-    for fpath in groups_info:
+    for group in EvaluatorConfig.DATASET_GROUPS:
+        fpath = resolve_repo_path(template.replace("{group}", group), root=base_dir)
         with open(fpath, "r", encoding="utf-8") as f:
             cases = json.load(f)
             for c in cases:
                 all_cases.append(c)
 
+    styles = _EXCEL_CFG["styles"]
+    sheets = _EXCEL_CFG["sheets"]
+
     wb = openpyxl.Workbook()
-    # Remove default sheet
     wb.remove(wb.active)
 
-    ws = wb.create_sheet(title="Master 785 Golden (Chưa chấm)")
+    ws = wb.create_sheet(title=str(sheets["batch_sheet_title"]))
     ws.views.sheetView[0].showGridLines = True
-    ws.freeze_panes = "A2"
+    ws.freeze_panes = str(styles["freeze_cell"])
 
-    navy_fill = PatternFill(start_color="0F2240", end_color="0F2240", fill_type="solid")
-    gold_fill = PatternFill(start_color="B45309", end_color="B45309", fill_type="solid")
-    header_font = Font(name="Segoe UI", size=10, bold=True, color="FFFFFF")
-    data_font = Font(name="Segoe UI", size=9, bold=False, color="1E293B")
-    bold_font = Font(name="Segoe UI", size=9, bold=True, color="0F2240")
+    navy_fill = PatternFill(start_color=styles["navy_color"], end_color=styles["navy_color"], fill_type="solid")
+    gold_fill = PatternFill(start_color=styles["gold_color"], end_color=styles["gold_color"], fill_type="solid")
+    font_name = str(styles["font_name"])
+    header_font = Font(name=font_name, size=int(styles["header_font_size"]), bold=True, color="FFFFFF")
+    data_font = Font(name=font_name, size=int(styles["data_font_size"]), bold=False, color=styles["data_text_color"])
 
+    border_color = str(styles["border_color"])
     thin_border = Border(
-        left=Side(style="thin", color="CBD5E1"),
-        right=Side(style="thin", color="CBD5E1"),
-        top=Side(style="thin", color="CBD5E1"),
-        bottom=Side(style="thin", color="CBD5E1")
+        left=Side(style="thin", color=border_color),
+        right=Side(style="thin", color=border_color),
+        top=Side(style="thin", color=border_color),
+        bottom=Side(style="thin", color=border_color)
     )
 
     align_left_wrap = Alignment(horizontal="left", vertical="top", wrap_text=True)
     align_center = Alignment(horizontal="center", vertical="top", wrap_text=True)
 
-    headers = [
-        "STT",
-        "ID Câu hỏi",
-        "Mã VB",
-        "Tiêu chí Kiểm thử",
-        "Độ khó",
-        "Câu hỏi Tình huống (Question)",
-        "Đáp án Chuẩn (Reference Answer)",
-        "Tiêu chí Bắt buộc (Must Include)",
-        "Đường dẫn Nguồn (Source Path)",
-        "Câu trả lời của Trợ lý AI Banking (Agent Answer)"
-    ]
+    headers = list(_EXCEL_LABELS["batch_headers"])
 
     for col_idx, h_text in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col_idx, value=h_text)
@@ -98,9 +79,8 @@ def format_excel():
         cell.alignment = align_center
         cell.border = thin_border
 
-    # Check if existing cache of predictions exists
     answers_cache = {}
-    cache_path = os.path.join(base_dir, "dataset", "agent_answers_cache.json")
+    cache_path = resolve_repo_path(_OUT_CFG["answers_legacy_cache_relpath"], root=base_dir)
     if os.path.exists(cache_path):
         try:
             with open(cache_path, "r", encoding="utf-8") as f_c:
@@ -133,11 +113,10 @@ def format_excel():
                     src_list.append(sp)
         src_str = "\n".join(src_list)
 
-        agent_ans = ""
         if case_id in answers_cache:
             agent_ans = answers_cache[case_id]
         else:
-            agent_ans = "[Chờ xử lý qua Agent Banking...]"
+            agent_ans = str(_FEEDBACK["pending_batch_placeholder"])
 
         row_vals = [
             idx,
@@ -161,25 +140,15 @@ def format_excel():
             else:
                 cell.alignment = align_left_wrap
 
-    col_widths = {
-        "A": 6,
-        "B": 12,
-        "C": 10,
-        "D": 26,
-        "E": 10,
-        "F": 45,
-        "G": 45,
-        "H": 34,
-        "I": 35,
-        "J": 50
-    }
+    col_widths = _EXCEL_CFG["column_widths"]["single_sheet_10_cols"]
     for col_letter, w in col_widths.items():
         ws.column_dimensions[col_letter].width = w
 
-    out_file = os.path.join(base_dir, "dataset", "A_Bank_golden_master_785.xlsx")
+    out_file = str(resolve_repo_path(_OUT_CFG["master_excel_relpath"], root=base_dir))
     wb.save(out_file)
     print("Formatted Excel Workbook saved to: " + out_file)
     print("Total rows:", len(all_cases) + 1)
+
 
 if __name__ == "__main__":
     format_excel()

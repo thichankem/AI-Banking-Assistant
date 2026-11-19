@@ -2,11 +2,15 @@
 import io
 import unicodedata
 
+from agent_banking.chunking.config.settings import get_config_section, get_rules
 from .tables import validate_table
 
+_PDF_RULES = get_rules("pdf")
+_LAYOUT_CFG = get_config_section("extraction")["pdf"]["layout"]
 
-IGNORED_VISUAL_TYPES = {"image", "figure", "diagram", "chart", "picture", "header", "footer",
-                        "page_number", "annotation", "furniture"}
+IGNORED_VISUAL_TYPES = set(_PDF_RULES["ignored_visual_types"])
+_ALLOWED_ELEMENT_TYPES = set(_PDF_RULES["allowed_element_types"])
+_INLINE_MARKER_SYMBOLS = set(_PDF_RULES["inline_marker_symbols"])
 
 
 def compact(value):
@@ -24,7 +28,7 @@ def normalized_box(box):
 
 
 def inside_box(inner, outer):
-    tolerance = 0.002
+    tolerance = _LAYOUT_CFG["inside_tolerance"]
     return (outer[0] - tolerance <= inner[0] and outer[1] - tolerance <= inner[1]
             and inner[2] <= outer[2] + tolerance and inner[3] <= outer[3] + tolerance)
 
@@ -33,7 +37,8 @@ def region_signature(element):
     if element["type"] == "table":
         table = element["table_data"]
         cells = sorted(
-            (cell["row"], cell["column"], cell["row_span"], cell["column_span"], compact(cell["text"]))
+            (cell["row"], cell["column"], cell["row_span"],
+             cell.get("column_span", cell.get("col_span", 1)), compact(cell["text"]))
             for cell in table["cells"]
         )
         return ("table", len(table["header_grid"]) + len(table["rows"]), len(table["headers"]),
@@ -59,16 +64,18 @@ def merge_region_observation(elements, incoming):
     value = region_signature(incoming)
     if value is None:
         return
+    containment_min = _LAYOUT_CFG["containment_threshold"]
+    similarity_conflict = _LAYOUT_CFG["similarity_conflict_threshold"]
     for index, previous in enumerate(elements):
         containment, similarity = region_overlap(incoming, previous)
         if not containment:
             continue
         other = region_signature(previous)
         if (other is not None and other[0] == value[0] == "text"
-                and (other != value or containment < 0.75)
+                and (other != value or containment < containment_min)
                 and _crossing_text_boxes(previous, incoming)):
             raise ValueError("Overlapping PDF regions contain partial readings of the same text")
-        if containment < 0.75:
+        if containment < containment_min:
             continue
         if other == value:
             return
@@ -78,7 +85,7 @@ def merge_region_observation(elements, incoming):
             if other[1] in value[1] and inside_box(previous["bbox"], incoming["bbox"]):
                 elements[index] = incoming
                 return
-        if similarity >= 0.85:
+        if similarity >= similarity_conflict:
             raise ValueError("Overlapping PDF regions disagree on the same text")
     elements.append(incoming)
 
@@ -88,6 +95,8 @@ def _crossing_text_boxes(first, second):
             or first["region_pixel_path"] == second["region_pixel_path"]):
         return False
     first_box, second_box = first["bbox"], second["bbox"]
+    overlap_ratio = _LAYOUT_CFG["crossing_overlap_ratio"]
+    cross_ratio = _LAYOUT_CFG["crossing_cross_ratio"]
     for axis, cross_axis in ((0, 1), (1, 0)):
         low, high = sorted((first_box, second_box), key=lambda box: box[axis])
         if not low[axis] < high[axis] < low[axis + 2] < high[axis + 2]:
@@ -98,13 +107,23 @@ def _crossing_text_boxes(first, second):
         cross_size = min(low[cross_axis + 2] - low[cross_axis], high[cross_axis + 2] - high[cross_axis])
         # Ignore small bbox rounding drift. Substantial crossing from two
         # different crops needs a reading that spans the disputed area.
-        if overlap >= 0.15 * size and cross_overlap >= 0.8 * cross_size:
+        if overlap >= overlap_ratio * size and cross_overlap >= cross_ratio * cross_size:
             return True
     return False
 
 
 def reading_order(elements):
     """Use a two-dimensional whitespace cut before falling back to row order."""
+    if any(item.get("bbox_granularity") == "page" for item in elements):
+        return list(elements)
+
+    col_min_gap = _LAYOUT_CFG["column_min_gap"]
+    col_min_overlap = _LAYOUT_CFG["column_min_vertical_overlap"]
+    col_min_width = _LAYOUT_CFG["column_min_width"]
+    col_min_lines = _LAYOUT_CFG["column_min_lines"]
+    band_min_gap = _LAYOUT_CFG["band_min_gap"]
+    band_broad_gap = _LAYOUT_CFG["band_broad_gap"]
+
     def whitespace_cuts(items, lower, upper, minimum):
         ordered = sorted(items, key=lambda item: item["bbox"][lower])
         edge = ordered[0]["bbox"][upper]
@@ -122,38 +141,41 @@ def reading_order(elements):
     def column_split(items):
         if len(items) < 2:
             return None
-        ordered, cuts = whitespace_cuts(items, 0, 2, 0.025)
+        ordered, cuts = whitespace_cuts(items, 0, 2, col_min_gap)
         if not cuts:
             return None
         cut = widest_cut(ordered, cuts)
         split = ordered[:cut], ordered[cut:]
         top = max(min(item["bbox"][1] for item in group) for group in split)
         bottom = min(max(item["bbox"][3] for item in group) for group in split)
-        if bottom - top <= 0.015:
+        if bottom - top <= col_min_overlap:
             return None
         # Both sides need vertically distributed text. A label or a list
         # marker next to a paragraph belongs to the same reading band.
         for group in split:
             if sum(len(item["text"].splitlines()) for item in group
-                   if item["type"] != "table" and item["bbox"][2] - item["bbox"][0] >= 0.08) < 2:
+                   if item["type"] != "table" and item["bbox"][2] - item["bbox"][0] >= col_min_width) < col_min_lines:
                 return None
         return split
 
     def band_split(items):
-        ordered, cuts = whitespace_cuts(items, 1, 3, 0.008)
+        ordered, cuts = whitespace_cuts(items, 1, 3, band_min_gap)
         if cuts:
             # A title or footer that overlaps the column gutter can sit
             # closer to the columns than the whitespace between body rows.
             for (_, cut), at_top in ((cuts[0], True), (cuts[-1], False)):
                 first, second = ordered[:cut], ordered[cut:]
-                column_items, outer_band = (second, first) if at_top else (first, second)
+                if at_top:
+                    column_items, outer_band = second, first
+                else:
+                    column_items, outer_band = first, second
                 columns = column_split(column_items)
                 if columns:
                     left, right = columns
                     center = (max(item["bbox"][2] for item in left) + min(item["bbox"][0] for item in right)) / 2
                     if any(item["bbox"][0] < center < item["bbox"][2] for item in outer_band):
                         return first, second
-        broad_cuts = [cut for cut in cuts if cut[0] > 0.035]
+        broad_cuts = [cut for cut in cuts if cut[0] > band_broad_gap]
         if broad_cuts:
             cut = widest_cut(ordered, broad_cuts)
             return ordered[:cut], ordered[cut:]
@@ -188,7 +210,7 @@ def layout_text(layout):
                 (row, column)
                 for cell in table.get("cells", [])
                 for row in range(cell["row"], cell["row"] + cell["row_span"])
-                for column in range(cell["column"], cell["column"] + cell["column_span"])
+                for column in range(cell["column"], cell["column"] + cell.get("column_span", cell.get("col_span", 1)))
                 if (row, column) != (cell["row"], cell["column"])
             }
             values.extend(value for row, cells in enumerate(grid) for column, value in enumerate(cells)
@@ -232,22 +254,23 @@ def validate_page(layout, native_lines, *, allow_ocr_additions=False):
         raise ValueError("PDF layout requires an elements array")
     if layout.get("uncertainties") != [] or not isinstance(layout.get("review"), dict) or layout["review"].get("verdict") != "accepted":
         raise ValueError("Unresolved visual extraction; publication refused")
-    allowed = {"heading", "paragraph", "caption", "table"}
+    max_level = _LAYOUT_CFG["max_heading_level"]
+    bbox_preview = _LAYOUT_CFG["bbox_error_preview_chars"]
     for element in layout["elements"]:
         if (not isinstance(element, dict) or not isinstance(element.get("type"), str)
-                or element["type"] not in allowed or not isinstance(element.get("text", ""), str)):
+                or element["type"] not in _ALLOWED_ELEMENT_TYPES or not isinstance(element.get("text", ""), str)):
             raise ValueError("Invalid PDF element")
         if element["type"] != "table" and (element.get("table_data") is not None or element.get("table_html") is not None):
             raise ValueError("table_data requires type table; preserve the complete table as its own element")
         box = element.get("bbox")
         if not normalized_box(box):
-            raise ValueError("PDF element bbox must be a nonempty [x0,y0,x1,y1] in [0,1]; received " + repr(box)[:120])
+            raise ValueError("PDF element bbox must be a nonempty [x0,y0,x1,y1] in [0,1]; received " + repr(box)[:bbox_preview])
         if element["type"] == "table":
             validate_table(element.get("table_data"), require_complete=True)
         if element["type"] == "heading":
             level = element.get("level")
-            if isinstance(level, bool) or not isinstance(level, int) or not 1 <= level <= 7:
-                raise ValueError("PDF heading must have a level 1..7")
+            if isinstance(level, bool) or not isinstance(level, int) or not 1 <= level <= max_level:
+                raise ValueError("PDF heading must have a level 1.." + str(max_level))
         if element["type"] != "table" and not element.get("text", "").strip():
             raise ValueError("PDF text elements require visible text")
     if layout["review"].get("non_text_only") is True and has_meaningful_layout(layout):
@@ -268,12 +291,16 @@ def is_inline_list_marker(element, page_elements):
         return False
     text = compact(text)
     marker = text.rstrip(".)、）:：")
-    looks_like_marker = (text in {"•", "●", "▪", "▫", "◦", "‣", "⁃", "·", "-", "–", "—", "*"}
-                         or 0 < len(marker) <= 4 and marker.isalnum()
+    max_len = _LAYOUT_CFG["inline_marker_max_len"]
+    looks_like_marker = (text in _INLINE_MARKER_SYMBOLS
+                         or 0 < len(marker) <= max_len and marker.isalnum()
                          or all(part.strip().isdecimal() for part in text.split("/")))
     if not looks_like_marker:
         return False
     left, top, right, bottom = element["bbox"]
+    max_gap = _LAYOUT_CFG["inline_marker_max_gap"]
+    wrap_top_max = _LAYOUT_CFG["inline_marker_wrap_top_max"]
+    wrap_gap_max = _LAYOUT_CFG["inline_marker_wrap_gap_max"]
     for peer in page_elements:
         if peer is element:
             continue
@@ -282,10 +309,13 @@ def is_inline_list_marker(element, page_elements):
             continue
         peer_left, peer_top, peer_right, peer_bottom = peer["bbox"]
         first_direction = next((unicodedata.bidirectional(char) for char in peer_text if char.isalpha()), None)
-        gap = left - peer_right if first_direction in {"R", "AL"} else peer_left - right
+        if first_direction in {"R", "AL"}:
+            gap = left - peer_right
+        else:
+            gap = peer_left - right
         overlap = min(bottom, peer_bottom) - max(top, peer_top)
-        wraps_at_top = first_direction is not None and top < 0.1 and 0 <= peer_top - bottom <= 0.06
-        if 0 <= gap <= 0.12 and (overlap >= (bottom - top) / 2 or wraps_at_top):
+        wraps_at_top = first_direction is not None and top < wrap_top_max and 0 <= peer_top - bottom <= wrap_gap_max
+        if 0 <= gap <= max_gap and (overlap >= (bottom - top) / 2 or wraps_at_top):
             return True
     return False
 
@@ -301,6 +331,7 @@ def normalize_visual_layout(layout):
     body = [item for item in layout["elements"]
             if item["type"] not in IGNORED_VISUAL_TYPES and item.get("role") not in IGNORED_VISUAL_TYPES
             and normalized_box(item.get("bbox"))]
+    max_level = _LAYOUT_CFG["max_heading_level"]
     kept = []
     for element in layout["elements"]:
         if element.get("type") in IGNORED_VISUAL_TYPES or element.get("role") in IGNORED_VISUAL_TYPES:
@@ -313,7 +344,7 @@ def normalize_visual_layout(layout):
         if element.get("type") == "heading":
             level = element.get("level", 1)
             if isinstance(level, int) and not isinstance(level, bool):
-                element["level"] = min(level, 7)
+                element["level"] = min(level, max_level)
         box = element.get("bbox")
         if not normalized_box(box):
             element["bbox"] = [0, 0, 1, 1]
@@ -367,4 +398,4 @@ def _same_heading_location(heading, element):
     if (not normalized_box(heading.get("bbox")) or not normalized_box(element.get("bbox"))
             or element.get("bbox_granularity") == "page"):
         return True
-    return region_overlap(heading, element)[0] >= 0.75
+    return region_overlap(heading, element)[0] >= _LAYOUT_CFG["containment_threshold"]

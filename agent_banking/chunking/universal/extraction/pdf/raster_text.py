@@ -3,6 +3,10 @@
 from itertools import groupby
 import math
 
+from agent_banking.chunking.config.settings import get_config_section
+
+_RASTER_CFG = get_config_section("extraction")["pdf"]["raster_text"]
+
 
 def _runs(values):
     index = 0
@@ -17,20 +21,31 @@ def _has_glyph_row(image):
     width, height = image.size
     samples = image.tobytes()
     rows = [samples[y * width:(y + 1) * width] for y in range(height)]
-    occupied = [3 <= row.count(255) <= width * 0.60 for row in rows]
+    min_ink = _RASTER_CFG["row_min_ink"]
+    max_ink = width * _RASTER_CFG["row_max_ink_ratio"]
+    min_lh = _RASTER_CFG["min_line_height"]
+    max_lh = height * _RASTER_CFG["max_line_height_ratio"]
+    min_wide = _RASTER_CFG["min_glyph_count_wide"]
+    short_min_g = _RASTER_CFG["short_label_min_glyphs"]
+    short_max_g = _RASTER_CFG["short_label_max_glyphs"]
+    short_min_lh = _RASTER_CFG["short_label_min_line_height"]
+    short_ext_ratio = _RASTER_CFG["short_label_max_extent_ratio"]
+    short_sub_div = _RASTER_CFG["short_label_substantial_divisor"]
+    short_min_sub = _RASTER_CFG["short_label_min_substantial"]
+    occupied = [min_ink <= row.count(255) <= max_ink for row in rows]
     for top, bottom in _runs(occupied):
         line_height = bottom - top
-        if not 3 <= line_height <= height * 0.45:
+        if not min_lh <= line_height <= max_lh:
             continue
         columns = (any(column) for column in zip(*rows[top:bottom]))
         glyphs = [(left, right) for left, right in _runs(columns) if right - left <= line_height * 2]
-        if len(glyphs) >= 4 and glyphs[-1][1] - glyphs[0][0] >= line_height * 2:
+        if len(glyphs) >= min_wide and glyphs[-1][1] - glyphs[0][0] >= line_height * 2:
             return True
-        if 2 <= len(glyphs) <= 3 and line_height >= 6:
+        if short_min_g <= len(glyphs) <= short_max_g and line_height >= short_min_lh:
             extent = glyphs[-1][1] - glyphs[0][0]
             # A compact short label can consist of a digit and a percent sign.
-            substantial = sum(right - left >= max(2, line_height // 5) for left, right in glyphs)
-            if substantial >= 2 and line_height <= extent <= line_height * 4:
+            substantial = sum(right - left >= max(2, line_height // short_sub_div) for left, right in glyphs)
+            if substantial >= short_min_sub and line_height <= extent <= line_height * short_ext_ratio:
                 return True
     return False
 
@@ -41,10 +56,10 @@ def region_may_contain_text(page, box, visible_elements):
     from pymupdf import Matrix, Rect
 
     region = Rect(box)
-    if region.width < 18 or region.height < 8:
+    if region.width < _RASTER_CFG["min_region_width"] or region.height < _RASTER_CFG["min_region_height"]:
         return False
     larger_side = max(region.width, region.height)
-    scale = min(3, 900 / larger_side)
+    scale = min(_RASTER_CFG["max_scale"], _RASTER_CFG["target_side"] / larger_side)
     pixmap = page.get_pixmap(matrix=Matrix(scale, scale), clip=region, alpha=False, annots=False)
     image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples).convert("L")
     background = ImageStat.Stat(image).median[0]
@@ -59,7 +74,23 @@ def region_may_contain_text(page, box, visible_elements):
                             math.floor(clipped.y0 * scale) - pixmap.y,
                             math.ceil(clipped.x1 * scale) - pixmap.x,
                             math.ceil(clipped.y1 * scale) - pixmap.y), fill=background)
-    light_background = background >= 128
-    cutoff = background - 36 if light_background else background + 36
-    mask = image.point([255 if (shade <= cutoff if light_background else shade >= cutoff) else 0 for shade in range(256)])
+    light_background = background >= _RASTER_CFG["luminance_midpoint"]
+    delta = _RASTER_CFG["contrast_delta"]
+    if light_background:
+        cutoff = background - delta
+        lut = []
+        for shade in range(256):
+            if shade <= cutoff:
+                lut.append(255)
+            else:
+                lut.append(0)
+    else:
+        cutoff = background + delta
+        lut = []
+        for shade in range(256):
+            if shade >= cutoff:
+                lut.append(255)
+            else:
+                lut.append(0)
+    mask = image.point(lut)
     return _has_glyph_row(mask) or _has_glyph_row(mask.transpose(Image.Transpose.ROTATE_90))

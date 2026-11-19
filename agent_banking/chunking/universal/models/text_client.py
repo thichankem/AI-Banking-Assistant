@@ -1,15 +1,34 @@
 """Request and validate JSON responses from configured cloud model chains."""
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextvars import copy_context
 from copy import deepcopy
+from dataclasses import replace
 import json
 import logging
 import time
 import urllib.error
 import urllib.request
 
+from agent_banking.chunking.config.models import TEXT_CLIENT_SETTINGS
+from agent_banking.core.model_routing import apply_chat_options, ordered_candidates, request_metadata, usage_metadata
+from agent_banking.tracing.agent_trace import agent_span, annotate_span
 
 logger = logging.getLogger("chunking.models")
-MAX_CLOUD_ATTEMPTS = 3
+_TEXT_CFG = TEXT_CLIENT_SETTINGS
+MAX_CLOUD_ATTEMPTS = _TEXT_CFG["max_cloud_attempts"]
+_DEFAULT_MAX_OUTPUT_TOKENS = _TEXT_CFG["default_max_output_tokens"]
+_CONTEXT_RESERVE_TOKENS = _TEXT_CFG["context_reserve_tokens"]
+_DEFAULT_TIMEOUT = _TEXT_CFG["default_timeout"]
+_DEFAULT_RETRIES = _TEXT_CFG["default_retries"]
+_MAX_BACKOFF_SECONDS = _TEXT_CFG["max_backoff_seconds"]
+_STREAM_LOG_INTERVAL = _TEXT_CFG["stream_log_interval"]
+_ERROR_BODY_READ_LIMIT = _TEXT_CFG["error_body_read_limit"]
+_ERROR_DETAIL_MAX_CHARS = _TEXT_CFG["error_detail_max_chars"]
+_LENGTH_RETRY_FLOOR = _TEXT_CFG["length_retry_floor"]
+_LENGTH_RETRY_MULTIPLIER = _TEXT_CFG["length_retry_multiplier"]
+_DEFAULT_LENGTH_FALLBACK = _TEXT_CFG["default_length_fallback"]
+_ROUTED_MULTI_CANDIDATE_ATTEMPTS = _TEXT_CFG["routed_multi_candidate_attempts"]
+_ROUTED_ESCALATION_REASONS = tuple(_TEXT_CFG["routed_escalation_reasons"])
 
 
 class CloudAttemptLimit(RuntimeError):
@@ -41,7 +60,7 @@ def ordered_parallel(operation, items, workers):
         return [operation(item) for item in items]
     executor = ThreadPoolExecutor(max_workers=workers)
     try:
-        futures = {executor.submit(operation, item): index for index, item in enumerate(items)}
+        futures = {executor.submit(copy_context().run, operation, item): index for index, item in enumerate(items)}
         results = [None] * len(futures)
         for future in as_completed(futures):
             results[futures[future]] = future.result()
@@ -72,7 +91,7 @@ def read_response(response, streaming=False):
         if not isinstance(data, dict) or "error" in data:
             raise ValueError("Cloud stream returned an invalid event")
         event_count += 1
-        if event_count % 500 == 0:
+        if event_count % _STREAM_LOG_INTERVAL == 0:
             logger.info("Model stream active: %s events, %s final-content characters", event_count, sum(len(part) for part in content))
         model = data.get("model", model)
         if data.get("usage"):
@@ -135,7 +154,10 @@ def _strict_object(pairs):
 
 
 def validate_decisions(result, questions):
-    answers = result.get("answers") if isinstance(result, dict) else None
+    if isinstance(result, dict):
+        answers = result.get("answers")
+    else:
+        answers = None
     if not isinstance(answers, dict):
         raise ValueError("Decision API did not return an answers object")
     for name, question in questions.items():
@@ -146,10 +168,10 @@ def validate_decisions(result, questions):
 
 
 def cloud_json(endpoint, key, payload, timeout=None, retries=None, allow_layout_list=False,
-               max_output_tokens=131072, model_module=None, validate=None, dimension=None,
-               configure_payload=None, attempt_budget=None):
+               max_output_tokens=_DEFAULT_MAX_OUTPUT_TOKENS, model_module=None, validate=None, dimension=None,
+               configure_payload=None, attempt_budget=None, route_reason=None):
     from agent_banking.core.fallback import run_fallback
-    from agent_banking.core.models import get_model_chain
+    from agent_banking.core.models import auto_routing_enabled, get_model_chain
 
     endpoint = endpoint.rstrip("/")
     if model_module is None:
@@ -183,9 +205,20 @@ def cloud_json(endpoint, key, payload, timeout=None, retries=None, allow_layout_
         if attempt_budget is None:
             attempt_budget = CloudAttempts()
     candidates = get_model_chain(model_module, primary)
+    routed = chunking_route and auto_routing_enabled()
+    if routed:
+        reason = route_reason
+        if reason is None and model_module in ("chunking.vision_review", "vision_review"):
+            reason = "visual_review"
+        candidates = ordered_candidates(candidates, reason in _ROUTED_ESCALATION_REASONS)
+        route_reason = reason
+        if len(candidates) > 1:
+            candidates = [replace(candidate, attempts=_ROUTED_MULTI_CANDIDATE_ATTEMPTS) for candidate in candidates]
     request_payloads = {}
+    attempts = 0
 
     def call(candidate):
+        nonlocal attempts
         if candidate not in request_payloads:
             request_payload = deepcopy(payload)
             request_payload["model"] = candidate.model
@@ -193,24 +226,90 @@ def cloud_json(endpoint, key, payload, timeout=None, retries=None, allow_layout_
                 configure_payload(request_payload, candidate)
             ceiling = max_output_tokens
             if chat_profile:
-                ceiling = apply_chat_profile(request_payload, candidate, ceiling)
+                if routed:
+                    ceiling = _routed_chat_profile(request_payload, candidate, ceiling)
+                else:
+                    ceiling = apply_chat_profile(request_payload, candidate, ceiling)
             request_payloads[candidate] = (request_payload, ceiling)
         request_payload, ceiling = request_payloads[candidate]
         request_url = candidate.url.rstrip("/") + path
         request_timeout = candidate.timeout
         if chunking_route and timeout is not None:
             request_timeout = min(request_timeout, timeout)
-        if attempt_budget is not None:
-            attempt_budget.consume()
-        result = _cloud_json(request_url, candidate.api_key, request_payload, request_timeout,
-                             0, allow_layout_list, ceiling)
-        if path == "/systemone":
-            validate_decisions(result, payload.get("questions", {}))
-        if validate is not None:
-            validate(result)
-        return result
+        if attempts:
+            span_reason = "provider_fallback"
+        elif route_reason:
+            span_reason = route_reason
+        else:
+            span_reason = "standard"
+        with agent_span("model.attempt", role=model_module,
+                        reason=span_reason,
+                        **request_metadata(request_payload, candidate)) as details:
+            if routed and candidate.context_window and _input_size(request_payload, candidate) + _CONTEXT_RESERVE_TOKENS > candidate.context_window:
+                details.update(result="skipped", reason="context_budget_exceeded")
+                raise ModelContextLimit("context_budget_exceeded")
+            if attempt_budget is not None:
+                if not attempt_budget.remaining:
+                    details["result"] = "skipped"
+                attempt_budget.consume()
+            attempts += 1
+            try:
+                result = _cloud_json(request_url, candidate.api_key, request_payload, request_timeout,
+                                     0, allow_layout_list, ceiling)
+                usage = (result.get("_api") or {}).get("usage") or result.get("usage")
+                details["usage"] = usage_metadata(usage)
+                if path == "/systemone":
+                    validate_decisions(result, payload.get("questions", {}))
+                if validate is not None:
+                    validate(result)
+            except Exception as error:
+                details["result"] = "failed"
+                if isinstance(error, IncompleteModelResponse):
+                    details["usage"] = usage_metadata(error.usage)
+                status = getattr(error, "status_code", None)
+                if type(status) is int:
+                    details["http_status"] = status
+                raise
+            details["result"] = "success"
+            if routed and path == "/systemone":
+                result["_routing"] = {"alias": candidate.profile, "model": candidate.model}
+            return result
 
     return run_fallback(model_module, candidates, call)
+
+
+class ModelContextLimit(ValueError):
+    retryable = False
+
+
+def _input_size(payload, candidate):
+    if candidate.protocol == "systemone":
+        return len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+    size = payload[candidate.token_parameter]
+    for message in payload["messages"]:
+        parts = message["content"]
+        if isinstance(parts, str):
+            size += len(parts.encode("utf-8"))
+        else:
+            for part in parts:
+                if part["type"] == "image_url":
+                    size += candidate.image_token_reserve
+                else:
+                    size += len(part.get("text", "").encode("utf-8"))
+    return size
+
+
+def _routed_chat_profile(payload, candidate, ceiling):
+    requested = payload.get("max_tokens") or payload.get("max_completion_tokens") or ceiling
+    ceiling = min(ceiling, candidate.max_output_tokens or ceiling)
+    payload.pop("chat_template_kwargs", None)
+    apply_chat_options(payload, candidate, min(requested, ceiling))
+    for message in payload.get("messages", []):
+        if isinstance(message.get("content"), list):
+            for part in message["content"]:
+                if part.get("type") == "image_url" and candidate.image_detail:
+                    part["image_url"].setdefault("detail", candidate.image_detail)
+    return ceiling
 
 
 def apply_chat_profile(payload, candidate, ceiling, *, structured=True):
@@ -237,15 +336,20 @@ def apply_chat_profile(payload, candidate, ceiling, *, structured=True):
     return ceiling
 
 
-def _cloud_json(endpoint, key, payload, timeout=240, retries=2, allow_layout_list=False, max_output_tokens=131072):
+def _cloud_json(endpoint, key, payload, timeout=_DEFAULT_TIMEOUT, retries=_DEFAULT_RETRIES,
+                allow_layout_list=False, max_output_tokens=_DEFAULT_MAX_OUTPUT_TOKENS):
+    from agent_banking.core.cloud_rate_limit import acquire_cloud_slot
     if not key:
         raise RuntimeError("Required cloud API credential is not configured")
     for attempt in range(retries + 1):
+        acquire_cloud_slot(str(payload.get("model", "")), endpoint)
         request = urllib.request.Request(endpoint, data=json.dumps(payload).encode("utf-8"),
                                          headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 body = read_response(response, payload.get("stream", False))
+            if isinstance(body, dict):
+                annotate_span(usage=usage_metadata(body.get("usage")))
             if not isinstance(body, dict) or "error" in body:
                 raise ValueError("Cloud API did not return a successful response object")
             if "choices" not in body:
@@ -260,7 +364,10 @@ def _cloud_json(endpoint, key, payload, timeout=240, retries=2, allow_layout_lis
                 if choice.get("finish_reason") == "length" and payload.get(limit_key, 0) >= max_output_tokens:
                     raise IncompleteModelResponse("Incomplete model response: length", body.get("usage", {}))
                 if choice.get("finish_reason") == "length" and payload.get(limit_key, 0) < max_output_tokens:
-                    payload[limit_key] = min(max_output_tokens, max(16384, payload.get(limit_key, 8192) * 2))
+                    payload[limit_key] = min(
+                        max_output_tokens,
+                        max(_LENGTH_RETRY_FLOOR, payload.get(limit_key, _DEFAULT_LENGTH_FALLBACK) * _LENGTH_RETRY_MULTIPLIER),
+                    )
                 raise ValueError("Incomplete model response: " + str(choice.get("finish_reason")))
             message = choice.get("message")
             if not isinstance(message, dict):
@@ -272,15 +379,18 @@ def _cloud_json(endpoint, key, payload, timeout=240, retries=2, allow_layout_lis
             if error.code < 500 and error.code != 429:
                 detail = ""
                 try:
-                    body = json.loads(error.read(16384))
-                    entry = body.get("error", body) if isinstance(body, dict) else body
+                    body = json.loads(error.read(_ERROR_BODY_READ_LIMIT))
+                    if isinstance(body, dict):
+                        entry = body.get("error", body)
+                    else:
+                        entry = body
                     if isinstance(entry, dict):
                         detail = str(entry.get("message", entry.get("detail", entry.get("code", ""))))
                     elif isinstance(entry, str):
                         detail = entry
                 except (ValueError, OSError):
                     pass
-                detail = detail.replace(key, "[redacted]")[:1000]
+                detail = detail.replace(key, "[redacted]")[:_ERROR_DETAIL_MAX_CHARS]
                 failure = RuntimeError("Cloud API rejected request with HTTP " + str(error.code) + ": " + detail)
                 failure.status_code = error.code
                 failure.retryable = error.code == 408
@@ -295,5 +405,5 @@ def _cloud_json(endpoint, key, payload, timeout=240, retries=2, allow_layout_lis
             logger.warning("Cloud request attempt %s failed (%s)", attempt + 1, type(error).__name__)
             if attempt == retries:
                 raise
-        time.sleep(min(8, 2 ** attempt))
+        time.sleep(min(_MAX_BACKOFF_SECONDS, 2 ** attempt))
     raise RuntimeError("Cloud request failed")

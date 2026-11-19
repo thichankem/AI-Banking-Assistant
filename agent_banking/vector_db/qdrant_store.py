@@ -25,8 +25,9 @@ import uuid
 import warnings
 from pathlib import Path
 
-from agent_banking.chunking.universal.planning.schema import payload_index_key
+from agent_banking.chunking.universal.planning.schema import VALID_CHUNK_TYPES, payload_index_key
 from agent_banking.core.search_text import search_key
+from agent_banking.vector_db.config.settings import VectorDBConfig
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -67,7 +68,7 @@ def _publication_owners(payload):
 
 def _index_payload(chunk, fallback_id):
     chunk_type = chunk.get("chunk_type")
-    if chunk_type not in ("text", "table", "multimodal"):
+    if chunk_type not in VALID_CHUNK_TYPES:
         chunk_type = "text"
     metadata = chunk.get("business_metadata")
     if not isinstance(metadata, dict):
@@ -111,23 +112,29 @@ class QdrantBankingStore:
 
     def __init__(
         self,
-        collection_name="banking_docs_1024",
-        dimension=1024,
-        storage_path="agent_banking/vector_db/qdrant_db",
+        collection_name=VectorDBConfig.QDRANT_COLLECTION,
+        dimension=VectorDBConfig.QDRANT_VECTOR_SIZE,
+        storage_path=None,
         use_memory=False
     ):
-        self.collection_name = collection_name
-        self.dimension = dimension
+        if collection_name:
+            self.collection_name = collection_name
+        else:
+            self.collection_name = VectorDBConfig.QDRANT_COLLECTION
+        if dimension is not None:
+            self.dimension = dimension
+        else:
+            self.dimension = VectorDBConfig.QDRANT_VECTOR_SIZE
         self.use_memory = use_memory
 
-        if storage_path:
-            raw_path = Path(storage_path)
-            if raw_path.is_absolute():
-                self.storage_path = str(raw_path)
-            else:
-                self.storage_path = str((PROJECT_ROOT / raw_path).resolve())
+        resolved_raw = storage_path
+        if not resolved_raw:
+            resolved_raw = VectorDBConfig.QDRANT_STORAGE_PATH
+        raw_path = Path(resolved_raw)
+        if raw_path.is_absolute():
+            self.storage_path = str(raw_path)
         else:
-            self.storage_path = str((PROJECT_ROOT / "agent_banking" / "vector_db" / "qdrant_db").resolve())
+            self.storage_path = str((PROJECT_ROOT / raw_path).resolve())
 
         # 1. Initialize Qdrant Client (local path or in-memory)
         if use_memory:
@@ -151,13 +158,24 @@ class QdrantBankingStore:
         self._bm25_doc_norm = []
         self._bm25_avgdl = 0.0
         self._bm25_idf = {}
-        self.k1 = 1.5
-        self.b = 0.75
-        self._bm25_breadcrumb_boost = 1.5
+        self.k1 = VectorDBConfig.VECTOR_DB_BM25_K1
+        self.b = VectorDBConfig.VECTOR_DB_BM25_B
+        self._bm25_breadcrumb_boost = VectorDBConfig.VECTOR_DB_BREADCRUMB_BOOST
 
         # Automatically reload BM25 from disk if collection pre-exists
         if not use_memory:
             self._load_bm25_from_existing_store()
+
+    @staticmethod
+    def _resolve_distance_metric():
+        metric_map = {
+            "cosine": Distance.COSINE,
+            "dot": Distance.DOT,
+            "euclid": Distance.EUCLID,
+            "manhattan": Distance.MANHATTAN,
+        }
+        key = VectorDBConfig.QDRANT_DISTANCE_METRIC.strip().lower()
+        return metric_map.get(key, Distance.COSINE)
 
     def _init_collection(self):
         """Tạo Collection với khoảng cách Cosine và chỉ mục HNSW nếu chưa tồn tại, kèm payload indexes"""
@@ -170,11 +188,11 @@ class QdrantBankingStore:
                 collection_name=self.collection_name,
                 vectors_config=VectorParams(
                     size=self.dimension,
-                    distance=Distance.COSINE
+                    distance=self._resolve_distance_metric()
                 ),
                 hnsw_config=HnswConfigDiff(
-                    m=16,
-                    ef_construct=100
+                    m=VectorDBConfig.QDRANT_HNSW_M,
+                    ef_construct=VectorDBConfig.QDRANT_HNSW_EF_CONSTRUCT
                 )
             )
             self._create_payload_indexes()
@@ -220,15 +238,15 @@ class QdrantBankingStore:
             collection_name=self.collection_name,
             vectors_config=VectorParams(
                 size=self.dimension,
-                distance=Distance.COSINE
+                distance=self._resolve_distance_metric()
             ),
             hnsw_config=HnswConfigDiff(
-                m=16,
-                ef_construct=100
+                m=VectorDBConfig.QDRANT_HNSW_M,
+                ef_construct=VectorDBConfig.QDRANT_HNSW_EF_CONSTRUCT
             )
         )
 
-        # Rebuild 5 payload indexes
+        # Rebuild payload indexes
         self._create_payload_indexes()
 
         # Clear BM25 cache
@@ -242,14 +260,8 @@ class QdrantBankingStore:
         return True
 
     def _create_payload_indexes(self):
-        """Khởi tạo 5 chỉ mục Payload (Keyword index) phục vụ truy vấn có điều kiện cực nhanh."""
-        fields = [
-            "source",
-            "chunk_type",
-            "parent_id",
-            "business_metadata.domain",
-            "business_metadata.category"
-        ]
+        """Khởi tạo các chỉ mục Payload (Keyword index) phục vụ truy vấn có điều kiện cực nhanh."""
+        fields = VectorDBConfig.VECTOR_DB_PAYLOAD_INDEX_FIELDS
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
             for field in fields:
@@ -267,9 +279,10 @@ class QdrantBankingStore:
         try:
             pts_count = self.count()
             if pts_count > 0:
-                limit_val = pts_count + 100
-                if limit_val < 10000:
-                    limit_val = 10000
+                limit_val = pts_count + VectorDBConfig.VECTOR_DB_SCROLL_LIMIT_BUFFER
+                min_limit = VectorDBConfig.VECTOR_DB_MIN_SCROLL_LIMIT
+                if limit_val < min_limit:
+                    limit_val = min_limit
                 records, _ = self.client.scroll(
                     collection_name=self.collection_name,
                     limit=limit_val,
@@ -296,7 +309,7 @@ class QdrantBankingStore:
         _set_publication_revision(payload, vector)
         return payload_index_key(payload)
 
-    def add_chunks(self, chunks, batch_size=64):
+    def add_chunks(self, chunks, batch_size=VectorDBConfig.VECTOR_DB_UPSERT_BATCH_SIZE):
         """
         Nạp danh sách chunks đã có trường 'vector' vào Qdrant và lập chỉ mục BM25F.
         Đảm bảo 100% chunks tuân thủ Target Universal Schema 13 trường.
@@ -381,13 +394,17 @@ class QdrantBankingStore:
             payload_fields.append("business_metadata.publication_revision")
         if scope is not None:
             payload_fields.append("business_metadata.publication_scopes")
+        scroll_limit = VectorDBConfig.VECTOR_DB_SCROLL_BATCH_SIZE
         while True:
-            records, offset = self.client.scroll(collection_name=self.collection_name, offset=offset, limit=256,
+            records, offset = self.client.scroll(collection_name=self.collection_name, offset=offset, limit=scroll_limit,
                                                   with_payload=payload_fields, with_vectors=False)
             for record in records:
                 payload = record.payload
                 if payload and (scope is None or scope in _publication_owners(payload)):
-                    identifier = payload_index_key(payload) if index_keys else payload.get("chunk_id")
+                    if index_keys:
+                        identifier = payload_index_key(payload)
+                    else:
+                        identifier = payload.get("chunk_id")
                     identifiers.add(identifier)
             if offset is None:
                 return identifiers
@@ -429,9 +446,11 @@ class QdrantBankingStore:
         payload_fields = ["chunk_id", "source", "business_metadata.publication_revision"]
         if scope is not None:
             payload_fields.append("business_metadata.publication_scopes")
+        scroll_limit = VectorDBConfig.VECTOR_DB_SCROLL_BATCH_SIZE
+        mutate_batch = VectorDBConfig.VECTOR_DB_MUTATE_BATCH_SIZE
         while True:
             records, offset = self.client.scroll(collection_name=self.collection_name, offset=offset,
-                                                 limit=256, with_payload=payload_fields, with_vectors=False)
+                                                 limit=scroll_limit, with_payload=payload_fields, with_vectors=False)
             for record in records:
                 payload = record.payload or {}
                 if stale(payload):
@@ -444,12 +463,12 @@ class QdrantBankingStore:
             if offset is None:
                 break
         for owners, identifiers in shared.items():
-            for start in range(0, len(identifiers), 256):
+            for start in range(0, len(identifiers), mutate_batch):
                 self.client.set_payload(
                     collection_name=self.collection_name, payload={"publication_scopes": list(owners)},
-                    points=identifiers[start:start + 256], key="business_metadata", wait=True)
-        for start in range(0, len(obsolete), 256):
-            self.client.delete(collection_name=self.collection_name, points_selector=obsolete[start:start + 256], wait=True)
+                    points=identifiers[start:start + mutate_batch], key="business_metadata", wait=True)
+        for start in range(0, len(obsolete), mutate_batch):
+            self.client.delete(collection_name=self.collection_name, points_selector=obsolete[start:start + mutate_batch], wait=True)
         remaining = []
         for item in self._bm25_corpus:
             owners = retained_points.get(payload_index_key(item))
@@ -458,6 +477,64 @@ class QdrantBankingStore:
             if not stale(item):
                 remaining.append(item)
         if len(remaining) != len(self._bm25_corpus):
+            self._build_bm25_index(remaining)
+        return len(obsolete)
+
+    def prune_publication_scopes(self, active_by_scope):
+        """Prune explicitly owned snapshots in one scan after replacement upserts.
+
+        Other owners and unowned legacy records are retained. Unlike calling
+        prune_chunks once per document, this rebuilds BM25 only once.
+        """
+        if not active_by_scope:
+            return 0
+        if any(not isinstance(scope, str) or not scope for scope in active_by_scope):
+            raise ValueError("Batch pruning requires explicit nonempty publication scopes")
+        active = {scope: set(keys) for scope, keys in active_by_scope.items()}
+
+        def remaining_owners(payload):
+            owners = _publication_owners(payload)
+            key = payload_index_key(payload)
+            removed = {scope for scope in owners if scope in active and key not in active[scope]}
+            if not removed:
+                return None
+            return owners - removed
+
+        obsolete = []
+        shared = {}
+        offset = None
+        fields = ["chunk_id", "source", "business_metadata.publication_revision", "business_metadata.publication_scopes"]
+        scroll_limit = VectorDBConfig.VECTOR_DB_SCROLL_BATCH_SIZE
+        mutate_batch = VectorDBConfig.VECTOR_DB_MUTATE_BATCH_SIZE
+        while True:
+            records, offset = self.client.scroll(collection_name=self.collection_name, offset=offset,
+                                                 limit=scroll_limit, with_payload=fields, with_vectors=False)
+            for record in records:
+                owners = remaining_owners(record.payload or {})
+                if owners is None:
+                    continue
+                if owners:
+                    shared.setdefault(tuple(sorted(owners)), []).append(record.id)
+                else:
+                    obsolete.append(record.id)
+            if offset is None:
+                break
+        for owners, identifiers in shared.items():
+            for start in range(0, len(identifiers), mutate_batch):
+                self.client.set_payload(collection_name=self.collection_name,
+                                        payload={"publication_scopes": list(owners)},
+                                        points=identifiers[start:start + mutate_batch], key="business_metadata", wait=True)
+        for start in range(0, len(obsolete), mutate_batch):
+            self.client.delete(collection_name=self.collection_name, points_selector=obsolete[start:start + mutate_batch], wait=True)
+        remaining = []
+        for item in self._bm25_corpus:
+            owners = remaining_owners(item)
+            if owners is None:
+                remaining.append(item)
+            elif owners:
+                metadata = {**item["business_metadata"], "publication_scopes": sorted(owners)}
+                remaining.append({**item, "business_metadata": metadata})
+        if obsolete or shared:
             self._build_bm25_index(remaining)
         return len(obsolete)
 
@@ -492,7 +569,7 @@ class QdrantBankingStore:
         if isinstance(value, (int, float, bool)):
             return [str(value)]
         if isinstance(value, dict):
-            for key in ("text", "value", "label", "name"):
+            for key in VectorDBConfig.VECTOR_DB_TABLE_DICT_VALUE_KEYS:
                 if key in value and value[key] is not None:
                     text = str(value[key]).strip()
                     if text:
@@ -514,7 +591,7 @@ class QdrantBankingStore:
             return table_data
         if isinstance(table_data, dict):
             parts = []
-            for meta_key in ("title", "caption", "column", "row_key"):
+            for meta_key in VectorDBConfig.VECTOR_DB_TABLE_META_KEYS:
                 val = table_data.get(meta_key)
                 if val is not None and str(val).strip():
                     parts.append(str(val).strip())
@@ -534,18 +611,7 @@ class QdrantBankingStore:
             if parts:
                 return " ".join(parts)
 
-            skip_keys = (
-                "table_id",
-                "html",
-                "header_cells",
-                "header_row_count",
-                "row_start",
-                "row_end",
-                "row_provenance",
-                "cell_span",
-                "source_cells",
-                "id",
-            )
+            skip_keys = VectorDBConfig.VECTOR_DB_TABLE_SKIP_KEYS
             for k, v in table_data.items():
                 if str(k) in skip_keys:
                     continue
@@ -576,7 +642,7 @@ class QdrantBankingStore:
             if isinstance(img, dict):
                 seen = set()
                 img_parts = []
-                for field in ("section_title", "title", "caption", "alt_text", "native_text", "description", "ocr_text"):
+                for field in VectorDBConfig.VECTOR_DB_IMAGE_TEXT_FIELDS:
                     raw_val = img.get(field)
                     if raw_val is not None:
                         val = str(raw_val).strip()
@@ -630,11 +696,29 @@ class QdrantBankingStore:
             content_text = chunk.get("content") or ""
             section_title_text = chunk.get("section_title") or ""
             breadcrumb_text = chunk.get("breadcrumb") or ""
+            source_name = str(chunk.get("source") or "").replace("\\", "/").rsplit("/", 1)[-1]
+            if "." in source_name:
+                source_stem = source_name.rsplit(".", 1)[0]
+            else:
+                source_stem = source_name
+            doc_name = str(chunk.get("document_name") or "").strip()
+            meta_labels = []
+            for label in (doc_name, source_stem):
+                if label and label.casefold() not in breadcrumb_text.casefold():
+                    if label not in meta_labels:
+                        meta_labels.append(label)
+            if meta_labels:
+                label_prefix = " | ".join(meta_labels)
+                if breadcrumb_text:
+                    breadcrumb_text = label_prefix + " > " + breadcrumb_text
+                else:
+                    breadcrumb_text = label_prefix
             table_text = self._extract_table_text(chunk.get("table_data"))
             retrieval = (chunk.get("business_metadata") or {}).get("retrieval", {})
             if "embedding_content" in retrieval:
                 content_text = retrieval["embedding_content"]
-                table_text = ""
+                if chunk.get("chunk_type") == "table":
+                    table_text = ""
             images_text = self._extract_images_text(chunk.get("images"))
 
             c_tokens = self._tokenize(content_text)
@@ -643,24 +727,30 @@ class QdrantBankingStore:
             td_tokens = self._tokenize(table_text)
             img_tokens = self._tokenize(images_text)
 
+            weights = VectorDBConfig.VECTOR_DB_BM25_FIELD_WEIGHTS
+            w_content = float(weights["content"])
+            w_title = float(weights["section_title"])
+            w_table = float(weights["table_data"])
+            w_images = float(weights["images"])
+
             doc_tf = {}
             for t in c_tokens:
-                doc_tf[t] = doc_tf.get(t, 0.0) + 1.0
+                doc_tf[t] = doc_tf.get(t, 0.0) + w_content
             for t in st_tokens:
-                doc_tf[t] = doc_tf.get(t, 0.0) + 2.0
+                doc_tf[t] = doc_tf.get(t, 0.0) + w_title
             for t in bc_tokens:
                 doc_tf[t] = doc_tf.get(t, 0.0) + bc_boost
             for t in td_tokens:
-                doc_tf[t] = doc_tf.get(t, 0.0) + 1.0
+                doc_tf[t] = doc_tf.get(t, 0.0) + w_table
             for t in img_tokens:
-                doc_tf[t] = doc_tf.get(t, 0.0) + 1.0
+                doc_tf[t] = doc_tf.get(t, 0.0) + w_images
 
             doc_len = (
-                len(c_tokens) * 1.0
-                + len(st_tokens) * 2.0
+                len(c_tokens) * w_content
+                + len(st_tokens) * w_title
                 + len(bc_tokens) * bc_boost
-                + len(td_tokens) * 1.0
-                + len(img_tokens) * 1.0
+                + len(td_tokens) * w_table
+                + len(img_tokens) * w_images
             )
             self._bm25_doc_len.append(doc_len)
 
@@ -744,7 +834,7 @@ class QdrantBankingStore:
     # -------------------------------------------------------------------------
     # 4. VECTOR SEARCH (DENSE SEARCH)
     # -------------------------------------------------------------------------
-    def search_vector(self, query_vector, top_k=5, filter_dict=None):
+    def search_vector(self, query_vector, top_k=VectorDBConfig.VECTOR_DB_DEFAULT_TOP_K, filter_dict=None):
         """
         Tìm kiếm Top-K chunks theo Cosine Similarity trên Qdrant HNSW Index kèm bộ lọc Metadata.
         """
@@ -770,7 +860,7 @@ class QdrantBankingStore:
     # -------------------------------------------------------------------------
     # 5. KEYWORD SEARCH (BM25F OKAPI SEARCH USING INVERTED INDEX)
     # -------------------------------------------------------------------------
-    def search_bm25(self, query_text, top_k=5, filter_dict=None, breadcrumb_boost=1.5):
+    def search_bm25(self, query_text, top_k=VectorDBConfig.VECTOR_DB_DEFAULT_TOP_K, filter_dict=None, breadcrumb_boost=None):
         """
         Tìm kiếm từ khóa chính xác qua thuật toán Okapi BM25 đa trường (BM25F)
         sử dụng Inverted Index và tiền tính toán tf để đạt độ trễ < 4ms.
@@ -879,18 +969,18 @@ class QdrantBankingStore:
         self,
         query_text,
         query_vector,
-        top_k=5,
-        candidate_k=15,
-        alpha=0.5,
-        rrf_k=60,
+        top_k=VectorDBConfig.VECTOR_DB_DEFAULT_TOP_K,
+        candidate_k=VectorDBConfig.VECTOR_DB_DEFAULT_CANDIDATE_K,
+        alpha=VectorDBConfig.VECTOR_DB_DEFAULT_ALPHA,
+        rrf_k=VectorDBConfig.VECTOR_DB_DEFAULT_RRF_K,
         filter_dict=None,
-        breadcrumb_boost=1.5
+        breadcrumb_boost=None
     ):
         """
         Tìm kiếm lai đồng thời:
         1. Dense Vector (hiểu ngữ nghĩa sâu) qua Qdrant HNSW.
         2. Sparse BM25F (bắt chính xác mã thẻ, số thông tư, lãi suất) qua Inverted Index.
-        3. Hợp nhất thứ hạng bằng Reciprocal Rank Fusion (RRF k=60).
+        3. Hợp nhất thứ hạng bằng Reciprocal Rank Fusion (RRF).
         """
         # 1. Execute queries
         dense_hits = self.search_vector(query_vector, top_k=candidate_k, filter_dict=filter_dict)
@@ -905,6 +995,8 @@ class QdrantBankingStore:
         candidates = {}
         dense_weight = alpha
         bm25_weight = 1.0 - alpha
+        score_decimals = VectorDBConfig.VECTOR_DB_SCORE_ROUND_DECIMALS
+        rrf_decimals = VectorDBConfig.VECTOR_DB_RRF_ROUND_DECIMALS
 
         # Record Dense ranking
         for rank, (chunk, score) in enumerate(dense_hits, start=1):
@@ -914,7 +1006,7 @@ class QdrantBankingStore:
             candidates[c_id] = {
                 "chunk": chunk,
                 "dense_rank": rank,
-                "dense_score": round(score, 4),
+                "dense_score": round(score, score_decimals),
                 "bm25_rank": None,
                 "bm25_score": 0.0,
                 "rrf_score": 0.0
@@ -931,12 +1023,12 @@ class QdrantBankingStore:
                     "dense_rank": None,
                     "dense_score": 0.0,
                     "bm25_rank": rank,
-                    "bm25_score": round(score, 4),
+                    "bm25_score": round(score, score_decimals),
                     "rrf_score": 0.0
                 }
             else:
                 candidates[c_id]["bm25_rank"] = rank
-                candidates[c_id]["bm25_score"] = round(score, 4)
+                candidates[c_id]["bm25_score"] = round(score, score_decimals)
 
         # Compute RRF score: Score = w1 / (k + rank1) + w2 / (k + rank2)
         for c_id, item in candidates.items():
@@ -945,7 +1037,7 @@ class QdrantBankingStore:
                 rrf += dense_weight / (rrf_k + item["dense_rank"])
             if item["bm25_rank"] is not None:
                 rrf += bm25_weight / (rrf_k + item["bm25_rank"])
-            item["rrf_score"] = round(rrf, 6)
+            item["rrf_score"] = round(rrf, rrf_decimals)
 
         # Sort results descending by RRF and take Top-K
         sorted_candidates = sorted(candidates.values(), key=lambda x: x["rrf_score"], reverse=True)

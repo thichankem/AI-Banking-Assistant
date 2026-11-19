@@ -9,14 +9,13 @@ Master Runner for A-Bank 785 Golden Questions Pipeline & LLM Judge Evaluation.
    - Faithfulness (0-100): Strict alignment with bank regulations (zero hallucination).
    - Completeness (0-100): Comprehensive, direct resolution of customer inquiry.
 4. Auto-saves results into JSON caches after every single case.
-5. Continuously syncs full results to Master Excel Workbook every 3 cases.
+5. Continuously syncs full results to Master Excel Workbook periodically.
 
 STRICT COMPLIANCE WITH GEMINI.md:
 - ZERO TERNARY LAW: Explicit if/else syntax only.
 - 0% REGEX LAW: Native string methods only.
 - NO TYPING LIBRARY: Native Python types only.
 - NO __INIT__.PY: Direct imports only.
-- ZERO TOUCH TO RAG: Only touches LangGraph, Tasks, Tools, Generator, Evaluator.
 """
 
 import os
@@ -25,7 +24,7 @@ import time
 import json
 from pathlib import Path
 
-PROJECT_ROOT = Path(r"d:\Desktop\GitHub\AI Banking Asistant")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -34,23 +33,34 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 from agent_banking.agent_pipeline import BankingAgentPipeline
 from agent_banking.core.chat import FallbackChatClient
+from agent_banking.evaluator.config.settings import (
+    EvaluatorConfig,
+    get_evaluator_messages,
+    get_evaluator_prompt,
+    render_prompt,
+    resolve_repo_path,
+)
+
+_DS_CFG = EvaluatorConfig.DATASETS
+_OUT_CFG = EvaluatorConfig.CACHES_AND_OUTPUTS
+_J785 = EvaluatorConfig.JUDGE_785
+_EXCEL_CFG = EvaluatorConfig.EXCEL
+_FEEDBACK = get_evaluator_messages("feedback")
+_EXCEL_LABELS = get_evaluator_messages("excel")
+_JUDGE_PROMPT = get_evaluator_prompt("MASTER_785_JUDGE_PROMPT", "master_785_judge.md")
+
 
 def load_all_785_cases():
-    base_dir = r"d:\Desktop\GitHub\AI Banking Asistant"
-    group_files = [
-        os.path.join(base_dir, "dataset", "A_Bank_golden_the", "a_bank_the_golden.json"),
-        os.path.join(base_dir, "dataset", "A_Bank_golden_compliance", "a_bank_compliance_golden.json"),
-        os.path.join(base_dir, "dataset", "A_Bank_golden_app", "a_bank_app_golden.json"),
-        os.path.join(base_dir, "dataset", "A_Bank_golden_specialized", "a_bank_specialized_golden.json")
-    ]
-
+    template = _DS_CFG["group_path_template"]
     all_cases = []
-    for fpath in group_files:
+    for group in EvaluatorConfig.DATASET_GROUPS:
+        fpath = resolve_repo_path(template.replace("{group}", group), root=PROJECT_ROOT)
         with open(fpath, "r", encoding="utf-8") as f:
             data = json.load(f)
             for item in data:
                 all_cases.append(item)
     return all_cases
+
 
 def load_cache(cache_file):
     if os.path.exists(cache_file):
@@ -61,6 +71,7 @@ def load_cache(cache_file):
             return {}
     return {}
 
+
 def save_cache(cache_data, cache_file):
     temp_file = cache_file + ".tmp"
     with open(temp_file, "w", encoding="utf-8") as f:
@@ -70,13 +81,14 @@ def save_cache(cache_data, cache_file):
     else:
         os.rename(temp_file, cache_file)
 
+
 def parse_judge_output(content):
     clean_c = content.strip()
     start_idx = clean_c.find("{")
     end_idx = clean_c.rfind("}")
     if start_idx != -1:
         if end_idx != -1:
-            json_str = clean_c[start_idx:end_idx+1]
+            json_str = clean_c[start_idx:end_idx + 1]
             try:
                 data = json.loads(json_str)
                 acc = float(data.get("accuracy", 0.0))
@@ -84,9 +96,14 @@ def parse_judge_output(content):
                 comp = float(data.get("completeness", 0.0))
                 overall = float(data.get("overall_score", 0.0))
                 if overall == 0.0:
-                    overall = round((acc * 0.4) + (faith * 0.3) + (comp * 0.3), 1)
+                    overall = round(
+                        (acc * float(_J785["accuracy_weight"]))
+                        + (faith * float(_J785["faithfulness_weight"]))
+                        + (comp * float(_J785["completeness_weight"])),
+                        1,
+                    )
                 verdict = str(data.get("verdict", "FAIL")).upper()
-                if "PASS" in verdict or overall >= 65.0:
+                if "PASS" in verdict or overall >= float(_J785["pass_threshold"]):
                     verdict = "PASS"
                 else:
                     verdict = "FAIL"
@@ -107,38 +124,26 @@ def parse_judge_output(content):
         "completeness": 0.0,
         "overall_score": 0.0,
         "verdict": "FAIL",
-        "feedback": "Lỗi phân tích cú pháp kết quả từ LLM Judge"
+        "feedback": _FEEDBACK["judge_parse_error"]
     }
+
 
 def call_llm_judge(client, question, reference_answer, must_include_list, agent_answer):
     must_inc_str = ", ".join(must_include_list)
-    prompt = (
-        "Bạn là Giám khảo AI Độc lập (LLM-as-a-Judge) chuyên chấm điểm chất lượng câu trả lời của Trợ lý Ngân hàng A-Bank.\n"
-        "Hãy chấm điểm câu trả lời thực tế của Trợ lý dựa trên Câu hỏi tình huống, Đáp án chuẩn tham chiếu và các tiêu chí nghiệp vụ.\n\n"
-        f"[CÂU HỎI TÌNH HUỐNG]:\n{question}\n\n"
-        f"[ĐÁP ÁN CHUẨN THAM CHIẾU]:\n{reference_answer}\n\n"
-        f"[CÁC Ý / CON SỐ BẮT BUỘC PHẢI CÓ (MUST INCLUDE)]:\n{must_inc_str}\n\n"
-        f"[CÂU TRẢ LỜI CỦA TRỢ LÝ AI ĐƯỢC CHẤM]:\n{agent_answer}\n\n"
-        "HÃY ĐÁNH GIÁ THEO 3 TIÊU CHÍ CỐT LÕI (Thang điểm 0 - 100):\n"
-        "1. accuracy (0-100): Đánh giá mức độ giải quyết đúng trọng tâm câu hỏi về các mốc hạn mức, con số, điều kiện, bước quy trình.\n"
-        "2. faithfulness (0-100): Độ trung thực với quy định thực tế của ngân hàng (nếu câu trả lời trích dẫn đúng theo văn bản quy chuẩn thực tế của A-Bank thì faithfulness đạt điểm cao 85-100, không bị coi là bịa đặt).\n"
-        "3. completeness (0-100): Độ đầy đủ các tiêu chí được hỏi.\n\n"
-        "QUY TẮC ĐÁNH GIÁ VÀ XÉT PASS/FAIL:\n"
-        "- overall_score: Điểm tổng hợp trọng số: (0.4 * accuracy + 0.3 * faithfulness + 0.3 * completeness).\n"
-        "- verdict: 'PASS' nếu overall_score >= 65.0 hoặc câu trả lời đã bám sát đúng điều khoản nghiệp vụ của ngân hàng; ngược lại 'FAIL'.\n"
-        "- LƯU Ý VỀ TÍNH CHÂN THỰC VĂN BẢN: Nếu Trợ lý AI đã giải đáp đầy đủ các điều kiện cốt lõi dựa trên văn bản quy chuẩn thực tế của ngân hàng (kể cả khi mức thu nhập hoặc điều kiện trong văn bản thực tế có sự khác biệt nhỏ về biểu số giữa các phiên bản quy chế), hãy công nhận câu trả lời là hợp lệ và cho kết luận 'PASS'. Chỉ chấm 'FAIL' khi câu trả lời hoàn toàn lạc đề, bỏ sót hầu hết các điều kiện cốt lõi, hoặc bịa đặt thông tin vô căn cứ.\n\n"
-        "TRẢ VỀ DUY NHẤT 1 ĐOẠN JSON KHÔNG CÓ MARKDOWN BỌC NGOÀI THEO CẤU TRÚC:\n"
-        "{\n"
-        '  "accuracy": <điểm từ 0 đến 100>,\n'
-        '  "faithfulness": <điểm từ 0 đến 100>,\n'
-        '  "completeness": <điểm từ 0 đến 100>,\n'
-        '  "overall_score": <điểm tổng hợp từ 0 đến 100>,\n'
-        '  "verdict": "<PASS hoặc FAIL>",\n'
-        '  "feedback": "<nhận xét ngắn gọn 1-2 câu>"\n'
-        "}\n"
+    prompt = render_prompt(
+        _JUDGE_PROMPT,
+        {
+            "question": question,
+            "reference_answer": reference_answer,
+            "must_include": must_inc_str,
+            "agent_answer": agent_answer,
+        },
     )
     try:
-        resp = client.create(messages=[{"role": "user", "content": prompt}], temperature=0.0)
+        resp = client.create(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=float(_J785["judge_temperature"]),
+        )
         content = resp.choices[0].message.content
         return parse_judge_output(content)
     except Exception as e:
@@ -148,56 +153,45 @@ def call_llm_judge(client, question, reference_answer, must_include_list, agent_
             "completeness": 0.0,
             "overall_score": 0.0,
             "verdict": "FAIL",
-            "feedback": f"Lỗi gọi LLM Judge API: {e}"
+            "feedback": _FEEDBACK["judge_api_error_prefix"] + str(e)
         }
 
+
 def export_to_excel(all_cases, answers_cache, scores_cache, output_path):
+    styles = _EXCEL_CFG["styles"]
+    sheets = _EXCEL_CFG["sheets"]
+
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
 
-    ws = wb.create_sheet(title="Master 785 Golden (Chưa chấm)")
+    ws = wb.create_sheet(title=str(sheets["batch_sheet_title"]))
     ws.views.sheetView[0].showGridLines = True
-    ws.freeze_panes = "A2"
+    ws.freeze_panes = str(styles["freeze_cell"])
 
-    navy_fill = PatternFill(start_color="0F2240", end_color="0F2240", fill_type="solid")
-    blue_fill = PatternFill(start_color="1E40AF", end_color="1E40AF", fill_type="solid")
-    gold_fill = PatternFill(start_color="B45309", end_color="B45309", fill_type="solid")
-    green_fill = PatternFill(start_color="15803D", end_color="15803D", fill_type="solid")
-    purple_fill = PatternFill(start_color="701A75", end_color="701A75", fill_type="solid")
+    navy_fill = PatternFill(start_color=styles["navy_color"], end_color=styles["navy_color"], fill_type="solid")
+    blue_fill = PatternFill(start_color=styles["blue_color"], end_color=styles["blue_color"], fill_type="solid")
+    gold_fill = PatternFill(start_color=styles["gold_color"], end_color=styles["gold_color"], fill_type="solid")
+    green_fill = PatternFill(start_color=styles["green_color"], end_color=styles["green_color"], fill_type="solid")
+    purple_fill = PatternFill(start_color=styles["purple_color"], end_color=styles["purple_color"], fill_type="solid")
 
-    header_font = Font(name="Segoe UI", size=10, bold=True, color="FFFFFF")
-    data_font = Font(name="Segoe UI", size=9, bold=False, color="1E293B")
-    bold_pass = Font(name="Segoe UI", size=9, bold=True, color="166534")
-    bold_fail = Font(name="Segoe UI", size=9, bold=True, color="991B1B")
+    font_name = str(styles["font_name"])
+    header_font = Font(name=font_name, size=int(styles["header_font_size"]), bold=True, color="FFFFFF")
+    data_font = Font(name=font_name, size=int(styles["data_font_size"]), bold=False, color=styles["data_text_color"])
+    bold_pass = Font(name=font_name, size=int(styles["data_font_size"]), bold=True, color=styles["pass_text_color"])
+    bold_fail = Font(name=font_name, size=int(styles["data_font_size"]), bold=True, color=styles["fail_text_color"])
 
+    border_color = str(styles["border_color"])
     thin_border = Border(
-        left=Side(style="thin", color="CBD5E1"),
-        right=Side(style="thin", color="CBD5E1"),
-        top=Side(style="thin", color="CBD5E1"),
-        bottom=Side(style="thin", color="CBD5E1")
+        left=Side(style="thin", color=border_color),
+        right=Side(style="thin", color=border_color),
+        top=Side(style="thin", color=border_color),
+        bottom=Side(style="thin", color=border_color)
     )
 
     align_left_wrap = Alignment(horizontal="left", vertical="top", wrap_text=True)
     align_center = Alignment(horizontal="center", vertical="top", wrap_text=True)
 
-    headers = [
-        "STT",
-        "ID Câu hỏi",
-        "Mã VB",
-        "Tiêu chí Kiểm thử",
-        "Độ khó",
-        "Câu hỏi Tình huống (Question)",
-        "Đáp án Chuẩn (Reference Answer)",
-        "Tiêu chí Bắt buộc (Must Include)",
-        "Đường dẫn Nguồn (Source Path)",
-        "Câu trả lời của Trợ lý AI Banking (Agent Answer)",
-        "LLM Điểm 1: Độ Chính Xác (Accuracy)",
-        "LLM Điểm 2: Độ Trung Thực (Faithfulness)",
-        "LLM Điểm 3: Độ Đầy Đủ (Completeness)",
-        "Tổng Điểm LLM (/100)",
-        "Kết Luận (PASS / FAIL)",
-        "Nhận Xét của Giám Khảo AI (LLM Feedback)"
-    ]
+    headers = list(_EXCEL_LABELS["batch_headers"]) + list(_EXCEL_LABELS["judge_extra_headers"]) + [str(_EXCEL_LABELS["master_extra_header"])]
 
     for col_idx, h_text in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col_idx, value=h_text)
@@ -213,7 +207,10 @@ def export_to_excel(all_cases, answers_cache, scores_cache, output_path):
                     if col_idx == 15:
                         cell.fill = green_fill
                     else:
-                        cell.fill = purple_fill
+                        if col_idx == 16:
+                            cell.fill = purple_fill
+                        else:
+                            cell.fill = blue_fill
         cell.font = header_font
         cell.alignment = align_center
         cell.border = thin_border
@@ -243,11 +240,10 @@ def export_to_excel(all_cases, answers_cache, scores_cache, output_path):
                     src_list.append(sp)
         src_str = "\n".join(src_list)
 
-        agent_ans = ""
         if case_id in answers_cache:
             agent_ans = answers_cache[case_id].get("answer", "")
         else:
-            agent_ans = "[Đang chờ tiến trình AI Banking xử lý...]"
+            agent_ans = str(_FEEDBACK["pending_agent_placeholder"])
 
         score_acc = ""
         score_faith = ""
@@ -266,12 +262,16 @@ def export_to_excel(all_cases, answers_cache, scores_cache, output_path):
             feedback = sc.get("feedback", "")
         else:
             if case_id in answers_cache:
-                score_acc = "[Chờ chấm]"
-                score_faith = "[Chờ chấm]"
-                score_comp = "[Chờ chấm]"
-                score_overall = "[Chờ chấm]"
-                verdict = "CHỜ CHẤM"
-                feedback = "Đang xếp hàng gọi LLM Judge"
+                score_acc = str(_FEEDBACK["pending_judge_cell"])
+                score_faith = str(_FEEDBACK["pending_judge_cell"])
+                score_comp = str(_FEEDBACK["pending_judge_cell"])
+                score_overall = str(_FEEDBACK["pending_judge_cell"])
+                verdict = str(_FEEDBACK["pending_judge_verdict"])
+                feedback = str(_FEEDBACK["pending_judge_feedback"])
+
+        latency_sec = ""
+        if case_id in answers_cache:
+            latency_sec = answers_cache[case_id].get("latency_sec", "")
 
         row_vals = [
             idx,
@@ -289,14 +289,15 @@ def export_to_excel(all_cases, answers_cache, scores_cache, output_path):
             score_comp,
             score_overall,
             verdict,
-            feedback
+            feedback,
+            latency_sec
         ]
 
         for col_idx, val in enumerate(row_vals, 1):
             cell = ws.cell(row=r_num, column=col_idx, value=val)
             cell.font = data_font
             cell.border = thin_border
-            if col_idx in [1, 2, 3, 5, 11, 12, 13, 14, 15]:
+            if col_idx in [1, 2, 3, 5, 11, 12, 13, 14, 15, 17]:
                 cell.alignment = align_center
                 if col_idx == 15:
                     if str(val) == "PASS":
@@ -307,46 +308,44 @@ def export_to_excel(all_cases, answers_cache, scores_cache, output_path):
             else:
                 cell.alignment = align_left_wrap
 
-    col_widths = {
-        "A": 6, "B": 12, "C": 10, "D": 26, "E": 10,
-        "F": 45, "G": 45, "H": 34, "I": 35, "J": 55,
-        "K": 18, "L": 18, "M": 18, "N": 16, "O": 14, "P": 45
-    }
+    col_widths = _EXCEL_CFG["column_widths"]["master_17_cols"]
     for col_letter, w in col_widths.items():
         ws.column_dimensions[col_letter].width = w
 
     try:
         wb.save(output_path)
     except PermissionError:
-        alt_path = output_path.replace(".xlsx", "_latest.xlsx")
+        alt_path = output_path.replace(".xlsx", str(_EXCEL_CFG["fallback_suffixes"]["latest_xlsx"]))
         wb.save(alt_path)
+
 
 def is_case_flawed(case_id, answers_cache, scores_cache):
     if case_id not in answers_cache:
         return True
     ans_text = answers_cache[case_id].get("answer", "")
-    if "The system is currently undergoing" in ans_text:
-        return True
-    if "Bảng tỷ giá ngoại tệ ngày hôm nay" in ans_text:
-        return True
-    if "kết quả dự tính tiền gửi tiết kiệm" in ans_text:
-        return True
-    if ans_text.startswith("Căn cứ theo quy định:") and len(ans_text) < 550 and "..." in ans_text:
+    for marker in _J785["flawed_answer_markers"]:
+        if marker in ans_text:
+            return True
+    if (
+        ans_text.startswith(str(_J785["short_citation_prefix"]))
+        and len(ans_text) < int(_J785["short_citation_max_len"])
+        and "..." in ans_text
+    ):
         return True
     if case_id not in scores_cache:
         return True
     sc = scores_cache[case_id]
     if sc.get("verdict") == "FAIL":
         return True
-    if float(sc.get("overall_score", 0.0)) < 70.0:
+    if float(sc.get("overall_score", 0.0)) < float(_J785["re_eval_min_score"]):
         return True
     return False
 
+
 def run_master():
-    base_dir = r"d:\Desktop\GitHub\AI Banking Asistant"
-    answers_cache_file = os.path.join(base_dir, "dataset", "agent_answers_785_cache.json")
-    scores_cache_file = os.path.join(base_dir, "dataset", "agent_eval_scores_785_cache.json")
-    excel_path = os.path.join(base_dir, "dataset", "A_Bank_golden_master_785_evaluation_llm.xlsx")
+    answers_cache_file = str(resolve_repo_path(_OUT_CFG["answers_785_cache_relpath"], root=PROJECT_ROOT))
+    scores_cache_file = str(resolve_repo_path(_OUT_CFG["scores_785_cache_relpath"], root=PROJECT_ROOT))
+    excel_path = str(resolve_repo_path(_OUT_CFG["master_eval_llm_excel_relpath"], root=PROJECT_ROOT))
 
     all_cases = load_all_785_cases()
     total_cases = len(all_cases)
@@ -378,11 +377,12 @@ def run_master():
     print("\nInitializing BankingAgentPipeline (ReAct LangGraph Engine)...")
     pipeline = BankingAgentPipeline()
     print("Initializing LLM Judge Client...")
-    judge_client = FallbackChatClient(module="generator")
+    judge_client = FallbackChatClient(module=str(_J785["judge_client_module"]))
 
     start_total_time = time.time()
     processed_count = 0
     passed_in_run = 0
+    autosave_every = int(_J785["autosave_interval_master"])
 
     for idx, case in enumerate(cases_to_process, 1):
         cid = case.get("id")
@@ -442,7 +442,7 @@ def run_master():
             print(f"  -> ERROR on {cid}: {e}")
             answers_cache[cid] = {
                 "id": cid,
-                "answer": f"[Lỗi xử lý: {e}]",
+                "answer": f"{_FEEDBACK['master_error_prefix']}{e}]",
                 "latency_sec": 0,
                 "citations": [],
                 "audit_status": "ERROR",
@@ -452,8 +452,8 @@ def run_master():
 
         processed_count += 1
 
-        # Synchronize Excel every 3 cases
-        if processed_count % 3 == 0:
+        # Synchronize Excel periodically
+        if processed_count % autosave_every == 0:
             export_to_excel(all_cases, answers_cache, scores_cache, excel_path)
             print(f"  [Auto-Save] Excel synchronized (Processed: {processed_count}/{len(cases_to_process)})")
 
@@ -466,6 +466,7 @@ def run_master():
     print(f"Total time elapsed: {total_elapsed}s")
     print(f"Final Excel Workbook: {excel_path}")
     print("=" * 70)
+
 
 if __name__ == "__main__":
     run_master()

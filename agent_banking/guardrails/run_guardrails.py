@@ -2,11 +2,11 @@
 Automated Banking Guardrails Runner (Auto Guardrails Node with Deduplication).
 ==============================================================================
 Features:
-1. Reads queries from guardrails/input/sample_queries.json (or queries.json).
+1. Reads queries from configured guardrails input file.
 2. Computes SHA-256 hash of each query.
 3. Checks StateTracker: Reuses previously audited queries (SKIP).
 4. Executes Input Safety Guardrail for new queries only.
-5. Emits results to: sample_guardrail_outputs.json.
+5. Emits results to configured guardrails output file.
 
 MANDATORY INVARIANTS:
 1. NO __INIT__.PY.
@@ -15,11 +15,11 @@ MANDATORY INVARIANTS:
 4. 0% REGEX LAW.
 """
 
-import sys
-import json
-import time
 import concurrent.futures
+import json
 from pathlib import Path
+import sys
+import time
 
 if sys.platform == "win32":
     try:
@@ -32,43 +32,64 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent_banking.core.settings import Config
+from agent_banking.guardrails.config.settings import GuardrailsConfig, load_guardrail_prompts
 from agent_banking.guardrails.rag_guardrails import BankingGuardrailManager
 from agent_banking.state_tracker import StateTracker
+
+
+_runner_cfg = dict(GuardrailsConfig.RUNNER_SETTINGS or {})
+_prompts = load_guardrail_prompts()
+_runner_msgs = dict(getattr(_prompts, "RUNNER_MESSAGES", {}) or {})
+
+
+def _msg(key, **kwargs):
+    template = str(_runner_msgs.get(key) or "")
+    if not template:
+        return ""
+    return template.format(**kwargs)
 
 
 def run_auto_guardrails(
     input_file=None,
     output_dir=None,
     force=False,
-    max_workers=8,
-    use_threading=True,
+    max_workers=None,
+    use_threading=None,
     use_concurrency=None,
-    use_decision_model=True
+    use_decision_model=None
 ):
-    """
-    Tu dong kiem dinh an toan guardrails tu input sang output kem co che chong trung lap
-    va ho tro xu ly da luong bang ThreadPoolExecutor.
-    """
+    """Run automated guardrails input->output evaluation with deduplication and thread pool."""
+    if max_workers is None:
+        max_workers = int(_runner_cfg.get("max_workers", 0))
+    if use_threading is None:
+        use_threading = bool(_runner_cfg.get("use_threading", False))
+    if use_decision_model is None:
+        use_decision_model = bool(_runner_cfg.get("use_decision_model", False))
     if use_concurrency is not None:
         use_threading = use_concurrency
 
-    cfg = Config()
-    in_dir = PROJECT_ROOT / "agent_banking" / "guardrails" / "input"
+    input_dir_name = str(_runner_cfg.get("input_dir_name") or "input")
+    output_dir_name = str(_runner_cfg.get("output_dir_name") or "output")
+    input_candidates = list(_runner_cfg.get("input_candidates") or [])
+    output_filename = str(_runner_cfg.get("output_filename") or "")
+    state_filename = str(_runner_cfg.get("state_filename") or "")
+    preview_chars = int(_runner_cfg.get("query_preview_chars", 0))
+
+    in_dir = PROJECT_ROOT / "agent_banking" / "guardrails" / input_dir_name
     in_dir.mkdir(parents=True, exist_ok=True)
 
     if output_dir is not None:
         out_path = Path(output_dir)
     else:
-        out_path = PROJECT_ROOT / "agent_banking" / "guardrails" / "output"
+        out_path = PROJECT_ROOT / "agent_banking" / "guardrails" / output_dir_name
     out_path.mkdir(parents=True, exist_ok=True)
 
-    state_file = out_path / ".state_tracker.json"
+    state_file = out_path / state_filename
     tracker = StateTracker(state_file)
     if force:
         tracker.clear()
 
-    # 1. Tim nguon queries
+    # 1. Locate query input source
     raw_items = None
     target_in_file = None
     if input_file is not None:
@@ -77,41 +98,36 @@ def run_auto_guardrails(
         else:
             target_in_file = Path(input_file)
     else:
-        candidates = [
-            in_dir / "sample_queries.json",
-            in_dir / "queries.json"
-        ]
-        for c in candidates:
+        for cand_name in input_candidates:
+            c = in_dir / cand_name
             if c.exists():
                 target_in_file = c
                 break
 
     if raw_items is None:
         if target_in_file is None or not target_in_file.exists():
-            print(f"⚠️ Khong tim thay tap tin input queries trong: {in_dir}")
+            print(_msg("missing_input_file", in_dir=in_dir))
             return []
 
         with open(target_in_file, "r", encoding="utf-8-sig") as fp:
             raw_items = json.load(fp)
 
     if not raw_items:
-        print("⚠️ Danh sach queries rong.")
+        print(_msg("empty_queries"))
         return []
 
-    input_desc = ""
     if target_in_file is not None:
         input_desc = target_in_file.name
     else:
         input_desc = f"<in-memory list: {len(raw_items)} items>"
 
-    print(f"\n{'='*75}")
-    print(f"▶ [MODULE 8: GUARDRAILS] Input: {input_desc} -> Output: {out_path}")
-    print(f"{'='*75}")
+    print(f"\n{'=' * 75}")
+    print(_msg("banner_line_template", input_desc=input_desc, out_path=out_path))
+    print(f"{'=' * 75}")
 
-
-    # 2. Doc ket qua cu de tai su dung
+    # 2. Load cached results if available
     prev_results = {}
-    prev_file = out_path / "sample_guardrail_outputs.json"
+    prev_file = out_path / output_filename
     if prev_file.exists() and not force:
         try:
             with open(prev_file, "r", encoding="utf-8") as fp:
@@ -129,14 +145,13 @@ def run_auto_guardrails(
                         qt = item.get("query", "")
                     q_hash_map[qt] = tracker.compute_text_hash(qt)
                 if tracker.are_all_items_processed(q_hash_map):
-                    print(f"  ⏭️ [SKIP ALL] Tat ca {len(raw_items)} queries da duoc kiem dinh Guardrails truoc do. Bo qua toan bo trong 0.0s!")
-                    print(f"✅ [Guardrails Hoan Tat] Da xuat {len(prev_list)} ket qua vao: {prev_file} trong 0.0s")
+                    print(_msg("skip_all_template", total=len(raw_items)))
+                    print(_msg("skip_all_done_template", total=len(prev_list), prev_file=prev_file))
                     return prev_list
         except Exception:
             prev_results = {}
 
     manager = BankingGuardrailManager(use_decision_model=use_decision_model)
-    # Initialize guardrail manager on main thread to preload patterns into RAM cache
     if hasattr(manager, "semantic_guardrail"):
         if hasattr(manager.semantic_guardrail, "_ensure_initialized"):
             manager.semantic_guardrail._ensure_initialized()
@@ -166,7 +181,7 @@ def run_auto_guardrails(
             cached_res["id"] = q_id
             guardrail_outputs[idx] = cached_res
             skipped_count += 1
-            print(f"  [{q_id}] [SKIP] '{q_text[:35]}...' (Da kiem dinh)")
+            print(_msg("skip_item_template", q_id=q_id, q_preview=q_text[:preview_chars]))
         else:
             items_to_process.append((idx, q_id, q_text, q_hash, desc))
 
@@ -213,7 +228,7 @@ def run_auto_guardrails(
                         status_label = f"BLOCKED: {guard_res.trigger_reason}"
                     else:
                         status_label = "SAFE"
-                    print(f"  [{it_qid}] [NEW-PARALLEL] '{it_qtext[:35]}...' -> {status_label} ({dt_ms}ms)")
+                    print(_msg("parallel_item_template", q_id=it_qid, q_preview=it_qtext[:preview_chars], status_label=status_label, dt_ms=dt_ms))
         else:
             for it in items_to_process:
                 it_idx, it_qid, it_qtext, it_qhash, it_desc = it
@@ -237,17 +252,17 @@ def run_auto_guardrails(
                     status_label = f"BLOCKED: {guard_res.trigger_reason}"
                 else:
                     status_label = "SAFE"
-                print(f"  [{it_qid}] [NEW-SERIAL] '{it_qtext[:35]}...' -> {status_label} ({dt_ms}ms)")
+                print(_msg("serial_item_template", q_id=it_qid, q_preview=it_qtext[:preview_chars], status_label=status_label, dt_ms=dt_ms))
 
     tracker.save()
     total_elapsed = round(time.time() - start_t, 2)
 
-    # 5. Xuat ket qua
-    out_file = out_path / "sample_guardrail_outputs.json"
+    # 5. Export results
+    out_file = out_path / output_filename
     with open(out_file, "w", encoding="utf-8") as fp:
         json.dump(guardrail_outputs, fp, ensure_ascii=False, indent=2)
 
-    print(f"✅ [Guardrails Hoan Tat] Da xuat {len(guardrail_outputs)} ket qua vao: {out_file} (Moi: {new_count}, Bo qua: {skipped_count}) trong {total_elapsed}s")
+    print(_msg("done_template", total=len(guardrail_outputs), out_file=out_file, new_count=new_count, skipped_count=skipped_count, elapsed=total_elapsed))
     return guardrail_outputs
 
 

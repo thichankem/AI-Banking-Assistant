@@ -6,10 +6,21 @@ from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
 from docx.text.run import Run
 
+from agent_banking.chunking.config.settings import get_config_section
 from .openxml import content_nodes
 
+_DOCX_CFG = get_config_section("extraction")["docx"]
+_TYPO_CFG = _DOCX_CFG["typography"]
 
-MAX_HEADING_LEVEL = 7
+MAX_HEADING_LEVEL = _DOCX_CFG["max_heading_level"]
+_DEFAULT_FONT_PT = _DOCX_CFG["default_font_pt"]
+_STYLE_INHERITANCE_HOPS = _DOCX_CFG["style_inheritance_hops"]
+_UPPER_RATIO_NUM = _TYPO_CFG["upper_ratio_num"]
+_UPPER_RATIO_DEN = _TYPO_CFG["upper_ratio_den"]
+_SINGLE_LINE_MAX_WORDS = _TYPO_CFG["single_line_max_words"]
+_BOLD_LABEL_MAX_WORDS = _TYPO_CFG["bold_label_max_words"]
+_MAX_OUTLINE_LEVEL = _TYPO_CFG["max_outline_level"]
+_PARAGRAPH_CACHE_MAXSIZE = _TYPO_CFG["paragraph_cache_maxsize"]
 VANISH_PATH = "./" + qn("w:rPr") + "/" + qn("w:vanish")
 
 
@@ -33,7 +44,7 @@ def hidden_run_checker(document):
             style = style.base_style
         return toggle
 
-    @lru_cache(maxsize=2048)
+    @lru_cache(maxsize=_PARAGRAPH_CACHE_MAXSIZE)
     def paragraph_toggle(node):
         style = Paragraph(node, document).style
         return style is not None and style_toggle(style.style_id)
@@ -65,7 +76,7 @@ def resolve_run_font_pt(run, paragraph):
         return round(run.font.size.pt, 1)
     run_style = getattr(run, "style", None)
     hops = 0
-    while run_style is not None and hops < 10:
+    while run_style is not None and hops < _STYLE_INHERITANCE_HOPS:
         font = getattr(run_style, "font", None)
         if font is not None and font.size is not None:
             return round(font.size.pt, 1)
@@ -73,13 +84,13 @@ def resolve_run_font_pt(run, paragraph):
         hops += 1
     para_style = getattr(paragraph, "style", None)
     hops = 0
-    while para_style is not None and hops < 10:
+    while para_style is not None and hops < _STYLE_INHERITANCE_HOPS:
         font = getattr(para_style, "font", None)
         if font is not None and font.size is not None:
             return round(font.size.pt, 1)
         para_style = getattr(para_style, "base_style", None)
         hops += 1
-    return 10.5
+    return _DEFAULT_FONT_PT
 
 
 def build_typography_record(value, mode_font_pt, total_chars, size_chars, all_bold, all_italic, starts_bold_label, centered):
@@ -88,9 +99,9 @@ def build_typography_record(value, mode_font_pt, total_chars, size_chars, all_bo
     is_upper = False
     if letters:
         upper_count = sum(1 for ch in letters if ch.isupper())
-        if upper_count * 5 >= len(letters) * 4:
+        if upper_count * _UPPER_RATIO_NUM >= len(letters) * _UPPER_RATIO_DEN:
             is_upper = True
-    single_line = "\n" not in clean_val and len(clean_val.split()) <= 45
+    single_line = "\n" not in clean_val and len(clean_val.split()) <= _SINGLE_LINE_MAX_WORDS
     return {
         "font_pt": mode_font_pt,
         "char_count": total_chars,
@@ -115,7 +126,7 @@ def extract_paragraph_typography(paragraph, value, hidden_run=None):
         ch_len = len(run.text.strip())
         size_chars[sz] = size_chars.get(sz, 0) + ch_len
         total_chars += ch_len
-    mode_font_pt = 10.5
+    mode_font_pt = _DEFAULT_FONT_PT
     best_chars = -1
     for sz, ch_len in size_chars.items():
         if ch_len > best_chars:
@@ -126,12 +137,12 @@ def extract_paragraph_typography(paragraph, value, hidden_run=None):
     starts_bold_label = False
     if not all_bold and runs[0].bold is True:
         first_txt = runs[0].text.strip()
-        if first_txt.endswith(":") and len(first_txt.split()) <= 6:
+        if first_txt.endswith(":") and len(first_txt.split()) <= _BOLD_LABEL_MAX_WORDS:
             starts_bold_label = True
     alignment = paragraph.alignment
     style = paragraph.style
     hops = 0
-    while alignment is None and style is not None and hops < 10:
+    while alignment is None and style is not None and hops < _STYLE_INHERITANCE_HOPS:
         alignment = getattr(getattr(style, "paragraph_format", None), "alignment", None)
         style = getattr(style, "base_style", None)
         hops += 1
@@ -155,17 +166,17 @@ def heading_level(paragraph, text):
     outline = paragraph._p.find(outline_path)
     style = paragraph.style
     hops = 0
-    while outline is None and style is not None and hops < 10:
+    while outline is None and style is not None and hops < _STYLE_INHERITANCE_HOPS:
         if getattr(style, "element", None) is not None:
             outline = style.element.find(outline_path)
         style = getattr(style, "base_style", None)
         hops += 1
     if outline is not None:
         try:
-            value = int(outline.get(qn("w:val"), "9"))
+            value = int(outline.get(qn("w:val"), str(_MAX_OUTLINE_LEVEL)))
         except ValueError:
             return 0
-        if 0 <= value < 9:
+        if 0 <= value < _MAX_OUTLINE_LEVEL:
             return value + 1
     # Only authored OpenXML outline metadata is structural evidence. Content,
     # capitalisation, font size and language-specific words are not rules.
@@ -174,14 +185,20 @@ def heading_level(paragraph, text):
 
 def _authored_language(paragraph, hidden_run=None):
     default = paragraph._p.find("./" + qn("w:pPr") + "/" + qn("w:rPr") + "/" + qn("w:lang"))
-    default_tag = default.get(qn("w:val"), "") if default is not None else ""
+    if default is not None:
+        default_tag = default.get(qn("w:val"), "")
+    else:
+        default_tag = ""
     tags = set()
     for node in content_nodes(paragraph._p, stop_at=("drawing", "pict", "txbxContent"), hidden_run=hidden_run):
         if node.tag != qn("w:r") or not any(
                 ch.isalpha() for item in content_nodes(node) if item.tag == qn("w:t") for ch in (item.text or "")):
             continue
         language = node.find("./" + qn("w:rPr") + "/" + qn("w:lang"))
-        tag = language.get(qn("w:val"), default_tag) if language is not None else default_tag
+        if language is not None:
+            tag = language.get(qn("w:val"), default_tag)
+        else:
+            tag = default_tag
         tags.add(tag.casefold())
     if len(tags) == 1:
         return tags.pop()

@@ -21,32 +21,18 @@ DESIGN INVARIANTS:
 
 import time
 
-from agent_banking.chunking.universal.planning.schema import payload_index_key
-
-from agent_banking.tools.extensions.banking_query import ParsedQuery
-
-
-REQUIRED_UNIVERSAL_SCHEMA_KEYS = (
-    "chunk_id",
-    "parent_id",
-    "source",
-    "chunk_type",
-    "breadcrumb",
-    "section_title",
-    "content",
-    "parent_content",
-    "business_metadata",
-    "prev_chunk_id",
-    "next_chunk_id",
-    "table_data",
-    "images",
+from agent_banking.chunking.universal.planning.schema import (
+    REQUIRED_UNIVERSAL_SCHEMA_KEYS,
+    payload_index_key,
 )
+from agent_banking.retrieval.config.settings import RetrievalConfig
+from agent_banking.tools.extensions.banking_query import ParsedQuery
 
 
 class HybridRetriever:
     """
     Hybrid retriever combining dense vectors and sparse Okapi BM25
-    using Reciprocal Rank Fusion (RRF k=60).
+    using Reciprocal Rank Fusion (RRF).
     """
 
     def __init__(
@@ -54,13 +40,13 @@ class HybridRetriever:
         vector_store=None,
         embedding_model=None,
         bm25_search=None,
-        rrf_k=60,
-        dense_weight=0.5,
-        bm25_weight=None,
-        top_k=5,
+        rrf_k=RetrievalConfig.RRF_K,
+        dense_weight=RetrievalConfig.DENSE_WEIGHT,
+        bm25_weight=RetrievalConfig.RETRIEVAL_BM25_WEIGHT,
+        top_k=RetrievalConfig.HYBRID_TOP_K,
         embedder=None,
         candidate_k=None,
-        breadcrumb_boost=1.5
+        breadcrumb_boost=RetrievalConfig.BREADCRUMB_BOOST
     ):
         actual_embedder = None
         actual_store = None
@@ -82,25 +68,37 @@ class HybridRetriever:
         self.embedding_model = actual_embedder
         self.embedder = actual_embedder
         self.bm25_search = bm25_search
-        self.rrf_k = rrf_k
-        self.dense_weight = float(dense_weight)
+        if rrf_k is not None:
+            self.rrf_k = rrf_k
+        else:
+            self.rrf_k = RetrievalConfig.RRF_K
+
+        if dense_weight is not None:
+            self.dense_weight = float(dense_weight)
+        else:
+            self.dense_weight = RetrievalConfig.DENSE_WEIGHT
 
         if bm25_weight is not None:
             self.bm25_weight = float(bm25_weight)
+        elif RetrievalConfig.RETRIEVAL_BM25_WEIGHT is not None:
+            self.bm25_weight = float(RetrievalConfig.RETRIEVAL_BM25_WEIGHT)
         else:
             self.bm25_weight = 1.0 - self.dense_weight
 
         if top_k is not None:
             self.top_k = int(top_k)
         else:
-            self.top_k = 5
+            self.top_k = RetrievalConfig.HYBRID_TOP_K
 
         if candidate_k is not None:
             self.candidate_k = int(candidate_k)
         else:
             self.candidate_k = None
 
-        self.breadcrumb_boost = float(breadcrumb_boost)
+        if breadcrumb_boost is not None:
+            self.breadcrumb_boost = float(breadcrumb_boost)
+        else:
+            self.breadcrumb_boost = RetrievalConfig.BREADCRUMB_BOOST
         self.last_query_vector = None
 
     @staticmethod
@@ -225,18 +223,16 @@ class HybridRetriever:
         if len(filters) == 0:
             return None
 
+        aliases = RetrievalConfig.RETRIEVAL_FILTER_ALIASES
         normalized = {}
         for k, v in filters.items():
             if v is not None:
                 clean_k = str(k).strip()
                 if not clean_k:
                     continue
-                if clean_k == "domain":
-                    if "business_metadata.domain" not in filters:
-                        clean_k = "business_metadata.domain"
-                elif clean_k == "category":
-                    if "business_metadata.category" not in filters:
-                        clean_k = "business_metadata.category"
+                alias_target = aliases.get(clean_k)
+                if alias_target and alias_target not in filters:
+                    clean_k = alias_target
                 if isinstance(v, (list, tuple, set)):
                     clean_v = [x for x in v if x is not None]
                     if not clean_v:
@@ -283,11 +279,12 @@ class HybridRetriever:
         elif self.candidate_k is not None:
             effective_candidate_k = int(self.candidate_k)
         else:
-            candidate_calc = effective_top_k * 3
-            if candidate_calc > 15:
+            candidate_calc = effective_top_k * RetrievalConfig.RETRIEVAL_CANDIDATE_MULTIPLIER
+            min_cand_k = RetrievalConfig.RETRIEVAL_MIN_CANDIDATE_K
+            if candidate_calc > min_cand_k:
                 effective_candidate_k = candidate_calc
             else:
-                effective_candidate_k = 15
+                effective_candidate_k = min_cand_k
 
         if effective_candidate_k < effective_top_k:
             effective_candidate_k = effective_top_k
@@ -382,8 +379,7 @@ class HybridRetriever:
         # 3. Determine metadata filters (Caller filter_dict > suggested_filters)
         active_filter = None
         if filter_dict is not None and isinstance(filter_dict, dict):
-            if len(filter_dict) > 0:
-                active_filter = dict(filter_dict)
+            active_filter = dict(filter_dict)
 
         if active_filter is None:
             if suggested_filters is not None and isinstance(suggested_filters, dict):
@@ -401,10 +397,16 @@ class HybridRetriever:
             query_vector = []
             self.last_query_vector = None
 
+        has_source_filter = bool(norm_filter and norm_filter.get("source"))
+        leg_k = effective_candidate_k
+        min_leg_k = RetrievalConfig.RETRIEVAL_MIN_UNFILTERED_LEG_K
+        if not has_source_filter and leg_k < min_leg_k:
+            leg_k = min_leg_k
+
         if self.vector_store is not None and hasattr(self.vector_store, "search_vector"):
             dense_results = self.vector_store.search_vector(
                 query_vector=query_vector,
-                top_k=effective_candidate_k,
+                top_k=leg_k,
                 filter_dict=norm_filter
             )
         else:
@@ -416,21 +418,21 @@ class HybridRetriever:
         if self.bm25_search is not None and hasattr(self.bm25_search, "search"):
             bm25_results = self.bm25_search.search(
                 bm25_query_text,
-                top_k=effective_candidate_k,
+                top_k=leg_k,
                 filter_dict=norm_filter
             )
         elif self.vector_store is not None and hasattr(self.vector_store, "search_bm25"):
             try:
                 bm25_results = self.vector_store.search_bm25(
                     query_text=bm25_query_text,
-                    top_k=effective_candidate_k,
+                    top_k=leg_k,
                     filter_dict=norm_filter,
                     breadcrumb_boost=effective_breadcrumb_boost
                 )
             except TypeError:
                 bm25_results = self.vector_store.search_bm25(
                     query_text=bm25_query_text,
-                    top_k=effective_candidate_k,
+                    top_k=leg_k,
                     filter_dict=norm_filter
                 )
         else:
@@ -439,7 +441,7 @@ class HybridRetriever:
 
         # 6. Filter Zero-Result Fallback mechanism
         fallback_unfiltered = False
-        scope_key = "business_metadata.publication_scopes"
+        scope_key = RetrievalConfig.RETRIEVAL_PUBLICATION_SCOPE_KEY
         if not dense_results and not bm25_results and norm_filter and set(norm_filter) != {scope_key}:
             fallback_unfiltered = True
             fallback_filter = None
@@ -448,27 +450,27 @@ class HybridRetriever:
             if self.vector_store is not None and hasattr(self.vector_store, "search_vector"):
                 dense_results = self.vector_store.search_vector(
                     query_vector=query_vector,
-                    top_k=effective_candidate_k,
+                    top_k=leg_k,
                     filter_dict=fallback_filter
                 )
             if self.bm25_search is not None and hasattr(self.bm25_search, "search"):
                 bm25_results = self.bm25_search.search(
                     bm25_query_text,
-                    top_k=effective_candidate_k,
+                    top_k=leg_k,
                     filter_dict=fallback_filter
                 )
             elif self.vector_store is not None and hasattr(self.vector_store, "search_bm25"):
                 try:
                     bm25_results = self.vector_store.search_bm25(
                         query_text=bm25_query_text,
-                        top_k=effective_candidate_k,
+                        top_k=leg_k,
                         filter_dict=fallback_filter,
                         breadcrumb_boost=effective_breadcrumb_boost
                     )
                 except TypeError:
                     bm25_results = self.vector_store.search_bm25(
                         query_text=bm25_query_text,
-                        top_k=effective_candidate_k,
+                        top_k=leg_k,
                         filter_dict=fallback_filter
                     )
 
@@ -538,16 +540,43 @@ class HybridRetriever:
         # Sort candidates descending by RRF score
         sorted_candidates = sorted(candidates.values(), key=lambda x: x["rrf_score"], reverse=True)
 
+        # Diversify candidate pool across sources before reranking when fetching candidate pools
+        diversify_min = RetrievalConfig.RETRIEVAL_DIVERSIFY_MIN_TOP_K
+        diversify_max = RetrievalConfig.RETRIEVAL_DIVERSIFY_MAX_PER_SOURCE
+        if not has_source_filter and effective_top_k >= diversify_min:
+            selected_pool = []
+            deferred = []
+            source_counts = {}
+            for item in sorted_candidates:
+                src_key = str(item["chunk"].get("source") or "").replace("\\", "/").casefold()
+                count = source_counts.get(src_key, 0)
+                if count < diversify_max:
+                    selected_pool.append(item)
+                    source_counts[src_key] = count + 1
+                else:
+                    deferred.append(item)
+                if len(selected_pool) >= effective_top_k:
+                    break
+            if len(selected_pool) < effective_top_k:
+                need = effective_top_k - len(selected_pool)
+                selected_pool.extend(deferred[:need])
+            chosen_candidates = selected_pool
+        else:
+            chosen_candidates = sorted_candidates[:effective_top_k]
+
         # Extract exact Top-K candidates and format return objects
+        score_decimals = RetrievalConfig.RETRIEVAL_SCORE_ROUND_DECIMALS
+        rrf_decimals = RetrievalConfig.RETRIEVAL_RRF_ROUND_DECIMALS
+        lat_decimals = RetrievalConfig.RETRIEVAL_LATENCY_ROUND_DECIMALS
         top_candidates = []
-        for rank, item in enumerate(sorted_candidates[:effective_top_k], start=1):
+        for rank, item in enumerate(chosen_candidates, start=1):
             if item["dense_score"] is not None:
-                dense_score_val = round(item["dense_score"], 4)
+                dense_score_val = round(item["dense_score"], score_decimals)
             else:
                 dense_score_val = None
 
             if item["bm25_score"] is not None:
-                bm25_score_val = round(item["bm25_score"], 4)
+                bm25_score_val = round(item["bm25_score"], score_decimals)
             else:
                 bm25_score_val = None
 
@@ -555,14 +584,14 @@ class HybridRetriever:
                 "candidate_rank": rank,
                 "chunk_id": item["chunk_id"],
                 "chunk": item["chunk"],
-                "rrf_score": round(item["rrf_score"], 6),
+                "rrf_score": round(item["rrf_score"], rrf_decimals),
                 "dense_rank": item["dense_rank"],
                 "dense_score": dense_score_val,
                 "bm25_rank": item["bm25_rank"],
                 "bm25_score": bm25_score_val,
                 "retrieval_meta": {
-                    "dense_latency_ms": round(t_dense_duration, 2),
-                    "bm25_latency_ms": round(t_bm25_duration, 2),
+                    "dense_latency_ms": round(t_dense_duration, lat_decimals),
+                    "bm25_latency_ms": round(t_bm25_duration, lat_decimals),
                     "rrf_k": self.rrf_k,
                     "dense_weight": self.dense_weight,
                     "bm25_weight": self.bm25_weight,

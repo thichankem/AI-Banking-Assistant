@@ -130,3 +130,89 @@ Chạy `python -m agent_banking.evaluator.harness_eval --index <dir> --output <d
 cho mỗi phiên bản. File `results.jsonl` lưu từng ca để chạy tiếp khi gián đoạn.
 Dùng `--retry-errors` để chạy lại ca hạ tầng. Bộ golden, cache lịch sử và
 checkpoint chat thông thường vẫn tách khỏi lần chạy này.
+
+## Tự động chọn model cloud
+
+Đặt `AUTO_MODEL_ROUTING=true` trong môi trường chạy, sau đó khởi động lại server hoặc runner. Giá trị mặc định là `false`. Cấu hình một model cho mỗi vai trò đã đủ để chạy. Thêm ứng viên `deep` để router có thể chuyển model khi tác vụ cần thêm năng lực.
+
+### Khai báo vai trò và profile
+
+| Vai trò | Prefix môi trường | Giao thức |
+| --- | --- | --- |
+| Điều phối, worker và tóm tắt chat | `AGENT` | `chat` |
+| Review câu trả lời | `AGENT_REVIEW` | `chat` |
+| Enrichment tài liệu | `CHUNKING_TEXT` | `chat` |
+| OCR ảnh và trang PDF | `CHUNKING_VISION` | `vision` |
+| Đọc lại ảnh và vùng crop | `CHUNKING_VISION_REVIEW` | `vision` |
+| Quyết định cấu trúc tài liệu | `CHUNKING_DECISION` | `systemone` |
+
+Mỗi prefix nhận hai profile, `STANDARD` và `DEEP`. Ví dụ `AGENT_STANDARD_MODEL`, `AGENT_DEEP_MODEL` và `AGENT_REVIEW_STANDARD_MODEL`. Cấu hình standard kế thừa endpoint cũ của vai trò. Deep chỉ được thêm khi có biến `*_DEEP_MODEL`. Deep kế thừa URL và credential từ standard, cùng các giới hạn của endpoint cũ, có thể ghi đè riêng. Vai trò review chat cần đủ model, URL và API key, sau đó tự fallback sang ứng viên agent khi cần.
+
+Các hậu tố cấu hình sau được đặt sau tên profile.
+
+| Hậu tố | Ý nghĩa |
+| --- | --- |
+| `MODEL`, `BASE_URL`, `API_KEY` | Model ID và thông tin kết nối qua môi trường |
+| `PROTOCOL` | Giao thức phù hợp vai trò trong bảng trên |
+| `CONTEXT_WINDOW` | Số token context tối đa theo cấu hình triển khai model. Giá trị `0` dùng ngân sách cũ |
+| `MAX_OUTPUT_TOKENS` | Trần output của model. Giá trị `0` dùng giới hạn của tác vụ |
+| `TOKEN_PARAMETER` | `max_tokens` hoặc `max_completion_tokens` |
+| `SEND_TEMPERATURE`, `TEMPERATURE` | Có gửi temperature và giá trị trong khoảng 0–2 |
+| `REASONING_EFFORT` | Chỉ khai báo mức provider hỗ trợ, gồm `none`, `minimal`, `low`, `medium`, `high`, `xhigh` |
+| `THINKING` | `true` hoặc `false`, dùng cho provider hỗ trợ `chat_template_kwargs.enable_thinking` |
+| `JSON_MODE` | `on`, `off` hoặc `auto`. `auto` cho phép thêm JSON object khi sửa contract chat |
+| `IMAGE_DETAIL` | `auto`, `low`, `high` khi provider Vision hỗ trợ |
+| `IMAGE_TOKEN_RESERVE` | Ước lượng dự phòng token cho mỗi ảnh. Mặc định 2048, điều chỉnh theo provider và độ phân giải |
+| `TIMEOUT`, `ATTEMPTS` | Timeout mỗi lần gọi và retry, vẫn chịu ngân sách chung của tác vụ |
+
+Ví dụ cấu hình giới hạn cho model deep đã được admin đăng ký, dùng provider hỗ trợ reasoning và completion tokens.
+
+```dotenv
+AUTO_MODEL_ROUTING=true
+AGENT_DEEP_MODEL=<model-id-trong-danh-muc-cloud>
+AGENT_DEEP_CONTEXT_WINDOW=<gioi-han-context-do-provider-cong-bo>
+AGENT_DEEP_MAX_OUTPUT_TOKENS=8192
+AGENT_DEEP_TOKEN_PARAMETER=max_completion_tokens
+AGENT_DEEP_SEND_TEMPERATURE=false
+AGENT_DEEP_REASONING_EFFORT=high
+```
+
+Điền các placeholder trước khi chạy. Model cloud quyết định context window khả dụng. Router dùng một token dự phòng cho mỗi byte UTF-8 của prompt để kiểm tra an toàn khi chưa có tokenizer khớp model, đồng thời dành chỗ cho output và overhead. Cách tính này có thể chuyển sang model context lớn sớm hơn cần thiết. `AGENT_CONTEXT_BYTES`, nếu được đặt, tiếp tục giới hạn kích thước payload chat.
+
+Prompt bắt buộc gồm yêu cầu, phản hồi làm rõ, phạm vi đã xác nhận và schema. Review giữ toàn bộ evidence và support đã đưa vào review. Lịch sử và quan sát được đóng gói theo các record đầy đủ. Khi các ứng viên đều thiếu context, trace ghi `context_budget_exceeded` và agent dùng đường phản hồi lỗi hiện có.
+
+### Khi nào router chuyển model
+
+- Coordinator ưu tiên deep khi có từ hai nguồn khác nhau, kết quả worker đã xác minh hoặc feedback yêu cầu sửa. Review ưu tiên deep khi kiểm chứng kết quả tool có số, có nhiều nguồn hoặc sửa record review.
+- Review chat dùng danh mục `AGENT_REVIEW` khi đủ cấu hình, sau đó fallback sang danh mục `AGENT`.
+- Decision tài liệu ưu tiên deep cho nối bảng PDF và phân cấp tiêu đề. Các endpoint `/systemone` tiếp tục dùng hợp đồng `state/questions/answers`.
+- Vision gọi review khi layout thiếu cấu trúc hoặc còn bất định. Các crop ưu tiên ứng viên review nếu có. Bộ đếm gọi cloud được chia sẻ cho trang và các crop, tối đa ba lần theo cấu hình pipeline hiện có.
+- Mỗi structured request chat có tối đa ba lần gọi cloud khi bật router, gồm retry, đổi model và sửa JSON. Quyết định cuối lượt sau review vẫn đi qua validator và guardrail.
+
+### Trace và UAT
+
+Khi `ENABLE_TRACING=true`, `TRACE_DIR/agent_runs.jsonl` chứa trace cho chat, SSE, resume và tài liệu. Mỗi `model.attempt` ghi model thực thi, profile, role, tham số thực gửi, latency, kết quả và usage do provider cung cấp. Các lỗi context được ghi trước khi gửi request. Trace giữ metadata chẩn đoán, mã phiên đã băm và các ID liên kết.
+
+API chat, SSE `done` và resume trả `trace_id` và `turn_id` khi bật trace. Một lần resume có trace mới và tiếp tục turn đang chờ. API xử lý ảnh chat giữ hợp đồng text hiện tại, Vision nằm trong pipeline tài liệu RAG.
+
+Chạy test offline từ thư mục gốc repo.
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest agent_banking/agent/tests agent_banking/chunking/tests -q
+```
+
+Để so sánh cloud, tạo chỉ mục riêng từ publication đủ tài liệu và `index_ready=true` bằng `agent_banking.evaluator.harness_index`. Dùng cùng chỉ mục và judge cho hai lần chạy.
+
+```powershell
+$env:AUTO_MODEL_ROUTING="false"
+.\.venv\Scripts\python.exe -m agent_banking.evaluator.harness_eval --index <index> --output <baseline> --version routing-off --scenarios agent_banking/evaluator/harness_scenarios.json
+$env:AUTO_MODEL_ROUTING="true"
+.\.venv\Scripts\python.exe -m agent_banking.evaluator.harness_eval --index <index> --output <candidate> --version routing-on --scenarios agent_banking/evaluator/harness_scenarios.json
+.\.venv\Scripts\python.exe -m agent_banking.evaluator.harness_eval --compare <baseline> <candidate>
+```
+
+`identity.json` ghi fingerprint policy và ứng viên của runtime, cùng fingerprint judge cố định. Mỗi case trong `results.jsonl` giữ trace ID. `metrics.json` thống kê p50/p95 theo request agent, số lần gọi và usage khi có. Lệnh compare trả thay đổi verdict kèm trace ID và áp dụng tiêu chí A–F/785 hiện có. Model judge dùng cấu hình legacy của agent cho cả hai lần chạy. Giữ các biến `MODEL`, `BASE_URL`, `API_KEY` của judge cố định khi thay danh mục routing.
+
+Tắt router bằng `AUTO_MODEL_ROUTING=false` và khởi động lại tiến trình để quay về danh sách model cũ. Embedding giữ cùng model và vector space 1024 chiều theo cấu hình hiện tại.
+
+Hướng dẫn xây lại kho tài liệu, đo truy xuất và kiểm thử chất lượng agent theo bộ 785 câu nằm trong [TUNING.md](TUNING.md).

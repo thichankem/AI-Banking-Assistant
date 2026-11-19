@@ -5,9 +5,12 @@ from importlib.metadata import version
 import json
 import os
 
+from agent_banking.chunking.config.settings import get_config_section
 from .enrichment import enricher as model_enrichment
 from .planning import semantic_boundaries
 from .enrichment.image_context import IMAGE_POLICY
+
+_PIPELINE = get_config_section("pipeline")
 
 
 def chunker_fingerprint(chunker, pipeline_version):
@@ -37,10 +40,10 @@ def chunker_fingerprint(chunker, pipeline_version):
                      "decision_enabled": chunker.use_decision, "llm_model": os.getenv("MODEL"),
                      "decision_model": os.getenv("DECISION_MODEL"),
                      "llm_provider": os.getenv("BASE_URL"), "decision_provider": os.getenv("DECISION_BASE_URL"),
-                     "llm_max_tokens": os.getenv("CHUNKING_LLM_MAX_TOKENS", "65536"),
+                     "llm_max_tokens": os.getenv("CHUNKING_LLM_MAX_TOKENS", _PIPELINE["default_llm_max_tokens"]),
                      "models_disable_json": os.getenv("MODELS_DISABLE_JSON_MODE"),
                      "embedding_model": os.getenv("EMBEDDING_MODEL"),
-                     "dependencies": {package: version(package) for package in ("python-docx", "tokenizers", "PyMuPDF", "Pillow", "regex")}}
+                     "dependencies": {package: version(package) for package in _PIPELINE["tracked_packages"]}}
     # Code changes invalidate document outputs even if the version constant
     # was accidentally left unchanged. Secrets are never part of manifests.
     from agent_banking.core.models import chain_fingerprint

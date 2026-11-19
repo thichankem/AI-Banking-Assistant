@@ -1,0 +1,1107 @@
+{
+  "version": 1,
+  "purpose": "Independent source-aligned evaluation; original benchmark is scored separately.",
+  "corrections": [
+    {
+      "id": "APP-021",
+      "question_sha256": "4f056cbd38b4a5ad6e943436c550e2a93e879e888b287522ecec5cc58bf73043",
+      "original_reference_sha256": "6282fc448929be89d3ba4a6a2bbf6284d92758d9dd85955c43637d86fd882d9a",
+      "source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 05 Khóa ứng dụng và tạm khóa dịch vụ khẩn cấp.pdf",
+      "source_sha256": "90b8d518f9606f3da1146839c7851983197bc3c2f7aacd1c89a03fc9f371ad3b",
+      "locator": "HDSD 05 v2.0, trang 1–2; đầu trang và xác nhận thành công",
+      "finding": "Phần đầu và chân trang công bố 1900 1234. Màn hình mẫu có số 1900 6868. Tài liệu không cam kết SLA tra soát 24 giờ ở đây.",
+      "reference_answer": "HDSD 05 minh họa khóa ứng dụng hoàn tất tức thì sau xác nhận. Hotline hỗ trợ 24/7 được ghi ở đầu và chân trang là 1900 1234. Thời hạn xử lý tra soát trong 24 giờ không được nêu trong hướng dẫn này.",
+      "must_include": [
+        "Khóa ứng dụng tức thì sau xác nhận",
+        "Hotline công bố 24/7: 1900 1234"
+      ]
+    },
+    {
+      "id": "APP-024",
+      "question_sha256": "a82e1fb221a78f55465b3c41075cbc3b8a2b334c2d32b3ca89daf4ed8b2a667b",
+      "original_reference_sha256": "4038fe3919183a317fbc9e6f4bff4be70ec3a9444104930a0bfeff268aa8fc1d",
+      "source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 05 Khóa ứng dụng và tạm khóa dịch vụ khẩn cấp.pdf",
+      "source_sha256": "90b8d518f9606f3da1146839c7851983197bc3c2f7aacd1c89a03fc9f371ad3b",
+      "locator": "HDSD 05 v2.0, trang 1–2; các bước và đầu trang",
+      "finding": "Các bước chính nằm ngoài điện thoại minh họa. Hotline công bố là 1900 1234.",
+      "reference_answer": "Nếu còn dùng được thiết bị, vào Trang chủ, chọn Avatar, Bảo mật, Khóa ứng dụng, tạo mã khóa và xác nhận theo HDSD 05. Nếu mất máy hoặc không thể tự khóa, dùng thiết bị khác gọi Hotline 24/7 tại đầu trang là 1900 1234 để yêu cầu hỗ trợ khóa khẩn cấp.",
+      "must_include": [
+        "Avatar → Bảo mật → Khóa ứng dụng",
+        "Tạo mã khóa và xác nhận nếu còn dùng được thiết bị",
+        "Trường hợp mất thiết bị: gọi đầu số công bố 1900 1234"
+      ]
+    },
+    {
+      "id": "APP-028",
+      "question_sha256": "9637aeb05018ee04974548cd4410c3b5d36beddc700456b280eb6402ca9a80cb",
+      "original_reference_sha256": "d33288ed64e983900efe33737def01e032bd7450240662ac552e3b3a6bdf1796",
+      "source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 06 Thanh toán hóa đơn tiền điện nước viễn thông.pdf",
+      "source_sha256": "958bc96561f904aae5e05379e7e446c83f3a5e2e9cb12caa4377f2c40fd62760",
+      "locator": "HDSD 06 v2.0, trang 1, Bước 4",
+      "finding": "Màn hình duy nhất chỉ minh họa kiểm tra số tiền và xác thực Smart OTP 6 số, không có quy tắc chuyển sang sinh trắc học theo giá trị.",
+      "reference_answer": "Ở Bước 4, hướng dẫn minh họa kiểm tra số tiền rồi xác thực giao dịch bằng Smart OTP 6 số trong app. HDSD 06 không mô tả cơ chế chọn Smart OTP hay sinh trắc học dựa trên cài đặt hoặc giá trị hóa đơn.",
+      "must_include": [
+        "Kiểm tra số tiền và xác thực Smart OTP 6 số",
+        "Tài liệu không nêu các yếu tố chuyển sang hình thức khác"
+      ]
+    },
+    {
+      "id": "APP-073",
+      "question_sha256": "52464af619d0eeae3d342c4ebce21ba488c7cac403989a5a16aac1fb0aadebf8",
+      "original_reference_sha256": "0d1be1a7500e9e93ca73488874aff6ee919b8b180fb7433407cd68c10c3c0bba",
+      "source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 15 Quản lý ví voucher và áp dụng mã giảm giá.pdf",
+      "source_sha256": "5bcb37fa13b0a2813b780436b5cd32cfd04a9bdd51df4cf63c9aa843fa3e6119",
+      "locator": "HDSD 15 v2.0, trang 1–3, màn hình Bước 2",
+      "finding": "Màn hình Bước 2 ghi Ẩm thực, Di chuyển, Mua sắm. Các trang lặp lại cùng bộ hình, không có danh mục bổ sung như tham chiếu cũ.",
+      "reference_answer": "Theo màn hình Bước 2, các danh mục được minh họa gồm Ẩm thực, Di chuyển và Mua sắm. Người dùng duyệt danh mục rồi bấm nút Thu thập.",
+      "must_include": [
+        "Ẩm thực",
+        "Di chuyển",
+        "Mua sắm"
+      ]
+    },
+    {
+      "id": "APP-124",
+      "question_sha256": "37166420cf8abb7b2ee18065540e6ce51c61835ba25cfc69739fae21e7001d8b",
+      "original_reference_sha256": "e23cce2f9f1ab9cd8a2d9a0d23a53635f7d69cf2386c9bcc4d7e5f756ecf0ff8",
+      "source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 25 Tra cứu lịch trả nợ và quản lý hợp đồng vay vốn.pdf",
+      "source_sha256": "bde87cceccd8b77e15c5914ace794845cff0122ee38405e51cc01710341a19d7",
+      "locator": "Phiên bản 2.0, trang 1–2",
+      "finding": "Hai trang hướng dẫn thao tác mở danh sách và chọn một khoản vay để xem chi tiết. Tài liệu được dẫn không liệt kê bốn dòng sản phẩm trong đáp án cũ.",
+      "reference_answer": "Theo HDSD 25 phiên bản 2.0, chức năng Quản lý khoản vay cho xem danh sách khoản vay và chọn một khoản để xem chi tiết. Hai trang hướng dẫn không liệt kê những loại hợp đồng tín dụng cụ thể được hiển thị, nên chưa có căn cứ từ tài liệu này để xác nhận danh mục theo sản phẩm.",
+      "must_include": [
+        "Có danh sách khoản vay và chọn khoản vay để xem chi tiết",
+        "HDSD 25 không nêu danh mục theo loại hợp đồng, nên chưa xác nhận được loại cụ thể"
+      ]
+    },
+    {
+      "id": "PL-028",
+      "question_sha256": "6ae9f8e4db8880350c1062f4486b7eeeccc74ee0147cd4a53e1ae41e5b6369eb",
+      "original_reference_sha256": "453d8fccd45bf26968674f44bd4a740dff07bc86ad04d64fc6b1c30e3545f61d",
+      "source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 04 Quy chế nhận biết khách hàng CDD và kiểm tra tăng cường EDD.docx",
+      "source_sha256": "d598fde22fc44ba4dc9861e92519e32acb772aeadd13ee28e0c34717102b3027",
+      "locator": "Hình 3 và 4 (word/media/image3.png, image4.png), Điều 18",
+      "finding": "Hai hình nêu chi nhánh, tuân thủ và ký duyệt cấp cao. Điều 18 làm rõ Giám đốc Khối và Tổng Giám đốc.",
+      "reference_answer": "Cán bộ quản lý khách hàng thu thập, xác minh nguồn tài sản/dòng tiền và lập tờ trình EDD. Giám đốc Chi nhánh và Trưởng phòng Tuân thủ duyệt hoặc xác nhận hồ sơ, Phòng Tuân thủ và AML Hội sở thẩm định độc lập trước khi trình Giám đốc Khối Pháp chế & Quản trị Tuân thủ. Theo Điều 18, trường hợp đặc biệt như PEPs hoặc giao dịch từ 20 tỷ đồng thuộc thẩm quyền Tổng Giám đốc. Chi nhánh không có thẩm quyền tự phê duyệt cuối.",
+      "must_include": [
+        "Cán bộ quản lý khách hàng/Chi nhánh thu thập và lập tờ trình",
+        "Giám đốc Chi nhánh và Trưởng phòng Tuân thủ xác nhận",
+        "Tuân thủ và AML Hội sở thẩm định độc lập",
+        "Giám đốc Khối Pháp chế & Quản trị Tuân thủ hoặc Tổng Giám đốc theo trường hợp"
+      ]
+    },
+    {
+      "id": "PL-034",
+      "question_sha256": "ae7aa7305c59abcf18c22fca617322b09a44cf17e3b17cc9ae6de26c98905ac9",
+      "original_reference_sha256": "d24d30278577e320bd78c1dfb4a5b1a0e9bd4c50b295457b0b3a1455733512bc",
+      "source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 05 Quy định bảo vệ dữ liệu cá nhân theo Nghị định 13 2023 NĐ CP.docx",
+      "source_sha256": "e9a98314b6b7fd717dcb4dcc180144e172208cf34e53289953fbf20cd4963864",
+      "locator": "Phụ lục I, ma trận; Điều 6, 10–11",
+      "finding": "Bảng tách PIN/CVC2 tối mật với ảnh NFC/eKYC nhạy cảm; số thẻ được giải thích ở Điều 6 và 11.",
+      "reference_answer": "Theo Phụ lục I, mã PIN và CVC2 thuộc nhóm Tối mật, không lưu dạng rõ, niêm phong trong HSM và không có quyền người xem. Ảnh chân dung NFC/dữ liệu eKYC thuộc nhóm Nhạy cảm, cô lập và chống sao chép, mã hóa TLS 1.3/AES-256, do hệ thống kiểm soát tự động eKYC quản lý truy cập. Số thẻ là dữ liệu cá nhân nhạy cảm theo Điều 6, áp quy tắc mã hóa tại Điều 10 và che số khi hiển thị theo Điều 11.",
+      "must_include": [
+        "PIN/CVC2: Tối mật, HSM, không có quyền xem",
+        "Ảnh NFC/eKYC: Nhạy cảm, TLS 1.3/AES-256, kiểm soát eKYC",
+        "Số thẻ: áp phân loại và che số theo Điều 6, 11"
+      ]
+    },
+    {
+      "id": "PL-045",
+      "question_sha256": "cc15bde739defcdc046199ced55197380215c1283f1b6dd00d3a7888389df91c",
+      "original_reference_sha256": "3b2ee2c2ea60f31a95c89d3be69dba86c7cb6fdf10fc0147d63a46100888c312",
+      "source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 06 Quy chế phòng chống gian lận nội bộ và xung đột lợi ích.docx",
+      "source_sha256": "e02e1c18995aba8603863f77cf25dcd7a5d78f5f4c9a9e3970fa94d1d5fbb460",
+      "locator": "Hình 3 (word/media/image4.png) và Hình 4 (word/media/image5.png)",
+      "finding": "Hình 3 có năm bước và mốc 24h; Hình 4 thể hiện sơ đồ tố giác sáu ô riêng. Đáp án cũ ghép chung và ghi 48h.",
+      "reference_answer": "Chu trình 5 bước ở Hình 3: tiếp nhận và phân loại tin báo trong 24 giờ; phê duyệt lập đoàn kiểm tra đặc biệt; thu thập chứng cứ và niêm phong hệ thống; làm việc trực tiếp với các bên; ban hành kết luận và xử lý kỷ luật. Hình 4 bổ sung luồng tiếp nhận tố giác, đánh giá sơ bộ trong 24 giờ, sàng lọc tin, lập đoàn, thanh tra đột xuất, báo cáo và họp hội đồng kỷ luật.",
+      "must_include": [
+        "Tiếp nhận và phân loại trong 24 giờ",
+        "Phê duyệt lập đoàn kiểm tra",
+        "Thu thập chứng cứ và niêm phong",
+        "Làm việc với các bên",
+        "Kết luận và xử lý kỷ luật"
+      ]
+    },
+    {
+      "id": "PL-052",
+      "question_sha256": "e75efcb1ce552b2dda18b8534bc625ef028b7a8dadba213e38f39e4b5732b096",
+      "original_reference_sha256": "84c934314d80d2dd10567e91a3f89460ebef50c0c04782201101861af4fe5d82",
+      "source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 07 Quy định về giao dịch an toàn trên không gian mạng và bảo vệ bí mật kinh doanh.docx",
+      "source_sha256": "cee5c67a6d52726198c71b819f26cfd5735fa0e44156bc7fd52e58836b71c0d5",
+      "locator": "Hình 3 (word/media/image3.png)",
+      "finding": "Sơ đồ hiện tại gọi lớp thứ tư là Giao dịch và mô tả ký số bằng Smart OTP. Đáp án cũ thay lớp này bằng WAF/API Gateway.",
+      "reference_answer": "Hình 3 gồm năm lớp. Lớp thiết bị kiểm tra toàn vẹn và phát hiện root/jailbreak. Lớp đường truyền dùng TLS 1.3 và SSL Pinning. Lớp định danh dùng xác thực sinh trắc học đa yếu tố, FIDO2 và liveness. Lớp giao dịch ký số bằng Smart OTP. Lớp giám sát AI theo dõi và phòng chống gian lận bằng FMS 24/7.",
+      "must_include": [
+        "Thiết bị: kiểm tra toàn vẹn, root/jailbreak",
+        "Đường truyền: TLS 1.3 và SSL Pinning",
+        "Định danh: sinh trắc học đa yếu tố hoặc FIDO2",
+        "Giao dịch: ký số bằng Smart OTP",
+        "Giám sát AI: FMS 24/7"
+      ]
+    },
+    {
+      "id": "PL-082",
+      "question_sha256": "4ef8909d124010aee43e175ac4120376fea04b762d0018febeb43ec8c05f2c60",
+      "original_reference_sha256": "352459eea34fb476d3b4e229dd833426a895a399e1a5325ba15bfe1dfd2b16d8",
+      "source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 11 Quy chế kiểm soát giao dịch với người có liên quan theo Luật TCTD 2024.docx",
+      "source_sha256": "097828f9482b97bedaf8c7de66f713ed299cdefdb3c027ca3d87b62c6f83d0f0",
+      "locator": "Hình 1 (word/media/image1.png); Điều 7",
+      "finding": "Sơ đồ có sáu bước. Hình ghi trần 5%/15%, trong khi tham chiếu ghi 14%/23%.",
+      "reference_answer": "Sáu bước trong Hình 1: cổ đông từ 1% hoặc lãnh đạo kê khai; Khối Pháp chế thẩm tra và đối chiếu dữ liệu; Core gắn RELATED_PARTY theo CIF; kiểm tra tự động trần 5% và 15%; chặn giao dịch trên Core nếu vượt chốt; trình thẩm quyền HĐQT/ĐHĐCĐ.",
+      "must_include": [
+        "Kê khai rồi Pháp chế thẩm tra",
+        "Gắn RELATED_PARTY vào CIF",
+        "Kiểm tra trần 5%/15% trong hình",
+        "Chặn trên Core và trình thẩm quyền"
+      ]
+    },
+    {
+      "id": "PL-099",
+      "question_sha256": "8bf96a56758b078bb79c0e71b29cf415b9780d2f831849642f85d1daa0f94d9a",
+      "original_reference_sha256": "add17903f9ba086d12745fd684a6b3150e76cb0cc3196ea39daed1c4e5da46be",
+      "source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 13 Quy chế hoạt động của Ban Kiểm soát và Ủy ban Kiểm toán nội bộ.docx",
+      "source_sha256": "976e926234551841d30774ee31ae537747760bc92d481bc4da92ba32f3de2cfc",
+      "locator": "Sơ đồ 2 (word/media/image2.png), Điều 16–17",
+      "finding": "Hình chia sáu ô cho hai giai đoạn đầu. Văn bản chính quy định bốn giai đoạn và tách theo dõi kiến nghị sau phát hành.",
+      "reference_answer": "Theo Điều 16, bốn giai đoạn là chuẩn bị kế hoạch và dữ liệu; thực hiện tại chỗ và thu thập chứng cứ; dự thảo báo cáo và họp đối thoại kết thúc; Trưởng Ban Kiểm soát ký phát hành báo cáo chính thức. Điều 17 quy định theo dõi kiến nghị sau báo cáo. Sáu ô trong Sơ đồ 2 là các thao tác minh họa của phần chuẩn bị và thực địa, không thay thế bốn giai đoạn văn bản.",
+      "must_include": [
+        "Chuẩn bị",
+        "Thực hiện tại chỗ",
+        "Dự thảo báo cáo và đối thoại",
+        "Ký phát hành báo cáo chính thức"
+      ]
+    },
+    {
+      "id": "PL-102",
+      "question_sha256": "fdc6af69a64726608e7b9f87f78cfed43380c762c44203c239934d26acf425db",
+      "original_reference_sha256": "bd3eb4a0e5b596331ab47f7162037f784ef02380b9fe2d93c2d470e94e4f0dba",
+      "source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 13 Quy chế hoạt động của Ban Kiểm soát và Ủy ban Kiểm toán nội bộ.docx",
+      "source_sha256": "976e926234551841d30774ee31ae537747760bc92d481bc4da92ba32f3de2cfc",
+      "locator": "Điều 11, khoản 1–2",
+      "finding": "Điều 11 giới hạn truy cập hệ thống ở quyền đọc. Vào địa điểm nhạy cảm để kiểm kê có điều kiện lệnh kiểm tra.",
+      "reference_answer": "Khi thực thi nhiệm vụ, đoàn có quyền yêu cầu hồ sơ gốc và tài liệu liên quan, dùng tài khoản kiểm toán đọc trực tiếp dữ liệu Core Banking, Treasury, CRM và hệ thống nghiệp vụ. Quyền hệ thống là read-only. Có thể vào kho tiền, phòng máy, quầy và ATM để kiểm kê hoặc niêm phong khi có lệnh kiểm tra của Trưởng Ban Kiểm soát. Đơn vị không được cản trở hoặc che giấu tài liệu.",
+      "must_include": [
+        "Yêu cầu hồ sơ và tài liệu liên quan",
+        "Truy cập hệ thống ở chế độ chỉ đọc",
+        "Vào nơi kiểm kê theo lệnh của Trưởng Ban Kiểm soát"
+      ]
+    },
+    {
+      "id": "PL-106",
+      "question_sha256": "814e116376cbf5f464f8ff06f9741afe68803c710843ca2867001c3f413aa0f1",
+      "original_reference_sha256": "bc4a12a6f19292f16d857f4ff675c7b68b9223fa85af1ce9ce13a4085ae0c7d7",
+      "source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 14 Quy định về quản trị rủi ro công nghệ thông tin và an ninh mạng theo Thông tư 09 2020.docx",
+      "source_sha256": "be7c1c006fc1f74797e523bfc7d81e5fb2fd59720e71a7fb804a417b6ed28944",
+      "locator": "Sơ đồ 1 (word/media/image1.png); Điều 7, khoản 1",
+      "finding": "Sơ đồ nêu các cấp. Điều 7 ghi các yêu cầu cụ thể cho cấp 4–5, khác ngưỡng dự phòng trong đáp án cũ.",
+      "reference_answer": "Điều 7 của PL 14 yêu cầu hệ thống cấp 4 và 5 có dự phòng nóng Active-Active cách tối thiểu 30 km, mã hóa toàn bộ dữ liệu cơ sở dữ liệu và đường truyền liên ngân hàng, và quản trị viên có chứng chỉ chuyên sâu như CISSP, CISM, CEH hoặc CCNA Security.",
+      "must_include": [
+        "Dự phòng nóng Active-Active cách tối thiểu 30 km",
+        "Mã hóa cơ sở dữ liệu và đường truyền liên ngân hàng",
+        "Quản trị viên có chứng chỉ an ninh mạng chuyên sâu"
+      ]
+    },
+    {
+      "id": "PL-114",
+      "question_sha256": "8abb650d7920bf777de6ed4d640f881eede2a281c8e272acd21898c79ee47ac5",
+      "original_reference_sha256": "baa313ebe0484db918e73995ae24323ed00ac2f6d289e3b70c0a7cb4b93d24d2",
+      "source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 15 Quy chế quản trị xung đột lợi ích và giao dịch nội bộ ngành ngân hàng.docx",
+      "source_sha256": "7b37375d2cf307fc3dc58bdfafe4418f7471bf7a9d404825c027cc9d78a56aed",
+      "locator": "Sơ đồ 1 (word/media/image1.png); Điều 3, khoản 5",
+      "finding": "Cả hình và điều khoản nội bộ ghi 10%; đáp án cũ ghi 5%. Nội dung này chỉ đối chiếu với PL 15.",
+      "reference_answer": "Theo Sơ đồ 1 và Điều 3 PL 15 của A-Bank, doanh nghiệp là đối tượng liên quan nếu cá nhân hoặc người có liên quan được nêu tại Điều 3 sở hữu từ 10% vốn điều lệ/cổ phần có quyền biểu quyết trở lên, hoặc là người quản lý, điều hành của doanh nghiệp.",
+      "must_include": [
+        "Ngưỡng từ 10% theo PL 15",
+        "Áp dụng với cá nhân hoặc người liên quan",
+        "Hoặc có vai trò quản lý, điều hành"
+      ]
+    },
+    {
+      "id": "PL-120",
+      "question_sha256": "0648f0da1b3bd88b072b83ee0c35c47517f618519ca7177d2cd5d6dddfd275a9",
+      "original_reference_sha256": "e5fbd7aa20b9b6731fd8d52aa1e7dfebf37de9e304a3cc147da44b0bfa111fb4",
+      "source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 16 Quy định về quản trị dữ liệu và chia sẻ dữ liệu mở Open Banking.docx",
+      "source_sha256": "4fba440a7bfbe8049a1f07ea76eb9c6bbdcb62124efc02283faa9819fcf0effe",
+      "locator": "Sơ đồ 1 (word/media/image1.png); Điều 4, khoản 2 và 4",
+      "finding": "Văn bản phân quyền cho Ủy ban phê duyệt danh mục API và đối tác; CISO có quyền phủ quyết, không nêu người ký từng thỏa thuận.",
+      "reference_answer": "Theo Điều 4, Ủy ban Chuyển đổi Số và Công nghệ do Tổng Giám đốc làm Chủ tịch phê duyệt danh mục gói Open API và danh sách đối tác chiến lược được cấp phép kết nối. CISO có quyền phủ quyết kết nối không đạt an toàn. Sơ đồ và Điều 4 không phân người ký từng loại thỏa thuận theo Public, Customer Data hay PIS.",
+      "must_include": [
+        "Ủy ban Chuyển đổi Số và Công nghệ phê duyệt danh mục và danh sách đối tác",
+        "Tổng Giám đốc là Chủ tịch Ủy ban",
+        "CISO có quyền phủ quyết khi không đạt an toàn"
+      ]
+    },
+    {
+      "id": "PL-141",
+      "question_sha256": "7275f9c90a742e8d0de111235887c2c7d93b6b19e8e759fbfd895ce389314511",
+      "original_reference_sha256": "42f3ae886e57a07d55927d9eefd9a3585f688f7feaed29f89edef321a1917aae",
+      "source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 19 Quy chế quản trị rủi ro đối tác thanh toán trung gian và Ví điện tử.docx",
+      "source_sha256": "688b6d3f604bae45c9c23a095c6edb884ef0722d6dc03c5febc6f45534fd1607",
+      "locator": "Điều 5 và bảng ma trận đánh giá",
+      "finding": "Bảng ghi trọng số 25%, mức ATTT 3 và PCI-DSS Level 1. RTO dưới 30 phút ở Điều 5.",
+      "reference_answer": "Tiêu chí An toàn công nghệ có trọng số 25%. Bảng yêu cầu cấp độ ATTT ít nhất 3 và bắt buộc PCI-DSS Level 1. Điều 5 còn quy định cơ sở dự phòng cách tối thiểu 30 km, RTO dưới 30 phút và RPO bằng 0.",
+      "must_include": [
+        "Trọng số 25%",
+        "ATTT tối thiểu cấp độ 3",
+        "PCI-DSS Level 1"
+      ]
+    },
+    {
+      "id": "PL-163",
+      "question_sha256": "d96fba1c7f7eda9680ee4483d94c78d87855867abd48d6ee034b8f0f778bad06",
+      "original_reference_sha256": "f3156de9449b857964ce03be8df56dd746acdbb2a9ab011fb6b9bc432c5d6d97",
+      "source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 22 Quy định về quản lý và xử lý nợ xấu theo Nghị quyết 42 và Luật TCTD 2024.docx",
+      "source_sha256": "9ea3c53cd22f8ea830677eb3ba2bcc3c7b941b47b69f5924c4259f0f70824af3",
+      "locator": "Điều 6, Bảng tỷ lệ khấu trừ TSBĐ",
+      "finding": "Bảng tại PL 22 ghi 100% cho tiền gửi/vàng và 50% cho nhà đất có giấy chứng nhận.",
+      "reference_answer": "Theo bảng tại Điều 6 PL 22, tiền gửi VND hoặc vàng miếng SJC tại ABank có tỷ lệ khấu trừ tối đa 100% với điều kiện phong tỏa. Nhà ở, đất ở có giấy chứng nhận có tỷ lệ tối đa 50% với điều kiện đã công chứng và đăng ký giao dịch bảo đảm.",
+      "must_include": [
+        "Tiền gửi VND hoặc vàng miếng SJC tại ABank: 100%",
+        "Nhà ở, đất ở có giấy chứng nhận: 50%"
+      ]
+    },
+    {
+      "id": "PL-178",
+      "question_sha256": "810aea10deaa89e376ce694c103510e7eae9d989679c817c77db69ea767add30",
+      "original_reference_sha256": "853839d57feb8dee92acadfb5534127df2aba68a77052c3e7096443976ddaa53",
+      "source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 23 Quy chế hoạt động của Hội đồng Quản trị và Ban Điều hành ngân hàng.docx",
+      "source_sha256": "53c24e02e18b8f4124206b16a7bc9ab0ed0eb27fc4c9b93944552cc9a86d9b05",
+      "locator": "FAQ Câu 3, tình huống khẩn cấp cấp độ 1",
+      "finding": "FAQ ghi mốc gọi trong 15 phút, báo cáo sơ bộ trong 2 giờ. Đáp án cũ không phân rõ hai mốc.",
+      "reference_answer": "Tổng Giám đốc kích hoạt ngay Ủy ban Quản lý Khủng hoảng. Trong 15 phút, gọi trực tiếp Chủ tịch HĐQT và Trưởng Ban Kiểm soát. Trong 2 giờ, Ban Điều hành gửi báo cáo sơ bộ kèm kịch bản ứng phó để Chủ tịch HĐQT quyết định triệu tập họp bất thường.",
+      "must_include": [
+        "Kích hoạt Ủy ban Quản lý Khủng hoảng",
+        "15 phút gọi Chủ tịch HĐQT và Trưởng Ban Kiểm soát",
+        "2 giờ gửi báo cáo và kịch bản ứng phó"
+      ]
+    },
+    {
+      "id": "PL-196",
+      "question_sha256": "4cfa31bf37697e1200749bbdcf8abb1926ef907c2e62278019c0c6b7b8effab1",
+      "original_reference_sha256": "5365a70c23a8400dbdd1bb3daccfb234bb7d2a046e5ae9aca5e8c22471c89a00",
+      "source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 26 Quy định về trách nhiệm xã hội môi trường và quản trị bền vững ESG.docx",
+      "source_sha256": "81f39640e229c8a07723f54fee335ba58d777962dc884a62173435bcf2c50dd3",
+      "locator": "Hình tương tác Chương III (word/media/image2.png), Điều 6–7",
+      "finding": "Hình bỏ sót nhãn Bước 2 nhưng văn bản ghi Phân loại E&S. Sau thẩm định là cam kết và giám sát hậu kiểm.",
+      "reference_answer": "Sau khi nhận hồ sơ, sàng lọc danh mục loại trừ và dừng nếu thuộc diện cấm. Phân loại rủi ro E&S theo Điều 7. Tiếp đó thẩm định điều kiện tuân thủ, đưa cam kết vào hợp đồng tín dụng và giải ngân theo chính sách nếu đạt. Khi đã cấp tín dụng, quản trị và giám sát hậu kiểm. Hình minh họa không hiển thị rõ nhãn bước phân loại, nên dùng văn bản kèm theo để bổ sung.",
+      "must_include": [
+        "Sàng lọc danh mục loại trừ",
+        "Phân loại rủi ro E&S",
+        "Thẩm định tuân thủ và cam kết trong hợp đồng",
+        "Quản trị và giám sát hậu kiểm"
+      ]
+    },
+    {
+      "id": "SPEC-008",
+      "question_sha256": "80407b1ec986be7b1aa3550b96fa3ef3fd8f7ecbe3fd127807067c18866444e3",
+      "original_reference_sha256": "02dea07d3cad3b66481da59a8ecad62591939961960878f195a02ee00584cdec",
+      "source": "A_Bank/5. Sản phẩm bảo hiểm và tín dụng/BH 01 Quy định sản phẩm bảo hiểm nhân thọ A-Life Trọn Đời.pdf",
+      "source_sha256": "cdab9e6bf04e03ec21bc93f664529aae014f74b3fa6f6a8acdb4f37da5d9af31",
+      "locator": "Trang 6/34, mục 1.19(a)",
+      "finding": "Đọc trực tiếp PDF: tuổi tham gia đến 70 và tuổi kết thúc tối đa 100.",
+      "reference_answer": "Người được bảo hiểm chính sống tại Việt Nam, từ 30 ngày tuổi đến 70 tuổi tại thời điểm tham gia. Tuổi tối đa khi kết thúc thời hạn bảo hiểm là 100 tuổi.",
+      "must_include": [
+        "Từ 30 ngày tuổi đến 70 tuổi khi tham gia",
+        "Tối đa 100 tuổi khi kết thúc thời hạn bảo hiểm"
+      ]
+    },
+    {
+      "id": "SPEC-080",
+      "question_sha256": "3dfb1c2970e014ccfcf4c699f2fd8a3941c3fa951bc15b0492381fcf1c2c0c7a",
+      "original_reference_sha256": "c8fa700461ac93c726c97af4996ace1f668854ffa1c20065c7fa5dbbf0460f36",
+      "source": "A_Bank/5. Sản phẩm bảo hiểm và tín dụng/TD 01 Quy định sản phẩm cho vay cán bộ nhân viên Đại học Quốc gia.pdf",
+      "source_sha256": "473ea19f910228c759fea7c57f7dacfde9b7259e5456705b55f2a1b5f995e116",
+      "locator": "TD 01, trang 4/8, Lưu ý 3.5 và khung quản trị hạn mức",
+      "finding": "Cả ghi chú và khung rủi ro công bố trần tổng không TSBĐ 1 tỷ đồng.",
+      "reference_answer": "Theo TD 01 trang 4, tổng dư nợ các khoản cấp tín dụng không tài sản bảo đảm của một CBNV ĐHQG tại A-Bank, gồm thấu chi, thẻ tín dụng và vay tiêu dùng tín chấp, trong mọi trường hợp không quá 1 tỷ đồng. Khi tính hệ số DTI, nghĩa vụ nợ hàng tháng tính 5% giá trị hạn mức thẻ tín dụng.",
+      "must_include": [
+        "Tổng không TSBĐ không quá 1 tỷ đồng",
+        "Tính chung thấu chi, thẻ và vay tín chấp"
+      ]
+    },
+    {
+      "id": "SPEC-157",
+      "question_sha256": "7e67df045228ffc88fe84ee02624dc30b1bcb5fed932aedcf02655a6a0afc1fa",
+      "original_reference_sha256": "12ba75e3630b9b2c195cfbacbf6ae12090ed791ee67dd7fb80d37c4e62671729",
+      "source": "A_Bank/7. Quy trình vận hành và SLA/VH 01 Hướng dẫn xử lý tình huống tra soát và rủi ro giao dịch.pdf",
+      "source_sha256": "81639bd95890765b579b94492d1b5d5ca80190e3cc925c48f3e3ba83a3527bcb",
+      "locator": "VH 01 trang 3–4, mục 18 và 21",
+      "finding": "Hai mục là hai tình huống, không phải một chuỗi bốn bước. Cả hai dùng hotline 1900 1234.",
+      "reference_answer": "Mục 18 hướng dẫn khóa thẻ ngay trên A-Bank Plus hoặc gọi 1900 1234, ngừng chia sẻ thông tin bảo mật và liên hệ ngân hàng để trợ giúp hoặc tiếp nhận tra soát. Mục 21 áp dụng khi đã bấm link lạ: ngừng thao tác, ngắt kết nối thiết bị, dùng thiết bị an toàn đổi mật khẩu và đăng xuất các thiết bị, rồi gọi 1900 1234 để khóa tạm dịch vụ. Tài liệu trình bày hai tình huống riêng.",
+      "must_include": [
+        "Mục 18: khóa thẻ hoặc gọi 1900 1234",
+        "Ngừng cung cấp thông tin và liên hệ tra soát nếu cần",
+        "Mục 21: ngắt kết nối, thiết bị an toàn đổi mật khẩu và đăng xuất các thiết bị",
+        "1900 1234 để khóa tạm dịch vụ"
+      ]
+    },
+    {
+      "id": "THE-011",
+      "question_sha256": "733db3ff8ac5184fae7c529beba75a43953cab77329ff9218e4e5eb11d493507",
+      "original_reference_sha256": "7cf12a0b38904c7afaa3c38ff1bf17b01efc9565a1125caa5d62fada28bf0d8e",
+      "source": "A_Bank/2. Chương trình thẻ/THE 02 Quy chế phát hành và sử dụng thẻ tín dụng quốc tế Visa Platinum.docx",
+      "source_sha256": "745a3d9daa374832e08739e086a237d1a4e15416f3095beb6b48b2d12ae46656",
+      "locator": "Phụ lục I, VPL07 và VPL08",
+      "finding": "Điều 8 nói về hồ sơ cầm cố. Phụ lục I gộp kỳ hạn 3/6 và 9/12 tháng.",
+      "reference_answer": "Phụ lục I của THE 02 quy định VPL07: 1,5% giá trị giao dịch cho kỳ hạn 3 và 6 tháng. VPL08: 2,5% cho 9 và 12 tháng. Đây là phí chuyển đổi trả góp lãi suất 0%.",
+      "must_include": [
+        "3 và 6 tháng: 1,5%",
+        "9 và 12 tháng: 2,5%",
+        "Tính trên giá trị giao dịch"
+      ]
+    },
+    {
+      "id": "THE-015",
+      "question_sha256": "7278f271c40d74c234ce30c8801d9985194bb99a34a052d38afc7d6d6e848984",
+      "original_reference_sha256": "ed9ffb9f1117b9ea44c40d6052fc09bab3537ab2da490f62ad75e9225928b105",
+      "source": "A_Bank/2. Chương trình thẻ/THE 02 Quy chế phát hành và sử dụng thẻ tín dụng quốc tế Visa Platinum.docx",
+      "source_sha256": "745a3d9daa374832e08739e086a237d1a4e15416f3095beb6b48b2d12ae46656",
+      "locator": "Điều 6, khoản 1–3",
+      "finding": "Nguồn ghi tối đa hai thẻ phụ, dùng chung hạn mức và đặt giới hạn tháng riêng qua app.",
+      "reference_answer": "Chủ thẻ chính được phát hành tối đa 02 thẻ phụ cho người thân gồm vợ/chồng, cha mẹ, con đẻ từ đủ 15 tuổi trở lên. Thẻ phụ dùng chung hạn mức tín dụng với thẻ chính. Chủ thẻ chính có thể đặt hạn mức chi tiêu tháng riêng cho từng thẻ phụ trên ABank Digital và chịu trách nhiệm giao dịch, phí, lãi và dư nợ.",
+      "must_include": [
+        "Tối đa 02 thẻ phụ",
+        "Người thân: vợ/chồng, cha mẹ, con đẻ từ 15 tuổi",
+        "Dùng chung hạn mức và đặt giới hạn tháng riêng trong app"
+      ]
+    },
+    {
+      "id": "THE-027",
+      "question_sha256": "0f46508f1896e5a42ab309362d0cc0a13b9ce9cbd46adf7c5f890c8ea1a2874c",
+      "original_reference_sha256": "f6de3fadf3e0170a1e0c9b57a7a08cb9cd7c91b856c79776b9cee6dc82f189d1",
+      "source": "A_Bank/2. Chương trình thẻ/THE 04 Quy định sản phẩm thẻ ghi nợ nội địa Napas Chip Contactless.docx",
+      "source_sha256": "cafce81ba19a14f5dd000521c38ccde85a035aaa80fe87445e8440706c51531f",
+      "locator": "Phụ lục I, bảng biểu phí thẻ ABank Napas",
+      "finding": "Biểu phí hiện ghi 0 đồng, 60.000 đồng và 3.300 đồng. Điều 9 nói về miễn nhập PIN.",
+      "reference_answer": "Phụ lục I quy định phát hành thẻ vật lý lần đầu miễn phí; phí thường niên 60.000 đồng/năm và miễn năm đầu; phí rút tiền tại ATM liên ngân hàng Napas là 3.300 đồng/giao dịch.",
+      "must_include": [
+        "Phát hành lần đầu miễn phí",
+        "60.000 đồng/năm và miễn năm đầu",
+        "3.300 đồng/giao dịch tại ATM liên ngân hàng Napas"
+      ]
+    },
+    {
+      "id": "THE-028",
+      "question_sha256": "8410d2197678a721282d8fd51113d4b6848ff9124992576d1420e312b550486b",
+      "original_reference_sha256": "912a2165ba6d6a15225e04d666fca3e90ccad17de6812a7263333b260191c603",
+      "source": "A_Bank/2. Chương trình thẻ/THE 04 Quy định sản phẩm thẻ ghi nợ nội địa Napas Chip Contactless.docx",
+      "source_sha256": "cafce81ba19a14f5dd000521c38ccde85a035aaa80fe87445e8440706c51531f",
+      "locator": "Hình 1 (word/media/image1.png); Điều 9–10 và bảng hạn mức Chương IV",
+      "finding": "Điều 10 ghi chốt 5 lần liên tiếp hoặc lũy kế vượt 5 triệu/ngày, không phải 3 triệu.",
+      "reference_answer": "Điều 9 cho chạm miễn PIN với giao dịch không quá 1 triệu đồng. Hình 1 đối chiếu thao tác chạm nhanh với xác thực tăng cường cho giá trị cao. Điều 10 quy định sau 5 lần chạm liên tiếp không PIN hoặc khi lũy kế trong ngày vượt 5 triệu đồng, POS yêu cầu cắm chip và nhập PIN. Sau một lần nhập đúng, bộ đếm về 0.",
+      "must_include": [
+        "Mỗi giao dịch không quá 1 triệu để miễn PIN",
+        "5 lần không PIN hoặc lũy kế vượt 5 triệu/ngày",
+        "Cắm chip và nhập PIN để xác thực và đặt lại bộ đếm"
+      ]
+    },
+    {
+      "id": "THE-044",
+      "question_sha256": "15a063c70938f25e90021ef608d0e79e414e40493fa1bdc45add712f3b037ee4",
+      "original_reference_sha256": "6dd2872e93b536cac6a4720b1b80a28e6d7ce61b119f60d83662b28eec587ef9",
+      "source": "A_Bank/2. Chương trình thẻ/THE 06 Quy định sản phẩm thẻ tín dụng du lịch Travel Visa Signature.docx",
+      "source_sha256": "46c81753a4c1d33aaa3edcabacdade4a33a6113745beba8e52134fb02c6e4600",
+      "locator": "Hình 4 (word/media/image4.png), Điều 7–8",
+      "finding": "Hình ghi ngày lập sao kê hàng tháng, không ghi ngày 25 hay tỷ lệ cố định. Điều 7 quy định tỷ lệ tích lũy theo danh mục.",
+      "reference_answer": "Theo Hình 4, dặm được hệ thống tích tự động và truyền để cộng tài khoản hội viên chính chủ vào ngày lập sao kê mỗi tháng. Hình không ấn định ngày 25 hoặc tỷ lệ chuyển dặm. Điều 7 quy định tỷ lệ tích lũy: 20.000 đồng = 2 dặm cho ngoại tệ, 20.000 = 1,5 dặm cho vé máy bay/khách sạn/tour trong nước, 25.000 = 1 dặm cho chi tiêu thường. Điều 8 mô tả chuyển toàn bộ dặm đã tích lũy vào ngày chốt sao kê.",
+      "must_include": [
+        "Ngày lập hoặc chốt sao kê hàng tháng",
+        "Hình không ấn định ngày 25 hay một tỷ lệ chuyển cố định",
+        "Tỷ lệ tích lũy phân theo danh mục tại Điều 7"
+      ]
+    },
+    {
+      "id": "THE-045",
+      "question_sha256": "f0371d0b9c1ad5530001e578ffecc3fa0f6b64d2f5995530a3801d2c01085cc9",
+      "original_reference_sha256": "4625c2416f4bcde9ddf256576c55a0c44c3f0380790ae7682bbf0108d930b798",
+      "source": "A_Bank/2. Chương trình thẻ/THE 06 Quy định sản phẩm thẻ tín dụng du lịch Travel Visa Signature.docx",
+      "source_sha256": "46c81753a4c1d33aaa3edcabacdade4a33a6113745beba8e52134fb02c6e4600",
+      "locator": "Hình 2 (word/media/image2.png); Điều 13",
+      "finding": "Biểu đồ ghi Signature 1,2%, mức thị trường so sánh 3,8%.",
+      "reference_answer": "Theo Hình 2, Signature có phí chuyển đổi ngoại tệ 1,2% so với mức thị trường dùng trong hình 3,8% (Standard 2,5% và Platinum 1,8%). Chênh lệch 2,6 điểm phần trăm. Với 100 triệu đồng chi tiêu quy đổi, riêng phí giảm từ 3,8 triệu còn 1,2 triệu, tiết kiệm 2,6 triệu theo phép so sánh của hình.",
+      "must_include": [
+        "Signature 1,2%",
+        "Mức thị trường trong hình 3,8%",
+        "Thấp hơn 2,6 điểm phần trăm; chi tiêu lớn tiết kiệm phí tương ứng"
+      ]
+    },
+    {
+      "id": "THE-052",
+      "question_sha256": "896eaeba5157a2134898bbed17c38ec0c723261ab89473b8423abdd47f160b75",
+      "original_reference_sha256": "8bb98f9cc3c5e036194f2299fb897ced14e732c2f412f234acdc34a578f04846",
+      "source": "A_Bank/2. Chương trình thẻ/THE 07 Quy chế phát hành và sử dụng thẻ tín dụng doanh nghiệp Corporate Visa.docx",
+      "source_sha256": "14ba3f176a9309015918ea75652892fb3e5348cc42b29df9579140e38f02478a",
+      "locator": "Điều 4, Hình 1 (word/media/image1.png); Điều 6",
+      "finding": "Hình 1 hiện tại là biểu đồ donut theo danh mục, còn đáp án cũ mô tả cây hạn mức ba tầng. Điều 6 mới là căn cứ về thao tác trên cổng B-Digital.",
+      "reference_answer": "Hình 1 minh họa hạn mức công ty bằng biểu đồ donut, phân bổ 45% cho công tác phí và đi lại, 25% cho tiếp khách và hội nghị, 15% cho vật tư và thiết bị, 10% cho quảng cáo và marketing số, và 5% cho dự phòng rủi ro. Theo Điều 6, quản trị viên có thể tăng hoặc giảm hạn mức của từng nhân viên trên B-Digital trong vòng 5 giây mà không cần gửi văn bản lên ngân hàng.",
+      "must_include": [
+        "Hình 1 là biểu đồ phân bổ theo danh mục, không phải cây hạn mức ba tầng",
+        "45%, 25%, 15%, 10%, 5% theo đúng danh mục",
+        "Điều 6: điều chỉnh hạn mức từng nhân viên qua B-Digital, không cần gửi văn bản"
+      ]
+    },
+    {
+      "id": "THE-069",
+      "question_sha256": "71281991c78a6b5eaaf47ac45ed7de4ebec03562573f5705a5bb8948a6924779",
+      "original_reference_sha256": "3534e145c29fe5e10daa7975fdc1fa72e712e3d00e0ad04817146657a4c074af",
+      "source": "A_Bank/2. Chương trình thẻ/THE 09 Quy chế phát hành và sử dụng thẻ trả trước quốc tế Prepaid Gift.docx",
+      "source_sha256": "4ee83db415af7b5c1319599f1ea2554efc02ff55ca823cc6aeabd7a376dffe83",
+      "locator": "Điều 13, khoản 2(a) và 2(b)",
+      "finding": "Điều 13 có quy trình trả số dư thẻ quà tặng vô danh tại quầy khi xuất trình phôi thẻ gốc.",
+      "reference_answer": "Khi thẻ định danh hết hạn còn số dư, mang CCCD ra quầy để chuyển toàn bộ số dư về tài khoản thanh toán hoặc đổi thẻ và chuyển số dư miễn phí. Với thẻ quà tặng vô danh, xuất trình phôi thẻ gốc tại quầy trước ngày hết hạn hoặc trong 30 ngày kể từ khi hết hạn để nhận số dư sau khi khấu trừ phí xử lý.",
+      "must_include": [
+        "Thẻ định danh: CCCD tại quầy, chuyển về tài khoản hoặc đổi thẻ",
+        "Thẻ vô danh: phôi thẻ gốc",
+        "Trước hạn hoặc trong 30 ngày kể từ khi hết hạn",
+        "Nhận số dư sau phí xử lý"
+      ]
+    },
+    {
+      "id": "THE-084",
+      "question_sha256": "3b51dd3a3def72273a3121de94b667e0d9ce713de36a5605ce5159716850a849",
+      "original_reference_sha256": "31629add14a023c9fd1b5c206ca271a75d90adf559854dee89f843b5bd1adbd5",
+      "source": "A_Bank/2. Chương trình thẻ/THE 11 Quy chế quản lý rủi ro đơn vị chấp nhận thẻ POS và Cổng E-Commerce.docx",
+      "source_sha256": "de4c17c88d3be205f363320617aa9d6dfce55794c237f5268ac593b46747a43e",
+      "locator": "Hình 1 (word/media/image1.png)",
+      "finding": "Hình chứa năm bước nghiệp vụ có nội dung xác định, khác số bốn trong tham chiếu.",
+      "reference_answer": "Hình 1 nêu thẩm định thực địa; kiểm tra MATCH/VMAS và CIC; khai báo MID/TID trên Core Thẻ, cài bảo mật POS; bàn giao máy có niêm phong và tập huấn; giám sát giao dịch 24/7 và kiểm tra định kỳ hoặc đột xuất.",
+      "must_include": [
+        "Thẩm định thực địa",
+        "Kiểm tra MATCH/VMAS hoặc CIC",
+        "Khai báo MID/TID và cài bảo mật",
+        "Bàn giao POS và tập huấn",
+        "Giám sát liên tục và kiểm tra"
+      ]
+    },
+    {
+      "id": "THE-085",
+      "question_sha256": "3fd680052683d6c2b02070e247a783e5a9ae806b12c5c8935ec32b622033638d",
+      "original_reference_sha256": "5319e76479d77867e4816673b5a118f412603ff1ba9e14c7b616691813ea5f8e",
+      "source": "A_Bank/2. Chương trình thẻ/THE 11 Quy chế quản lý rủi ro đơn vị chấp nhận thẻ POS và Cổng E-Commerce.docx",
+      "source_sha256": "de4c17c88d3be205f363320617aa9d6dfce55794c237f5268ac593b46747a43e",
+      "locator": "Hình 2 (word/media/image2.png); Điều 11",
+      "finding": "Hình mô tả giữ quyết toán, kiểm tra chứng từ và hai kết quả. Điều 11 nêu tăng từ 3 lần, không phải 5.",
+      "reference_answer": "Theo Điều 11, hệ thống gắn cờ bất thường (ví dụ doanh số từ 3 lần bình quân ngày của ba tháng gần nhất khi không có khuyến mại phù hợp). Hình 2 mô tả bật giữ quyết toán, yêu cầu đơn vị chấp nhận thẻ nộp hóa đơn, hợp đồng và chứng từ trong 24 giờ làm việc. Nếu chứng từ hợp lệ thì giải tỏa; nếu thiếu hoặc phát hiện giao dịch khống thì thu hồi POS, ngắt kết nối và chuyển hồ sơ xử lý.",
+      "must_include": [
+        "Cờ cảnh báo và tự động giữ quyết toán",
+        "Yêu cầu chứng từ trong 24 giờ làm việc",
+        "Chứng từ hợp lệ thì giải tỏa",
+        "Thiếu chứng từ hoặc quẹt khống thì thu hồi POS và chuyển hồ sơ"
+      ]
+    },
+    {
+      "id": "THE-092",
+      "question_sha256": "9843b65c19081c2c7fc8493bcbfc4bd2fee0d83697bf08e7e6bc33955c2b66b5",
+      "original_reference_sha256": "d7ac7ade8aa98cbef1a155c366439524788cf99dd683e95fd12e2dd59070aa88",
+      "source": "A_Bank/2. Chương trình thẻ/THE 12 Quy trình tra soát khiếu nại giao dịch thẻ quốc tế Chargeback.docx",
+      "source_sha256": "2c2b560ed7a8c012c47bb27f4299742a3f42fb2c4b1ac84279caf7526b9142fb",
+      "locator": "Hình 1 (word/media/image1.png), bốn ô nghiệp vụ",
+      "finding": "Hình nêu mốc 60 ngày nộp đơn, ngày 1–5 phát điện, 30 ngày tái xuất trình và 30 ngày tiền trọng tài. Ô cuối không ghi số ngày.",
+      "reference_answer": "Hình 1 ghi: (1) Khởi tạo: chủ thẻ nộp đơn trong 60 ngày, ABank phát điện Chargeback ngày 1–5 và cấp hoàn tạm. (2) Tái xuất trình: ngân hàng thanh toán/đơn vị chấp nhận thẻ gửi chứng từ trong tối đa 30 ngày từ khi nhận điện. (3) Tiền trọng tài: xem chứng từ mới và gửi thông báo trong 30 ngày tiếp theo. (4) Trọng tài chung thẩm: nộp hồ sơ Visa/Mastercard và phí 500 USD, bên thua chịu phí; hình không nêu số ngày cho phán quyết.",
+      "must_include": [
+        "Nộp đơn 60 ngày; phát điện ngày 1–5",
+        "Tái xuất trình trong tối đa 30 ngày",
+        "Tiền trọng tài trong 30 ngày tiếp theo",
+        "Trọng tài chung thẩm; hình không nêu số ngày"
+      ]
+    },
+    {
+      "id": "THE-095",
+      "question_sha256": "a2b557115f619d5a43f742e34e906828f714d7d84bae2aa9ad609ef231f2091f",
+      "original_reference_sha256": "477047355c7f256fac9197f027f5424b03e94725a32c1ba1c6b84af5a7150a3a",
+      "source": "A_Bank/2. Chương trình thẻ/THE 12 Quy trình tra soát khiếu nại giao dịch thẻ quốc tế Chargeback.docx",
+      "source_sha256": "2c2b560ed7a8c012c47bb27f4299742a3f42fb2c4b1ac84279caf7526b9142fb",
+      "locator": "Điều 13, khoản 2",
+      "finding": "Phí xử lý khiếu nại sai hiện là 150.000 đồng/giao dịch và thu hồi 100% tiền hoàn tạm.",
+      "reference_answer": "Khi chứng từ chứng minh khiếu nại sai, ABank gửi bằng chứng phản biện rồi thu hồi 100% khoản tiền hoàn tạm ứng đã cấp bằng trích nợ tự động tài khoản thẻ hoặc tài khoản thanh toán. Phí xử lý khiếu nại sai là 150.000 đồng/giao dịch.",
+      "must_include": [
+        "150.000 đồng/giao dịch",
+        "Thu hồi 100% tiền hoàn tạm ứng",
+        "Trích nợ tài khoản thẻ hoặc tài khoản thanh toán"
+      ]
+    },
+    {
+      "id": "THE-102",
+      "question_sha256": "1a8949a21958ee4007e690b806f42d10e5ab0072d179a522981a39ca28237c3f",
+      "original_reference_sha256": "2d01a31da4f674bd0749d2d9c7771b3a2314b89553803fed0c1e5576c2c8d3de",
+      "source": "A_Bank/2. Chương trình thẻ/THE 13 Quy định sản phẩm thẻ tín dụng sinh viên Edu Visa.docx",
+      "source_sha256": "92690019b50e588067967b96530daa95fd0534207f60b319d127caee3180c07f",
+      "locator": "Điều 3, khoản 1–5",
+      "finding": "Tuổi và đối tượng ghi ở Điều 3, có cơ chế bảo lãnh riêng cho năm nhất hoặc GPA thấp.",
+      "reference_answer": "Điều 3 áp dụng với công dân Việt Nam 18–25 tuổi, có CCCD gắn chip hợp lệ và xác thực sinh trắc. Sinh viên hệ chính quy từ năm hai tại đại học, học viện hoặc cao đẳng công lập/tư thục được công nhận. Cần GPA tối thiểu 2,5/4 hoặc 6,5/10 hay thành tích quy định, CIC nhóm 1. Sinh viên năm nhất hoặc GPA dưới 2,5 có thể dùng bảo lãnh của cha/mẹ/người giám hộ hoặc thẻ phụ của phụ huynh.",
+      "must_include": [
+        "18–25 tuổi",
+        "Hệ chính quy từ năm hai",
+        "Đại học, học viện, cao đẳng được công nhận",
+        "Năm nhất hoặc GPA thấp: bảo lãnh hoặc thẻ phụ"
+      ]
+    },
+    {
+      "id": "THE-111",
+      "question_sha256": "67c8de52dbd1ae7c19e00ee4fbb4a65ece4e84565507bb5a99533dca6972b7c4",
+      "original_reference_sha256": "1468f65dc6f4a2ae89ec2e18ac4f8b453f0ae23eae469c3aa23e692cbf117b33",
+      "source": "A_Bank/2. Chương trình thẻ/THE 14 Quy định sản phẩm thẻ tín dụng xanh bảo vệ môi trường Eco Visa.docx",
+      "source_sha256": "26eadfc1acbedc800ffc85965f1723e42a2527a8823815bf18a23bc22f3f303e",
+      "locator": "Điều 26 và 27",
+      "finding": "Điều 26 quy định thu hồi thẻ. Điều 27 quy định tái chế thành đồ dùng văn phòng, khác mô tả vật phẩm gia dụng trong đáp án cũ.",
+      "reference_answer": "Điều 26 mô tả thu hồi khép kín. Trước ngày hết hạn một tháng, app gửi hướng dẫn và ngân hàng gửi thẻ mới kèm bì thư bảo mật dán tem. Khách cắt đôi chip và gửi thẻ cũ miễn phí về ABank. Điều 27 mô tả tập kết tại trung tâm tiêu hủy, băm nghiền cơ học, tách vi mạch EMV thu hồi kim loại và tái chế nhựa OBP thành đồ dùng văn phòng.",
+      "must_include": [
+        "Điều 26: thu hồi thẻ hết hạn",
+        "Bì thư bảo mật dán tem, cắt đôi chip, gửi lại miễn phí",
+        "Điều 27: băm nghiền, tách vi mạch EMV, tái chế nhựa thành đồ dùng văn phòng"
+      ]
+    },
+    {
+      "id": "THE-115",
+      "question_sha256": "b1f42ff1e8f38abe11d7b6a01c838af89c383e8cf47a3198e17f1170a2dc5999",
+      "original_reference_sha256": "1a32e25cb99e9fa7dd260204674b10def347016eb6eab1d0cf22501c28443e55",
+      "source": "A_Bank/2. Chương trình thẻ/THE 15 Quy chế phát hành và sử dụng thẻ ảo thanh toán một lần Virtual Card.docx",
+      "source_sha256": "b69f039725c31d04cc0aa24da301ad745b37b4590a1a2705720a479271e74c24",
+      "locator": "Điều 9, khoản 1–2",
+      "finding": "Số thẻ ảo hoạt động đồng thời phân theo hạng khách hàng, còn thẻ dùng một lần có giới hạn theo ngày ghi riêng.",
+      "reference_answer": "Khách hàng có tài khoản thanh toán VND hoặc thẻ tín dụng quốc tế đang hoạt động tại ABank được tạo thẻ ảo miễn phí. Khách phổ thông duy trì tối đa 5 thẻ hoạt động đồng thời, khách ưu tiên tối đa 20. Điều 9 ghi riêng con số đến 50 thẻ dùng một lần tạo mới mỗi ngày.",
+      "must_include": [
+        "Có tài khoản VND hoặc thẻ tín dụng quốc tế đang hoạt động",
+        "Phổ thông 5 thẻ hoạt động đồng thời",
+        "Ưu tiên 20 thẻ hoạt động đồng thời"
+      ]
+    },
+    {
+      "id": "THE-120",
+      "question_sha256": "77dc71205a570851af6bc16ebdd79688bd57f7feb1a4cb208df0ac04a8a5d603",
+      "original_reference_sha256": "6e9c9c81336b2fedb171ac44bcce407dc636bf820737cba328baba1413f968d6",
+      "source": "A_Bank/2. Chương trình thẻ/THE 15 Quy chế phát hành và sử dụng thẻ ảo thanh toán một lần Virtual Card.docx",
+      "source_sha256": "b69f039725c31d04cc0aa24da301ad745b37b4590a1a2705720a479271e74c24",
+      "locator": "Điều 16, khoản 2",
+      "finding": "Nguồn ghi hạn mức đúng 1 USD cho thẻ tùy biến trước xác minh, khác 0 đồng trong tham chiếu cũ.",
+      "reference_answer": "Dùng thẻ ảo một lần hoặc thẻ ảo tùy biến đặt hạn mức 1 USD để trang web xác minh thẻ. Sau đăng ký, khóa thẻ hoặc để thẻ dùng một lần tự hủy. Theo Điều 16, yêu cầu thu tiền gia hạn bằng thẻ đã khóa sẽ bị từ chối.",
+      "must_include": [
+        "Thẻ ảo một lần hoặc tùy biến 1 USD",
+        "Khóa thẻ hoặc để thẻ tự hủy sau đăng ký",
+        "Giao dịch gia hạn bị từ chối khi thẻ khóa"
+      ]
+    },
+    {
+      "id": "THE-122",
+      "question_sha256": "dc04fbdee98271d05aca27d131c0dea9aadcda7ab4412f47d00e6d09af92487f",
+      "original_reference_sha256": "ad50062a1f0a5a6e10ff13a87b5e1ff9c489c9be5ffa8028cc87e9cade90d077",
+      "source": "A_Bank/2. Chương trình thẻ/THE 16 Quy chế phát hành và sử dụng thẻ tín dụng nữ giới Lady Visa.docx",
+      "source_sha256": "30336f045a4409713fc7911803b70a6202eab80991aafe3efc63ca305a5a4716",
+      "locator": "Điều 18, cột Lady Platinum; Điều 8",
+      "finding": "Điều 18 ghi 999.000 đồng/năm và ngưỡng 100 triệu/năm. Điều 10 là về hoàn tiền thời trang.",
+      "reference_answer": "Điều 18 áp phí thường niên thẻ chính Lady Platinum 999.000 đồng/năm và miễn phí năm sau khi chi tiêu đạt 100 triệu đồng/năm. Điều 8 nêu giảm 50% phí năm đầu cho hội viên thuộc nhóm được quy định.",
+      "must_include": [
+        "999.000 đồng/năm",
+        "100 triệu đồng/năm để miễn phí năm sau",
+        "Biểu phí tại Điều 18"
+      ]
+    },
+    {
+      "id": "THE-126",
+      "question_sha256": "6f4cff0bfb670b23f8f0f2790ef38ff34410c1d3cdf3dc3e546d6f3676fb61dd",
+      "original_reference_sha256": "572283cd8e98e44fab37d3c50c84921f588bd5865f6f63775f3adc8d12a5f107",
+      "source": "A_Bank/2. Chương trình thẻ/THE 16 Quy chế phát hành và sử dụng thẻ tín dụng nữ giới Lady Visa.docx",
+      "source_sha256": "30336f045a4409713fc7911803b70a6202eab80991aafe3efc63ca305a5a4716",
+      "locator": "Điều 5, khoản 1–3",
+      "finding": "Nguồn ghi 18–60 tuổi và các hình thức tài chính thay thế cụ thể.",
+      "reference_answer": "Nữ công dân Việt Nam hoặc người nước ngoài cư trú hợp pháp ở Việt Nam từ 18 đến 60 tuổi và có năng lực hành vi dân sự đầy đủ. Thu nhập ổn định từ 8 triệu đồng/tháng có thể chứng minh bằng sao kê lương, hợp đồng cho thuê nhà hoặc doanh thu kinh doanh. Các hình thức thay thế gồm sổ tiết kiệm ABank từ 20 triệu đồng, bảo hiểm nhân thọ đóng phí từ 15 triệu/năm, hoặc sở hữu ô tô gia đình.",
+      "must_include": [
+        "18 đến 60 tuổi",
+        "8 triệu đồng/tháng",
+        "Sao kê lương, cho thuê nhà hoặc kinh doanh",
+        "Sổ tiết kiệm từ 20 triệu, bảo hiểm từ 15 triệu/năm hoặc ô tô"
+      ]
+    },
+    {
+      "id": "THE-127",
+      "question_sha256": "ebb96e0b74764fabaca679566626e0a25ab0906600cc22f84dc15217893ef05c",
+      "original_reference_sha256": "a7cf675c4ef6beb4c27e87250574665bb9d69c89a78dc7c065c64c591c70a515",
+      "source": "A_Bank/2. Chương trình thẻ/THE 16 Quy chế phát hành và sử dụng thẻ tín dụng nữ giới Lady Visa.docx",
+      "source_sha256": "30336f045a4409713fc7911803b70a6202eab80991aafe3efc63ca305a5a4716",
+      "locator": "Điều 13, khoản 1–2; hạng thẻ tại Điều 6",
+      "finding": "Quy định Pink Care ghi 500 triệu và quyền lợi nằm viện, dùng hạng Diamond thay vì Signature cho voucher.",
+      "reference_answer": "Chủ thẻ Lady Visa Gold trở lên có chi tiêu trong năm được tặng Pink Care. Chi trả một lần đến 500 triệu đồng khi chẩn đoán xác định ung thư vú, cổ tử cung hoặc buồng trứng. Nằm viện phẫu thuật được trợ cấp 2 triệu đồng/ngày, tối đa 30 ngày/năm. Platinum và Diamond được một voucher tầm soát mỗi năm trị giá 2,5 triệu đồng.",
+      "must_include": [
+        "500 triệu đồng khi chẩn đoán xác định",
+        "Ung thư vú, cổ tử cung hoặc buồng trứng",
+        "2 triệu/ngày tối đa 30 ngày/năm",
+        "Platinum và Diamond một voucher 2,5 triệu/năm"
+      ]
+    },
+    {
+      "id": "THE-132",
+      "question_sha256": "304ea1c88d0ebc83c73041327e1018363feda403464cb47e5f6f574233bebb9c",
+      "original_reference_sha256": "704fd966854e65673c89b556f57123f0827e197fd35b881d19f416d70d05c6d9",
+      "source": "A_Bank/2. Chương trình thẻ/THE 17 Quy định sản phẩm thẻ tín dụng ẩm thực và giải trí Dining Visa.docx",
+      "source_sha256": "2e871212831c1d78c6dcf6cf01a6adf97ff04f6c73d927711d11f28b9a169f64",
+      "locator": "Sơ đồ 1 (word/media/image1.png) và bảng ở Điều 6",
+      "finding": "Hình xác nhận tên bốn hạng. Đặc quyền từng hạng lấy từ bảng Điều 6 vì hình chỉ có nhãn nền chung.",
+      "reference_answer": "Từ thấp lên cao: Classic hoàn 10% A-Food Delivery/A-Food và 5% nhà hàng; Gold hoàn 10% nhà hàng và có món tráng miệng đối tác; Platinum hoàn 15% Fine Dining và tặng rượu vang; Michelin Edition hoàn 20% Fine Dining và có trợ lý đặt bàn Michelin 24/7. Tỷ lệ theo bảng Điều 6.",
+      "must_include": [
+        "Classic: A-Food 10%, nhà hàng 5%",
+        "Gold: nhà hàng 10%, món tráng miệng",
+        "Platinum: Fine Dining 15%, rượu vang",
+        "Michelin Edition: Fine Dining 20%, đặt bàn 24/7"
+      ]
+    },
+    {
+      "id": "THE-143",
+      "question_sha256": "84cfad6ffe4052eab0dc1fe9e231af1bf1ff2e1de6b463fcc5659140e1704b88",
+      "original_reference_sha256": "8b7b5e4221bccecdfa47f3d1c7ba3df04d98b0e00ac35db5d46f9ff3f0b1ec9c",
+      "source": "A_Bank/2. Chương trình thẻ/THE 18 Quy định sản phẩm thẻ tín dụng chơi Golf đẳng cấp Golf Visa Infinite.docx",
+      "source_sha256": "a041b6a656d3507a09ded2945acefb40f3673c3d9073e57d9ac95e050e477b66",
+      "locator": "Điều 9, khoản 1; mục ưu đãi phí thường niên",
+      "finding": "Điều 9 ghi hơn 50 sân. 150 triệu là mốc giảm phí thường niên, không phải điều kiện duy trì Green Fee trong Điều 9.",
+      "reference_answer": "Điều 9 cấp 12 lượt miễn 100% Green Fee mỗi năm dương lịch, tương đương một lượt/tháng, tại hơn 50 sân cho thẻ chính. Điều này không nêu ngưỡng chi tiêu để gia hạn lượt năm sau. Mốc 150 triệu đồng trong biểu phí là điều kiện giảm phí thường niên.",
+      "must_include": [
+        "12 lượt/năm dương lịch",
+        "Miễn 100% Green Fee",
+        "Hơn 50 sân",
+        "Điều 9 chưa nêu điều kiện chi tiêu để gia hạn lượt"
+      ]
+    },
+    {
+      "id": "THE-148",
+      "question_sha256": "a1a13ac1ae0caacc2fbe92f9a0fdc71847ddfbb99d86001e21b039b31b960657",
+      "original_reference_sha256": "9d4b28ed87d897d9b013da4228ae0bca160e00691fbf004d904486eeb7996a97",
+      "source": "A_Bank/2. Chương trình thẻ/THE 19 Quy chế phát hành và sử dụng thẻ tín dụng Hoàn tiền Xăng dầu Auto Visa.docx",
+      "source_sha256": "96a657639075dc8e74b377c6a2d084580922d9f1a02f81a33081a813f30cace9",
+      "locator": "Điều 3, 8 và 12",
+      "finding": "Điều 12 có Auto Top-up, thay vì thiếu hoàn toàn như kết quả rà tự động. Nguồn ghi 300.000 hoặc 500.000 đồng.",
+      "reference_answer": "Giao dịch xăng dầu được nhận diện theo MCC 5541 hoặc 5542 để áp hoàn tiền 10%, tối đa 300.000 đồng/kỳ sao kê theo Điều 8. Nạp ETC là tính năng riêng theo Điều 12. Khách liên kết V-Toll hoặc A-Pass trên ABank Digital. Khi số dư dưới ngưỡng cài đặt, ví dụ 100.000 đồng, hệ thống tự trích từ thẻ để nạp 300.000 hoặc 500.000 đồng.",
+      "must_include": [
+        "MCC 5541 hoặc 5542",
+        "Liên kết V-Toll hoặc A-Pass trên ABank Digital",
+        "Nạp tự động khi dưới ngưỡng cài đặt",
+        "Mức nạp 300.000 hoặc 500.000 đồng"
+      ]
+    },
+    {
+      "id": "THE-154",
+      "question_sha256": "e18575239c0b3084434e80776eaedab9c8a2659bcb3dee054e2c344a0c102617",
+      "original_reference_sha256": "d26719939e30e803c4fafcdb9d76d6814cc898e00977630c388f564c238309b3",
+      "source": "A_Bank/2. Chương trình thẻ/THE 20 Quy định sản phẩm thẻ ghi nợ quốc tế sinh viên Edu Mastercard.docx",
+      "source_sha256": "daf4d56bb4afcdaea55a12a38b636fb99332e63ea5add4ac8715454e39261d5c",
+      "locator": "Điều 10 và 11",
+      "finding": "Đáp án cũ nêu hạn mức cao hơn và thiếu GPA tối thiểu.",
+      "reference_answer": "Theo Điều 10, sinh viên từ năm thứ hai tại trường đại học/cao đẳng liên kết cần GPA học kỳ gần nhất từ 2,5/4 hoặc 7/10 và tài khoản ABank Edu có tiền chu cấp hoặc chi tiêu đều ít nhất ba tháng liên tiếp. Hạn mức chuẩn 1 triệu đồng, sinh viên GPA từ 3,2 được đến 3 triệu đồng. Điều 11 miễn toàn bộ lãi nếu hoàn trả trong 15 ngày kể từ ngày trích nợ vượt số dư. Sau đó áp 10%/năm.",
+      "must_include": [
+        "Sinh viên từ năm thứ hai tại trường liên kết",
+        "GPA 2,5/4 hoặc 7/10",
+        "Tài khoản giao dịch đều ba tháng",
+        "Hạn mức 1 triệu và tối đa 3 triệu cho GPA từ 3,2",
+        "Miễn lãi khi hoàn trả trong 15 ngày"
+      ]
+    },
+    {
+      "id": "THE-168",
+      "question_sha256": "f4997d0603af1b5aad4034cff83703633bbfb147246c6c9026d4f1c22c68dd41",
+      "original_reference_sha256": "c0c95204e75ff9f1e287aa1726695e5b3fbe9a9255573e0c8668463286d59c33",
+      "source": "A_Bank/2. Chương trình thẻ/THE 22 Quy định sản phẩm thẻ tín dụng tích lũy dặm bay Air Miles Visa.docx",
+      "source_sha256": "b4b204188337506c2e1096c8be9590cd7692ab1dd70558a3cf7961d0b440dc94",
+      "locator": "Điều 8, khoản 2–3",
+      "finding": "Câu hỏi cho giả định khác với Điều 8. Có thể tính theo giả định và nêu kết quả theo tỷ lệ trong văn bản.",
+      "reference_answer": "Theo các tỷ lệ nêu trong câu hỏi: 30.000.000 / 15.000 = 2.000 dặm vé máy bay và 50.000.000 / 25.000 = 2.000 dặm nội địa, tổng 4.000. Theo Điều 8 của THE 22, vé máy bay/du lịch tích 1,5 dặm mỗi 20.000 đồng, nên phần vé là 2.250 dặm và tổng theo văn bản là 4.250 dặm.",
+      "must_include": [
+        "4.000 dặm theo giả định của câu hỏi",
+        "Điều 8 ghi 20.000 đồng = 1,5 dặm vé máy bay/du lịch",
+        "4.250 dặm theo văn bản"
+      ]
+    },
+    {
+      "id": "THE-170",
+      "question_sha256": "d12260b1efa7c325b4e80108d1a44bc382e34a67643e6b45b09ea1f8825b9dca",
+      "original_reference_sha256": "483941a40e11b16dfd4838e5d9bb60ba86ca724b70538db68f6fa29fff753c4d",
+      "source": "A_Bank/2. Chương trình thẻ/THE 22 Quy định sản phẩm thẻ tín dụng tích lũy dặm bay Air Miles Visa.docx",
+      "source_sha256": "b4b204188337506c2e1096c8be9590cd7692ab1dd70558a3cf7961d0b440dc94",
+      "locator": "Điều 11, khoản 1–3",
+      "finding": "Điều 11 ghi đặt qua Tổng đài Du lịch Chuyên biệt trước 24 giờ, không mô tả một luồng đặt qua app.",
+      "reference_answer": "Đặc quyền có 2 lượt miễn phí/năm tại ga quốc tế Nội Bài và Tân Sơn Nhất. Để dùng, gọi Tổng đài Du lịch Chuyên biệt của ABank trước giờ cất cánh ít nhất 24 giờ. Lễ tân đón tại cửa nhà ga, hỗ trợ hành lý và hướng dẫn qua làn soi chiếu an ninh và xuất nhập cảnh ưu tiên.",
+      "must_include": [
+        "2 lượt miễn phí mỗi năm tại hai sân bay",
+        "Tổng đài Du lịch Chuyên biệt trước ít nhất 24 giờ",
+        "Đón tại cửa ga, hỗ trợ hành lý, làn an ninh và xuất nhập cảnh ưu tiên"
+      ]
+    },
+    {
+      "id": "THE-171",
+      "question_sha256": "eb731a69bf3ba4ab018cf0c691d996c3e414ae10affe82b693d4b7e9e2528e06",
+      "original_reference_sha256": "fc29e97b814295a5d0e12d65fedbb791b9a6f8aa8142e90e36c71cf15fbe5fb7",
+      "source": "A_Bank/2. Chương trình thẻ/THE 22 Quy định sản phẩm thẻ tín dụng tích lũy dặm bay Air Miles Visa.docx",
+      "source_sha256": "b4b204188337506c2e1096c8be9590cd7692ab1dd70558a3cf7961d0b440dc94",
+      "locator": "Điều 4–5, điều kiện và hồ sơ",
+      "finding": "Ngưỡng thu nhập khác theo địa bàn; Điều 5 mới liệt kê hồ sơ, Điều 6 quy định hạn mức.",
+      "reference_answer": "Diện chứng minh lương: từ 20 triệu đồng/tháng tại Hà Nội hoặc TP.HCM, từ 15 triệu tại tỉnh thành khác, theo sao kê 3 tháng gần nhất. Hồ sơ gồm đơn kiêm hợp đồng, giấy tờ định danh còn hiệu lực, hợp đồng lao động và sao kê đối với diện chứng minh thu nhập; mã hội viên dặm bay nếu có. Điều 4 cũng có diện khách Priority hoặc tài sản bảo đảm theo điều kiện riêng.",
+      "must_include": [
+        "Hà Nội/TP.HCM 20 triệu, tỉnh khác 15 triệu đồng/tháng",
+        "Sao kê lương 3 tháng và hợp đồng lao động",
+        "Đơn kiêm hợp đồng, giấy tờ định danh"
+      ]
+    },
+    {
+      "id": "THE-172",
+      "question_sha256": "b1a7bf0c7db6c89bece5c6f58446b91125316842f8d724331cebcc700680875b",
+      "original_reference_sha256": "1f54808bcda04d95381797b09e15590290f8d323d39e41d74eafbe9d6ce1b081",
+      "source": "A_Bank/2. Chương trình thẻ/THE 22 Quy định sản phẩm thẻ tín dụng tích lũy dặm bay Air Miles Visa.docx",
+      "source_sha256": "b4b204188337506c2e1096c8be9590cd7692ab1dd70558a3cf7961d0b440dc94",
+      "locator": "Điều 7, ghi chú dưới bảng phí",
+      "finding": "Điều 7 ghi ngưỡng 150 triệu trong 12 tháng và chưa liệt kê các loại giao dịch bị loại.",
+      "reference_answer": "Điều 7 miễn 100% phí thường niên năm sau nếu đạt ít nhất 150 triệu đồng doanh số chi tiêu hợp lệ trong 12 tháng của năm tài chính liền trước. Điều 7 không liệt kê danh sách giao dịch loại trừ.",
+      "must_include": [
+        "150 triệu đồng doanh số hợp lệ",
+        "12 tháng năm tài chính liền trước",
+        "Miễn 100% phí năm sau",
+        "Điều 7 chưa nêu danh sách giao dịch loại trừ"
+      ]
+    },
+    {
+      "id": "THE-177",
+      "question_sha256": "1a6d8d0f864318cf847ad932b6037a895ceeba7eccf740b6fc8f6179a1be9418",
+      "original_reference_sha256": "25c7d7cffa2f4883560d1aded9478d4ca52ee745dc7f069146658c6beb3caf90",
+      "source": "A_Bank/2. Chương trình thẻ/THE 23 Quy chế phát hành thẻ tín dụng bảo đảm bằng sổ tiết kiệm Secured Card.docx",
+      "source_sha256": "ee51e818cd2a129f5b11a5f42f3d0a7d6b4cb6f9787289a2e8d4985951fbd16f",
+      "locator": "Sơ đồ 3; Điều 9, 10 và 12",
+      "finding": "Điều 9 mới là điều quy định tự động tái tục. Điều 12 trong nguồn hiện hành nói về mục tiêu chuyển đổi sang thẻ tín chấp.",
+      "reference_answer": "Theo Điều 9 của THE 23, khi sổ cầm cố đáo hạn mà thẻ vẫn còn hiệu lực, Core Banking tự động tái tục sổ sang kỳ hạn tương đương theo lãi suất niêm yết ngày tái tục. Lãi kỳ trước chuyển vào tài khoản thanh toán hoặc nhập gốc theo phương thức đã chọn. Thẻ vẫn hoạt động, hạn mức chi tiêu không gián đoạn. Điều 10 quy định riêng về cấn trừ khi nợ quá hạn kéo dài quá 60 ngày. Điều 12 nói về mục tiêu chuyển đổi thẻ, không phải quy định tái tục.",
+      "must_include": [
+        "Điều 9: Core Banking tự động tái tục sang kỳ hạn tương đương",
+        "Áp dụng lãi suất ngày tái tục",
+        "Lãi kỳ trước chuyển tài khoản thanh toán hoặc nhập gốc theo lựa chọn",
+        "Thẻ và hạn mức chi tiêu tiếp tục hoạt động"
+      ]
+    },
+    {
+      "id": "THE-179",
+      "question_sha256": "41e4e5a43d3854e0409c1cc558ee0264266a2c3495382a2d0aeaa6b436627048",
+      "original_reference_sha256": "1c72798e184c0a071454ec14821574e7ad3aeb2ee60bc4882f3fd1d542a9faf1",
+      "source": "A_Bank/2. Chương trình thẻ/THE 23 Quy chế phát hành thẻ tín dụng bảo đảm bằng sổ tiết kiệm Secured Card.docx",
+      "source_sha256": "ee51e818cd2a129f5b11a5f42f3d0a7d6b4cb6f9787289a2e8d4985951fbd16f",
+      "locator": "Điều 10, khoản 2",
+      "finding": "Trường hợp quá 90 ngày đã vượt ngưỡng quá 60 ngày của Điều 10. Không dùng mốc 90 ngày làm điều kiện kích hoạt.",
+      "reference_answer": "Theo Điều 10, không trả nợ và quá hạn kéo dài quá 60 ngày thì ABank có quyền cấn trừ theo thỏa thuận cầm cố. Trường hợp đã quá 90 ngày thỏa mốc này. Ngân hàng trích từ tiền gốc và lãi của sổ đang phong tỏa để thanh toán nợ gốc, lãi và phí; phần dư sau khi trả hết nghĩa vụ được giải tỏa và chuyển vào tài khoản thanh toán.",
+      "must_include": [
+        "Điều 10: quá hạn kéo dài quá 60 ngày",
+        "Cấn trừ gốc và lãi sổ cho nợ gốc, lãi, phí",
+        "Giải tỏa và trả phần dư sau khi hoàn thành nghĩa vụ"
+      ]
+    },
+    {
+      "id": "THE-185",
+      "question_sha256": "4dd4d2bba6e138b1350e407e34466e03353a7df1896bcb56a4ebbe863778276c",
+      "original_reference_sha256": "d5ec88f892d6109bb099b232dc8373ca1e7ff08dc902064fa2ce725ee16ec18d",
+      "source": "A_Bank/2. Chương trình thẻ/THE 24 Quy định sản phẩm thẻ tín dụng siêu thị Mart Visa Platinum.docx",
+      "source_sha256": "96465c0cccd771e840e6b2dea5a6cc69ec998b7f64d95ae480b9618af381e229",
+      "locator": "Điều 4; mục giới thiệu sản phẩm",
+      "finding": "Điều 4 ghi hạn mức tối đa 500 triệu. Phần giới thiệu xác định nhóm gia đình và người thường mua hàng tại siêu thị.",
+      "reference_answer": "Thẻ ABank Mart Visa Platinum có hạn mức tín dụng từ 20 triệu đến 500 triệu đồng. Sản phẩm hướng tới các gia đình hiện đại, người nội trợ và khách thường mua thực phẩm, nhu yếu phẩm tại siêu thị, cửa hàng tiện lợi hoặc chuỗi bán lẻ.",
+      "must_include": [
+        "20 triệu đến 500 triệu đồng",
+        "Gia đình, nội trợ hoặc khách thường mua hàng tại siêu thị/chuỗi bán lẻ"
+      ]
+    },
+    {
+      "id": "THE-188",
+      "question_sha256": "41b743fe94d539600756479de57c6e21a0d4d9ea6b79ff961742dc327989736a",
+      "original_reference_sha256": "1150c23ef27230b5480bdb1afefd68557fde7620e2faff50bda42bf1ef67915e",
+      "source": "A_Bank/2. Chương trình thẻ/THE 25 Quy chế phát hành và quản lý thẻ đồng thương hiệu Co-Branded Card.docx",
+      "source_sha256": "7e1382c42455af926e6ecc7a9310069f7ed82ed8676754295b849aae70fe8728",
+      "locator": "Điều 6, khoản 1–2",
+      "finding": "Điều 6 ghi phí thường niên 70/30, MDR trong mạng và tỷ lệ theo doanh số ngoài mạng.",
+      "reference_answer": "Phí thường niên chia ABank 70% và đối tác 30% theo hợp đồng liên minh, hoặc trích toàn bộ vào quỹ truyền thông chung. Giao dịch trong hệ thống đối tác áp MDR ưu đãi 0,8–1,2%. Giao dịch ngoài hệ thống chia 0,3–0,5% trên tổng doanh số thanh toán cho đối tác để chi quyền lợi tích điểm.",
+      "must_include": [
+        "ABank 70%, đối tác 30% hoặc quỹ chung",
+        "MDR trong hệ thống đối tác 0,8–1,2%",
+        "Ngoài hệ thống chia 0,3–0,5% doanh số"
+      ]
+    },
+    {
+      "id": "THE-189",
+      "question_sha256": "cf3bc5230484a555d091b52e8b4c990e08bc686bbff0b4844e24ba277fc53425",
+      "original_reference_sha256": "81f5c15a46dffbd53119d8f565bbc5b536a3282e662183da808ef87d461e4b6d",
+      "source": "A_Bank/2. Chương trình thẻ/THE 25 Quy chế phát hành và quản lý thẻ đồng thương hiệu Co-Branded Card.docx",
+      "source_sha256": "7e1382c42455af926e6ecc7a9310069f7ed82ed8676754295b849aae70fe8728",
+      "locator": "Điều 4, ba nhóm tiêu chuẩn",
+      "finding": "Điều 4 trực tiếp liệt kê ba nhóm tiêu chuẩn, không có nhóm báo cáo kiểm toán hai năm.",
+      "reference_answer": "Đối tác phải hoạt động hợp pháp tại Việt Nam ít nhất 3 năm, có uy tín dẫn đầu ngành và không có tranh chấp nghiêm trọng hoặc bê bối ảnh hưởng ABank. Tệp khách hàng thân thiết ít nhất 500.000 thành viên và mạng lưới rộng tại các tỉnh, thành lớn. Hệ thống CRM/loyalty phải kết nối API an toàn theo thời gian thực với Core Banking/ABank Digital, đáp ứng ISO 27001 và PCI DSS.",
+      "must_include": [
+        "Ít nhất 3 năm hoạt động hợp pháp và uy tín",
+        "Ít nhất 500.000 khách thân thiết và mạng lưới rộng",
+        "CRM/loyalty kết nối API bảo mật, ISO 27001 và PCI DSS"
+      ]
+    },
+    {
+      "id": "THE-190",
+      "question_sha256": "22f4dc17e4c30555b8f7654382be0e68a84b077416772513ffbc14eac4fb28f1",
+      "original_reference_sha256": "c82696133595f1dba53021aff050098b76714073510375eeebccbce1672b0283",
+      "source": "A_Bank/2. Chương trình thẻ/THE 25 Quy chế phát hành và quản lý thẻ đồng thương hiệu Co-Branded Card.docx",
+      "source_sha256": "7e1382c42455af926e6ecc7a9310069f7ed82ed8676754295b849aae70fe8728",
+      "locator": "Hình tương tác Chương IV (word/media/image3.png)",
+      "finding": "Thứ tự hình: thiết kế ABank, đối tác/logo và Mastercard, duyệt kỹ thuật, đạt chuẩn EMV/NFC.",
+      "reference_answer": "Sơ đồ bắt đầu ở Phòng Thiết kế/Bộ phận Thương hiệu ABank dựng layout phôi; đối tác chiến lược thống nhất vị trí logo và màu sắc, hình ghi Mastercard phê duyệt; sau đó phê duyệt tiêu chuẩn kỹ thuật và kiểm thử POS ở nhà máy sản xuất; kết thúc ở phôi đạt chuẩn EMV và NFC.",
+      "must_include": [
+        "Bộ phận thương hiệu ABank dựng layout",
+        "Đối tác thống nhất logo và màu sắc, Mastercard phê duyệt",
+        "Duyệt kỹ thuật và kiểm thử POS",
+        "Đạt chuẩn EMV và NFC"
+      ]
+    },
+    {
+      "id": "PL-179",
+      "question_sha256": "961c2b938f38edb704e93438cd906cdefa37267e1193435d3411d165db1b814f",
+      "original_reference_sha256": "7039d85f3d6652e799fd84456d3d29fb9cbeed8312ffb9700f207385e07fe251",
+      "source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 24 Quy định về kiểm toán độc lập và công bố thông tin báo cáo tài chính.docx",
+      "source_sha256": "5088b082e952ae7c62e2a4f05cf17e0a8a693b039152482fd68cbe4af29af405",
+      "locator": "PL 24, Chương III, Bảng lịch trình các đợt kiểm toán",
+      "finding": "Bảng ghi tháng 07 cho soát xét bán niên và tháng 01 đến tháng 03 năm sau cho kiểm toán năm. Bảng cũng ghi đầu ra và nơi nhận.",
+      "reference_answer": "Đợt 2 soát xét BCTC bán niên riêng lẻ và hợp nhất trong tháng 7 hằng năm. Đầu ra là báo cáo kết quả soát xét BCTC bán niên công bố UBCKNN. Đợt 3 kiểm toán BCTC năm trong tháng 1 đến tháng 3 năm sau. Đầu ra là báo cáo kiểm toán độc lập chính thức gửi NHNN và Đại hội đồng cổ đông thường niên.",
+      "must_include": [
+        "Bán niên: tháng 7, báo cáo kết quả soát xét công bố UBCKNN",
+        "Năm: tháng 1–3 năm sau, báo cáo kiểm toán độc lập chính thức"
+      ]
+    },
+    {
+      "id": "THE-200",
+      "question_sha256": "a5802a3598f08b0c0b610a4c6d1209950966c6034c257e5e6108e39bbdb7db4c",
+      "original_reference_sha256": "07071063ce8478a682e2caca5a32310a1f58c6de1072e0796e77117f966c5b5b",
+      "source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+      "source_sha256": "4e7b4fe1373fc61f245bc8cfa46c357897144b556cdda1b1fc043f7b1c535989",
+      "locator": "THE 26, Điều 10",
+      "finding": "Điều 10 liệt kê bốn căn cứ, gồm gian dối hồ sơ và quẹt thẻ khống. Các tình huống PIN, FMS và văn bản cưỡng chế trong tham chiếu cũ không nằm trong danh sách này.",
+      "reference_answer": "Theo Điều 10 THE 26, các trường hợp gồm (1) thẻ tín dụng quá hạn từ 30 ngày và chưa trả khoản tối thiểu, (2) phát hiện thông tin hoặc giấy tờ giả mạo khi đăng ký phát hành, (3) giao dịch có bằng chứng liên quan đến tội phạm, rửa tiền, cờ bạc hoặc các hành vi bị cấm, (4) quẹt thẻ khống tại POS để rút tiền mặt.",
+      "must_include": [
+        "Quá hạn từ 30 ngày và chưa trả khoản tối thiểu",
+        "Thông tin hoặc giấy tờ đăng ký giả mạo",
+        "Giao dịch có bằng chứng liên quan đến hành vi bị cấm",
+        "Quẹt thẻ khống tại POS để rút tiền mặt"
+      ]
+    },
+    {
+      "id": "PL-017",
+      "question_sha256": "2bcdbf483f8777d7b50998947a80ef27c2d7cfdc38434963a668992ea489486b",
+      "original_reference_sha256": "4531604bf0c77f3a17e1819ba5bd22f74778bf641216d1083319481b7b15d209",
+      "source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 03 Quy định phòng chống rửa tiền và tài trợ khủng bố toàn hệ thống.docx",
+      "source_sha256": "d149e9d202b11e3839d17a979c53d6cd869e4628179f7e49d8fa92be142648b1",
+      "locator": "PL 03, Điều 8, ma trận đánh giá rủi ro rửa tiền, hàng Khách hàng",
+      "finding": "Ma trận đặt ngành nghề ở một hàng độc lập. Hàng Khách hàng có tiêu chí, trọng số và mức rủi ro thấp riêng.",
+      "reference_answer": "Nhóm Khách hàng có tiêu chí Tư cách pháp lý và Danh tính PEP với trọng số 30%. Mức rủi ro thấp áp dụng cho công dân Việt Nam có việc làm ổn định và nhận lương qua tài khoản.",
+      "must_include": [
+        "Tư cách pháp lý và Danh tính PEP, trọng số 30%",
+        "Công dân Việt Nam có việc làm ổn định, nhận lương qua tài khoản"
+      ]
+    },
+    {
+      "id": "THE-005",
+      "question_sha256": "9ff4d05450e215abe2ac6a7ff0d759582f20a071544cdc5cfd0c58f29f021c03",
+      "original_reference_sha256": "5d0c52256df601c40b44d4e1e08a2d84b17c0e0c6ec2ebe7100ccf665b580339",
+      "source": "A_Bank/2. Chương trình thẻ/THE 01 Quy định chung sản phẩm thẻ ghi nợ và thẻ tín dụng.docx",
+      "source_sha256": "fb6386141551bd3b5d380a2d6c4dc06f1d31bd99acbcb16e0122d5bbd4afc988",
+      "locator": "THE 01, Điều 11",
+      "finding": "Trình tự trong điều khoản là chọn thẻ, đối chiếu sinh trắc học và CMS cấp thẻ trong 30 giây.",
+      "reference_answer": "Trong ABank Digital, vào Dịch vụ Thẻ rồi chọn Phát hành thẻ mới. Chọn thẻ ghi nợ Napas ảo hoặc Visa Platinum đã phê duyệt trước. Khách hàng xác thực khuôn mặt sinh trắc học đối chiếu với dữ liệu quốc gia. CMS sinh số thẻ ảo ngẫu nhiên, mã hóa và hiển thị thẻ ở trạng thái hoạt động trong vòng 30 giây. Sau đó có thể liên kết ví thanh toán.",
+      "must_include": [
+        "Dịch vụ Thẻ → Phát hành thẻ mới → chọn thẻ ảo phù hợp",
+        "Đối chiếu sinh trắc học khuôn mặt với dữ liệu quốc gia",
+        "CMS sinh số, mã hóa và hiển thị thẻ hoạt động trong 30 giây"
+      ]
+    },
+    {
+      "id": "THE-036",
+      "question_sha256": "12822054f187f891b37cbabb6b76504e8f85ee6cad0b0ad9be7ad2279588e252",
+      "original_reference_sha256": "03c6e8d09d9deb55364ff8326b532918fd3740f657fd424e2a545f8d72454542",
+      "source": "A_Bank/2. Chương trình thẻ/THE 05 Quy chế phát hành và quản lý thẻ ghi nợ quốc tế Mastercard Debit.docx",
+      "source_sha256": "ce72185d89f3fc8e93996fcbfbf8a69fd1b6c38d58ff2cb79073ae5bbc1c2720",
+      "locator": "THE 05, Hình 2 (word/media/image2.png)",
+      "finding": "Nội dung trong hình bắt đầu từ ABank Digital, xác thực khuôn mặt ở bước 3 và đồng ý điều khoản ở bước 4.",
+      "reference_answer": "Theo Hình 2, (1) mở ABank Digital và chọn thẻ Mastercard Debit, (2) bấm Thêm vào Apple Wallet khi dùng Apple Pay, (3) xác thực khuôn mặt eKYC trên app, (4) đồng ý điều khoản sử dụng thẻ số hóa của Mastercard, (5) thẻ được số hóa thành công, sẵn sàng chạm iPhone hoặc Apple Watch để thanh toán.",
+      "must_include": [
+        "Mở ABank Digital và chọn Mastercard Debit",
+        "Bấm Thêm vào Apple Wallet",
+        "Xác thực khuôn mặt eKYC trên app",
+        "Đồng ý điều khoản thẻ số hóa của Mastercard",
+        "Số hóa thành công, có thể chạm iPhone hoặc Apple Watch để thanh toán"
+      ]
+    },
+    {
+      "id": "THE-149",
+      "question_sha256": "ef4b0ce311c94bb90d7f07ac3e6f1c2865f6c1ee0b455e73f63e4ce421930b29",
+      "original_reference_sha256": "f02402ad5134ccf41d734fac88881e19f53257ad5103cd6a1f50f45b63411c9c",
+      "source": "A_Bank/2. Chương trình thẻ/THE 19 Quy chế phát hành và sử dụng thẻ tín dụng Hoàn tiền Xăng dầu Auto Visa.docx",
+      "source_sha256": "96a657639075dc8e74b377c6a2d084580922d9f1a02f81a33081a813f30cace9",
+      "locator": "THE 19, Điều 11, quy trình kích hoạt RSA 24/7",
+      "finding": "Quy trình nằm ở Điều 11. Điều này ghi tổng đài và thời gian đến theo khu vực.",
+      "reference_answer": "Quy trình kích hoạt RSA nằm ở Điều 11. Gọi tổng đài cứu hộ 24/7 số 1800 1234 và bấm phím 6. Cung cấp họ tên chủ thẻ, bốn số cuối thẻ, biển số đã đăng ký và vị trí xe chính xác. Đơn vị cứu hộ đến trong khoảng 30–45 phút tại nội thành hoặc tối đa 60 phút trên quốc lộ liên tỉnh.",
+      "must_include": [
+        "1800 1234, phím 6, hỗ trợ 24/7",
+        "Họ tên, bốn số cuối thẻ, biển số đã đăng ký, vị trí chính xác",
+        "Nội thành 30–45 phút, quốc lộ liên tỉnh tối đa 60 phút"
+      ]
+    },
+    {
+      "id": "THE-029",
+      "question_sha256": "223a212de8cfae7c530bc0c57c7da4691c35f841b4203abd0956a088df28296d",
+      "original_reference_sha256": "c6999e8c738e5a6f09f744a3d8fa91503091f009bba96a6db40aac6bb76b1fb2",
+      "source": "A_Bank/2. Chương trình thẻ/THE 04 Quy định sản phẩm thẻ ghi nợ nội địa Napas Chip Contactless.docx",
+      "source_sha256": "cafce81ba19a14f5dd000521c38ccde85a035aaa80fe87445e8440706c51531f",
+      "locator": "THE 04, Hình 2 (word/media/image2.png)",
+      "finding": "Hình có năm bước. Nhập mã PIN đứng trước quét khuôn mặt, Smart OTP ở bước cuối.",
+      "reference_answer": "Vào Quản lý thẻ trong ABank Digital, chọn Cấp/Đổi mã PIN thẻ, nhập mã PIN mới gồm sáu chữ số, quét xác thực khuôn mặt sinh trắc học, rồi xác nhận bằng Smart OTP. Mã PIN mới có hiệu lực ngay sau xác nhận. Hai lớp xác thực trong hình là sinh trắc học khuôn mặt và Smart OTP.",
+      "must_include": [
+        "Quản lý thẻ → Cấp/Đổi mã PIN thẻ → nhập sáu chữ số",
+        "Quét khuôn mặt sau khi nhập mã PIN mới",
+        "Xác nhận Smart OTP, mã PIN có hiệu lực ngay"
+      ]
+    },
+    {
+      "id": "PL-159",
+      "question_sha256": "cb8802c5e5c91ac13c6238e4133908e70c425afb67145a043d7750f85bd5543a",
+      "original_reference_sha256": "77c32d737fdacd484b9d327c73abe512b3f4d95c5667fba859056ba6ac92c701",
+      "source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 21 Quy chế bảo vệ người tiêu dùng dịch vụ tài chính theo Luật TCTD 2024.docx",
+      "source_sha256": "08da96fe3b26ad0f47fac38ee063b2142ece145dad78b4d3d9d8bc76babd50e9",
+      "locator": "PL 21, Chương II, Hình người tiêu dùng dịch vụ tài chính (word/media/image1.png)",
+      "finding": "Tiêu đề chương ghi tám quyền, còn sơ đồ được hỏi ghi sáu ô đánh số và sáu quyền.",
+      "reference_answer": "Sơ đồ có sáu quyền: được thông tin, tự do lựa chọn, an toàn dữ liệu, bồi thường, khiếu nại độc lập và được giải trình lý do. Tiêu đề Chương II ghi tám quyền, nhưng hình được hỏi chỉ thể hiện sáu mục.",
+      "must_include": [
+        "Sơ đồ thể hiện sáu quyền",
+        "Được thông tin, tự do lựa chọn, an toàn dữ liệu",
+        "Bồi thường, khiếu nại độc lập, giải trình lý do"
+      ]
+    },
+    {
+      "id": "THE-112",
+      "question_sha256": "b6e701a2e28509be1553fb5d0b3c30672fce5bcd8f2fff60ae81940ea4329c2f",
+      "original_reference_sha256": "676e6da36a132b3a1373025cd5b904d55c30ed4e0d4258e446b7833adb8a3a2f",
+      "source": "A_Bank/2. Chương trình thẻ/THE 14 Quy định sản phẩm thẻ tín dụng xanh bảo vệ môi trường Eco Visa.docx",
+      "source_sha256": "26eadfc1acbedc800ffc85965f1723e42a2527a8823815bf18a23bc22f3f303e",
+      "locator": "THE 14, Điều 12",
+      "finding": "Điều 12 ghi hai điều kiện thay thế nhau và miễn năm đầu cho mọi thẻ.",
+      "reference_answer": "Năm đầu miễn phí thường niên cho mọi chủ thẻ. Từ năm thứ hai, mỗi kỳ xét miễn phí áp dụng nếu tổng doanh số chi tiêu năm trước từ 30 triệu đồng hoặc có ít nhất 20 giao dịch thuộc danh mục xanh, như sạc xe điện, vé xe buýt hoặc thực phẩm hữu cơ.",
+      "must_include": [
+        "Từ năm thứ hai: doanh số chi tiêu năm trước từ 30 triệu đồng hoặc ít nhất 20 giao dịch xanh"
+      ]
+    },
+    {
+      "id": "THE-103",
+      "question_sha256": "1066950efb97a1e98d68acfedbd7e87a51600d977735db19ce05524deba808f8",
+      "original_reference_sha256": "64f0d0bf4fcd0e0443ee0df5462144ce7eacf61729f9628c2facc3926ad0ab99",
+      "source": "A_Bank/2. Chương trình thẻ/THE 13 Quy định sản phẩm thẻ tín dụng sinh viên Edu Visa.docx",
+      "source_sha256": "92690019b50e588067967b96530daa95fd0534207f60b319d127caee3180c07f",
+      "locator": "THE 13, Điều 10 và Điều 13",
+      "finding": "Điều 10 là Youth Spending Guard. Điều 13 ghi phương thức nhắc nợ, không thấy quy trình thông báo phụ huynh hoặc nhà trường trong hai điều.",
+      "reference_answer": "Điều 10 quy định kiểm soát chi tiêu, còn quy trình nhắc nợ nằm ở Điều 13. Ứng dụng gửi thông báo trước hạn 7, 3 và 1 ngày. Khi quá hạn từ ngày 1 đến ngày 9, nhân viên liên hệ để nhắc thanh toán số tiền tối thiểu. Hai điều này không nêu quy trình báo cho phụ huynh hoặc nhà trường.",
+      "must_include": [
+        "Điều 10 là kiểm soát chi tiêu; Điều 13 quy định nhắc nợ",
+        "Nhắc trên app trước hạn 7, 3 và 1 ngày",
+        "Quá hạn ngày 1–9, nhân viên liên hệ nhắc thanh toán tối thiểu",
+        "Không có quy trình báo phụ huynh hoặc nhà trường trong hai điều được đối chiếu"
+      ]
+    },
+    {
+      "id": "PL-091",
+      "question_sha256": "1c73fa48088ee2b53e52b3682ce0f27b05fe614ee0523a2f2437be7ef520d085",
+      "original_reference_sha256": "7b364b5ad43067b2ecf7d87aedd2ddac08470ab07fa267fa17b8e961d62cc82a",
+      "source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 12 Quy định về tỷ lệ an toàn thanh khoản LCR và tỷ lệ NSFR theo chuẩn Basel III.docx",
+      "source_sha256": "b73e45d37aa3c7b8fe85c9d40e1ed5d01d0e2dc953af7d423ab11ab9de51e6ed",
+      "locator": "PL 12, Điều 16, bảng các cấp độ cảnh báo thanh khoản",
+      "finding": "Bảng xếp mức 3 là Da cam và mức 4 là Đỏ. Ngưỡng NSFR và biện pháp khác nhau.",
+      "reference_answer": "Cấp 3 trong bảng là Báo động Da cam. LCR từ 100% đến dưới 105%, NSFR từ 98% đến dưới 100%. ALCO họp khẩn, tăng cường huy động vốn và thu hẹp tăng trưởng tín dụng. Cấp 4 mới là Khẩn cấp Đỏ, với LCR dưới 100%, NSFR dưới 98% và kích hoạt CFP Committee.",
+      "must_include": [
+        "Cấp 3 Da cam: 100% ≤ LCR < 105% và 98% ≤ NSFR < 100%",
+        "ALCO họp khẩn, tăng huy động vốn, thu hẹp tăng trưởng tín dụng",
+        "Cấp 4 Đỏ: LCR < 100%, NSFR < 98%, kích hoạt CFP Committee"
+      ]
+    },
+    {
+      "id": "THE-010",
+      "question_sha256": "1f6570aca47645b806f2695405ea7269659566b3915507f692af35ad7c86d4c7",
+      "original_reference_sha256": "44b96f85fd0a347f608c3a2ed38a1d592b8a121e38208667f9b28657bfe6dfea",
+      "source": "A_Bank/2. Chương trình thẻ/THE 02 Quy chế phát hành và sử dụng thẻ tín dụng quốc tế Visa Platinum.docx",
+      "source_sha256": "745a3d9daa374832e08739e086a237d1a4e15416f3095beb6b48b2d12ae46656",
+      "locator": "THE 02, Điều 8 dẫn tới bảng Phụ lục I, dòng VPL02–VPL03; FAQ Chương XI câu 4",
+      "finding": "Bảng ghi 80 triệu/năm cho thẻ chính và chỉ ưu đãi năm đầu tối đa hai thẻ phụ. FAQ riêng ghi 60 triệu và Diamond Privilege cho thẻ chính. Tham chiếu đưa thêm ngưỡng 40 triệu cho thẻ phụ.",
+      "reference_answer": "Theo bảng biểu phí Phụ lục I, phí thường niên thẻ chính là 800.000 đồng/năm; miễn năm đầu và các năm tiếp theo khi chi tiêu từ 80 triệu đồng/năm. Thẻ phụ có phí 400.000 đồng/thẻ/năm; miễn năm đầu cho tối đa hai thẻ phụ. Bảng không nêu điều kiện miễn phí cho thẻ phụ các năm sau. FAQ Chương XI ghi riêng ngưỡng 60 triệu đồng với thẻ chính và miễn trọn đời cho Diamond Privilege, khác với ngưỡng trong bảng.",
+      "must_include": [
+        "Thẻ chính 800.000 đồng/năm, miễn năm đầu và các năm sau nếu chi tiêu từ 80 triệu đồng theo bảng",
+        "Thẻ phụ 400.000 đồng/thẻ/năm, miễn năm đầu tối đa hai thẻ phụ",
+        "Bảng không quy định ngưỡng miễn phí các năm tiếp theo cho thẻ phụ"
+      ]
+    },
+    {
+      "id": "PL-083",
+      "question_sha256": "cca98675baa7b5795203bba6ecc6ecdce23499957b98e8d240ec353cdac493a6",
+      "original_reference_sha256": "d8aac28c49e276b7b1c679ebfd414dd39c9ea180d650e90fccf57773841175c2",
+      "source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 11 Quy chế kiểm soát giao dịch với người có liên quan theo Luật TCTD 2024.docx",
+      "source_sha256": "097828f9482b97bedaf8c7de66f713ed299cdefdb3c027ca3d87b62c6f83d0f0",
+      "locator": "PL 11, Điều 11 và Hình 2 (word/media/image2.png)",
+      "finding": "Điều 11 quy định đa số thành viên HĐQT không có lợi ích liên quan, không ghi ngưỡng 3/4. Hình 2 tách vai trò Thẩm định và Quản trị Rủi ro với Pháp chế.",
+      "reference_answer": "Hình 2 quy định Khối Thẩm định và Quản trị Rủi ro đánh giá tính độc lập thị trường, Khối Pháp chế kiểm tra xung đột lợi ích và rà soát hợp đồng, rồi trình HĐQT. Theo Điều 11, HĐQT phê duyệt giao dịch dưới 20% vốn điều lệ hoặc cấp tín dụng trong hạn mức luật định; Đại hội đồng cổ đông duyệt giao dịch từ 20% vốn điều lệ hoặc làm tổng giao dịch 12 tháng với đối tượng vượt 20%. Quyết định của HĐQT cần đa số thành viên không có lợi ích liên quan tán thành.",
+      "must_include": [
+        "Thẩm định và Quản trị Rủi ro đánh giá thị trường, Pháp chế kiểm tra xung đột",
+        "HĐQT và Đại hội đồng cổ đông theo ngưỡng 20%",
+        "Đa số thành viên HĐQT không có lợi ích liên quan tán thành"
+      ]
+    },
+    {
+      "id": "PL-188",
+      "question_sha256": "eb022c99f5b9ea2db35c64bfbd85b9a263f12a2bc9fd704283fbefe854dd51f9",
+      "original_reference_sha256": "5808956434a410b2b389783193c04eaa8f45d509d264dbc8b3a888c37f5e0435",
+      "source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 25 Quy chế ứng phó khủng hoảng truyền thông và bảo vệ uy tín ngân hàng.docx",
+      "source_sha256": "3aeed60f63b912679c95fbf2f86a717fe8173cf25e77b3348c7eaafb674b3921",
+      "locator": "PL 25, sơ đồ tiếp nhận phóng viên (word/media/image2.png), Điều 6–7",
+      "finding": "Điều 6 liệt kê Tổng Giám đốc, Phó Tổng Giám đốc phụ trách Truyền thông và điều kiện hẹp cho Giám đốc Chi nhánh. Sơ đồ và Điều 7 chỉ định Phòng Quan hệ Báo chí.",
+      "reference_answer": "Chỉ người phát ngôn chính thức được nhân danh ABank cung cấp thông tin cho báo chí. Điều 6 nêu Tổng Giám đốc, Phó Tổng Giám đốc phụ trách Truyền thông, và Giám đốc Chi nhánh chỉ với vụ việc tại địa bàn khi Trụ sở chính đã duyệt nội dung bằng văn bản. Cán bộ nhân viên không tự ý trả lời phỏng vấn, không chia sẻ tài liệu nội bộ hoặc đăng bình luận về vụ việc. Khi phóng viên tiếp cận, hướng dẫn họ tới đầu mối duy nhất là Phòng Quan hệ Báo chí, Trụ sở chính.",
+      "must_include": [
+        "Tổng Giám đốc và Phó Tổng Giám đốc phụ trách Truyền thông",
+        "Giám đốc Chi nhánh chỉ với vụ việc cục bộ đã được duyệt bằng văn bản",
+        "Nhân viên không tự phỏng vấn, không chia sẻ tài liệu nội bộ hoặc bình luận về vụ việc",
+        "Đầu mối Phòng Quan hệ Báo chí tại Trụ sở chính"
+      ]
+    },
+    {
+      "id": "SPEC-172",
+      "question_sha256": "32f9cb2595248ec22ba09770e8fe5ea1928ad4c0dd7cc3ab3d7508d7c0a943a5",
+      "original_reference_sha256": "632b0c5d2648c51f961bc879df08efda6aef3a95ca62f4f31a9a22af0e1b7fed",
+      "source": "A_Bank/7. Quy trình vận hành và SLA/VH 02 Hướng dẫn xử lý tình huống Tổng đài chăm sóc khách hàng.pdf",
+      "source_sha256": "e8dadae7e66b5ac554e372ef9112085b71fc8a781ca31d56def80dfa46a5d062",
+      "locator": "VH 02, Mục 17, phạm vi hỗ trợ của A-Smart",
+      "finding": "Mục 17 phiên bản hiện hành gọi trợ lý là A-Smart và giới hạn hỗ trợ ở dịch vụ phi tài chính. Căn cứ bắt buộc được nêu là xác thực chính chủ nghiêm ngặt theo quy định ngân hàng.",
+      "reference_answer": "Mục 17 gọi trợ lý là A-Smart. A-Smart chỉ hỗ trợ dịch vụ phi tài chính trong phạm vi A-Bank cho phép, như khóa thẻ khẩn cấp hoặc cấp lại mật khẩu app. Mọi tác vụ được hỗ trợ đều yêu cầu xác thực thông tin chính chủ nghiêm ngặt theo quy định ngân hàng. Mục 17 không cho A-Smart tự thực hiện trích nợ, chuyển tiền hay thay đổi thông tin định danh chủ tài khoản.",
+      "must_include": [
+        "Chỉ dịch vụ phi tài chính trong phạm vi cho phép",
+        "Xác thực thông tin chính chủ nghiêm ngặt",
+        "Không tự trích nợ, chuyển tiền hoặc thay đổi định danh"
+      ]
+    }
+  ],
+  "reviewed_without_correction": [
+    {
+      "id": "THE-064",
+      "status": "false_positive",
+      "finding": "The reference already rejects the premise of a single payment and specifies monthly principal installments."
+    },
+    {
+      "id": "THE-128",
+      "status": "false_positive",
+      "finding": "Article 5 limits Lady Visa eligibility to women. FAQ 6 permits a man to open his own ABank card and request a Lady Visa supplementary card for a woman, rather than issue a primary Lady Visa card to himself."
+    },
+    {
+      "id": "PL-081",
+      "status": "external_authority_needed",
+      "finding": "The internal table and reference differ on damage thresholds. The original asks about the Criminal Code. The evaluator leaves this unresolved pending authoritative legal reconciliation."
+    },
+    {
+      "id": "PL-085",
+      "status": "external_authority_needed",
+      "finding": "The internal document and reference differ on the ownership threshold. The question asks directly about national law. The evaluator leaves this unresolved pending authoritative legal reconciliation."
+    },
+    {
+      "id": "THE-018",
+      "status": "source_internal_conflict",
+      "finding": "Câu hỏi chỉ định Bảng 2 và Bảng 4. Hai bảng hỗ trợ kết quả 675.000 đồng. Điều 20 của cùng tài liệu ghi bộ tỷ lệ khác, cần chỉnh tại tài liệu trước khi diễn giải thành chính sách thống nhất."
+    },
+    {
+      "id": "PL-084",
+      "status": "external_authority_needed",
+      "finding": "Điều 9 PL 11 và tham chiếu có phạm vi đối tượng khác nhau. Câu hỏi viện dẫn đồng thời luật quốc gia và quy chế nội bộ. Cần đối chiếu cả hai căn cứ trước khi sửa tiêu chí chấm."
+    }
+  ]
+}

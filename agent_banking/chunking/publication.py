@@ -4,12 +4,24 @@ import hashlib
 import json
 from pathlib import Path, PureWindowsPath
 
+from .config.settings import get_config_section, get_rules
 from .publication_io import atomic_bytes, atomic_json, content_hash, file_hash, read_verified_json
 from .universal.planning.schema import validate_chunk_sequence
 
+_PUB_RULES = get_rules("publication")
+_PIPELINE_CFG = get_config_section("pipeline")
 
-SUCCESS_STATUSES = {"SUCCESS", "SKIPPED_ALREADY_PROCESSED", "MANUALLY_EDITED"}
-ASSET_REFERENCES = (("path", "sha256"), ("visual_path", "visual_sha256"))
+SUCCESS_STATUSES = set(_PUB_RULES["success_statuses"])
+ASSET_REFERENCES = tuple(tuple(pair) for pair in _PUB_RULES["asset_references"])
+_SCHEMA_VERSION = _PUB_RULES["schema_version"]
+_DOCUMENT_ID_HEX_LENGTH = _PUB_RULES["document_id_hex_length"]
+_PREFIX_HASH_LENGTH = _PUB_RULES["prefix_hash_length"]
+_RETIRED_EXTRACTION_METHODS = tuple(_PUB_RULES["retired_extraction_methods"])
+_REQUIRED_PDF_VISUAL_POLICY = _PUB_RULES["required_pdf_visual_policy"]
+_MAX_VALIDATION_ISSUES_SHOWN = _PUB_RULES["max_validation_issues_shown"]
+_MANIFEST_FILENAME = _PIPELINE_CFG["manifest_filename"]
+_LAST_RUN_FILENAME = _PIPELINE_CFG["last_run_filename"]
+_AGGREGATE_FILENAME = _PIPELINE_CFG["aggregate_filename"]
 
 
 def publication_asset_path(output, filename):
@@ -74,7 +86,7 @@ def _snapshot_records(manifest):
 
 
 def _load_snapshot(output, manifest, require_ready):
-    if not isinstance(manifest, dict) or manifest.get("schema_version") != "2.0" or "active_aggregate_file" not in manifest:
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != _SCHEMA_VERSION or "active_aggregate_file" not in manifest:
         raise ValueError("Chunking output uses an obsolete publication contract; rerun chunking")
     if type(manifest.get("index_ready")) is not bool or (require_ready and not manifest["index_ready"]):
         raise ValueError("Published chunks are not ready for indexing")
@@ -100,10 +112,10 @@ def _load_snapshot(output, manifest, require_ready):
         document_chunks, artifact = cached
         extraction = artifact["document"].get("extraction_method")
         if require_ready and (record["status"] == "MANUALLY_EDITED" or artifact["quality"].get("manually_edited_chunks")
-                              or extraction in ("pdf_reviewed_transcript", "pdf_reviewed_transcript_and_cloud_vision")):
+                              or extraction in _RETIRED_EXTRACTION_METHODS):
             raise ValueError("Published document uses a retired content override; rerun chunking: " + record["rel_path"])
         if (require_ready and Path(record["rel_path"]).suffix.lower() == ".pdf"
-                and artifact["quality"].get("visual_policy") != "pdf_cloud_ocr"):
+                and artifact["quality"].get("visual_policy") != _REQUIRED_PDF_VISUAL_POLICY):
             raise ValueError("Published PDF uses a retired extraction policy; rerun chunking: " + record["rel_path"])
         if require_ready and not artifact["quality"].get("index_ready"):
             raise ValueError("Published document is not ready for indexing: " + record["rel_path"])
@@ -124,14 +136,14 @@ def _validate_document(output, chunks, artifact, source, digest, fingerprint):
     document = artifact["document"]
     if document["source"] != source or document["document_version"] != digest:
         raise ValueError("Document identity or version does not match the input")
-    document_id = hashlib.sha256(source.encode("utf-8")).hexdigest()[:20]
+    document_id = hashlib.sha256(source.encode("utf-8")).hexdigest()[:_DOCUMENT_ID_HEX_LENGTH]
     if document["document_id"] != document_id or artifact["pipeline_fingerprint"] != fingerprint:
         raise ValueError("Document artifact does not match this pipeline run")
     if not isinstance(artifact.get("quality"), dict) or type(artifact["quality"].get("index_ready")) is not bool:
         raise ValueError("Document artifact is missing its index readiness result")
     valid, issues = validate_chunk_sequence(chunks)
     if not valid:
-        raise ValueError("Invalid chunk sequence: " + "; ".join(issues[:5]))
+        raise ValueError("Invalid chunk sequence: " + "; ".join(issues[:_MAX_VALIDATION_ISSUES_SHOWN]))
     for chunk in chunks:
         metadata = chunk["business_metadata"]
         if (chunk["source"] != source or metadata.get("document_id") != document_id
@@ -165,9 +177,10 @@ def _read_cached(output, record, source, digest, fingerprint):
 
 
 def _publish_document_files(output, chunks, artifact, digest, fingerprint):
-    prefix = artifact["document"]["document_id"] + "_" + digest[:16] + "_" + fingerprint[:16]
-    chunk_file = Path("chunks_per_file") / (prefix + "_" + content_hash(chunks)[:16] + ".json")
-    artifact_file = Path("artifacts") / (prefix + "_" + content_hash(artifact)[:16] + ".json")
+    n = _PREFIX_HASH_LENGTH
+    prefix = artifact["document"]["document_id"] + "_" + digest[:n] + "_" + fingerprint[:n]
+    chunk_file = Path("chunks_per_file") / (prefix + "_" + content_hash(chunks)[:n] + ".json")
+    artifact_file = Path("artifacts") / (prefix + "_" + content_hash(artifact)[:n] + ".json")
     for path, value in ((chunk_file, chunks), (artifact_file, artifact)):
         atomic_json(_publication_path(output, path, path.parent.name), value)
     return {"input_sha256": digest, "pipeline_fingerprint": fingerprint,
@@ -185,10 +198,10 @@ def publish_snapshot(output, chunks, manifest, aliases):
         atomic_bytes(snapshot_file, aggregate)
     manifest["active_aggregate_file"] = snapshot.as_posix()
     manifest["aggregate_sha256"] = digest
-    atomic_bytes(output / "all_chunks.json", aggregate)
+    atomic_bytes(output / _AGGREGATE_FILENAME, aggregate)
     for document_id, document_chunks in aliases.items():
         atomic_json(output / (document_id + ".json"), document_chunks)
     # The manifest commits a snapshot only after its artifacts exist.
-    atomic_json(output / "chunking_manifest.json", manifest)
-    atomic_json(output / "chunking_last_run.json", manifest)
+    atomic_json(output / _MANIFEST_FILENAME, manifest)
+    atomic_json(output / _LAST_RUN_FILENAME, manifest)
     return snapshot

@@ -13,6 +13,8 @@ if sys.platform == "win32":
     except Exception:
         pass
 
+from agent_banking.core.config.settings import CoreConfig, get_core_messages
+from agent_banking.core.environment import ROOT_DIR
 from agent_banking.core.settings import Config
 from .chunking.run_chunking import load_published_chunks
 from .chunking.universal.extraction.sources import discover_documents, document_source_root, source_key
@@ -27,6 +29,30 @@ from .retrieval.hybrid_retriever import HybridRetriever
 from .reranking.rag_reranker import BankingReranker
 from .tracing.tracer import BankingTracer
 
+_RAG_CFG = CoreConfig.CORE_RAG_PIPELINE
+_PATHS_CFG = CoreConfig.CORE_PATHS
+_MESSAGES = get_core_messages("rag_pipeline", "pipeline_messages.yaml", "RAG_PIPELINE_MESSAGES")
+
+_DEFAULT_CHUNK_SIZE_TOKENS = int(_RAG_CFG["default_chunk_size_tokens"])
+_DEFAULT_CHUNK_MAX_TOKENS = int(_RAG_CFG["default_chunk_max_tokens"])
+_DEFAULT_CHUNK_MIN_TOKENS = int(_RAG_CFG["default_chunk_min_tokens"])
+_DEFAULT_CHUNK_SEARCH_LANGUAGE = str(_RAG_CFG["default_chunk_search_language"])
+_EMBEDDING_CACHE_FILENAME = str(_RAG_CFG["embedding_cache_filename"])
+_DEFAULT_QDRANT_SUBDIR = str(_RAG_CFG["default_qdrant_subdir"])
+_DEFAULT_BATCH_SIZE = int(_RAG_CFG["ingest_batch_size"])
+_CHUNK_FILE_PATTERN = str(_RAG_CFG["chunk_file_pattern"])
+_MANIFEST_FILENAME = str(_RAG_CFG["chunking_manifest_filename"])
+_DEFAULT_EXTENSIONS = list(_RAG_CFG["default_extensions"])
+_EXCLUDED_ROLE = str(_RAG_CFG["excluded_retrieval_role"])
+
+
+def _default_chunking_output_dir():
+    target = ROOT_DIR
+    for part in str(_PATHS_CFG["chunking_output_relpath"]).replace("\\", "/").split("/"):
+        if part:
+            target = target / part
+    return target
+
 
 class BankingRAGPipeline:
     """Own the banking knowledge index and its search components."""
@@ -39,16 +65,16 @@ class BankingRAGPipeline:
         self.use_memory = use_memory
 
         print("=" * 70)
-        print("  INITIALIZING ENTERPRISE BANKING RAG ASSISTANT PIPELINE")
+        print(_MESSAGES["init_banner"])
         print("=" * 70)
 
         # 1. Initialize DLA Chunker (Canonical document chunking)
         print("[1/4] Initializing Layout-Aware Document Chunker...")
         self.dla_chunker = DLAChunker(
-            target_chunk_tokens=int(getattr(self.config, "CHUNK_SIZE_TOKENS", 512)),
-            max_chunk_tokens=int(getattr(self.config, "CHUNK_MAX_TOKENS", 1024)),
-            min_chunk_tokens=int(getattr(self.config, "CHUNK_MIN_TOKENS", 128)),
-            search_language=getattr(self.config, "CHUNK_SEARCH_LANGUAGE", "vi"),
+            target_chunk_tokens=int(getattr(self.config, "CHUNK_SIZE_TOKENS", _DEFAULT_CHUNK_SIZE_TOKENS)),
+            max_chunk_tokens=int(getattr(self.config, "CHUNK_MAX_TOKENS", _DEFAULT_CHUNK_MAX_TOKENS)),
+            min_chunk_tokens=int(getattr(self.config, "CHUNK_MIN_TOKENS", _DEFAULT_CHUNK_MIN_TOKENS)),
+            search_language=getattr(self.config, "CHUNK_SEARCH_LANGUAGE", _DEFAULT_CHUNK_SEARCH_LANGUAGE),
             config=self.config
         )
         self.chunker = self.dla_chunker
@@ -59,7 +85,7 @@ class BankingRAGPipeline:
             dimension=self.config.EMBEDDING_DIM,
             model_name=self.config.EMBEDDING_MODEL_1024,
             embedding_url=self.config.EMBEDDING_URL,
-            cache_db_path=str(self.config.STORAGE_DIR / "embedding_cache.db")
+            cache_db_path=str(self.config.STORAGE_DIR / _EMBEDDING_CACHE_FILENAME)
         )
         self.embedding_model = self.embedder
 
@@ -71,7 +97,7 @@ class BankingRAGPipeline:
         print(f"[3/4] Initializing Vector & BM25 Store ({store_mode})...")
         selected_store = getattr(self.config, "ABANK_QDRANT_STORAGE_PATH", "")
         raw_qdrant_path = Path(selected_store or getattr(self.config, "QDRANT_STORAGE_PATH",
-                                                        self.config.STORAGE_DIR / "qdrant_db"))
+                                                        self.config.STORAGE_DIR / _DEFAULT_QDRANT_SUBDIR))
         if raw_qdrant_path.is_absolute():
             qdrant_storage_path = raw_qdrant_path
         else:
@@ -100,18 +126,20 @@ class BankingRAGPipeline:
         self.tracer = BankingTracer(config=self.config)
 
         self.indexed_chunks = []
-        print("[System] Banking knowledge index and retrieval are ready.\n")
+        print(_MESSAGES["ready_message"])
 
-    def ingest_chunks(self, chunks, batch_size=32, *, return_index_keys=False):
+    def ingest_chunks(self, chunks, batch_size=None, *, return_index_keys=False):
         """
         Directly ingest a list of chunks into the system:
         1. Generate dense vector embeddings (using SQLite cache).
         2. Ingest concurrently into HNSW Vector Store and Okapi BM25 index.
         """
+        if batch_size is None:
+            batch_size = _DEFAULT_BATCH_SIZE
         chunks = list(chunks)
         require_index_ready(chunks)
         chunks = [chunk for chunk in chunks
-                  if chunk.get("business_metadata", {}).get("retrieval", {}).get("role") != "attachment_only"]
+                  if chunk.get("business_metadata", {}).get("retrieval", {}).get("role") != _EXCLUDED_ROLE]
         link_chunk_sequence(chunks)
         if not chunks:
             if return_index_keys:
@@ -142,16 +170,18 @@ class BankingRAGPipeline:
             return len(chunks), index_keys
         return len(chunks)
 
-    def ingest_published_chunks(self, output_dir=None, require_ready=True, batch_size=32):
+    def ingest_published_chunks(self, output_dir=None, require_ready=True, batch_size=None):
         """
         Synchronize a verified chunking publication with Vector DB and BM25.
         Retain the indexed versions of sources that failed this publication.
         """
+        if batch_size is None:
+            batch_size = _DEFAULT_BATCH_SIZE
         if output_dir is not None:
             target_out = Path(output_dir)
         else:
-            default_out = Path(__file__).resolve().parent / "chunking" / "output"
-            target_out = Path(getattr(self.config, "CHUNKING_OUTPUT_DIR", default_out))
+            default_out = _default_chunking_output_dir()
+            target_out = Path(getattr(getattr(self, "config", None), "CHUNKING_OUTPUT_DIR", default_out))
 
         chunks, manifest = load_published_chunks(target_out, require_ready=require_ready, return_manifest=True)
         require_index_ready(chunks)
@@ -159,7 +189,7 @@ class BankingRAGPipeline:
         scope = publication_scope(target_out)
         searchable = mark_publication_chunks([
             chunk for chunk in chunks
-            if chunk.get("business_metadata", {}).get("retrieval", {}).get("role") != "attachment_only"
+            if chunk.get("business_metadata", {}).get("retrieval", {}).get("role") != _EXCLUDED_ROLE
         ], scope)
         link_chunk_sequence(searchable)
         count, index_keys = self.ingest_chunks(searchable, batch_size=batch_size, return_index_keys=True)
@@ -170,17 +200,19 @@ class BankingRAGPipeline:
                                        active_index_keys=index_keys)
         return count
 
-    def ingest_chunk_files(self, chunks_dir, file_pattern="*.json"):
+    def ingest_chunk_files(self, chunks_dir, file_pattern=None):
         """
         Ingest chunk JSON files in the specified directory into Vector DB.
         If chunks_dir contains a published v2.0 chunking_manifest.json and default
         pattern is used, delegates to load_published_chunks for integrity verification.
         """
+        if file_pattern is None:
+            file_pattern = _CHUNK_FILE_PATTERN
         c_dir = Path(chunks_dir)
         if not c_dir.exists():
-            raise FileNotFoundError(f"Chunks directory not found: {c_dir}")
+            raise FileNotFoundError(_MESSAGES["chunking_dir_missing"].format(path=c_dir))
 
-        if file_pattern == "*.json" and (c_dir / "chunking_manifest.json").exists():
+        if file_pattern == _CHUNK_FILE_PATTERN and (c_dir / _MANIFEST_FILENAME).exists():
             return self.ingest_published_chunks(c_dir)
 
         json_files = sorted(list(c_dir.glob(file_pattern)))
@@ -227,12 +259,12 @@ class BankingRAGPipeline:
         print(f"[*] Starting ingestion phase from: {target_dir}")
 
         if not target_dir.exists():
-            raise FileNotFoundError(f"Directory not found: {target_dir}")
+            raise FileNotFoundError(_MESSAGES["dataset_dir_missing"].format(path=target_dir))
 
         if extensions:
             target_exts = extensions
         else:
-            target_exts = [".docx", ".pdf"]
+            target_exts = list(_DEFAULT_EXTENSIONS)
 
         # Layout-Aware DLA Chunking
         t0 = time.time()
@@ -251,7 +283,7 @@ class BankingRAGPipeline:
                 if not matches:
                     raise FileNotFoundError(str(fname))
                 if len(matches) != 1:
-                    raise ValueError("Ambiguous document path: " + str(fname))
+                    raise ValueError(_MESSAGES["ambiguous_doc_path"].format(path=fname))
                 path = next(iter(matches))
                 selected[path] = path.relative_to(source_root).as_posix()
             chunks = []

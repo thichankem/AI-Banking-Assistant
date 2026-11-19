@@ -9,12 +9,23 @@ import stat
 import sys
 import tempfile
 
+from .config.settings import get_rules
+
+_PUB_RULES = get_rules("publication")
+_LOCK_FILENAME = _PUB_RULES["lock_filename"]
+_FILE_HASH_BLOCK_SIZE = _PUB_RULES["file_hash_block_size"]
+_CLEANUP_DIRECTORY_SPECS = tuple(
+    (name, ext, tuple(widths)) for name, ext, widths in _PUB_RULES["cleanup_directory_specs"]
+)
+_PUBLICATION_ROOT_FILES = tuple(_PUB_RULES["publication_root_files"])
+_MANIFEST_FILENAME = _PUBLICATION_ROOT_FILES[0]
+
 
 @contextmanager
 def publication_lock(output):
     directory = Path(output)
     directory.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(directory / ".publication.lock", os.O_CREAT | os.O_RDWR, 0o600)
+    descriptor = os.open(directory / _LOCK_FILENAME, os.O_CREAT | os.O_RDWR, 0o600)
     locked = False
     try:
         if os.fstat(descriptor).st_size == 0:
@@ -58,12 +69,7 @@ def _publication_cleanup_candidates(output_dir):
         )
 
     targets = set()
-    for name, extension, widths in (
-        ("snapshots", ".json", (64,)),
-        ("artifacts", ".json", (20, 16, 16, 16)),
-        ("chunks_per_file", ".json", (20, 16, 16, 16)),
-        ("assets", ".png", (64,)),
-    ):
+    for name, extension, widths in _CLEANUP_DIRECTORY_SPECS:
         directory = root / name
         try:
             info = directory.lstat()
@@ -80,12 +86,11 @@ def _publication_cleanup_candidates(output_dir):
                 alias = root / (artifact.name.split("_", 1)[0] + ".json")
                 if alias.exists() or alias.is_symlink():
                     targets.add(alias)
-    names = ("chunking_manifest.json", "chunking_last_run.json", ".state_tracker.json", "all_chunks.json")
-    for name in names:
+    for name in _PUBLICATION_ROOT_FILES:
         path = root / name
         if path.exists() or path.is_symlink():
             _check_publication_file(root, path)
-    manifest_path = root / "chunking_manifest.json"
+    manifest_path = root / _MANIFEST_FILENAME
     if manifest_path.is_file():
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -94,7 +99,10 @@ def _publication_cleanup_candidates(output_dir):
         if (isinstance(manifest, dict) and manifest.get("module") == "chunking"
                 and isinstance(manifest.get("records"), list)):
             for record in manifest["records"]:
-                source = record.get("rel_path") if isinstance(record, dict) else None
+                if isinstance(record, dict):
+                    source = record.get("rel_path")
+                else:
+                    source = None
                 if isinstance(source, str) and source:
                     identifier = hashlib.sha256(source.replace("\\", "/").encode()).hexdigest()[:20]
                     path = root / (identifier + ".json")
@@ -132,7 +140,7 @@ def _remove_obsolete_publication_files(root, previous_files, active_files):
 def file_hash(path):
     hasher = hashlib.sha256()
     with Path(path).open("rb") as stream:
-        for block in iter(lambda: stream.read(65536), b""):
+        for block in iter(lambda: stream.read(_FILE_HASH_BLOCK_SIZE), b""):
             hasher.update(block)
     return hasher.hexdigest()
 

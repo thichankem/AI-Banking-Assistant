@@ -2,7 +2,7 @@
 Batch Runner: Execute 785 Golden Questions through LangGraph Agent Banking Pipeline.
 ===================================================================================
 Features:
-- Incremental execution with JSON state caching (agent_answers_785_cache.json).
+- Incremental execution with JSON state caching.
 - Safe resume capability: seamlessly continues from un-evaluated cases if interrupted.
 - Periodically updates Excel workbook with AI Generated Answers.
 - 100% compliant with GEMINI.md rules:
@@ -19,7 +19,7 @@ import json
 from pathlib import Path
 
 # Add project root to path
-PROJECT_ROOT = Path(r"d:\Desktop\GitHub\AI Banking Asistant")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -27,23 +27,31 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 from agent_banking.agent_pipeline import BankingAgentPipeline
+from agent_banking.evaluator.config.settings import (
+    EvaluatorConfig,
+    get_evaluator_messages,
+    resolve_repo_path,
+)
+
+_DS_CFG = EvaluatorConfig.DATASETS
+_OUT_CFG = EvaluatorConfig.CACHES_AND_OUTPUTS
+_J785 = EvaluatorConfig.JUDGE_785
+_EXCEL_CFG = EvaluatorConfig.EXCEL
+_FEEDBACK = get_evaluator_messages("feedback")
+_EXCEL_LABELS = get_evaluator_messages("excel")
+
 
 def load_all_785_cases():
-    base_dir = r"d:\Desktop\GitHub\AI Banking Asistant"
-    group_files = [
-        os.path.join(base_dir, "dataset", "A_Bank_golden_the", "a_bank_the_golden.json"),
-        os.path.join(base_dir, "dataset", "A_Bank_golden_compliance", "a_bank_compliance_golden.json"),
-        os.path.join(base_dir, "dataset", "A_Bank_golden_app", "a_bank_app_golden.json"),
-        os.path.join(base_dir, "dataset", "A_Bank_golden_specialized", "a_bank_specialized_golden.json")
-    ]
-
+    template = _DS_CFG["group_path_template"]
     all_cases = []
-    for fpath in group_files:
+    for group in EvaluatorConfig.DATASET_GROUPS:
+        fpath = resolve_repo_path(template.replace("{group}", group), root=PROJECT_ROOT)
         with open(fpath, "r", encoding="utf-8") as f:
             data = json.load(f)
             for item in data:
                 all_cases.append(item)
     return all_cases
+
 
 def load_cache(cache_file):
     if os.path.exists(cache_file):
@@ -54,6 +62,7 @@ def load_cache(cache_file):
             return {}
     return {}
 
+
 def save_cache(cache_data, cache_file):
     temp_file = cache_file + ".tmp"
     with open(temp_file, "w", encoding="utf-8") as f:
@@ -63,41 +72,36 @@ def save_cache(cache_data, cache_file):
     else:
         os.rename(temp_file, cache_file)
 
+
 def export_to_excel(all_cases, answers_cache, output_path):
+    styles = _EXCEL_CFG["styles"]
+    sheets = _EXCEL_CFG["sheets"]
+
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
 
-    ws = wb.create_sheet(title="Master 785 Golden (Chưa chấm)")
+    ws = wb.create_sheet(title=str(sheets["batch_sheet_title"]))
     ws.views.sheetView[0].showGridLines = True
-    ws.freeze_panes = "A2"
+    ws.freeze_panes = str(styles["freeze_cell"])
 
-    navy_fill = PatternFill(start_color="0F2240", end_color="0F2240", fill_type="solid")
-    gold_fill = PatternFill(start_color="B45309", end_color="B45309", fill_type="solid")
-    header_font = Font(name="Segoe UI", size=10, bold=True, color="FFFFFF")
-    data_font = Font(name="Segoe UI", size=9, bold=False, color="1E293B")
+    navy_fill = PatternFill(start_color=styles["navy_color"], end_color=styles["navy_color"], fill_type="solid")
+    gold_fill = PatternFill(start_color=styles["gold_color"], end_color=styles["gold_color"], fill_type="solid")
+    font_name = str(styles["font_name"])
+    header_font = Font(name=font_name, size=int(styles["header_font_size"]), bold=True, color="FFFFFF")
+    data_font = Font(name=font_name, size=int(styles["data_font_size"]), bold=False, color=styles["data_text_color"])
 
+    border_color = str(styles["border_color"])
     thin_border = Border(
-        left=Side(style="thin", color="CBD5E1"),
-        right=Side(style="thin", color="CBD5E1"),
-        top=Side(style="thin", color="CBD5E1"),
-        bottom=Side(style="thin", color="CBD5E1")
+        left=Side(style="thin", color=border_color),
+        right=Side(style="thin", color=border_color),
+        top=Side(style="thin", color=border_color),
+        bottom=Side(style="thin", color=border_color)
     )
 
     align_left_wrap = Alignment(horizontal="left", vertical="top", wrap_text=True)
     align_center = Alignment(horizontal="center", vertical="top", wrap_text=True)
 
-    headers = [
-        "STT",
-        "ID Câu hỏi",
-        "Mã VB",
-        "Tiêu chí Kiểm thử",
-        "Độ khó",
-        "Câu hỏi Tình huống (Question)",
-        "Đáp án Chuẩn (Reference Answer)",
-        "Tiêu chí Bắt buộc (Must Include)",
-        "Đường dẫn Nguồn (Source Path)",
-        "Câu trả lời của Trợ lý AI Banking (Agent Answer)"
-    ]
+    headers = list(_EXCEL_LABELS["batch_headers"])
 
     for col_idx, h_text in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col_idx, value=h_text)
@@ -134,11 +138,10 @@ def export_to_excel(all_cases, answers_cache, output_path):
                     src_list.append(sp)
         src_str = "\n".join(src_list)
 
-        agent_ans = ""
         if case_id in answers_cache:
             agent_ans = answers_cache[case_id].get("answer", "")
         else:
-            agent_ans = "[Đang chờ tiến trình AI Banking xử lý...]"
+            agent_ans = str(_FEEDBACK["pending_agent_placeholder"])
 
         row_vals = [
             idx,
@@ -162,18 +165,7 @@ def export_to_excel(all_cases, answers_cache, output_path):
             else:
                 cell.alignment = align_left_wrap
 
-    col_widths = {
-        "A": 6,
-        "B": 12,
-        "C": 10,
-        "D": 26,
-        "E": 10,
-        "F": 45,
-        "G": 45,
-        "H": 34,
-        "I": 35,
-        "J": 55
-    }
+    col_widths = _EXCEL_CFG["column_widths"]["batch_eval_only"]
     for col_letter, w in col_widths.items():
         ws.column_dimensions[col_letter].width = w
 
@@ -181,14 +173,14 @@ def export_to_excel(all_cases, answers_cache, output_path):
         wb.save(output_path)
     except PermissionError:
         # Fallback if primary file is currently open in Excel
-        alt_path = output_path.replace(".xlsx", "_agent.xlsx")
+        alt_path = output_path.replace(".xlsx", str(_EXCEL_CFG["fallback_suffixes"]["agent_xlsx"]))
         wb.save(alt_path)
         print(f"[Notice] File is locked by Excel. Saved update to alternative path: {alt_path}")
 
+
 def run_batch():
-    base_dir = r"d:\Desktop\GitHub\AI Banking Asistant"
-    cache_file = os.path.join(base_dir, "dataset", "agent_answers_785_cache.json")
-    excel_path = os.path.join(base_dir, "dataset", "A_Bank_golden_master_785_agent.xlsx")
+    cache_file = str(resolve_repo_path(_OUT_CFG["answers_785_cache_relpath"], root=PROJECT_ROOT))
+    excel_path = str(resolve_repo_path(_OUT_CFG["master_agent_excel_relpath"], root=PROJECT_ROOT))
 
     all_cases = load_all_785_cases()
     total_cases = len(all_cases)
@@ -215,6 +207,7 @@ def run_batch():
 
     start_total_time = time.time()
     processed_in_session = 0
+    autosave_every = int(_J785["autosave_interval_batch"])
 
     for idx, case in enumerate(all_cases, 1):
         case_id = case.get("id", f"CASE-{idx:03d}")
@@ -255,7 +248,7 @@ def run_batch():
             print(f"  -> ERROR on {case_id}: {e}")
             answers_cache[case_id] = {
                 "id": case_id,
-                "answer": f"[Lỗi xử lý pipeline: {e}]",
+                "answer": f"{_FEEDBACK['pipeline_error_prefix']}{e}]",
                 "latency_sec": latency,
                 "citations": [],
                 "audit_status": "ERROR",
@@ -266,8 +259,8 @@ def run_batch():
         save_cache(answers_cache, cache_file)
         processed_in_session += 1
 
-        # Periodically refresh Excel every 5 cases
-        if processed_in_session % 5 == 0:
+        # Periodically refresh Excel
+        if processed_in_session % autosave_every == 0:
             export_to_excel(all_cases, answers_cache, excel_path)
             print(f"  [Auto-Save] Excel updated with {len(answers_cache)}/{total_cases} answers.")
 
@@ -279,6 +272,7 @@ def run_batch():
     print(f"Total time: {total_elapsed}s")
     print(f"Final Excel Workbook: {excel_path}")
     print("=" * 70)
+
 
 if __name__ == "__main__":
     run_batch()
