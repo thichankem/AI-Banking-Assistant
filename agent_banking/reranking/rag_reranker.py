@@ -247,6 +247,24 @@ class BankingReranker:
                 prefix_parts.append(title)
             elif bc:
                 prefix_parts.append(bc)
+            meta = chunk.get("business_metadata")
+            if isinstance(meta, dict):
+                prov = meta.get("provenance")
+                if isinstance(prov, dict):
+                    locs = prov.get("locations")
+                    if isinstance(locs, list):
+                        pages = []
+                        for loc in locs:
+                            if isinstance(loc, dict):
+                                p_num = loc.get("page_number")
+                                if type(p_num) is int and p_num > 0 and p_num not in pages:
+                                    pages.append(p_num)
+                        if pages:
+                            pages.sort()
+                            prefix_parts.append("Trang " + ", ".join(str(p) for p in pages))
+            parent_text = str(chunk.get("parent_content") or "").strip()
+            if len(text) < 320 and len(parent_text) > len(text) + 40:
+                text = text + "\n" + parent_text[:700]
             prefix = ""
             if prefix_parts:
                 prefix = "[" + " | ".join(prefix_parts) + "]\n"

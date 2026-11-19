@@ -196,6 +196,19 @@ def _format_retrieved_doc_context(doc, max_chars=None, query="") -> str:
         header_parts.append(breadcrumb)
     if section_title and section_title not in breadcrumb:
         header_parts.append(section_title)
+    prov = meta.get("provenance")
+    if isinstance(prov, dict):
+        locs = prov.get("locations")
+        if isinstance(locs, list):
+            pages = []
+            for loc in locs:
+                if isinstance(loc, dict):
+                    p_num = loc.get("page_number")
+                    if type(p_num) is int and p_num > 0 and p_num not in pages:
+                        pages.append(p_num)
+            if pages:
+                pages.sort()
+                header_parts.append("Trang " + ", ".join(str(p) for p in pages))
 
     meta_tags = []
     if chunk_type and chunk_type != "text":
@@ -207,7 +220,8 @@ def _format_retrieved_doc_context(doc, max_chars=None, query="") -> str:
 
     body_parts = []
     original = str(d.get("content") or "").strip()
-    parent = str(d.get("parent_content") or "").strip()
+    parent_raw = str(d.get("parent_content") or "").strip()
+    parent = parent_raw
     if original and original in parent:
         parent = parent.replace(original, "", 1).strip()
     table_prose = []
@@ -236,11 +250,31 @@ def _format_retrieved_doc_context(doc, max_chars=None, query="") -> str:
         if table_intro:
             body_parts.append(table_intro)
         body_parts.append(_DOC_MESSAGES.get("table_data_header", "") + table_text)
+        if parent_raw and "|" in parent_raw:
+            parent_table_lines = []
+            for p_line in parent_raw.splitlines():
+                s_line = p_line.strip()
+                if s_line and s_line not in table_text and s_line not in table_intro and s_line not in parent_table_lines:
+                    parent_table_lines.append(s_line)
+            if parent_table_lines:
+                extra_parent_table = "\n".join(parent_table_lines)
+                current_len = sum(len(bp) + 1 for bp in body_parts)
+                if max_chars is None or current_len + len(extra_parent_table) <= max_chars - 64:
+                    body_parts.append("[Ngữ cảnh bảng đầy đủ]:\n" + extra_parent_table)
+                elif max_chars is not None and max_chars - current_len > 240:
+                    rem_budget = max_chars - current_len - 40
+                    body_parts.append("[Ngữ cảnh bảng đầy đủ]:\n" + extra_parent_table[:rem_budget])
     if situated:
         body_parts.append(_DOC_MESSAGES.get("situated_context_prefix", "") + situated)
 
     if original and not table_text:
-        body_parts.append(_label_guide_screen(original, source_name, section_title, query))
+        text_source = original
+        if parent_raw and len(parent_raw) > len(original) + 60 and len(original) < 1100:
+            if max_chars is None or len(parent_raw) <= max_chars - 100:
+                text_source = parent_raw
+            else:
+                text_source = original + "\n[Ngữ cảnh mục cha]:\n" + parent
+        body_parts.append(_label_guide_screen(text_source, source_name, section_title, query))
 
     image_text = _render_images_text(d.get("images"))
     if image_text and image_text not in original:

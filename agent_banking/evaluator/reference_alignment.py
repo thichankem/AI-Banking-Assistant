@@ -174,7 +174,8 @@ def validate_corrections(path, cases, inventory, source_root=None):
         case = known[cid]
         if sha256(case["question"].encode("utf-8")).hexdigest() != row["question_sha256"]:
             raise ValueError("Question changed since review: " + cid)
-        if sha256(case["reference_answer"].encode("utf-8")).hexdigest() != row["original_reference_sha256"]:
+        ref_hash = sha256(case["reference_answer"].encode("utf-8")).hexdigest()
+        if ref_hash != row["original_reference_sha256"] and ref_hash != sha256(row["reference_answer"].encode("utf-8")).hexdigest():
             raise ValueError("Reference changed since review: " + cid)
         if inventory["source_hashes"].get(row["source"]) != row["source_sha256"]:
             raise ValueError("Source changed since review: " + cid)

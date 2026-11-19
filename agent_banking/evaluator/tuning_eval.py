@@ -207,6 +207,8 @@ def main():
                                            case.get("rubric", {}).get("must_include", []), response.get("answer", ""))
                     if not score.get("feedback", "").startswith(error_prefixes):
                         break
+                    if attempt + 1 < judge_retries:
+                        time.sleep(2 ** (attempt + 1))
                 result["judge"] = score
                 if score.get("feedback", "").startswith(error_prefixes):
                     result["status"] = "JUDGE_ERROR"

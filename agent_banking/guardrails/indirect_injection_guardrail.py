@@ -48,6 +48,7 @@ _CHUNK_TEXT_FIELDS = list(_indirect_cfg.get("chunk_text_fields") or [])
 _RETRIEVAL_CONTEXT_FIELDS = list(_indirect_cfg.get("retrieval_context_fields") or [])
 
 _NOSPACE_MIN_LENGTH = int(_indirect_limits.get("nospace_min_length", 0))
+_OVERRIDE_WINDOW_WORDS = int(_indirect_limits.get("override_window_words", 2))
 _CRITICAL_THREAT_MIN_COUNT = int(_indirect_limits.get("critical_threat_min_count", 0))
 _URL_PREVIEW_CHARS = int(_indirect_limits.get("url_preview_chars", 0))
 
@@ -268,21 +269,32 @@ class IndirectInjectionGuardrail:
                         threats_found.append(threat_tag)
 
         # 4. Fuzzy verb + target co-occurrence
-        has_override = False
-        matched_verb = ""
+        # A verb only counts as an override when its target follows within a few words
+        # ("bo qua huong dan", "ignore previous instructions"). Distant co-occurrence
+        # such as "quen mat khau ... bao mat" is normal banking text.
+        words = text_unaccented.split()
+        found_pair = ""
         for v in self.unaccented_override_verbs:
-            if v in text_unaccented:
-                has_override = True
-                matched_verb = v
+            verb_words = v.split()
+            for index in range(len(words) - len(verb_words) + 1):
+                if words[index:index + len(verb_words)] != verb_words:
+                    continue
+                window = " ".join(words[index + len(verb_words):index + len(verb_words) + _OVERRIDE_WINDOW_WORDS + 3])
+                for t in self.unaccented_targets:
+                    if window.startswith(t) or (" " + t) in (" " + window):
+                        near = window.split(t)[0].split()
+                        if len(near) <= _OVERRIDE_WINDOW_WORDS:
+                            found_pair = v + "+" + t
+                            break
+                if found_pair:
+                    break
+            if found_pair:
                 break
 
-        if has_override is True:
-            for t in self.unaccented_targets:
-                if t in text_unaccented:
-                    cooccur_tag = f"COOCCURRENCE_INJECTION:{matched_verb}+{t}"
-                    if cooccur_tag not in threats_found:
-                        threats_found.append(cooccur_tag)
-                    break
+        if found_pair:
+            cooccur_tag = f"COOCCURRENCE_INJECTION:{found_pair}"
+            if cooccur_tag not in threats_found:
+                threats_found.append(cooccur_tag)
 
         # 5. Dangerous HTML elements
         for elem in DANGEROUS_HTML_ELEMENTS:

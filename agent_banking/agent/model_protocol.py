@@ -57,7 +57,7 @@ PLAN_ITEM = object_schema({
 }, ["id", "task", "status"])
 
 CLAIM = object_schema({
-    "claim": text_schema(420),
+    "claim": text_schema(600),
     "draft_line": {"type": "integer", "minimum": 1, "maximum": 500},
     "source": text_schema(32),
     "quote": text_schema(720),
@@ -116,13 +116,20 @@ def _bound_review_advice(result):
     if isinstance(result.get("feedback"), str):
         result["feedback"] = result["feedback"][:_REVIEW_FEEDBACK_MAX_CHARS]
     issues = result.get("issues")
-    if not isinstance(issues, list):
-        return
-    for issue in issues:
-        if isinstance(issue, dict):
-            for key, limit in (("item", _REVIEW_ISSUE_ITEM_MAX_CHARS), ("problem", _REVIEW_ISSUE_PROBLEM_MAX_CHARS)):
-                if isinstance(issue.get(key), str):
-                    issue[key] = issue[key][:limit]
+    if isinstance(issues, list):
+        for issue in issues:
+            if isinstance(issue, dict):
+                for key, limit in (("item", _REVIEW_ISSUE_ITEM_MAX_CHARS), ("problem", _REVIEW_ISSUE_PROBLEM_MAX_CHARS)):
+                    if isinstance(issue.get(key), str):
+                        issue[key] = issue[key][:limit]
+    coverage = result.get("coverage")
+    if isinstance(coverage, list):
+        for item in coverage:
+            if isinstance(item, dict):
+                if isinstance(item.get("item"), str):
+                    item["item"] = item["item"][:240]
+                if item.get("status") not in ("answered", "limited", "missing"):
+                    item["status"] = "answered"
 
 
 def pack_context(data: dict, budget: int, *, keep_evidence=False) -> str:
@@ -241,6 +248,8 @@ class StructuredModel:
                 # A provider may add prose fields to an otherwise valid decision.
                 # They have no effect on execution and must not enter the checkpoint.
                 result = {key: value for key, value in result.items() if key in fields}
+            if result.get("kind") == "final" and isinstance(result.get("answer"), str):
+                result["answer"] = result["answer"][:8000]
             if any(schema is REVIEW_SCHEMA for schema in schemas):
                 _bound_review_advice(result)
             if not any(validator.is_valid(result) for validator in validators):

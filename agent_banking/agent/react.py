@@ -77,9 +77,16 @@ def verify_calculation(tool_name: str, data: dict, params: dict) -> bool:
 
 def _reference_numbers(answer: str, evidence_count: int) -> set[int]:
     references = set()
-    if answer.lower().count("[nguồn ") != answer.count("[Nguồn "):
+    norm_answer = answer
+    for prefix in ("[nguồn ", "[Nguon ", "[nguon ", "[NGUỒN ", "[Source ", "[source ", "[SOURCE "):
+        if prefix in norm_answer:
+            norm_answer = norm_answer.replace(prefix, "[Nguồn ")
+    for colon_prefix in ("[Nguồn: ", "[Nguon: ", "[nguồn: ", "[nguon: ", "[Source: ", "[source: "):
+        if colon_prefix in norm_answer:
+            norm_answer = norm_answer.replace(colon_prefix, "[Nguồn ")
+    if norm_answer.lower().count("[nguồn ") != norm_answer.count("[Nguồn "):
         raise ValueError("Invalid citation marker")
-    for tail in answer.split("[Nguồn ")[1:]:
+    for tail in norm_answer.split("[Nguồn ")[1:]:
         label, closing, _ = tail.partition("]")
         if not closing:
             raise ValueError("Invalid citation marker")
@@ -90,6 +97,8 @@ def _reference_numbers(answer: str, evidence_count: int) -> set[int]:
             token = part
             if idx > 0 and part.startswith("Nguồn "):
                 token = part[len("Nguồn "):].strip()
+            if " " in token:
+                token = token.split()[0].rstrip(":,-")
             if not token.isascii() or not token.isdecimal() or len(token) > _MAX_CITATION_DIGITS:
                 raise ValueError("Invalid citation marker")
             number = int(token)

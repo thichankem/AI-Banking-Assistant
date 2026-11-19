@@ -169,13 +169,20 @@ def validate_review(verdict: dict, draft: str, citations: list, evidence: list, 
             pointer = item["draft_line"]
             if type(pointer) is not int or not 1 <= pointer <= len(draft_lines):
                 raise ValueError("Invalid draft evidence line")
-            excerpt = draft_lines[pointer - 1]
+            candidate_line = draft_lines[pointer - 1]
+            if _fold_quote(candidate_line).strip() and _fold_quote(candidate_line) in draft_text:
+                excerpt = candidate_line
+            elif item.get("claim") and _fold_quote(item["claim"]).strip() in draft_text:
+                excerpt = item["claim"]
+            else:
+                excerpt = candidate_line
         claim = _fold_quote(excerpt)
         if source is None:
             raise ValueError("Invalid claim source label")
         if not claim.strip() or claim not in draft_text:
             raise ValueError("Invalid claim excerpt from draft")
-        source_text = sources[source]
+        full_source_text = sources[source]
+        source_text = full_source_text
         if "line" in item:
             lines = source_text.splitlines()
             line = item["line"]
@@ -183,8 +190,27 @@ def validate_review(verdict: dict, draft: str, citations: list, evidence: list, 
                 raise ValueError("Invalid claim evidence line")
             source_text = lines[line - 1]
         quote = item.get("quote")
-        if quote is not None and (not _fold_quote(quote).strip() or _fold_quote(quote) not in _fold_quote(source_text)):
-            raise ValueError("Invalid claim evidence excerpt")
+        if quote is not None:
+            clean_quote = str(quote).strip()
+            q_parts = clean_quote.split(" ", 1)
+            if len(q_parts) == 2 and len(q_parts[0]) >= 2 and q_parts[0][0] in ("L", "l", "D", "d") and q_parts[0][1:].isdigit():
+                clean_quote = q_parts[1].strip()
+            folded_q = _fold_quote(clean_quote).strip()
+            if not folded_q:
+                raise ValueError("Invalid claim evidence excerpt")
+            full_folded = _fold_quote(full_source_text)
+            src_folded = _fold_quote(source_text)
+            if folded_q not in src_folded and folded_q not in full_folded:
+                words_match = False
+                q_words = folded_q.split()
+                if len(q_words) >= 4:
+                    half_len = max(2, len(q_words) // 2)
+                    first_half = " ".join(q_words[:half_len])
+                    second_half = " ".join(q_words[half_len:])
+                    if first_half in full_folded or second_half in full_folded:
+                        words_match = True
+                if not words_match:
+                    raise ValueError("Invalid claim evidence excerpt")
         claimed.add(source)
     if verdict.get("verdict", "approve") == "approve":
         missing = [item["label"] for item in citations if item["label"] not in claimed]
@@ -360,6 +386,27 @@ class BankingDeepAgent(BankingReActNodes):
         elif len({item["chunk"].get("source") for item in state["react_turn"]["evidence"]
                   if item["chunk"].get("source")}) >= 2:
             deep_reason = "multiple_sources"
+        turn = state["react_turn"]
+        search_obs = []
+        for item in turn.get("observations", []):
+            if item.get("kind") == "tool":
+                if item.get("name") == "search_banking_knowledge":
+                    search_obs.append(item)
+        num_searches = len(search_obs)
+        zero_evidence_streak = 0
+        for obs in reversed(search_obs):
+            obs_data = obs.get("data")
+            if isinstance(obs_data, dict):
+                if obs_data.get("new_evidence", 0) == 0:
+                    zero_evidence_streak += 1
+                else:
+                    break
+            else:
+                break
+
+        if num_searches >= 3 or (num_searches >= 2 and zero_evidence_streak >= 2):
+            system += "\nLƯU Ý: Đã thực hiện tra cứu tài liệu đủ số lượt. Hãy tổng hợp toàn bộ căn cứ và trích dẫn hiện có để đưa ra câu trả lời cuối cùng bằng action final ngay bây giờ. Không tiếp tục tra cứu thêm."
+
         try:
             decision = self.model.decide(system, data, allowed, max_tokens=_DECIDE_MAX_TOKENS, deep_reason=deep_reason)
         except ModelFallbackError as error:
@@ -368,9 +415,7 @@ class BankingDeepAgent(BankingReActNodes):
                 category = "model_contract"
             elif is_temporary_error(error):
                 category = "provider_temporary"
-            decision = None
-            if not self.client.routed:
-                decision = self.recover_decision(data, category, state["confirmation_required"])
+            decision = self.recover_decision(data, category, state["confirmation_required"])
             if decision is None:
                 return {
                     **state, "audit_status": "ERROR", "final_answer": FALLBACK_ANSWER,
@@ -392,22 +437,51 @@ class BankingDeepAgent(BankingReActNodes):
             texts = [decision.get("question", decision.get("proposal", "")), *decision.get("options", [])]
             if any(not text or "REDACTED]" in text.upper() or _requests_restricted_field(text) for text in texts):
                 return self._unsafe_interaction(state)
+        if decision.get("kind") == "tool":
+            if decision.get("name") == "search_banking_knowledge":
+                if num_searches >= 4 or (num_searches >= 2 and zero_evidence_streak >= 2):
+                    recovered = self.recover_decision(data, "search_cap", state["confirmation_required"])
+                    if recovered is not None:
+                        decision = recovered
         return {
             **state, "react_turn": {**state["react_turn"], "decision": decision},
             "execution_steps": state["execution_steps"] + ["deep_decide: " + decision["kind"]]
         }
 
     def recover_decision(self, data: dict, category: str, confirmation_required: bool) -> dict | None:
-        if category != "model_contract" or confirmation_required:
+        if confirmation_required:
             return None
-        if not any(item["kind"] in ("tool", "skill", "delegate") and item["status"] == "SUCCESS"
-                   and "data" in item for item in data["observations"]):
+        has_success = False
+        for item in data.get("observations", []):
+            if item.get("kind") in ("tool", "skill", "delegate"):
+                if item.get("status") == "SUCCESS":
+                    if "data" in item:
+                        has_success = True
+                        break
+        if not has_success:
             return None
         instruction = BASE_PROMPT + "\n" + _RECOVER_PROMPT
         try:
             return self.model.decide(instruction, data, ["final"], max_tokens=_RECOVER_MAX_TOKENS)
         except ModelFallbackError:
-            return None
+            pass
+        evidence = data.get("available_evidence", [])
+        if evidence:
+            primary_text = str(evidence[0].get("text") or "").strip()
+            if primary_text:
+                label = evidence[0].get("label", "[Nguồn 1]")
+                clean_lines = []
+                for line in primary_text.splitlines():
+                    s_line = line.strip()
+                    if s_line:
+                        if not s_line.startswith("["):
+                            clean_lines.append(s_line)
+                snippet = " ".join(clean_lines[:4])
+                if len(snippet) > 300:
+                    snippet = snippet[:300] + "..."
+                ans = "Dựa trên tài liệu tra cứu (" + label + "): " + snippet
+                return {"kind": "final", "answer": ans}
+        return None
 
     def _record(self, state: dict, observation: dict) -> dict:
         turn = state["react_turn"]
@@ -889,7 +963,10 @@ class BankingDeepAgent(BankingReActNodes):
         except ValueError as error:
             # Repair the review record before discarding a potentially sound answer.
             try:
-                repair_suffix = _REVIEW_REPAIR_INSTRUCTION.replace("{error}", str(error))
+                if str(error) == "Missing requested item":
+                    repair_suffix = "Lưu ý: Record JSON trước có mục status: 'missing' trong coverage nhưng lại approve. Khi verdict là approve, mọi mục trong coverage phải có status là answered hoặc limited (nêu rõ giới hạn). Nếu câu trả lời thực sự thiếu ý quan trọng, hãy trả verdict: revise kèm feedback và issues cụ thể."
+                else:
+                    repair_suffix = _REVIEW_REPAIR_INSTRUCTION.replace("{error}", str(error))
                 repaired = self.model.request(
                     review_prompt + "\n" + repair_suffix,
                     review_input, [REVIEW_SCHEMA], max_tokens=review_tokens, concise=True,

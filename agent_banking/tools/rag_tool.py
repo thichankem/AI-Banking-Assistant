@@ -84,6 +84,10 @@ def _source_neighbors(anchor, ordered, positions, procedure):
     if app_steps:
         hop_limit = int(_NEIGHBOR_CFG["app_guide_hop_limit"])
         step_limit = int(_NEIGHBOR_CFG["app_guide_step_limit"])
+    seen_texts = set()
+    anchor_norm = " ".join(str(anchor.get("content") or "").split()).casefold()
+    if anchor_norm:
+        seen_texts.add(anchor_norm)
     for direction in (-1, 1):
         previous = anchor
         scopes = anchor_scopes
@@ -110,6 +114,11 @@ def _source_neighbors(anchor, ordered, positions, procedure):
                 continue
             if current_section != section:
                 break
+            chunk_norm = " ".join(str(chunk.get("content") or "").split()).casefold()
+            if chunk_norm and chunk_norm in seen_texts:
+                continue
+            if chunk_norm:
+                seen_texts.add(chunk_norm)
             logical_distance += 1
             found.append((logical_distance, index, chunk))
             if logical_distance == step_limit:

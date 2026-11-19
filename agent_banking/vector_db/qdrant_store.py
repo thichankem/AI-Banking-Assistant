@@ -702,8 +702,25 @@ class QdrantBankingStore:
             else:
                 source_stem = source_name
             doc_name = str(chunk.get("document_name") or "").strip()
+            meta = chunk.get("business_metadata")
+            if not isinstance(meta, dict):
+                meta = {}
+            prov = meta.get("provenance")
+            page_label = ""
+            if isinstance(prov, dict):
+                locs = prov.get("locations")
+                if isinstance(locs, list):
+                    page_nums = []
+                    for loc in locs:
+                        if isinstance(loc, dict):
+                            p_val = loc.get("page_number")
+                            if type(p_val) is int and p_val > 0 and p_val not in page_nums:
+                                page_nums.append(p_val)
+                    if page_nums:
+                        page_nums.sort()
+                        page_label = "Trang " + " ".join(str(p) for p in page_nums)
             meta_labels = []
-            for label in (doc_name, source_stem):
+            for label in (doc_name, source_stem, page_label):
                 if label and label.casefold() not in breadcrumb_text.casefold():
                     if label not in meta_labels:
                         meta_labels.append(label)
@@ -714,11 +731,15 @@ class QdrantBankingStore:
                 else:
                     breadcrumb_text = label_prefix
             table_text = self._extract_table_text(chunk.get("table_data"))
-            retrieval = (chunk.get("business_metadata") or {}).get("retrieval", {})
+            retrieval = meta.get("retrieval", {})
             if "embedding_content" in retrieval:
                 content_text = retrieval["embedding_content"]
                 if chunk.get("chunk_type") == "table":
                     table_text = ""
+            raw_content = str(chunk.get("content") or "")
+            parent_text = str(chunk.get("parent_content") or "")
+            if len(raw_content) < 350 and len(parent_text) > len(raw_content) + 40:
+                content_text = str(content_text) + "\n" + parent_text[:900]
             images_text = self._extract_images_text(chunk.get("images"))
 
             c_tokens = self._tokenize(content_text)
