@@ -11,7 +11,7 @@ import urllib.request
 
 from agent_banking.chunking.config.models import TEXT_CLIENT_SETTINGS
 from agent_banking.core.model_routing import apply_chat_options, ordered_candidates, request_metadata, usage_metadata
-from agent_banking.tracing.agent_trace import agent_span, annotate_span
+from agent_banking.tracing.tracer import annotate_span, trace_span
 
 logger = logging.getLogger("chunking.models")
 _TEXT_CFG = TEXT_CLIENT_SETTINGS
@@ -242,7 +242,7 @@ def cloud_json(endpoint, key, payload, timeout=None, retries=None, allow_layout_
             span_reason = route_reason
         else:
             span_reason = "standard"
-        with agent_span("model.attempt", role=model_module,
+        with trace_span("model.attempt", run_type="llm", role=model_module,
                         reason=span_reason,
                         **request_metadata(request_payload, candidate)) as details:
             if routed and candidate.context_window and _input_size(request_payload, candidate) + _CONTEXT_RESERVE_TOKENS > candidate.context_window:

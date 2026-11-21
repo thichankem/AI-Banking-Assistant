@@ -1,7 +1,6 @@
 """Exercise checkpoints and the HTTP contract with deterministic model responses."""
 
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 import importlib.util
 import json
 from pathlib import Path
@@ -22,14 +21,9 @@ SEARCH = {"kind": "tool", "name": "search_banking_knowledge", "arguments": {"que
 REVIEW = {"verdict": "approve", "feedback": ""}
 
 
-@contextmanager
-def trace_query(query):
-    yield SimpleNamespace(spans=[], finish=lambda **kwargs: None)
-
-
 def make_pipeline(monkeypatch, path, decisions):
     monkeypatch.setattr(Config, "ENABLE_SEMANTIC_GUARDRAIL", False)
-    rag = SimpleNamespace(tracer=SimpleNamespace(trace_query=trace_query))
+    rag = SimpleNamespace(tracer=SimpleNamespace())
     pipeline = BankingAgentPipeline(sqlite_db_path=str(path), rag_pipeline=rag)
     calls = []
     script = iter(decisions)

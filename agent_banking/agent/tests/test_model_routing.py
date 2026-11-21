@@ -12,7 +12,7 @@ from agent_banking.agent.model_protocol import StructuredModel, object_schema
 from agent_banking.core import models
 from agent_banking.core.chat import FallbackChatClient
 from agent_banking.core.fallback import ModelEndpoint, ModelFallbackError
-from agent_banking.tracing.agent_trace import AgentRun
+from agent_banking.tracing.tracer import LangSmithTraceRun, trace_span
 
 
 SCHEMA = object_schema({"answer": {"type": "string"}}, ["answer"])
@@ -106,11 +106,11 @@ def test_review_role_is_preferred(monkeypatch):
 
 def test_context_exhaustion_reports_category_without_cloud_call(monkeypatch, tmp_path):
     model, calls = install_provider(monkeypatch, [], (replace(STANDARD, context_window=800),))
-    with AgentRun(tmp_path, "chat", "sensitive-session").capture(), pytest.raises(ModelFallbackError) as failure:
+    with LangSmithTraceRun(tmp_path, "chat", "sensitive-session").capture(), pytest.raises(ModelFallbackError) as failure:
         request(model, {"request": "private " * 300})
     assert failure.value.category == "context_budget_exceeded"
     assert calls == []
-    trace = (tmp_path / "agent_runs.jsonl").read_text(encoding="utf-8")
+    trace = (tmp_path / "langsmith_runs.jsonl").read_text(encoding="utf-8")
     assert "context_budget_exceeded" in trace and "private" not in trace and "sensitive-session" not in trace
 
 
@@ -149,19 +149,22 @@ def test_concurrent_requests_have_independent_budgets_and_traces(monkeypatch, tm
     model, calls = install_provider(monkeypatch, [{"answer": "ok"}] * 8)
 
     def execute(index):
-        with AgentRun(tmp_path, "chat", str(index)).capture() as run:
-            request(model, {"request": "secret input"}, deep_reason="complex" if index % 2 else None)
+        reason = None
+        if index % 2:
+            reason = "complex"
+        with LangSmithTraceRun(tmp_path, "chat", str(index)).capture() as run:
+            request(model, {"request": "secret input"}, deep_reason=reason)
             return run.result({"status": "completed"})["trace_id"]
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         ids = list(pool.map(execute, range(8)))
-    traces = [json.loads(line) for line in (tmp_path / "agent_runs.jsonl").read_text().splitlines()]
+    traces = [json.loads(line) for line in (tmp_path / "langsmith_runs.jsonl").read_text().splitlines()]
     assert len(set(ids)) == len(traces) == len(calls) == 8
     for trace in traces:
         attempt = [span for span in trace["spans"] if span["name"] == "model.attempt"]
         assert len(attempt) == 1 and attempt[0]["attributes"]["usage"]["total_tokens"] == 25
-    assert "secret input" not in (tmp_path / "agent_runs.jsonl").read_text()
-    assert "secret-fixture" not in (tmp_path / "agent_runs.jsonl").read_text()
+    assert "secret input" not in (tmp_path / "langsmith_runs.jsonl").read_text()
+    assert "secret-fixture" not in (tmp_path / "langsmith_runs.jsonl").read_text()
 
 
 def test_configuration_cache_identity_and_legacy_flag(monkeypatch):
@@ -205,7 +208,7 @@ def test_document_decision_routes_protocol_and_limits_attempts(monkeypatch, tmp_
     monkeypatch.setattr(text_client, "_cloud_json", call)
     budget = text_client.CloudAttempts()
     payload = {"state": {"table": "fixture"}, "questions": {"q": {"criteria": {"yes": "ok"}}}}
-    with AgentRun(tmp_path, "document", "fixture").capture():
+    with LangSmithTraceRun(tmp_path, "document", "fixture").capture():
         result = text_client.cloud_json("https://fixture.invalid/systemone", "fixture", payload,
             model_module="chunking.decision", route_reason="table_continuation", attempt_budget=budget)
     assert [item[1]["model"] for item in sent] == [DEEP.model, STANDARD.model]
@@ -247,7 +250,7 @@ def test_trace_links_sse_pause_resume_and_http_done(monkeypatch, tmp_path):
     from agent_banking.agent.tests.test_interactions import CLARIFY, REVIEW, load_app, make_pipeline
     pipeline, _ = make_pipeline(monkeypatch, tmp_path / "sessions.sqlite", [CLARIFY,
         {"kind": "final", "answer": "Xin chào!"}, REVIEW, {"kind": "final", "answer": "Xin chào!"}, REVIEW])
-    pipeline.tracer = SimpleNamespace(trace_agent=lambda entrypoint, session_id: AgentRun(tmp_path, entrypoint, session_id).capture())
+    pipeline.tracer = SimpleNamespace(trace_agent=lambda entrypoint, session_id: LangSmithTraceRun(tmp_path, entrypoint, session_id).capture())
     pipeline.runtime.client.routed = True
     pipeline.runtime.client.candidates = [STANDARD, DEEP]
     app = load_app(monkeypatch, pipeline)
@@ -268,7 +271,7 @@ def test_trace_links_sse_pause_resume_and_http_done(monkeypatch, tmp_path):
             rejected = client.post("/api/agent/resume", json={"session_id": "test",
                 "interaction_id": pause["interaction"]["id"], "choice_id": "option_1"})
             assert rejected.status_code == 409 and rejected.headers["X-Trace-ID"]
-        traces = [json.loads(line) for line in (tmp_path / "agent_runs.jsonl").read_text().splitlines()]
+        traces = [json.loads(line) for line in (tmp_path / "langsmith_runs.jsonl").read_text().splitlines()]
         stream_trace = next(trace for trace in traces if trace["trace_id"] == done["trace_id"])
         assert any(span["name"] == "model.attempt" for span in stream_trace["spans"])
         paused_trace = next(trace for trace in traces if trace["trace_id"] == pause["trace_id"])
@@ -286,12 +289,14 @@ def test_evaluator_comparison_keeps_judge_fixed_and_reports_routes(tmp_path):
         identity = {"models": "fixed-judge", "snapshot": {"digest": "same"}, "collection": "fixture",
                     "routing": {"enabled": bool(index)}}
         (directory / "identity.json").write_text(json.dumps(identity))
-        with AgentRun(directory / "traces", "chat", "test").capture() as run:
-            from agent_banking.tracing.agent_trace import agent_span
-            with agent_span("model.attempt", role="agent", alias="standard", result="success",
+        with LangSmithTraceRun(directory / "traces", "chat", "test").capture() as run:
+            with trace_span("model.attempt", run_type="llm", role="agent", alias="standard", result="success",
                             usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}):
                 pass
-        row = {"key": "the:1", "group": "the", "verdict": "pass" if index else "fail",
+        verdict = "fail"
+        if index:
+            verdict = "pass"
+        row = {"key": "the:1", "group": "the", "verdict": verdict,
                "observed": [{"trace_id": run.trace_id}]}
         (directory / "results.jsonl").write_text(json.dumps(row) + "\n")
     compared = comparison(*directories)
@@ -303,13 +308,12 @@ def test_evaluator_comparison_keeps_judge_fixed_and_reports_routes(tmp_path):
 
 
 def test_document_nested_in_request_shares_trace_and_records_cloud_call(tmp_path):
-    from agent_banking.tracing.agent_trace import agent_span
-    with AgentRun(tmp_path, "smoke", "parent").capture() as parent:
-        with AgentRun(tmp_path, "document", "child").capture() as child:
+    with LangSmithTraceRun(tmp_path, "smoke", "parent").capture() as parent:
+        with LangSmithTraceRun(tmp_path, "document", "child").capture() as child:
             assert child.trace_id == parent.trace_id
-            with agent_span("model.attempt", role="vision", model="fixture"):
+            with trace_span("model.attempt", run_type="llm", role="vision", model="fixture"):
                 pass
-    traces = [json.loads(line) for line in (tmp_path / "agent_runs.jsonl").read_text().splitlines()]
+    traces = [json.loads(line) for line in (tmp_path / "langsmith_runs.jsonl").read_text().splitlines()]
     assert len(traces) == 1
     assert [span["name"] for span in traces[0]["spans"]] == ["agent.smoke", "agent.document", "model.attempt"]
 

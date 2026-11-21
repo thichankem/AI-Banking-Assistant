@@ -28,12 +28,18 @@ from agent_banking.agent.memory import (
     should_compact,
 )
 from agent_banking.agent.model_protocol import REVIEW_SCHEMA, StructuredModel
-from agent_banking.agent.react import BankingReActNodes, FALLBACK_ANSWER, MAX_EVIDENCE
+from agent_banking.agent.react import (
+    BankingReActNodes,
+    FALLBACK_ANSWER,
+    MAX_EVIDENCE,
+    _normalize_citation_markers,
+    _reference_numbers,
+)
 from agent_banking.core.fallback import ModelFallbackError, is_temporary_error
 from agent_banking.core.search_text import search_key
 from agent_banking.skills.skill_registry import resolve_skill
 from agent_banking.tools.extensions.banking_query import parse_banking_query
-from agent_banking.tracing.agent_trace import annotate_span
+from agent_banking.tracing.tracer import annotate_span
 
 
 MAX_ACTIONS = get_int_setting("max_actions")
@@ -209,6 +215,16 @@ def validate_review(verdict: dict, draft: str, citations: list, evidence: list, 
                     second_half = " ".join(q_words[half_len:])
                     if first_half in full_folded or second_half in full_folded:
                         words_match = True
+                if not words_match and len(q_words) >= 3:
+                    full_tokens = set(full_folded.split())
+                    numeric_q = [tok for tok in q_words if tok.isdigit()]
+                    if all(tok in full_tokens for tok in numeric_q):
+                        matched_count = 0
+                        for tok in q_words:
+                            if tok in full_tokens:
+                                matched_count += 1
+                        if matched_count * 5 >= len(q_words) * 4:
+                            words_match = True
                 if not words_match:
                     raise ValueError("Invalid claim evidence excerpt")
         claimed.add(source)
@@ -273,6 +289,88 @@ def _requests_restricted_field(text: str) -> bool:
     return any(f" {field} " in normalized for field in RESTRICTED_CARD_FIELDS)
 
 
+def _resolve_cited_images(citations: list, retrieved_chunks: list, status: str, max_images: int = 6) -> list:
+    """Collect deduplicated visual assets only from chunks cited in the final answer."""
+    if status == "BLOCKED" or not citations or not retrieved_chunks:
+        return []
+    by_chunk_id = {}
+    for chunk in retrieved_chunks:
+        if isinstance(chunk, dict):
+            cid = str(chunk.get("chunk_id") or "")
+            if cid:
+                by_chunk_id[cid] = chunk
+
+    resolved = []
+    seen_ids = set()
+    for citation in citations:
+        if not isinstance(citation, dict):
+            continue
+        cid = str(citation.get("chunk_id") or "")
+        chunk = by_chunk_id.get(cid)
+        if chunk is None:
+            continue
+        raw_images = chunk.get("images")
+        if not isinstance(raw_images, list) or not raw_images:
+            continue
+
+        direct_items = []
+        context_items = []
+        for img in raw_images:
+            if not isinstance(img, dict):
+                continue
+            if img.get("match_strength") == "direct":
+                direct_items.append(img)
+            else:
+                context_items.append(img)
+
+        meta = chunk.get("business_metadata")
+        if not isinstance(meta, dict):
+            meta = {}
+        doc_name = str(meta.get("document_name") or "").strip()
+        if not doc_name:
+            src_str = str(citation.get("source") or "").replace("\\", "/")
+            doc_name = src_str.rsplit("/", 1)[-1]
+
+        per_citation_added = 0
+        for img in direct_items + context_items:
+            asset_id = str(img.get("asset_id") or img.get("sha256") or "").strip()
+            if len(asset_id) != 64:
+                continue
+            if not all(ch in "0123456789abcdef" for ch in asset_id.lower()):
+                continue
+            asset_id = asset_id.lower()
+            if asset_id in seen_ids:
+                continue
+            seen_ids.add(asset_id)
+
+            caption = str(
+                img.get("display_caption")
+                or img.get("caption")
+                or img.get("title")
+                or citation.get("section_title")
+                or doc_name
+            ).strip()
+            resolved.append({
+                "asset_id": asset_id,
+                "url": "/api/assets/" + asset_id,
+                "citation_label": str(citation.get("label") or ""),
+                "source": str(citation.get("source") or ""),
+                "document_name": doc_name,
+                "section_title": str(citation.get("section_title") or ""),
+                "page_number": img.get("page_number"),
+                "region_type": str(img.get("region_type") or "figure"),
+                "caption": caption,
+                "width": int(img.get("width") or 0),
+                "height": int(img.get("height") or 0),
+            })
+            per_citation_added += 1
+            if len(resolved) >= max_images or per_citation_added >= 3:
+                break
+        if len(resolved) >= max_images:
+            break
+    return resolved
+
+
 class BankingDeepAgent(BankingReActNodes):
     def __init__(self, pipeline, config):
         super().__init__(pipeline, config)
@@ -295,10 +393,25 @@ class BankingDeepAgent(BankingReActNodes):
 
     def prepare_context(self, state: dict) -> dict:
         parsed = parse_banking_query(state["user_query"][:_QUERY_HINTS_MAX_QUERY_CHARS])
-        state = {**state, "query_hints": {"normalized": parsed.normalized_query[:_QUERY_HINTS_MAX_TEXT_CHARS],
-                                        "accent_folded": search_key(parsed.raw_query)[:_QUERY_HINTS_MAX_TEXT_CHARS],
-                                        "keywords": parsed.keywords[:_QUERY_HINTS_MAX_KEYWORDS],
-                                        "abbreviations": parsed.detected_acronyms[:_QUERY_HINTS_MAX_ACRONYMS]}}
+        hints = {
+            "normalized": parsed.normalized_query[:_QUERY_HINTS_MAX_TEXT_CHARS],
+            "accent_folded": search_key(parsed.raw_query)[:_QUERY_HINTS_MAX_TEXT_CHARS],
+            "keywords": parsed.keywords[:_QUERY_HINTS_MAX_KEYWORDS],
+            "abbreviations": parsed.detected_acronyms[:_QUERY_HINTS_MAX_ACRONYMS],
+            "intent": parsed.intent,
+            "sub_intent": parsed.sub_intent,
+            "domain": parsed.domain,
+        }
+        if parsed.legal_references:
+            hints["legal_references"] = parsed.legal_references[:_QUERY_HINTS_MAX_ACRONYMS]
+        if parsed.financial_amounts:
+            amounts = [
+                item["formatted"] for item in parsed.financial_amounts[:_QUERY_HINTS_MAX_ACRONYMS]
+                if isinstance(item, dict) and item.get("formatted")
+            ]
+            if amounts:
+                hints["financial_amounts"] = amounts
+        state = {**state, "query_hints": hints}
         if not should_compact(state.get("chat_history", [])):
             return state
         result, compacted = compact_memory(state, self.model, self.guard_artifact)
@@ -786,11 +899,25 @@ class BankingDeepAgent(BankingReActNodes):
                     error = result.get("error", "")
                     if not error:
                         merged, mapping = self._merge_worker_evidence(turn["evidence"], result["evidence"])
-                        parts = result["report"].split("[Nguồn ")
+                        norm_report = _normalize_citation_markers(result["report"])
+                        parts = norm_report.split("[Nguồn ")
                         report = parts[0]
                         for part in parts[1:]:
-                            number, _, tail = part.partition("]")
-                            report += _label(mapping[int(number)]) + tail
+                            label_body, closing, tail = part.partition("]")
+                            if not closing:
+                                raise ValueError("Invalid worker citation")
+                            raw_tokens = [tok.strip() for tok in label_body.replace(";", ",").split(",") if tok.strip()]
+                            if not raw_tokens:
+                                raise ValueError("Invalid worker citation")
+                            remapped = []
+                            for idx_pos, tok in enumerate(raw_tokens):
+                                clean_tok = tok
+                                if idx_pos > 0 and clean_tok.startswith("Nguồn "):
+                                    clean_tok = clean_tok[len("Nguồn "):].strip()
+                                if " " in clean_tok:
+                                    clean_tok = clean_tok.split()[0].rstrip(":,-")
+                                remapped.append(_label(mapping[int(clean_tok)]))
+                            report += "".join(remapped) + tail
                         docs = [merged[index - 1] for index in dict.fromkeys(mapping.values())]
                         work = [
                             item for item in result["observations"] if not item.get("retrieval")
@@ -1021,11 +1148,27 @@ class BankingDeepAgent(BankingReActNodes):
                                 {"role": "user", "content": reply["response"]}])
             history.append({"role": "assistant", "content": answer[:_HISTORY_MESSAGE_MAX_CHARS]})
             memory = state["session_memory"]
-        citations = [item for item in state["citations"] if item["label"] in answer]
+        max_idx = 0
+        for item in state["citations"]:
+            idx_val = item.get("index", 0)
+            if type(idx_val) is int and idx_val > max_idx:
+                max_idx = idx_val
+        used_indices = set()
+        if max_idx > 0:
+            try:
+                used_indices = _reference_numbers(answer, max_idx)
+            except ValueError:
+                used_indices = set()
+        citations = []
+        for item in state["citations"]:
+            if item.get("index") in used_indices or item["label"] in answer:
+                citations.append(item)
+        cited_images = _resolve_cited_images(citations, state.get("retrieved_chunks", []), status)
         result_state = {
             **state, "react_turn": {}, "audit_feedback": "", "draft_answer": "", "chat_history": history,
             "session_memory": memory, "audit_status": status, "final_answer": answer, "citations": citations,
             "sources": list(dict.fromkeys(item["source"] for item in citations)),
+            "images": cited_images,
             "output_guard": {"is_safe": result.is_safe, "flags": result.flags},
             "execution_steps": state["execution_steps"] + ["output_guardrail"]
         }

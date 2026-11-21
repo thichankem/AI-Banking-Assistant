@@ -31,12 +31,12 @@ def _load_yaml_file(directory, filename):
 
 
 def load_tracing_settings():
-    """Load tracing, Phoenix, span, and telemetry settings from config.yaml."""
+    """Load LangSmith tracing, span, and telemetry settings from config.yaml."""
     return _load_yaml_file(_SETTINGS_DIR, "config.yaml")
 
 
 def load_tracing_prompts():
-    """Load span labels, Phoenix log templates, and runner messages from config/prompts."""
+    """Load span labels, LangSmith log templates, and runner messages from config/prompts."""
     try:
         return import_module("agent_banking.tracing.config.prompts")
     except ModuleNotFoundError as exc:
@@ -45,16 +45,21 @@ def load_tracing_prompts():
     messages_data = _load_yaml_file(_PROMPTS_DIR, "messages.yaml")
     return SimpleNamespace(
         SPAN_LABELS=dict(messages_data.get("span_labels") or {}),
-        PHOENIX_MESSAGES=dict(messages_data.get("phoenix_messages") or {}),
+        LANGSMITH_MESSAGES=dict(messages_data.get("langsmith_messages") or {}),
         TERMINAL_SUMMARY_TEMPLATES=dict(messages_data.get("terminal_summary") or {}),
         RUNNER_MESSAGES=dict(messages_data.get("runner_messages") or {}),
     )
 
 
-def _env_or_cfg(env_key, cfg, cfg_key):
-    env_val = os.getenv(env_key)
-    if env_val is not None:
-        return env_val
+def _env_or_cfg(env_keys, cfg, cfg_key):
+    if isinstance(env_keys, str):
+        keys = (env_keys,)
+    else:
+        keys = tuple(env_keys)
+    for env_key in keys:
+        env_val = os.getenv(env_key)
+        if env_val is not None and str(env_val).strip() != "":
+            return env_val
     return cfg.get(cfg_key)
 
 
@@ -69,7 +74,7 @@ def _as_bool(val):
 def _as_str(val):
     if val is None:
         return ""
-    return str(val)
+    return str(val).strip()
 
 
 _cfg = load_tracing_settings()
@@ -80,18 +85,26 @@ if not _trace_dir_name:
 
 class TracingConfig:
     ENABLE_TRACING = _as_bool(_env_or_cfg("ENABLE_TRACING", _cfg, "enable_tracing"))
-    ENABLE_PHOENIX = _as_bool(_env_or_cfg("ENABLE_PHOENIX", _cfg, "enable_phoenix"))
-    PHOENIX_COLLECTOR_ENDPOINT = _as_str(_env_or_cfg("PHOENIX_COLLECTOR_ENDPOINT", _cfg, "phoenix_collector_endpoint"))
-    PHOENIX_PROJECT_NAME = _as_str(_env_or_cfg("PHOENIX_PROJECT_NAME", _cfg, "phoenix_project_name"))
+    LANGSMITH_TRACING = _as_bool(
+        _env_or_cfg(("LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2"), _cfg, "langsmith_tracing")
+    )
+    LANGSMITH_API_KEY = _as_str(_env_or_cfg(("LANGSMITH_API_KEY", "LANGCHAIN_API_KEY"), {}, ""))
+    LANGSMITH_ENDPOINT = _as_str(
+        _env_or_cfg(("LANGSMITH_ENDPOINT", "LANGCHAIN_ENDPOINT"), _cfg, "langsmith_endpoint")
+    )
+    LANGSMITH_PROJECT = _as_str(
+        _env_or_cfg(("LANGSMITH_PROJECT", "LANGCHAIN_PROJECT"), _cfg, "langsmith_project")
+    )
+    LANGSMITH_WEB_URL = _as_str(_env_or_cfg("LANGSMITH_WEB_URL", _cfg, "langsmith_web_url"))
+    LOCAL_TRACE_EXPORT = _as_bool(_env_or_cfg("LOCAL_TRACE_EXPORT", _cfg, "local_trace_export"))
     TRACE_DIR = Path(__file__).resolve().parent.parent / _trace_dir_name
 
-    RAG_TRACES_FILENAME = _as_str(_cfg.get("rag_traces_filename"))
-    AGENT_RUNS_FILENAME = _as_str(_cfg.get("agent_runs_filename"))
+    LANGSMITH_RUNS_FILENAME = _as_str(_cfg.get("langsmith_runs_filename"))
     LOGGER_NAME = _as_str(_cfg.get("logger_name"))
 
-    PHOENIX_SETTINGS = dict(_cfg.get("phoenix") or {})
+    LANGSMITH_SETTINGS = dict(_cfg.get("langsmith") or {})
     SPAN_SETTINGS = dict(_cfg.get("spans") or {})
     DEFAULT_TRACE_SETTINGS = dict(_cfg.get("defaults") or {})
     FORMATTING_SETTINGS = dict(_cfg.get("formatting") or {})
-    AGENT_TRACE_SETTINGS = dict(_cfg.get("agent_trace") or {})
+    RUN_METADATA_SETTINGS = dict(_cfg.get("run_metadata") or {})
     RUNNER_SETTINGS = dict(_cfg.get("runner") or {})

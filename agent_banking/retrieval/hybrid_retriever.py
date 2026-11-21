@@ -544,13 +544,18 @@ class HybridRetriever:
         diversify_min = RetrievalConfig.RETRIEVAL_DIVERSIFY_MIN_TOP_K
         diversify_max = RetrievalConfig.RETRIEVAL_DIVERSIFY_MAX_PER_SOURCE
         if not has_source_filter and effective_top_k >= diversify_min:
+            effective_diversify_max = diversify_max
+            if effective_top_k > diversify_min:
+                scaled_cap = effective_top_k // 4
+                if scaled_cap > effective_diversify_max:
+                    effective_diversify_max = scaled_cap
             selected_pool = []
             deferred = []
             source_counts = {}
             for item in sorted_candidates:
                 src_key = str(item["chunk"].get("source") or "").replace("\\", "/").casefold()
                 count = source_counts.get(src_key, 0)
-                if count < diversify_max:
+                if count < effective_diversify_max:
                     selected_pool.append(item)
                     source_counts[src_key] = count + 1
                 else:

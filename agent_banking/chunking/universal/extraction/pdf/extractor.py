@@ -143,6 +143,12 @@ class PdfExtractor:
             "page_indices": [], "width": pixmap.width, "height": pixmap.height,
         })
         asset["page_indices"].append(page_index)
+        from .visual_cropper import extract_page_visual_crops
+
+        for crop in extract_page_visual_crops(
+            pixels, page_index, sha, self.asset_dir, source_name=ir.get("source", "")
+        ):
+            ir["assets"].setdefault(crop["sha256"], crop)
         return page_index, pixels, pixmap.width, pixmap.height, sha, page.rotation
 
     def _read_rendered_page(self, pixels, width, height, sha, page_index, rotation):

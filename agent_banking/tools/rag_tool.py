@@ -15,12 +15,32 @@ from agent_banking.chunking.universal.planning.schema import payload_index_key
 from agent_banking.core.search_text import is_procedure_query, search_key
 from agent_banking.tools.config.prompts import RAG_TOOL_DESCRIPTION, TOOL_TEMPLATES
 from agent_banking.tools.config.settings import get_tool_runtime_config
+from agent_banking.tracing.tracer import trace_span
 
 _RAG_CFG = get_tool_runtime_config()["rag_tool"]
 _HEADER_CFG = _RAG_CFG["guide_header"]
 _LOGO_CFG = _RAG_CFG["guide_logo"]
 _NEIGHBOR_CFG = _RAG_CFG["neighbors"]
 _SOURCE_CFG = _RAG_CFG["source_matching"]
+
+_PIN_STOPWORDS = frozenset({
+    "cua", "cho", "trong", "theo", "quy", "dinh", "ngan", "hang", "abank",
+    "khach", "va", "hay", "hoac", "nhu", "the", "nao", "bao", "nhieu",
+    "cac", "nhung", "mot", "duoc", "khong", "khi", "sau", "truoc", "tai",
+    "ve", "tu", "den", "la", "gi", "co", "voi", "tren", "duoi", "nay", "do",
+})
+_FEE_TABLE_CUES = (
+    " bieu phi ", " bang phi ", " muc phi ", " phi chuyen doi ",
+    " phi thuong nien ", " phu luc ", " ma phi ",
+)
+_DIAGRAM_CUES = (
+    " hinh 1 ", " hinh 2 ", " hinh 3 ", " so do ",
+    " luu do ", " chu trinh ", " lo trinh ", " thap ",
+)
+_DIAGRAM_CHUNK_MARKERS = (
+    " hinh 1 ", " hinh 2 ", " hinh 3 ", " so do ",
+    " quy trinh chuan ", " ma tran ",
+)
 
 
 def matches_exact(item: dict, exact: str) -> bool:
@@ -124,6 +144,131 @@ def _source_neighbors(anchor, ordered, positions, procedure):
             if logical_distance == step_limit:
                 break
     return sorted(found, key=lambda item: (item[0], item[1]))
+
+
+def _pin_intra_document_targets(ranked, ordered, seen, clean_query, related, related_limit):
+    """Pin high-signal same-document tables, diagrams, or app steps missed by top_k."""
+    if not ranked or len(related) >= related_limit:
+        return
+    query_key = " " + search_key(clean_query) + " "
+    q_tokens = []
+    for tok in query_key.split():
+        if (len(tok) >= 3 or tok.isdigit()) and tok not in _PIN_STOPWORDS:
+            if tok not in q_tokens:
+                q_tokens.append(tok)
+    if not q_tokens:
+        return
+
+    wants_fee_table = any(cue in query_key for cue in _FEE_TABLE_CUES)
+    wants_diagram = any(cue in query_key for cue in _DIAGRAM_CUES)
+    time_prefix = str(_RAG_CFG["guide_header"].get("excluded_terms", ["09:41"])[0])
+
+    # Collect immediate linked siblings sharing the exact same section_title as ranked[:2]
+    sibling_keys = {}
+    primary_sources = []
+    seen_sources = set()
+    for anchor in ranked[:2]:
+        src = anchor.get("source")
+        if not src or src not in ordered:
+            continue
+        if src not in seen_sources:
+            seen_sources.add(src)
+            primary_sources.append((src, anchor))
+        passages, positions = ordered[src]
+        pos = positions.get(payload_index_key(anchor))
+        anchor_sec = str(anchor.get("section_title") or "").strip()
+        if pos is not None and anchor_sec:
+            src_sibs = sibling_keys.setdefault(src, set())
+            for delta in (-1, 1):
+                sib_idx = pos + delta
+                if 0 <= sib_idx < len(passages):
+                    sib = passages[sib_idx]
+                    if delta == -1:
+                        linked = (
+                            sib.get("next_chunk_id") == anchor.get("chunk_id")
+                            and anchor.get("prev_chunk_id") == sib.get("chunk_id")
+                        )
+                    else:
+                        linked = (
+                            anchor.get("next_chunk_id") == sib.get("chunk_id")
+                            and sib.get("prev_chunk_id") == anchor.get("chunk_id")
+                        )
+                    if linked and str(sib.get("section_title") or "").strip() == anchor_sec:
+                        src_sibs.add(payload_index_key(sib))
+
+    threshold = 4
+    if wants_fee_table or wants_diagram:
+        threshold = 3
+
+    pinned = []
+    for src, anchor in primary_sources:
+        passages, _ = ordered[src]
+        anchor_scopes = set(anchor.get("business_metadata", {}).get("publication_scopes", []))
+        wants_app_subflow = _app_guide(anchor)
+        src_sibs = sibling_keys.get(src, set())
+        for idx, cand in enumerate(passages):
+            cand_key_id = payload_index_key(cand)
+            ident = (cand.get("source"), cand_key_id)
+            if ident in seen:
+                continue
+            cand_scopes = set(cand.get("business_metadata", {}).get("publication_scopes", []))
+            if (anchor_scopes or cand_scopes) and not anchor_scopes.intersection(cand_scopes):
+                continue
+            if wants_app_subflow and (_guide_logo(cand) or _guide_header(cand)):
+                continue
+            sec_str = str(cand.get("section_title") or "") + " " + str(cand.get("breadcrumb") or "")
+            sec_key = " " + search_key(sec_str) + " "
+            content_str = str(cand.get("content") or "")
+            table_str = str(cand.get("table_data") or "")
+            cand_key = " " + search_key(content_str + " " + sec_str + " " + table_str) + " "
+            cand_tokens = set(cand_key.split())
+
+            token_hits = 0
+            for tok in q_tokens:
+                if tok in cand_tokens:
+                    token_hits += 1
+            if token_hits == 0:
+                continue
+
+            score = token_hits
+            is_table_chunk = (
+                cand.get("chunk_type") == "table"
+                or bool(cand.get("table_data"))
+                or " phu luc " in sec_key
+                or " bieu phi " in sec_key
+            )
+            if wants_fee_table and is_table_chunk:
+                score += 3
+            has_diagram_cue = any(marker in cand_key for marker in _DIAGRAM_CHUNK_MARKERS)
+            if wants_diagram and has_diagram_cue:
+                score += 3
+            if wants_app_subflow:
+                instr_lines = []
+                for line in content_str.splitlines():
+                    if line.strip().startswith(time_prefix):
+                        break
+                    instr_lines.append(line)
+                instr_tokens = set(search_key(" ".join(instr_lines)).split())
+                instr_hits = 0
+                for tok in q_tokens:
+                    if tok in instr_tokens:
+                        instr_hits += 1
+                if instr_hits >= 2:
+                    score += 2
+            if cand_key_id in src_sibs and (token_hits >= 1 or is_table_chunk or has_diagram_cue):
+                score += 2
+
+            if score >= threshold:
+                pinned.append((score, token_hits, idx, ident, cand, anchor["chunk_id"]))
+
+    pinned.sort(key=lambda item: (-item[0], -item[1], item[2]))
+    for _, _, _, ident, cand, anchor_id in pinned:
+        if len(related) >= related_limit:
+            break
+        if ident in seen:
+            continue
+        related.append({"chunk": cand, "context_for": anchor_id})
+        seen.add(ident)
 
 
 class BankingRAGTool:
@@ -234,8 +379,14 @@ class BankingRAGTool:
             raise ValueError("Exact search requires a product name or service code")
         if exact and search_key(exact) not in search_key(clean_query):
             search_text += " " + exact
-        parsed_q = self.pipeline.parse_query(search_text)
-        search_query = parsed_q.normalized_query
+        with trace_span("query_parser", run_type="parser", raw_query=search_text) as qp_span:
+            parsed_q = self.pipeline.parse_query(search_text)
+            search_query = parsed_q.normalized_query
+            qp_span.update(
+                normalized_query=search_query,
+                keywords=list(getattr(parsed_q, "keywords", []) or []),
+                legal_references=list(getattr(parsed_q, "legal_references", []) or []),
+            )
 
         # 2. Hybrid Retrieval (Dense Vector + BM25 Okapi)
         candidate_count = candidate_k or self.pipeline.config.HYBRID_CANDIDATE_K
@@ -253,36 +404,40 @@ class BankingRAGTool:
             source_chunks = self._source_chunks(source, scope)
             if source_chunks:
                 filters["source"] = source_chunks[0]["source"]
-        if offset is not None:
-            if not source or type(offset) is not int or offset < 0:
-                raise ValueError("Reading a document requires source and a nonnegative offset")
-            candidates = [{"chunk": chunk} for chunk in source_chunks[offset:offset + top_k]]
-        elif source and not source_chunks:
-            candidates = []
-        else:
-            candidates = self.pipeline.retriever.retrieve(
-                query=parsed_q, top_k=top_candidates, candidate_k=candidate_count, filter_dict=filters,
-            )
-            if source:
-                allowed = {(chunk["source"], payload_index_key(chunk)) for chunk in source_chunks}
-                selected = []
-                for item in candidates:
-                    raw = item.get("chunk", item)
-                    if (raw.get("source"), payload_index_key(raw)) not in allowed:
-                        continue
-                    if scope and scope not in raw.get("business_metadata", {}).get("publication_scopes", []):
-                        continue
-                    selected.append(item)
-                candidates = selected
-        relaxed = any(item.get("retrieval_meta", {}).get("fallback_unfiltered") for item in candidates)
-        if exact:
-            candidates = [item for item in candidates if matches_exact(item, exact)]
+        with trace_span("top_k_hybrid_retrieval", run_type="retriever", query=search_query, top_k=top_candidates) as ret_span:
+            if offset is not None:
+                if not source or type(offset) is not int or offset < 0:
+                    raise ValueError("Reading a document requires source and a nonnegative offset")
+                candidates = [{"chunk": chunk} for chunk in source_chunks[offset:offset + top_k]]
+            elif source and not source_chunks:
+                candidates = []
+            else:
+                candidates = self.pipeline.retriever.retrieve(
+                    query=parsed_q, top_k=top_candidates, candidate_k=candidate_count, filter_dict=filters,
+                )
+                if source:
+                    allowed = {(chunk["source"], payload_index_key(chunk)) for chunk in source_chunks}
+                    selected = []
+                    for item in candidates:
+                        raw = item.get("chunk", item)
+                        if (raw.get("source"), payload_index_key(raw)) not in allowed:
+                            continue
+                        if scope and scope not in raw.get("business_metadata", {}).get("publication_scopes", []):
+                            continue
+                        selected.append(item)
+                    candidates = selected
+            relaxed = any(item.get("retrieval_meta", {}).get("fallback_unfiltered") for item in candidates)
+            if exact:
+                candidates = [item for item in candidates if matches_exact(item, exact)]
+            ret_span.update(candidate_count=len(candidates), relaxed_filters=relaxed)
 
         # 3. Cross-Encoder Reranker
-        if offset is not None:
-            reranked = candidates
-        else:
-            reranked = self.pipeline.reranker.rerank(query=clean_query, candidates=candidates, top_k=top_k)
+        with trace_span("top_k_cross_encoder_reranker", run_type="retriever", query=clean_query, input_count=len(candidates), top_k=top_k) as rr_span:
+            if offset is not None:
+                reranked = candidates
+            else:
+                reranked = self.pipeline.reranker.rerank(query=clean_query, candidates=candidates, top_k=top_k)
+            rr_span.update(reranked_count=len(reranked))
 
         # 4. Extract documents and source references
         docs = []
@@ -343,6 +498,8 @@ class BankingRAGTool:
                         break
                 if len(related) == related_limit:
                     break
+            if top_k >= 3 and len(related) < related_limit:
+                _pin_intra_document_targets(ranked, ordered, seen, clean_query, related, related_limit)
 
         default_source = TOOL_TEMPLATES["rag_default_source_label"]
         score_precision = int(_RAG_CFG["score_precision"])

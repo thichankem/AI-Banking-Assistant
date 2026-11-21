@@ -15,7 +15,7 @@ from agent_banking.chunking.config.prompt_config import (
 )
 from agent_banking.chunking.config.settings import get_config_section
 from agent_banking.core.models import auto_routing_enabled, chain_fingerprint, model_primary
-from agent_banking.tracing.agent_trace import annotate_span, trace_stage
+from agent_banking.tracing.tracer import annotate_span, trace_stage
 from ...extraction.docx.extractor import MAX_HEADING_LEVEL
 from .images import attach_visual_captions, resolve_image_titles_and_context
 from .tables import (

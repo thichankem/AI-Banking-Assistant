@@ -200,8 +200,10 @@ def get_config():
         "reranker_model": config.RERANKER_MODEL,
         "qdrant_collection": config.QDRANT_COLLECTION,
         "points_count": total_points,
-        "tracing_enabled": rag_pipeline.tracer.is_phoenix_active,
-        "phoenix_url": str(_API_CFG["phoenix_url"]),
+        "tracing_enabled": rag_pipeline.tracer.is_langsmith_active,
+        "tracing_provider": "langsmith",
+        "langsmith_project": rag_pipeline.tracer.project_name,
+        "langsmith_url": str(_API_CFG["langsmith_url"]),
         "nodes": list(_API_CFG["nodes"])
     }
 
@@ -314,6 +316,7 @@ async def stream_agent_chat(req: ChatRequest):
         audit_status_used = "PASS"
         citations = []
         sources = []
+        images = []
         final_metadata = {}
 
         try:
@@ -344,6 +347,7 @@ async def stream_agent_chat(req: ChatRequest):
                         final_response_text = node_state["final_answer"]
                         citations = node_state["citations"]
                         sources = node_state["sources"]
+                        images = node_state.get("images", [])
                         final_metadata = {
                             key: node_state[key] for key in _FINAL_METADATA_KEYS
                         }
@@ -381,6 +385,7 @@ async def stream_agent_chat(req: ChatRequest):
                 "evaluation_metrics": None,
                 "citations": citations,
                 "sources": sources,
+                "images": images,
                 "full_answer": final_response_text,
                 **final_metadata
             }
@@ -483,6 +488,63 @@ def get_node_file_content(node_name: str, io_type: str, file_name: str):
             return {"file_name": file_name, "is_json": False, "content": raw_text}
     except Exception as e:
         raise HTTPException(status_code=500, detail=_API_MESSAGES["unable_to_read_file"].format(error=e))
+
+
+_SHARED_ASSETS_DIR = (ROOT_DIR / "agent_banking" / "chunking" / "output" / "assets").resolve()
+_PUBLICATION_KNOWLEDGE_DIR = (ROOT_DIR / "agent_banking" / "outputs" / "tuning_20261117" / "knowledge").resolve()
+_ASSET_INDEX_CACHE = {}
+_HEX_CHARS = "0123456789abcdef"
+
+
+def _is_valid_asset_id(asset_id: str) -> bool:
+    if not isinstance(asset_id, str) or len(asset_id) != 64:
+        return False
+    for ch in asset_id:
+        if ch not in _HEX_CHARS:
+            return False
+    return True
+
+
+def _find_asset_file(asset_id: str):
+    if not _is_valid_asset_id(asset_id):
+        return None
+    filename = asset_id + ".png"
+
+    if _SHARED_ASSETS_DIR.is_dir():
+        candidate = (_SHARED_ASSETS_DIR / filename).resolve()
+        if candidate.is_relative_to(_SHARED_ASSETS_DIR) and candidate.is_file():
+            return candidate
+
+    cached = _ASSET_INDEX_CACHE.get(asset_id)
+    if cached is not None and cached.is_file():
+        return cached
+
+    if _PUBLICATION_KNOWLEDGE_DIR.is_dir():
+        for pub_assets in _PUBLICATION_KNOWLEDGE_DIR.glob("*/assets"):
+            if not pub_assets.is_dir():
+                continue
+            pub_base = pub_assets.resolve()
+            candidate = (pub_base / filename).resolve()
+            if candidate.is_relative_to(pub_base) and candidate.is_file():
+                _ASSET_INDEX_CACHE[asset_id] = candidate
+                return candidate
+    return None
+
+
+@app.get("/api/assets/{asset_id}")
+def get_visual_asset(asset_id: str):
+    """Serve a validated cropped or embedded visual asset PNG safely."""
+    clean_id = asset_id.strip().lower()
+    if not _is_valid_asset_id(clean_id):
+        raise HTTPException(status_code=400, detail="Invalid visual asset identifier")
+    target = _find_asset_file(clean_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Visual asset not found")
+    return FileResponse(
+        str(target),
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"}
+    )
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 """
-Direct runner for Tracing Module.
+Direct runner for LangSmith Tracing Module.
 Executes input-to-output tracing pipeline with deduplication.
 """
 import argparse

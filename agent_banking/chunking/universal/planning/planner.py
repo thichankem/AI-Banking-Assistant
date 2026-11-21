@@ -250,6 +250,14 @@ class ChunkPlanner:
             provenance = chunk["business_metadata"]["provenance"]
             indices = {index for identifier in provenance["block_ids"] for index in self.relations_by_block[identifier]}
             provenance["relations"] = [ir["relations"][index] for index in sorted(indices)]
+        from ..extraction.pdf.visual_cropper import collect_page_step_numbers, match_chunk_visual_assets
+
+        page_step_numbers = collect_page_step_numbers(ir.get("blocks", []))
+        ir_assets = ir.get("assets", {})
+        for chunk in self.chunks:
+            chunk["images"] = match_chunk_visual_assets(
+                chunk, ir_assets, page_step_numbers=page_step_numbers
+            )
         link_chunk_sequence(self.chunks)
         quality = validate_coverage(self)
         for chunk in self.chunks:

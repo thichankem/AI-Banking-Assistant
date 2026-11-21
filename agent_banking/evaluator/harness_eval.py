@@ -2,7 +2,6 @@
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import contextmanager
 from contextvars import ContextVar
 from hashlib import sha256
 import json
@@ -11,7 +10,6 @@ from pathlib import Path
 import os
 import sys
 from time import perf_counter
-from types import SimpleNamespace
 
 from agent_banking.evaluator.config.settings import (
     EvaluatorConfig,
@@ -38,11 +36,6 @@ def golden_cases(root):
     if len(cases) != expected_total or len({case["key"] for case in cases}) != expected_total:
         raise ValueError(f"Expected {expected_total} distinct golden cases")
     return cases
-
-
-@contextmanager
-def discard_trace(query):
-    yield SimpleNamespace(spans=[], finish=lambda **kwargs: None)
 
 
 def judge_answer(judge, case, observed):
@@ -165,8 +158,9 @@ def routing_metrics(output, results):
                     routes[route] = routes.get(route, 0) + 1
                     reported = data.get("usage", {})
                     usage_reports += bool(reported)
-                    for field in usage:
-                        usage[field] += reported.get(field, 0)
+                    usage["prompt_tokens"] += reported.get("prompt_tokens", reported.get("input_tokens", 0))
+                    usage["completion_tokens"] += reported.get("completion_tokens", reported.get("output_tokens", 0))
+                    usage["total_tokens"] += reported.get("total_tokens", 0)
     latencies.sort()
 
     def percentile(value):
@@ -216,9 +210,8 @@ def run(args):
     config.STORAGE_DIR = root / "agent_banking" / "vector_db"
     config.TRACE_DIR = output / "traces"
     config.ENABLE_TRACING = True
-    config.ENABLE_PHOENIX = False
+    config.LOCAL_TRACE_EXPORT = True
     rag = BankingRAGPipeline(config=config)
-    rag.tracer.trace_query = discard_trace
     pipeline = BankingAgentPipeline(
         config=config,
         rag_pipeline=rag,

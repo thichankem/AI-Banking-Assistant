@@ -13,7 +13,7 @@ from agent_banking.chunking.config.prompt_config import (
     PDF_SCHEMA_VERSION,
 )
 from agent_banking.chunking.config.settings import get_config_section, get_rules
-from agent_banking.tracing.agent_trace import annotate_span, trace_stage
+from agent_banking.tracing.tracer import annotate_span, trace_stage
 from .layout import has_meaningful_layout, merge_region_observation, normalize_visual_layout, reading_order, validate_page, validate_scan_pixels
 from .tables import table_from_html, validate_table
 

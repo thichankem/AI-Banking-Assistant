@@ -9,7 +9,7 @@ from agent_banking.core.config.settings import CoreConfig, get_core_messages
 from agent_banking.core.fallback import run_fallback
 from agent_banking.core.model_routing import request_metadata, usage_metadata
 from agent_banking.core.models import chain_fingerprint, get_model_chain
-from agent_banking.tracing.agent_trace import agent_span
+from agent_banking.tracing.tracer import trace_span
 
 _CHAT_CFG = CoreConfig.CORE_CHAT
 _DEFAULT_RETRY_DELAYS = tuple(_CHAT_CFG["retry_delays"])
@@ -73,8 +73,9 @@ class FallbackChatClient:
 
         def legacy_call(candidate):
             nonlocal _usage
-            with agent_span(
+            with trace_span(
                 "model.attempt",
+                run_type="llm",
                 role=self.module,
                 reason="legacy_order",
                 **request_metadata(kwargs, candidate),

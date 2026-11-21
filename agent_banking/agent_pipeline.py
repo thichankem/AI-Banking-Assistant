@@ -25,7 +25,7 @@ from agent_banking.pipeline import BankingRAGPipeline
 from agent_banking.agent.graph import build_banking_agent_graph
 from agent_banking.agent.deep import BankingDeepAgent
 from agent_banking.agent.react import FALLBACK_ANSWER
-from agent_banking.tracing.agent_trace import AgentRun, agent_span
+from agent_banking.tracing.tracer import LangSmithTraceRun, trace_span
 
 _AP_CFG = CoreConfig.CORE_AGENT_PIPELINE
 _MESSAGES = get_core_messages("agent_pipeline", "pipeline_messages.yaml", "AGENT_PIPELINE_MESSAGES")
@@ -131,14 +131,14 @@ class BankingAgentPipeline:
     def _trace(self, entrypoint, session_id):
         if hasattr(self.tracer, "trace_agent"):
             return self.tracer.trace_agent(entrypoint, session_id)
-        return AgentRun(None, entrypoint, session_id).capture()
+        return LangSmithTraceRun(None, entrypoint, session_id).capture()
 
     def _snapshot(self, config):
-        with agent_span("checkpoint.load"):
+        with trace_span("checkpoint.load"):
             return self.graph.get_state(config)
 
     def _initial_turn(self, run, snapshot, query, session_id, persona, tone, format_type, custom_persona):
-        with agent_span("request.prepare") as details:
+        with trace_span("request.prepare") as details:
             state = self.build_initial_state(query, session_id, persona, tone, format_type, custom_persona)
             details["input_safe"] = state["screened_input"]["is_safe"]
             if run.turn_id:
@@ -254,6 +254,7 @@ class BankingAgentPipeline:
                 "answer": reply.sanitized_answer,
                 "citations": [],
                 "sources": [],
+                "images": [],
                 "intent": "CHIT_CHAT",
                 "retry_count": 0,
                 "audit_status": "PASS",
@@ -286,6 +287,7 @@ class BankingAgentPipeline:
                 "answer": reply.sanitized_answer,
                 "citations": [],
                 "sources": [],
+                "images": [],
                 "intent": "ERROR",
                 "retry_count": 0,
                 "audit_status": "ERROR",
@@ -365,6 +367,7 @@ class BankingAgentPipeline:
             "answer": answer,
             "citations": citations,
             "sources": sources,
+            "images": final_state.get("images", []),
             "intent": intent,
             "retry_count": retries,
             "audit_status": audit_stat,

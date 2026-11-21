@@ -195,6 +195,35 @@ class BankingReranker:
                     bonus += section_fallback_bonus
                     break
 
+        structural_query_markers = (
+            " phu luc ", " bieu phi ", " bang phi ",
+            " hinh 1 ", " hinh 2 ", " hinh 3 ",
+            " so do ", " luu do ", " chu trinh ", " lo trinh ",
+        )
+        if any(marker in padded_q for marker in structural_query_markers):
+            head_key = search_key(str(chunk.get("content") or "")[:320])
+            padded_head = " " + head_key + " "
+            structural_chunk_markers = (
+                " phu luc ", " bieu phi ",
+                " hinh 1 ", " hinh 2 ", " hinh 3 ",
+                " so do ", " quy trinh chuan ", " ma tran ",
+            )
+            if (
+                any(marker in padded_sec or marker in padded_head for marker in structural_chunk_markers)
+                or chunk.get("chunk_type") == "table"
+                or bool(chunk.get("table_data"))
+            ):
+                bonus += 0.045
+
+        q_all_tokens = q_key.split()
+        for idx in range(len(q_all_tokens) - 1):
+            unit_tok = q_all_tokens[idx]
+            num_tok = q_all_tokens[idx + 1]
+            if unit_tok in ("dieu", "buoc") and num_tok.isdigit():
+                if (" " + unit_tok + " " + num_tok + " ") in padded_sec:
+                    bonus += 0.04
+                    break
+
         return bonus
 
     @staticmethod
@@ -463,8 +492,10 @@ class BankingReranker:
                         if len(ordered) > top_k:
                             selected = []
                             deferred = []
+                            dup_deferred = []
                             source_counts = {}
                             seen_snippets = set()
+                            best_deferred_score = 0.0
                             for item in ordered:
                                 raw_chunk = item.get("chunk", item)
                                 src_id = ""
@@ -475,10 +506,15 @@ class BankingReranker:
                                     if src_id and snippet:
                                         snippet_key = (src_id, snippet)
                                 if snippet_key is not None and snippet_key in seen_snippets:
-                                    deferred.append(item)
+                                    dup_deferred.append(item)
                                     continue
+                                item_score = float(item.get("relevance_score", 0.0))
                                 count = source_counts.get(src_id, 0)
                                 if top_k >= div_min_top_k and src_id and count >= div_max_per_src:
+                                    if item_score > best_deferred_score:
+                                        best_deferred_score = item_score
+                                    deferred.append(item)
+                                elif top_k >= div_min_top_k and best_deferred_score >= 0.45 and item_score < 0.22:
                                     deferred.append(item)
                                 else:
                                     selected.append(item)
@@ -489,7 +525,10 @@ class BankingReranker:
                                 if len(selected) >= top_k:
                                     break
                             if len(selected) < top_k:
+                                deferred.sort(key=lambda d_item: float(d_item.get("relevance_score", 0.0)), reverse=True)
                                 selected.extend(deferred[:top_k - len(selected)])
+                                if len(selected) < top_k:
+                                    selected.extend(dup_deferred[:top_k - len(selected)])
                             chosen = selected
                         else:
                             chosen = ordered[:top_k]

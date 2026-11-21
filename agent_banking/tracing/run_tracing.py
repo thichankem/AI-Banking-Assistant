@@ -1,12 +1,12 @@
 """
-Automated Tracing Collection Runner (Auto Tracing Node with Deduplication).
-===========================================================================
+Automated LangSmith Tracing Collection Runner (Auto Tracing Node with Deduplication).
+=====================================================================================
 Features:
 1. Reads trace inputs from configured tracing input file.
 2. Computes SHA-256 hash of each trace request.
 3. Checks StateTracker: Reuses previously traced requests (SKIP).
-4. Records spans and metrics for new trace queries.
-5. Emits results to configured tracing output file.
+4. Records LangSmith runs and spans for new trace queries.
+5. Emits results to configured tracing output file and flushes LangSmith client.
 
 MANDATORY INVARIANTS:
 1. NO __INIT__.PY.
@@ -54,7 +54,7 @@ def run_auto_tracing(
     output_dir=None,
     force=False
 ):
-    """Run automated tracing collection with state deduplication."""
+    """Run automated LangSmith tracing collection with state deduplication."""
     cfg = Config()
     input_dir_name = str(_runner_cfg.get("input_dir_name") or "input")
     output_dir_name = str(_runner_cfg.get("output_dir_name") or "output")
@@ -151,7 +151,7 @@ def run_auto_tracing(
             print(_msg("skip_item_template", tid=tid, q_preview=q[:preview_chars]))
         else:
             t0 = time.time()
-            with tracer.trace_query(query=q) as trace:
+            with tracer.trace_query(query=q, session_id=sess) as trace:
                 trace.record_query_parser(
                     input_query=q,
                     parsed=type("DummyParsed", (), {"normalized_query": q, "keywords": q.split()})(),
@@ -159,14 +159,17 @@ def run_auto_tracing(
                 )
                 trace.record_embedding(num_texts=1, dimension=sim_embed_dim, duration_ms=sim_embed_ms)
                 trace.finish(answer=_msg("simulated_answer"), is_blocked=False)
+                recorded_trace_id = trace.trace_id
 
             dt_ms = round((time.time() - t0) * 1000, 2)
             res = {
                 "trace_id": tid,
+                "langsmith_trace_id": recorded_trace_id or tid,
+                "langsmith_project": tracer.project_name,
+                "langsmith_enabled": tracer.is_langsmith_active,
                 "session_id": sess,
                 "query": q,
                 "status": "RECORDED",
-                "phoenix_enabled": cfg.ENABLE_PHOENIX,
                 "latency_ms": dt_ms,
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
             }
@@ -175,6 +178,7 @@ def run_auto_tracing(
             new_count += 1
             print(_msg("new_item_template", tid=tid, q_preview=q[:preview_chars], dt_ms=dt_ms))
 
+    tracer.flush()
     tracker.save()
     total_elapsed = round(time.time() - start_t, 2)
 

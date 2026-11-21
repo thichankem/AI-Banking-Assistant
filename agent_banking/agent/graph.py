@@ -10,7 +10,7 @@ from langgraph.graph import END, START, StateGraph
 from agent_banking.agent.config.settings import get_setting
 from agent_banking.agent.deep import BankingDeepAgent
 from agent_banking.core.settings import Config
-from agent_banking.tracing.agent_trace import agent_span, fingerprint
+from agent_banking.tracing.tracer import fingerprint, trace_node_context
 
 
 DEFAULT_SQLITE_DB = str(
@@ -49,7 +49,7 @@ def _after_decision(state: dict) -> str:
 
 def _trace_node(name, action):
     def traced(state):
-        with agent_span("graph." + name) as details:
+        with trace_node_context(name) as details:
             result = action(state)
             if name == "deep_decide":
                 decision = result["react_turn"].get("decision", {})

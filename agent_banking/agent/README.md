@@ -191,9 +191,9 @@ Prompt bắt buộc gồm yêu cầu, phản hồi làm rõ, phạm vi đã xác
 
 ### Trace và UAT
 
-Khi `ENABLE_TRACING=true`, `TRACE_DIR/agent_runs.jsonl` chứa trace cho chat, SSE, resume và tài liệu. Mỗi `model.attempt` ghi model thực thi, profile, role, tham số thực gửi, latency, kết quả và usage do provider cung cấp. Các lỗi context được ghi trước khi gửi request. Trace giữ metadata chẩn đoán, mã phiên đã băm và các ID liên kết.
+Toàn bộ tracing của dự án sử dụng **LangSmith** (`agent_banking/tracing/tracer.py`). Khi `ENABLE_TRACING=true` và `LANGSMITH_API_KEY` được cấu hình, mọi lượt chat, SSE, resume, LangGraph node, gọi model LLM (`model.attempt`), tool/RAG (`query_parser`, `top_k_hybrid_retrieval`, `top_k_cross_encoder_reranker`) và xử lý tài liệu (`document`) đều được đồng bộ lên LangSmith project (`LANGSMITH_PROJECT`). Khi chạy offline không có `LANGSMITH_API_KEY`, tracer tự động dùng `OfflineLangSmithClient` an toàn không gọi mạng; khi chạy đánh giá harness hoặc truyền `LOCAL_TRACE_EXPORT=true`, bản tóm tắt LangSmith được xuất tại `TRACE_DIR/langsmith_runs.jsonl`. Mỗi `model.attempt` ghi model thực thi, profile, role, tham số thực gửi, latency, kết quả và usage (`usage_metadata` / `usage`). Các lỗi context được ghi trước khi gửi request. Trace giữ metadata chẩn đoán, mã phiên đã băm và các ID liên kết.
 
-API chat, SSE `done` và resume trả `trace_id` và `turn_id` khi bật trace. Một lần resume có trace mới và tiếp tục turn đang chờ. API xử lý ảnh chat giữ hợp đồng text hiện tại, Vision nằm trong pipeline tài liệu RAG.
+API chat, SSE `done` và resume trả `trace_id` và `turn_id` của LangSmith khi bật trace. Một lần resume có trace mới và tiếp tục turn đang chờ. API xử lý ảnh chat giữ hợp đồng text hiện tại, Vision nằm trong pipeline tài liệu RAG.
 
 Chạy test offline từ thư mục gốc repo.
 

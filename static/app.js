@@ -230,6 +230,179 @@ document.addEventListener("DOMContentLoaded", () => {
         stepperDesc.textContent = message;
     }
 
+    let lightboxElements = null;
+
+    function ensureLightbox() {
+        if (lightboxElements) {
+            return lightboxElements;
+        }
+        const overlay = document.createElement("div");
+        overlay.className = "image-lightbox-overlay";
+        overlay.hidden = true;
+
+        const dialog = document.createElement("div");
+        dialog.className = "image-lightbox-content";
+
+        const closeBtn = document.createElement("button");
+        closeBtn.type = "button";
+        closeBtn.className = "image-lightbox-close";
+        closeBtn.textContent = "×";
+        closeBtn.setAttribute("aria-label", "Đóng ảnh phóng to");
+
+        const fullImg = document.createElement("img");
+        fullImg.className = "image-lightbox-img";
+        fullImg.alt = "";
+
+        const metaBox = document.createElement("div");
+        metaBox.className = "image-lightbox-meta";
+
+        dialog.append(closeBtn, fullImg, metaBox);
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+
+        function closeLightbox() {
+            overlay.hidden = true;
+            fullImg.src = "";
+        }
+
+        closeBtn.addEventListener("click", closeLightbox);
+        overlay.addEventListener("click", (event) => {
+            if (event.target === overlay) {
+                closeLightbox();
+            }
+        });
+        document.addEventListener("keydown", (event) => {
+            if (event.key === "Escape" && !overlay.hidden) {
+                closeLightbox();
+            }
+        });
+
+        lightboxElements = { overlay, fullImg, metaBox };
+        return lightboxElements;
+    }
+
+    function openImageLightbox(url, caption, metaText) {
+        const box = ensureLightbox();
+        box.fullImg.src = url;
+        box.fullImg.alt = caption;
+        box.metaBox.replaceChildren();
+
+        const titleEl = document.createElement("div");
+        titleEl.className = "image-lightbox-title";
+        titleEl.textContent = caption;
+        box.metaBox.appendChild(titleEl);
+
+        if (metaText) {
+            const subEl = document.createElement("div");
+            subEl.className = "image-lightbox-sub";
+            subEl.textContent = metaText;
+            box.metaBox.appendChild(subEl);
+        }
+        box.overlay.hidden = false;
+    }
+
+    function regionTypeLabel(regionType) {
+        if (regionType === "app_step") {
+            return "Thao tác App";
+        }
+        if (regionType === "slide_visual") {
+            return "Hướng dẫn trực quan";
+        }
+        if (regionType === "table") {
+            return "Bảng biểu";
+        }
+        if (regionType === "visual_card") {
+            return "Thẻ chỉ số";
+        }
+        return "Minh họa";
+    }
+
+    function buildEvidenceImagesElement(images) {
+        if (!Array.isArray(images) || images.length === 0) {
+            return null;
+        }
+        const card = document.createElement("div");
+        card.className = "evidence-images-card";
+
+        const header = document.createElement("div");
+        header.className = "evidence-images-header";
+        header.textContent = "Hình ảnh minh họa liên quan (" + images.length + ")";
+        card.appendChild(header);
+
+        const grid = document.createElement("div");
+        grid.className = "evidence-images-grid";
+
+        for (const item of images) {
+            if (!item || !item.url) {
+                continue;
+            }
+            const tile = document.createElement("button");
+            tile.type = "button";
+            tile.className = "evidence-image-item";
+
+            const thumbWrap = document.createElement("div");
+            thumbWrap.className = "evidence-image-thumb-wrap";
+
+            const imgEl = document.createElement("img");
+            imgEl.src = item.url;
+            imgEl.loading = "lazy";
+            let imgAlt = "Hình ảnh minh họa";
+            if (item.caption) {
+                imgAlt = item.caption;
+            }
+            imgEl.alt = imgAlt;
+            thumbWrap.appendChild(imgEl);
+
+            const metaDiv = document.createElement("div");
+            metaDiv.className = "evidence-image-meta";
+
+            const topRow = document.createElement("div");
+            topRow.className = "evidence-image-badges";
+
+            if (item.citation_label) {
+                const citeBadge = document.createElement("span");
+                citeBadge.className = "evidence-image-badge";
+                citeBadge.textContent = item.citation_label;
+                topRow.appendChild(citeBadge);
+            }
+
+            const typeBadge = document.createElement("span");
+            typeBadge.className = "evidence-image-type";
+            typeBadge.textContent = regionTypeLabel(item.region_type);
+            topRow.appendChild(typeBadge);
+
+            const capEl = document.createElement("div");
+            capEl.className = "evidence-image-caption";
+            let subParts = [];
+            if (item.document_name) {
+                subParts.push(item.document_name);
+            }
+            if (item.page_number) {
+                subParts.push("Trang " + item.page_number);
+            }
+            const metaSummary = subParts.join(" · ");
+            if (metaSummary) {
+                capEl.textContent = metaSummary;
+            } else {
+                capEl.textContent = imgAlt;
+            }
+
+            metaDiv.append(topRow, capEl);
+            tile.append(thumbWrap, metaDiv);
+
+            tile.addEventListener("click", () => {
+                openImageLightbox(item.url, imgAlt, metaSummary);
+            });
+            grid.appendChild(tile);
+        }
+
+        if (grid.children.length === 0) {
+            return null;
+        }
+        card.appendChild(grid);
+        return card;
+    }
+
     function appendMessage(sender, content, meta = null) {
         const msgDiv = document.createElement("div");
         msgDiv.className = "message " + sender + "-message";
@@ -277,6 +450,18 @@ document.addEventListener("DOMContentLoaded", () => {
                     ${sourcesHtml}
                 </div>
             `;
+            if (meta && Array.isArray(meta.images) && meta.images.length > 0) {
+                const galleryEl = buildEvidenceImagesElement(meta.images);
+                const bubbleEl = msgDiv.querySelector(".bubble");
+                if (galleryEl && bubbleEl) {
+                    const sourcesCard = bubbleEl.querySelector(".sources-card");
+                    if (sourcesCard) {
+                        bubbleEl.insertBefore(galleryEl, sourcesCard);
+                    } else {
+                        bubbleEl.appendChild(galleryEl);
+                    }
+                }
+            }
         }
 
         chatMessages.appendChild(msgDiv);
@@ -590,7 +775,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 appendMessage("bot", finalText, {
                     citations: finalDoneMeta.citations,
-                    sources: finalDoneMeta.sources
+                    sources: finalDoneMeta.sources,
+                    images: finalDoneMeta.images
                 });
             } else {
                 botMsgDiv.remove();

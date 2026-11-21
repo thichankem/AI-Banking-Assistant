@@ -12,7 +12,7 @@ from agent_banking.agent.config.settings import get_float_setting, get_int_setti
 from agent_banking.core.cloud_rate_limit import retry_delay
 from agent_banking.core.fallback import ModelFallbackError, is_temporary_error
 from agent_banking.core.model_routing import apply_chat_options, ordered_candidates, request_metadata, usage_metadata
-from agent_banking.tracing.agent_trace import agent_span
+from agent_banking.tracing.tracer import trace_span
 
 
 _CONTEXT_BYTES_DEFAULT = get_int_setting("context_bytes_default")
@@ -343,7 +343,7 @@ class StructuredModel:
             except ModelFallbackError:
                 context_limited = True
                 failures.append((candidate.profile, "context_budget_exceeded"))
-                with agent_span("model.route", role=role, alias=candidate.profile,
+                with trace_span("model.route", run_type="chain", role=role, alias=candidate.profile,
                                 reason="context_budget_exceeded", input_budget_bytes=budget):
                     pass
                 continue
@@ -361,7 +361,7 @@ class StructuredModel:
             elif candidate.profile == "standard" and deep_reason:
                 reason = "standard_fallback"
             calls += 1
-            with agent_span("model.attempt", role=role, configured_role=client.module,
+            with trace_span("model.attempt", run_type="llm", role=role, configured_role=client.module,
                             reason=reason, attempt=calls, input_budget_bytes=budget,
                             input_bytes=len(packed.encode("utf-8")), **request_metadata(payload, candidate)) as details:
                 try:

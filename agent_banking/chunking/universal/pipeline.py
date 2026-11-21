@@ -168,16 +168,17 @@ class UniversalDocxChunker:
             source, name, fmt = self._resolve_source(
                 docx_path, docx_bytes, source_name, expected_format, source_root=source_root,
             )
-            from agent_banking.tracing.agent_trace import AgentRun
+            from agent_banking.tracing.tracer import BankingTracer, LangSmithTraceRun
 
-            trace_dir = None
             trace_config = self.config
             if trace_config is None:
                 from agent_banking.tracing.config.settings import TracingConfig
                 trace_config = TracingConfig()
-            if getattr(trace_config, "ENABLE_TRACING", False):
-                trace_dir = getattr(trace_config, "TRACE_DIR", None)
-            with AgentRun(trace_dir, "document", name).capture() as run:
+            doc_tracer = BankingTracer(config=trace_config)
+            trace_dir = None
+            if doc_tracer.should_export_local():
+                trace_dir = doc_tracer.trace_dir
+            with LangSmithTraceRun(trace_dir, "document", name, tracer=doc_tracer).capture() as run:
                 run.details["format"] = fmt
                 chunks = self._process_ir(self._extract_ir(source, name, fmt))
                 run.details["chunks"] = len(chunks)

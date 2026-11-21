@@ -18,6 +18,7 @@ from agent_banking.core.models import auto_routing_enabled
 from agent_banking.guardrails.rag_guardrails import BankingGuardrailManager
 from agent_banking.skills.skill_registry import SkillRegistry, mapped_arguments, resolve_skill
 from agent_banking.tools.tool_registry import BankingToolRegistry, ONCE_PER_TURN, is_extension, tool_contract, tool_input_schema
+from agent_banking.tracing.tracer import trace_span
 
 
 MAX_EVIDENCE = get_int_setting("max_evidence")
@@ -75,8 +76,8 @@ def verify_calculation(tool_name: str, data: dict, params: dict) -> bool:
     )
 
 
-def _reference_numbers(answer: str, evidence_count: int) -> set[int]:
-    references = set()
+def _normalize_citation_markers(answer: str) -> str:
+    """Normalize accepted citation bracket prefixes to canonical '[Nguồn '."""
     norm_answer = answer
     for prefix in ("[nguồn ", "[Nguon ", "[nguon ", "[NGUỒN ", "[Source ", "[source ", "[SOURCE "):
         if prefix in norm_answer:
@@ -84,6 +85,12 @@ def _reference_numbers(answer: str, evidence_count: int) -> set[int]:
     for colon_prefix in ("[Nguồn: ", "[Nguon: ", "[nguồn: ", "[nguon: ", "[Source: ", "[source: "):
         if colon_prefix in norm_answer:
             norm_answer = norm_answer.replace(colon_prefix, "[Nguồn ")
+    return norm_answer
+
+
+def _reference_numbers(answer: str, evidence_count: int) -> set[int]:
+    references = set()
+    norm_answer = _normalize_citation_markers(answer)
     if norm_answer.lower().count("[nguồn ") != norm_answer.count("[Nguồn "):
         raise ValueError("Invalid citation marker")
     for tail in norm_answer.split("[Nguồn ")[1:]:
@@ -423,52 +430,60 @@ class BankingReActNodes:
             else:
                 execution = self.skills.get_skill(name, definition=definition).execute
                 arguments = (params,)
-            result = execution(*arguments, **kwargs)
-            retried = False
-            elapsed = result.get("latency_ms", 0.0)
-            if result.get("temporary") is True and tool_name not in ONCE_PER_TURN:
+            with trace_span(f"{kind}.{name}", run_type="tool", kind=kind, action_name=name, tool_name=tool_name) as span_details:
                 result = execution(*arguments, **kwargs)
-                elapsed += result.get("latency_ms", 0.0)
-                retried = True
-            data = result.get("data")
-            if result.get("status") == "SUCCESS" and isinstance(data, dict) and str(data.get("status", "")).lower() not in ("failed", "error"):
-                observation = {"kind": kind, "name": name, "status": "SUCCESS"}
-                simulated = tool_name in SIMULATED_TOOLS or data.get("simulation") is True
-                documents = data.get("documents") or data.get("chunks")
-                if isinstance(documents, list) and documents and all(_unwrap_doc_dict(item).get("content") for item in documents):
-                    retrieval = True
-                if retrieval:
-                    observation["retrieval"] = True
-                    data = self._observe_retrieval({**data, "query": params.get("query", "")}, evidence)
-                    searches += 1
-                    intent = "RAG_SEARCH"
-                elif intent != "RAG_SEARCH":
-                    intent = "BANKING_ACTION"
-                if simulated:
-                    observation["simulation"] = True
-                if retrieval:
-                    observation["data"] = data
-                    if not data["documents"]:
-                        observation.update(status="ERROR", error_code="insufficient_evidence",
-                                           error=_REACT_MESSAGES.get("insufficient_evidence", ""))
-                elif not verify_calculation(tool_name, data, params):
-                    observation.update(status="ERROR", error_code="verification_failed",
-                                       error=_REACT_MESSAGES.get("calculation_verification_failed", ""))
+                retried = False
+                elapsed = result.get("latency_ms", 0.0)
+                if result.get("temporary") is True and tool_name not in ONCE_PER_TURN:
+                    result = execution(*arguments, **kwargs)
+                    elapsed += result.get("latency_ms", 0.0)
+                    retried = True
+                data = result.get("data")
+                if result.get("status") == "SUCCESS" and isinstance(data, dict) and str(data.get("status", "")).lower() not in ("failed", "error"):
+                    observation = {"kind": kind, "name": name, "status": "SUCCESS"}
+                    simulated = tool_name in SIMULATED_TOOLS or data.get("simulation") is True
+                    documents = data.get("documents") or data.get("chunks")
+                    if isinstance(documents, list) and documents and all(_unwrap_doc_dict(item).get("content") for item in documents):
+                        retrieval = True
+                    if retrieval:
+                        observation["retrieval"] = True
+                        data = self._observe_retrieval({**data, "query": params.get("query", "")}, evidence)
+                        searches += 1
+                        intent = "RAG_SEARCH"
+                    elif intent != "RAG_SEARCH":
+                        intent = "BANKING_ACTION"
+                    if simulated:
+                        observation["simulation"] = True
+                    if retrieval:
+                        observation["data"] = data
+                        if not data["documents"]:
+                            observation.update(status="ERROR", error_code="insufficient_evidence",
+                                               error=_REACT_MESSAGES.get("insufficient_evidence", ""))
+                    elif not verify_calculation(tool_name, data, params):
+                        observation.update(status="ERROR", error_code="verification_failed",
+                                           error=_REACT_MESSAGES.get("calculation_verification_failed", ""))
+                    else:
+                        try:
+                            observation["data"] = self.guard_payload(data)
+                        except ValueError:
+                            observation.update(status="ERROR", error_code="unsafe_result",
+                                               error=_REACT_MESSAGES.get("unsafe_result", ""))
                 else:
-                    try:
-                        observation["data"] = self.guard_payload(data)
-                    except ValueError:
-                        observation.update(status="ERROR", error_code="unsafe_result",
-                                           error=_REACT_MESSAGES.get("unsafe_result", ""))
-            else:
-                observation["error"] = _REACT_MESSAGES.get("tool_failed", "")
-                observation["error_code"] = "tool_failed"
-                if result.get("error") == "ToolInputError":
-                    observation.update(error_code="invalid_action", error=_REACT_MESSAGES.get("tool_input_error", ""))
-                elif result.get("error") == "ToolOutputError":
-                    observation.update(error_code="invalid_tool_output", error=_REACT_MESSAGES.get("tool_output_error", ""))
-                elif result.get("temporary") is True:
-                    observation["error_code"] = "temporary_failure"
+                    observation["error"] = _REACT_MESSAGES.get("tool_failed", "")
+                    observation["error_code"] = "tool_failed"
+                    if result.get("error") == "ToolInputError":
+                        observation.update(error_code="invalid_action", error=_REACT_MESSAGES.get("tool_input_error", ""))
+                    elif result.get("error") == "ToolOutputError":
+                        observation.update(error_code="invalid_tool_output", error=_REACT_MESSAGES.get("tool_output_error", ""))
+                    elif result.get("temporary") is True:
+                        observation["error_code"] = "temporary_failure"
+
+                span_details.update(
+                    status=observation["status"],
+                    error_code=observation.get("error_code"),
+                    retried=retried,
+                    latency_ms=elapsed,
+                )
 
             if retried:
                 observation["retried"] = True
