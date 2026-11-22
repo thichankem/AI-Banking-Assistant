@@ -376,15 +376,6 @@ class OfflineLangSmithClient(Client):
     def flush(self, timeout=None):
         return None
 
-    def get_run_url(self, *, run=None, project_name=None, project_id=None):
-        run_id = ""
-        if run is not None:
-            run_id = str(getattr(run, "id", ""))
-        base = str(self._web_url or "https://smith.langchain.com").rstrip("/")
-        if run_id:
-            return f"{base}/o/default/projects/p/{project_name or 'default'}/r/{run_id}"
-        return base
-
     def captured_runs(self, trace_id=None):
         with self._lock:
             items = list(self._runs.values())
@@ -884,10 +875,8 @@ class LangSmithTraceRun:
         """Resolve LangSmith web URL for the active root run when remote tracing is active."""
         if not self.is_remote or self.root_run_tree is None or self.client is None:
             return None
-        if not hasattr(self.client, "get_run_url"):
-            return None
         try:
-            return self.client.get_run_url(run=self.root_run_tree, project_name=self.project_name)
+            return self.root_run_tree.get_url()
         except Exception:
             return None
 

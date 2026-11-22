@@ -156,6 +156,7 @@ tmp/
 .*.lock
 .publication.lock
 uv.lock
+!/uv.lock
 poetry.lock
 Pipfile.lock
 package-lock.json
@@ -454,6 +455,7 @@ run_*tests.py
 !/agent_banking/agent/tests/test_interactions.py
 !/agent_banking/agent/tests/test_harness_quality.py
 !/agent_banking/agent/tests/test_model_routing.py
+!/agent_banking/agent/tests/test_langsmith_migration.py
 !/agent_banking/agent/tests/test_tuning_regressions.py
 audit_*.py
 *_audit.py
