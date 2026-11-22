@@ -89,8 +89,9 @@ SCHEMAS = {
     "delegate": action_schema("delegate", {"role": text_schema(50), "task": text_schema(600)}),
     "clarify": action_schema("clarify", {
         "question": text_schema(300),
-        "options": {"type": "array", "items": text_schema(120), "minItems": 2, "maxItems": 4},
-    }),
+        "options": {"type": "array", "items": text_schema(120), "minItems": 2, "maxItems": 6},
+        "multi_select": {"type": "boolean"},
+    }, optional=("multi_select",)),
     "confirm": action_schema("confirm", {"proposal": text_schema(480)}),
     "remember": action_schema("remember", {
         "key": text_schema(48), "value": text_schema(300), "category": {"enum": ["preference", "fact", "pending"]}
@@ -274,7 +275,8 @@ class StructuredModel:
             return parsed
         # Account for prompts and schema repair on every attempt; reserve output headroom.
         reserved = len(system.encode("utf-8")) + len(contract.encode("utf-8")) + max_tokens * 4 + _PROMPT_OVERHEAD_BYTES
-        payload = pack_context(data, self.context_bytes - reserved, keep_evidence=role == "agent_review")
+        input_budget_bytes = max(0, self.context_bytes - reserved)
+        payload = pack_context(data, input_budget_bytes, keep_evidence=role == "agent_review")
         messages = [{"role": "system", "content": system}, {"role": "user", "content": payload}]
         review_thinking_rejected = False
         for attempt in range(_MAX_REQUEST_ATTEMPTS):
@@ -284,6 +286,27 @@ class StructuredModel:
                 options["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
             if attempt == 1:
                 options["response_format"] = {"type": "json_object"}
+            if deep_reason:
+                reason_val = str(deep_reason)
+            elif attempt > 0:
+                reason_val = "contract_repair"
+            else:
+                reason_val = "standard"
+            msg_bytes = sum(len(str(msg.get("content") or "").encode("utf-8")) for msg in messages)
+            pending_meta = {
+                "role": role,
+                "configured_role": getattr(self.client, "module", role),
+                "reason": reason_val,
+                "attempt": attempt + 1,
+                "input_bytes": msg_bytes,
+                "input_budget_bytes": input_budget_bytes,
+                "output_tokens_limit": max_tokens,
+                "repair": bool(attempt > 0),
+            }
+            try:
+                setattr(self.client, "_pending_trace_meta", pending_meta)
+            except Exception:
+                pass
             try:
                 self.client.create(
                     model=self.model, messages=messages, validate=validate,
@@ -363,7 +386,10 @@ class StructuredModel:
             calls += 1
             with trace_span("model.attempt", run_type="llm", role=role, configured_role=client.module,
                             reason=reason, attempt=calls, input_budget_bytes=budget,
-                            input_bytes=len(packed.encode("utf-8")), **request_metadata(payload, candidate)) as details:
+                            input_bytes=len(packed.encode("utf-8")),
+                            output_tokens_limit=output_tokens,
+                            repair=bool(repair),
+                            **request_metadata(payload, candidate)) as details:
                 try:
                     client.create(_candidate=candidate, _usage=lambda usage: details.update(usage=usage_metadata(usage)),
                                   validate=validate, **payload)

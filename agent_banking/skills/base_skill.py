@@ -6,7 +6,6 @@ Clean, intuitive, and modular:
 
 MANDATORY RULES:
 1. NO __INIT__.PY: Direct module imports.
-2. NO TYPING LIBRARY: Native Python types only (dict, list, str, int, float).
 3. ZERO TERNARY: Explicit if/else only.
 4. 0% REGEX LAW: Absolutely no regular expressions.
 5. KEEP IT SIMPLE: Clear, direct, readable code.

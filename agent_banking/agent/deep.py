@@ -2,6 +2,7 @@
 
 import json
 from unicodedata import normalize
+from urllib.parse import quote
 from uuid import uuid4
 
 from langgraph.types import interrupt
@@ -146,6 +147,18 @@ def _support_view(state: dict) -> dict:
     return result
 
 
+def _strip_thousands_separators(text: str) -> str:
+    """Remove '.' and ',' thousands separators between digit groups without altering decimals."""
+    out = []
+    length = len(text)
+    for i, ch in enumerate(text):
+        if ch in (".", ",") and i > 0 and text[i - 1].isdigit() and i + 3 < length:
+            if text[i + 1:i + 4].isdigit() and (i + 4 == length or not text[i + 4].isdigit()):
+                continue
+        out.append(ch)
+    return "".join(out)
+
+
 def _fold_quote(value: str) -> str:
     canonical = normalize("NFC", value).casefold()
     # Formatting may differ between Markdown, plain text, and a quoted table cell.
@@ -192,7 +205,7 @@ def validate_review(verdict: dict, draft: str, citations: list, evidence: list, 
         if "line" in item:
             lines = source_text.splitlines()
             line = item["line"]
-            if source in support or not 1 <= line <= len(lines) or not _fold_quote(lines[line - 1]).strip():
+            if type(line) is not int or not 1 <= line <= len(lines) or not _fold_quote(lines[line - 1]).strip():
                 raise ValueError("Invalid claim evidence line")
             source_text = lines[line - 1]
         quote = item.get("quote")
@@ -206,17 +219,19 @@ def validate_review(verdict: dict, draft: str, citations: list, evidence: list, 
                 raise ValueError("Invalid claim evidence excerpt")
             full_folded = _fold_quote(full_source_text)
             src_folded = _fold_quote(source_text)
-            if folded_q not in src_folded and folded_q not in full_folded:
+            compact_q = _fold_quote(_strip_thousands_separators(clean_quote)).strip()
+            compact_full = _fold_quote(_strip_thousands_separators(full_source_text))
+            if folded_q not in src_folded and folded_q not in full_folded and compact_q not in compact_full:
                 words_match = False
-                q_words = folded_q.split()
+                q_words = compact_q.split()
                 if len(q_words) >= 4:
                     half_len = max(2, len(q_words) // 2)
                     first_half = " ".join(q_words[:half_len])
                     second_half = " ".join(q_words[half_len:])
-                    if first_half in full_folded or second_half in full_folded:
+                    if first_half in compact_full or second_half in compact_full:
                         words_match = True
                 if not words_match and len(q_words) >= 3:
-                    full_tokens = set(full_folded.split())
+                    full_tokens = set(full_folded.split()) | set(compact_full.split())
                     numeric_q = [tok for tok in q_words if tok.isdigit()]
                     if all(tok in full_tokens for tok in numeric_q):
                         matched_count = 0
@@ -289,86 +304,659 @@ def _requests_restricted_field(text: str) -> bool:
     return any(f" {field} " in normalized for field in RESTRICTED_CARD_FIELDS)
 
 
-def _resolve_cited_images(citations: list, retrieved_chunks: list, status: str, max_images: int = 6) -> list:
-    """Collect deduplicated visual assets only from chunks cited in the final answer."""
+_SUPPORT_LINE_MARKERS = (
+    "hotline",
+    "tong dai",
+    "1900",
+    "cskh",
+    "cham soc khach hang",
+    "kenh ho tro",
+    "lien he ho tro",
+    "ho tro 24 7",
+    "ho tro khach hang",
+)
+_ACTION_STEP_MARKERS = (
+    "buoc ",
+    "chon ",
+    "nhan ",
+    "nhap ",
+    "bam ",
+    "quet ",
+    "chup ",
+    "xac thuc",
+    "dang nhap",
+    "mo ung dung",
+    "tai ung dung",
+)
+_APP_VISUAL_REGION_TYPES = ("app_step", "slide_visual")
+
+
+def _is_hex64(value: str) -> bool:
+    if not isinstance(value, str) or len(value) != 64:
+        return False
+    for ch in value:
+        if ch not in "0123456789abcdef":
+            return False
+    return True
+
+
+def _parse_frame_index_from_caption(text: str) -> int:
+    if not text:
+        return 999999
+    lower_text = str(text).lower()
+    pos = lower_text.find("khung ")
+    if pos < 0:
+        return 999999
+    tail = lower_text[pos + 6:].strip()
+    slash_idx = tail.find("/")
+    if slash_idx <= 0:
+        return 999999
+    num_str = tail[:slash_idx].strip()
+    if num_str.isdigit():
+        val = int(num_str)
+        if val > 0:
+            return val - 1
+    return 999999
+
+
+def _image_order_key(img: dict) -> tuple:
+    page_num = 999999
+    raw_page = img.get("page_number")
+    raw_page_idx = img.get("page_index")
+    if type(raw_page) is int and raw_page > 0:
+        page_num = raw_page
+    elif type(raw_page_idx) is int and raw_page_idx >= 0:
+        page_num = raw_page_idx + 1
+
+    region_idx = 999999
+    raw_region_idx = img.get("region_index")
+    if type(raw_region_idx) is int and raw_region_idx >= 0:
+        region_idx = raw_region_idx
+    else:
+        cap_text = str(img.get("display_caption") or img.get("caption") or "")
+        region_idx = _parse_frame_index_from_caption(cap_text)
+
+    bbox_y = 999999.0
+    bbox_x = 999999.0
+    bbox = img.get("bbox")
+    if isinstance(bbox, (list, tuple)) and len(bbox) >= 2:
+        try:
+            bbox_x = float(bbox[0])
+            bbox_y = float(bbox[1])
+        except (TypeError, ValueError):
+            bbox_x = 999999.0
+            bbox_y = 999999.0
+
+    return (page_num, region_idx, bbox_y, bbox_x)
+
+
+def _normalize_image_entry(img: dict, citation: dict, doc_name: str):
+    if not isinstance(img, dict):
+        return None
+    asset_id = str(img.get("asset_id") or img.get("sha256") or "").strip().lower()
+    if not _is_hex64(asset_id):
+        return None
+
+    page_number = None
+    raw_page = img.get("page_number")
+    raw_page_idx = img.get("page_index")
+    if type(raw_page) is int and raw_page > 0:
+        page_number = raw_page
+    elif type(raw_page_idx) is int and raw_page_idx >= 0:
+        page_number = raw_page_idx + 1
+
+    region_index = None
+    raw_region_idx = img.get("region_index")
+    if type(raw_region_idx) is int and raw_region_idx >= 0:
+        region_index = raw_region_idx
+
+    region_count = None
+    raw_region_cnt = img.get("region_count")
+    if type(raw_region_cnt) is int and raw_region_cnt > 0:
+        region_count = raw_region_cnt
+
+    caption = str(
+        img.get("display_caption")
+        or img.get("caption")
+        or img.get("title")
+        or citation.get("section_title")
+        or doc_name
+    ).strip()
+
+    return {
+        "asset_id": asset_id,
+        "url": "/api/assets/" + asset_id,
+        "citation_label": str(citation.get("label") or ""),
+        "source": str(citation.get("source") or ""),
+        "document_name": doc_name,
+        "section_title": str(citation.get("section_title") or ""),
+        "page_number": page_number,
+        "region_index": region_index,
+        "region_count": region_count,
+        "region_type": str(img.get("region_type") or "figure"),
+        "caption": caption,
+        "width": int(img.get("width") or 0),
+        "height": int(img.get("height") or 0),
+    }
+
+
+def _extract_chunk_images(citation: dict, chunk: dict) -> list:
+    if not isinstance(chunk, dict):
+        return []
+    raw_images = chunk.get("images")
+    if not isinstance(raw_images, list) or not raw_images:
+        return []
+    meta = chunk.get("business_metadata")
+    if not isinstance(meta, dict):
+        meta = {}
+    src = str(citation.get("source") or chunk.get("source") or "")
+    doc_name = _extract_document_name(src, meta)
+
+    by_asset = {}
+    for raw_img in raw_images:
+        entry = _normalize_image_entry(raw_img, citation, doc_name)
+        if entry is None:
+            continue
+        asset_id = entry["asset_id"]
+        direct_rank = 1
+        if raw_img.get("match_strength") == "direct":
+            direct_rank = 0
+        order_key = _image_order_key(raw_img)
+        existing = by_asset.get(asset_id)
+        if existing is None or direct_rank < existing[0]:
+            by_asset[asset_id] = (direct_rank, order_key, entry)
+
+    items = list(by_asset.values())
+    items.sort(key=lambda pair: pair[1])
+    return [pair[2] for pair in items]
+
+
+def _line_contains_citation(line: str, label: str, cit_index) -> bool:
+    if not line:
+        return False
+    if label and label in line:
+        return True
+    if type(cit_index) is not int or cit_index <= 0:
+        return False
+    target = str(cit_index)
+    cursor = 0
+    while cursor < len(line):
+        open_idx = line.find("[", cursor)
+        if open_idx < 0:
+            break
+        close_idx = line.find("]", open_idx + 1)
+        if close_idx < 0:
+            break
+        inner = line[open_idx + 1:close_idx]
+        lower_inner = inner.lower()
+        if "nguồn" in lower_inner or "nguon" in lower_inner:
+            normalized = inner.replace(";", ",")
+            for part in normalized.split(","):
+                token = part.strip()
+                lower_token = token.lower()
+                if lower_token.startswith("nguồn"):
+                    token = token[5:].strip()
+                elif lower_token.startswith("nguon"):
+                    token = token[5:].strip()
+                if " " in token:
+                    token = token.split(" ")[0].strip()
+                if token == target:
+                    return True
+        cursor = close_idx + 1
+    return False
+
+
+def _citation_answer_stats(citation: dict, answer_text: str) -> tuple:
+    if not answer_text:
+        return (999999999, False)
+    label = str(citation.get("label") or "")
+    cit_index = citation.get("index")
+    first_pos = 999999999
+    matched_lines = []
+    offset = 0
+    for line in answer_text.splitlines():
+        if _line_contains_citation(line, label, cit_index):
+            if first_pos == 999999999:
+                first_pos = offset
+            matched_lines.append(line)
+        offset += len(line) + 1
+
+    if not matched_lines:
+        return (first_pos, False)
+
+    all_support_only = True
+    for line in matched_lines:
+        line_key = " " + search_key(line) + " "
+        has_support = False
+        for marker in _SUPPORT_LINE_MARKERS:
+            if marker in line_key:
+                has_support = True
+                break
+        has_action = False
+        for marker in _ACTION_STEP_MARKERS:
+            if marker in line_key:
+                has_action = True
+                break
+        if not has_support or has_action:
+            all_support_only = False
+            break
+
+    return (first_pos, all_support_only)
+
+
+def _resolve_cited_images(
+    citations: list,
+    retrieved_chunks: list,
+    status: str,
+    max_images: int | None = None,
+    answer_text: str = "",
+) -> list:
+    """Collect deduplicated visual assets from cited chunks in canonical step/page order."""
     if status == "BLOCKED" or not citations or not retrieved_chunks:
         return []
     by_chunk_id = {}
+    by_source_section = {}
     for chunk in retrieved_chunks:
-        if isinstance(chunk, dict):
-            cid = str(chunk.get("chunk_id") or "")
-            if cid:
-                by_chunk_id[cid] = chunk
+        if not isinstance(chunk, dict):
+            continue
+        cid = str(chunk.get("chunk_id") or "")
+        if cid and cid not in by_chunk_id:
+            by_chunk_id[cid] = chunk
+        src = str(chunk.get("source") or "")
+        sec = str(chunk.get("section_title") or "")
+        if src and (src, sec) not in by_source_section:
+            by_source_section[(src, sec)] = chunk
 
-    resolved = []
-    seen_ids = set()
-    for citation in citations:
+    cit_records = []
+    for cit_pos, citation in enumerate(citations):
         if not isinstance(citation, dict):
             continue
         cid = str(citation.get("chunk_id") or "")
+        src = str(citation.get("source") or "")
+        sec = str(citation.get("section_title") or "")
         chunk = by_chunk_id.get(cid)
+        if chunk is None and src:
+            chunk = by_source_section.get((src, sec))
         if chunk is None:
             continue
         raw_images = chunk.get("images")
         if not isinstance(raw_images, list) or not raw_images:
             continue
 
-        direct_items = []
-        context_items = []
-        for img in raw_images:
+        meta = chunk.get("business_metadata")
+        if not isinstance(meta, dict):
+            meta = {}
+        effective_src = str(src or chunk.get("source") or "")
+        doc_name = _extract_document_name(effective_src, meta)
+        doc_key = str(effective_src or doc_name).replace("\\", "/").strip().lower()
+        first_pos, is_support_only = _citation_answer_stats(citation, answer_text)
+
+        cit_idx_raw = citation.get("index")
+        if type(cit_idx_raw) is int:
+            cit_idx = cit_idx_raw
+        else:
+            cit_idx = cit_pos + 1
+
+        valid_items = []
+        has_app_visual = False
+        app_pages = []
+        seen_app_pages = set()
+        for raw_img in raw_images:
+            entry = _normalize_image_entry(raw_img, citation, doc_name)
+            if entry is None:
+                continue
+            order_key = _image_order_key(raw_img)
+            is_direct = raw_img.get("match_strength") == "direct"
+            valid_items.append((entry, order_key, is_direct))
+            if entry["region_type"] in _APP_VISUAL_REGION_TYPES:
+                has_app_visual = True
+                p_num = entry.get("page_number")
+                if type(p_num) is int and p_num > 0 and p_num not in seen_app_pages:
+                    seen_app_pages.add(p_num)
+                    app_pages.append(p_num)
+
+        if not valid_items:
+            continue
+
+        cit_records.append({
+            "cit_idx": cit_idx,
+            "doc_key": doc_key,
+            "first_pos": first_pos,
+            "is_support_only": is_support_only,
+            "has_app_visual": has_app_visual,
+            "app_pages": app_pages,
+            "chunk_img_count": len(valid_items),
+            "items": valid_items,
+            "drop_app": False,
+        })
+
+    if not cit_records:
+        return []
+
+    # Filter A: ignore app/slide visuals attached only to Hotline/CSKH support citations
+    has_non_support_app = False
+    for rec in cit_records:
+        if rec["has_app_visual"] and not rec["is_support_only"]:
+            has_non_support_app = True
+            break
+    if has_non_support_app:
+        for rec in cit_records:
+            if rec["has_app_visual"] and rec["is_support_only"]:
+                rec["drop_app"] = True
+
+    # Filter B: drop isolated cross-document HDSD stray when a dominant HDSD doc has >=60% & >=2 citations
+    app_doc_counts = {}
+    total_app_cits = 0
+    for rec in cit_records:
+        if rec["has_app_visual"] and not rec["drop_app"]:
+            dk = rec["doc_key"]
+            app_doc_counts[dk] = app_doc_counts.get(dk, 0) + 1
+            total_app_cits += 1
+
+    has_dominant_app_doc = False
+    for dk, cnt in app_doc_counts.items():
+        if cnt >= 2 and cnt * 5 >= total_app_cits * 3:
+            has_dominant_app_doc = True
+            break
+    if has_dominant_app_doc:
+        for rec in cit_records:
+            if rec["has_app_visual"] and not rec["drop_app"]:
+                if app_doc_counts.get(rec["doc_key"], 0) == 1:
+                    rec["drop_app"] = True
+
+    # Filter C: within an HDSD doc (>=4 app citations), drop isolated distant whole-page dumps
+    by_app_doc = {}
+    for rec in cit_records:
+        if rec["has_app_visual"] and not rec["drop_app"]:
+            by_app_doc.setdefault(rec["doc_key"], []).append(rec)
+
+    for dk, doc_recs in by_app_doc.items():
+        if len(doc_recs) < 4:
+            continue
+        page_cit_counts = {}
+        for rec in doc_recs:
+            for p_num in rec["app_pages"]:
+                page_cit_counts[p_num] = page_cit_counts.get(p_num, 0) + 1
+
+        to_drop = []
+        for rec in doc_recs:
+            if rec["chunk_img_count"] < 3 or len(rec["app_pages"]) != 1:
+                continue
+            p_num = rec["app_pages"][0]
+            if page_cit_counts.get(p_num, 0) != 1:
+                continue
+            is_distant = True
+            has_other_page = False
+            for other_p in page_cit_counts:
+                if other_p == p_num:
+                    continue
+                has_other_page = True
+                if abs(p_num - other_p) < 2:
+                    is_distant = False
+                    break
+            if has_other_page and is_distant:
+                to_drop.append(rec)
+
+        if to_drop and len(to_drop) < len(doc_recs):
+            for rec in to_drop:
+                rec["drop_app"] = True
+
+    # Deduplicate by asset_id preferring direct match and most specific (fewest images) chunk
+    best_by_asset = {}
+    for rec in cit_records:
+        drop_app = rec["drop_app"]
+        for entry, order_key, is_direct in rec["items"]:
+            if drop_app and entry["region_type"] in _APP_VISUAL_REGION_TYPES:
+                continue
+            asset_id = entry["asset_id"]
+            direct_rank = 1
+            if is_direct:
+                direct_rank = 0
+            spec_key = (direct_rank, rec["chunk_img_count"], rec["first_pos"], rec["cit_idx"])
+            candidate = (spec_key, rec["doc_key"], order_key, rec["first_pos"], rec["cit_idx"], entry)
+            existing = best_by_asset.get(asset_id)
+            if existing is None or spec_key < existing[0]:
+                best_by_asset[asset_id] = candidate
+
+    surviving = list(best_by_asset.values())
+    if not surviving:
+        return []
+
+    has_any_app_visual = False
+    doc_stats = {}
+    for item in surviving:
+        doc_key = item[1]
+        first_pos = item[3]
+        cit_idx = item[4]
+        entry = item[5]
+        is_app = entry["region_type"] in _APP_VISUAL_REGION_TYPES
+        if is_app:
+            has_any_app_visual = True
+        stat = doc_stats.get(doc_key)
+        if stat is None:
+            doc_stats[doc_key] = {
+                "has_app": is_app,
+                "cit_indices": {cit_idx},
+                "min_first_pos": first_pos,
+                "min_cit_idx": cit_idx,
+            }
+        else:
+            if is_app:
+                stat["has_app"] = True
+            stat["cit_indices"].add(cit_idx)
+            if first_pos < stat["min_first_pos"]:
+                stat["min_first_pos"] = first_pos
+            if cit_idx < stat["min_cit_idx"]:
+                stat["min_cit_idx"] = cit_idx
+
+    doc_keys = list(doc_stats.keys())
+    if has_any_app_visual:
+        def _app_doc_sort_key(dk):
+            st = doc_stats[dk]
+            app_pri = 1
+            if st["has_app"]:
+                app_pri = 0
+            return (app_pri, -len(st["cit_indices"]), st["min_first_pos"], st["min_cit_idx"])
+        doc_keys.sort(key=_app_doc_sort_key)
+    else:
+        def _non_app_doc_sort_key(dk):
+            st = doc_stats[dk]
+            return (st["min_first_pos"], st["min_cit_idx"])
+        doc_keys.sort(key=_non_app_doc_sort_key)
+
+    doc_rank = {}
+    for rank_idx, dk in enumerate(doc_keys):
+        doc_rank[dk] = rank_idx
+
+    surviving.sort(
+        key=lambda item: (
+            doc_rank[item[1]],
+            item[2][0],
+            item[2][1],
+            item[2][2],
+            item[2][3],
+            item[3],
+            item[4],
+        )
+    )
+
+    if max_images is not None:
+        limit = max_images
+    elif has_any_app_visual:
+        limit = 16
+    else:
+        limit = 8
+
+    if limit <= 0:
+        return []
+    return [item[5] for item in surviving[:limit]]
+
+
+def _extract_page_numbers(business_metadata: dict) -> list:
+    """Collect sorted unique 1-based page numbers from citation or provenance metadata."""
+    if not isinstance(business_metadata, dict):
+        return []
+    pages = []
+    seen = set()
+    citation_meta = business_metadata.get("citation")
+    if isinstance(citation_meta, dict):
+        raw_pages = citation_meta.get("page_numbers")
+        if isinstance(raw_pages, list):
+            for p_num in raw_pages:
+                if type(p_num) is int and p_num > 0 and p_num not in seen:
+                    seen.add(p_num)
+                    pages.append(p_num)
+    if not pages:
+        prov = business_metadata.get("provenance")
+        if isinstance(prov, dict):
+            locations = prov.get("locations")
+            if isinstance(locations, list):
+                for loc in locations:
+                    if not isinstance(loc, dict):
+                        continue
+                    page_num = loc.get("page_number")
+                    page_idx = loc.get("page_index")
+                    resolved_num = None
+                    if type(page_num) is int and page_num > 0:
+                        resolved_num = page_num
+                    elif type(page_idx) is int and page_idx >= 0:
+                        resolved_num = page_idx + 1
+                    if resolved_num is not None and resolved_num not in seen:
+                        seen.add(resolved_num)
+                        pages.append(resolved_num)
+    pages.sort()
+    return pages
+
+
+def _extract_document_name(source: str, business_metadata: dict) -> str:
+    """Resolve human-readable document name without extension when metadata omits it."""
+    if isinstance(business_metadata, dict):
+        doc_name = str(business_metadata.get("document_name") or "").strip()
+        if doc_name:
+            return doc_name
+    clean = str(source or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if "." in clean:
+        return clean.rsplit(".", 1)[0]
+    return clean
+
+
+def _build_pdf_url(source: str, page_numbers: list) -> str:
+    """Build browser-ready inline PDF URL with #page=N anchor for PDF sources."""
+    clean = str(source or "").replace("\\", "/").strip()
+    while clean.startswith("/"):
+        clean = clean[1:]
+    if not clean or not clean.lower().endswith(".pdf"):
+        return ""
+    url = "/api/documents/pdf?source=" + quote(clean, safe="")
+    if isinstance(page_numbers, list) and page_numbers:
+        first_page = page_numbers[0]
+        if type(first_page) is int and first_page > 0:
+            url = url + "#page=" + str(first_page)
+    return url
+
+
+def _format_citation_excerpt(chunk: dict, max_chars: int = 4000) -> str:
+    """Return literal chunk text or markdown table fallback, bounded to max_chars."""
+    if not isinstance(chunk, dict):
+        return ""
+    text = str(chunk.get("content") or "").strip()
+    if not text:
+        table_data = chunk.get("table_data")
+        rows = []
+        if isinstance(table_data, dict):
+            grid = table_data.get("grid")
+            if isinstance(grid, list):
+                rows = grid
+            else:
+                headers = table_data.get("header_grid")
+                body = table_data.get("rows")
+                if isinstance(headers, list):
+                    rows.extend(headers)
+                if isinstance(body, list):
+                    rows.extend(body)
+        elif isinstance(table_data, list):
+            rows = table_data
+        md_lines = []
+        for idx, row in enumerate(rows):
+            if not isinstance(row, (list, tuple)) or not row:
+                continue
+            cells = []
+            for cell in row:
+                cells.append(str(cell).replace("|", "\\|").replace("\n", " ").strip())
+            md_lines.append("| " + " | ".join(cells) + " |")
+            if idx == 0:
+                sep = ["---" for _ in cells]
+                md_lines.append("| " + " | ".join(sep) + " |")
+        text = "\n".join(md_lines).strip()
+
+    if len(text) > max_chars:
+        cutoff = text.rfind(" ", max(0, max_chars - 120), max_chars)
+        if cutoff > max_chars // 2:
+            text = text[:cutoff].rstrip() + "..."
+        else:
+            text = text[:max_chars].rstrip() + "..."
+    return text
+
+
+def _enrich_citations(citations: list, retrieved_chunks: list, cited_images: list, status: str) -> list:
+    """Attach source document metadata, page numbers, original excerpt, and images to citations."""
+    if status == "BLOCKED" or not citations:
+        return []
+    by_chunk_id = {}
+    by_source_section = {}
+    if isinstance(retrieved_chunks, list):
+        for chunk in retrieved_chunks:
+            if not isinstance(chunk, dict):
+                continue
+            cid = str(chunk.get("chunk_id") or "")
+            if cid and cid not in by_chunk_id:
+                by_chunk_id[cid] = chunk
+            src = str(chunk.get("source") or "")
+            sec = str(chunk.get("section_title") or "")
+            if src and (src, sec) not in by_source_section:
+                by_source_section[(src, sec)] = chunk
+
+    images_by_label = {}
+    if isinstance(cited_images, list):
+        for img in cited_images:
             if not isinstance(img, dict):
                 continue
-            if img.get("match_strength") == "direct":
-                direct_items.append(img)
-            else:
-                context_items.append(img)
+            lbl = str(img.get("citation_label") or "")
+            if lbl:
+                images_by_label.setdefault(lbl, []).append(img)
+
+    enriched = []
+    for item in citations:
+        if not isinstance(item, dict):
+            continue
+        cid = str(item.get("chunk_id") or "")
+        src = str(item.get("source") or "")
+        sec = str(item.get("section_title") or "")
+        chunk = by_chunk_id.get(cid)
+        if chunk is None and src:
+            chunk = by_source_section.get((src, sec))
+        if chunk is None:
+            chunk = {}
 
         meta = chunk.get("business_metadata")
         if not isinstance(meta, dict):
             meta = {}
-        doc_name = str(meta.get("document_name") or "").strip()
-        if not doc_name:
-            src_str = str(citation.get("source") or "").replace("\\", "/")
-            doc_name = src_str.rsplit("/", 1)[-1]
-
-        per_citation_added = 0
-        for img in direct_items + context_items:
-            asset_id = str(img.get("asset_id") or img.get("sha256") or "").strip()
-            if len(asset_id) != 64:
-                continue
-            if not all(ch in "0123456789abcdef" for ch in asset_id.lower()):
-                continue
-            asset_id = asset_id.lower()
-            if asset_id in seen_ids:
-                continue
-            seen_ids.add(asset_id)
-
-            caption = str(
-                img.get("display_caption")
-                or img.get("caption")
-                or img.get("title")
-                or citation.get("section_title")
-                or doc_name
-            ).strip()
-            resolved.append({
-                "asset_id": asset_id,
-                "url": "/api/assets/" + asset_id,
-                "citation_label": str(citation.get("label") or ""),
-                "source": str(citation.get("source") or ""),
-                "document_name": doc_name,
-                "section_title": str(citation.get("section_title") or ""),
-                "page_number": img.get("page_number"),
-                "region_type": str(img.get("region_type") or "figure"),
-                "caption": caption,
-                "width": int(img.get("width") or 0),
-                "height": int(img.get("height") or 0),
-            })
-            per_citation_added += 1
-            if len(resolved) >= max_images or per_citation_added >= 3:
-                break
-        if len(resolved) >= max_images:
-            break
-    return resolved
+        chunk_type = str(chunk.get("chunk_type") or "text")
+        label = str(item.get("label") or "")
+        enriched_item = dict(item)
+        pages = _extract_page_numbers(meta)
+        enriched_item["document_name"] = _extract_document_name(src, meta)
+        enriched_item["page_numbers"] = pages
+        enriched_item["pdf_url"] = _build_pdf_url(src, pages)
+        enriched_item["chunk_type"] = chunk_type
+        enriched_item["excerpt"] = _format_citation_excerpt(chunk)
+        chunk_imgs = _extract_chunk_images(item, chunk)
+        if chunk_imgs:
+            enriched_item["images"] = chunk_imgs
+        else:
+            enriched_item["images"] = list(images_by_label.get(label, []))
+        enriched.append(enriched_item)
+    return enriched
 
 
 class BankingDeepAgent(BankingReActNodes):
@@ -411,7 +999,7 @@ class BankingDeepAgent(BankingReActNodes):
             ]
             if amounts:
                 hints["financial_amounts"] = amounts
-        state = {**state, "query_hints": hints}
+        state = {**state, "query_hints": hints, "last_action": None}
         if not should_compact(state.get("chat_history", [])):
             return state
         result, compacted = compact_memory(state, self.model, self.guard_artifact)
@@ -479,12 +1067,18 @@ class BankingDeepAgent(BankingReActNodes):
         persona = PERSONA_PROFILES.get(state.get("persona"), PERSONA_PROFILES.get(_DEFAULT_PERSONA, {}))
         tone = TONE_PROFILES.get(state.get("tone"), TONE_PROFILES.get(_DEFAULT_TONE, ""))
         format_style = FORMAT_PROFILES.get(state.get("format_type"), FORMAT_PROFILES.get(_DEFAULT_FORMAT_TYPE, ""))
+        persona_role_text = persona.get("role_definition")
+        if not persona_role_text:
+            persona_role_text = persona.get("description", "")
+        custom_persona_text = str(state.get("custom_persona") or "").strip()
+        if state.get("persona") == "custom" and custom_persona_text:
+            persona_role_text = persona_role_text + "\nChỉ thị vai trò tùy chỉnh từ khách hàng: " + custom_persona_text
         system += _DEEP_MESSAGES.get("style_header", "\n") + "\n".join(
-            [persona.get("role_definition") or persona.get("description", ""), tone, format_style]
+            [persona_role_text, tone, format_style]
         )
         system += _DEEP_MESSAGES.get("allowed_kinds_header", "\n") + ", ".join(allowed)
         if state.get("persona") == "custom":
-            data["style_preference"] = state.get("custom_persona", "")
+            data["style_preference"] = custom_persona_text
         if state.get("audit_feedback"):
             data["review_feedback"] = state["audit_feedback"]
             data["previous_draft"] = state.get("draft_answer", "")
@@ -703,6 +1297,9 @@ class BankingDeepAgent(BankingReActNodes):
         scope = []
         if mode == "confirm":
             scope = self.plan_scope(state["plan"])
+        multi_select = False
+        if mode == "clarify" and decision.get("multi_select") is True:
+            multi_select = True
         signature = [mode, " ".join(message.casefold().split()), scope]
         if len(state["human_replies"]) >= MAX_INTERACTIONS or any(
             reply["signature"] == signature for reply in state["human_replies"]
@@ -724,7 +1321,7 @@ class BankingDeepAgent(BankingReActNodes):
                                _DEEP_MESSAGES.get("non_durable_interaction_suffix", "")])
             return self._interaction_stop(state, answer)
         return {**state, "interaction": {"id": uuid4().hex, "kind": mode, "message": message,
-                                         "options": options, "scope": scope},
+                                         "options": options, "scope": scope, "multi_select": multi_select},
                 "interaction_signature": signature,
                 "execution_steps": state["execution_steps"] + ["interaction: awaiting_input"]}
 
@@ -733,21 +1330,57 @@ class BankingDeepAgent(BankingReActNodes):
         reply = interrupt(card)
         if not isinstance(reply, dict) or reply.get("interaction_id") != card["id"]:
             return self._interaction_stop(state, _DEEP_MESSAGES.get("interaction_mismatch_id", ""))
-        selection = next((option for option in card["options"] if option["id"] == reply.get("choice_id")), None)
-        if selection is None:
+        raw_ids = []
+        choice_ids = reply.get("choice_ids")
+        if isinstance(choice_ids, list) and choice_ids:
+            for item in choice_ids:
+                if not isinstance(item, str) or not item:
+                    return self._interaction_stop(state, _DEEP_MESSAGES.get("interaction_mismatch_choice", ""))
+                if item not in raw_ids:
+                    raw_ids.append(item)
+        else:
+            single_id = reply.get("choice_id")
+            if isinstance(single_id, str) and single_id:
+                raw_ids = [single_id]
+        if not raw_ids:
             return self._interaction_stop(state, _DEEP_MESSAGES.get("interaction_mismatch_choice", ""))
+
+        option_map = {option["id"]: option for option in card["options"]}
+        selected = []
+        for cid in raw_ids:
+            option = option_map.get(cid)
+            if option is None:
+                return self._interaction_stop(state, _DEEP_MESSAGES.get("interaction_mismatch_choice", ""))
+            selected.append(option)
+
+        allow_multi = card.get("multi_select") is True
+        if len(selected) > 1:
+            if not allow_multi:
+                return self._interaction_stop(state, _DEEP_MESSAGES.get("interaction_mismatch_choice", ""))
+            for opt in selected:
+                if opt["id"] in ("cancel", "reject"):
+                    return self._interaction_stop(state, _DEEP_MESSAGES.get("interaction_mismatch_choice", ""))
+
         state = {**state, "interaction": None, "accepted_interaction_id": card["id"]}
-        if selection["id"] in ("cancel", "reject"):
+        if len(selected) == 1 and selected[0]["id"] in ("cancel", "reject"):
             return self._interaction_stop(state, _DEEP_MESSAGES.get("interaction_canceled", ""), status="CANCELED")
-        response = selection["label"]
-        if selection["id"] == "other":
-            response = self.guard_artifact(reply.get("text") or "")
-            if not response:
-                return self._interaction_stop(state, _DEEP_MESSAGES.get("interaction_unusable_reply", ""))
+
+        parts = []
+        for opt in selected:
+            if opt["id"] == "other":
+                custom = self.guard_artifact(reply.get("text") or "")
+                if not custom:
+                    return self._interaction_stop(state, _DEEP_MESSAGES.get("interaction_unusable_reply", ""))
+                parts.append(custom)
+            else:
+                parts.append(opt["label"])
+        response = "; ".join(parts)
+
         if card["kind"] == "confirm":
             state["approved_scope"] = {"proposal": card["message"], "plan": card["scope"]}
             state["confirmation_required"] = False
         entry = {"kind": card["kind"], "question": card["message"], "response": response,
+                 "selected_ids": [opt["id"] for opt in selected],
                  "signature": state["interaction_signature"]}
         state["human_replies"] = state["human_replies"] + [entry]
         return self._record(state, {"kind": card["kind"], "name": "human_input", "status": "SUCCESS"})
@@ -1092,6 +1725,8 @@ class BankingDeepAgent(BankingReActNodes):
             try:
                 if str(error) == "Missing requested item":
                     repair_suffix = "Lưu ý: Record JSON trước có mục status: 'missing' trong coverage nhưng lại approve. Khi verdict là approve, mọi mục trong coverage phải có status là answered hoặc limited (nêu rõ giới hạn). Nếu câu trả lời thực sự thiếu ý quan trọng, hãy trả verdict: revise kèm feedback và issues cụ thể."
+                elif str(error) == "Invalid claim evidence line":
+                    repair_suffix = "Lưu ý: Số dòng 'line' trong claim vượt quá số dòng thực tế của nguồn. Hãy kiểm tra lại số dòng (1..số dòng có trong nguồn) hoặc dùng trường 'quote' trích nguyên văn từ [Tool N] / [Khách] trong support."
                 else:
                     repair_suffix = _REVIEW_REPAIR_INSTRUCTION.replace("{error}", str(error))
                 repaired = self.model.request(
@@ -1163,12 +1798,15 @@ class BankingDeepAgent(BankingReActNodes):
         for item in state["citations"]:
             if item.get("index") in used_indices or item["label"] in answer:
                 citations.append(item)
-        cited_images = _resolve_cited_images(citations, state.get("retrieved_chunks", []), status)
+        retrieved = state.get("retrieved_chunks", [])
+        cited_images = _resolve_cited_images(citations, retrieved, status, answer_text=answer)
+        enriched_citations = _enrich_citations(citations, retrieved, cited_images, status)
         result_state = {
             **state, "react_turn": {}, "audit_feedback": "", "draft_answer": "", "chat_history": history,
-            "session_memory": memory, "audit_status": status, "final_answer": answer, "citations": citations,
-            "sources": list(dict.fromkeys(item["source"] for item in citations)),
+            "session_memory": memory, "audit_status": status, "final_answer": answer, "citations": enriched_citations,
+            "sources": list(dict.fromkeys(item["source"] for item in enriched_citations)),
             "images": cited_images,
+            "human_replies": list(state.get("human_replies") or []),
             "output_guard": {"is_safe": result.is_safe, "flags": result.flags},
             "execution_steps": state["execution_steps"] + ["output_guardrail"]
         }
@@ -1177,7 +1815,6 @@ class BankingDeepAgent(BankingReActNodes):
         result_state.pop("memory_at_start")
         result_state.pop("capabilities", None)
         result_state.pop("interaction_signature", None)
-        result_state.pop("human_replies", None)
         result_state.pop("approved_scope", None)
         result_state.pop("active_skills", None)
         return result_state

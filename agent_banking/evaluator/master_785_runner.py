@@ -14,7 +14,6 @@ Master Runner for A-Bank 785 Golden Questions Pipeline & LLM Judge Evaluation.
 STRICT COMPLIANCE WITH GEMINI.md:
 - ZERO TERNARY LAW: Explicit if/else syntax only.
 - 0% REGEX LAW: Native string methods only.
-- NO TYPING LIBRARY: Native Python types only.
 - NO __INIT__.PY: Direct imports only.
 """
 

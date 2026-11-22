@@ -7,7 +7,6 @@ Checks ReAct input, tool parameters, retrieved documents, and final output.
 CORE DESIGN INVARIANTS:
 - 0% Regex Law: No regex methods or import re.
 - Zero Ternary Law: Explicit if/else statements only.
-- No Typing Library: No typing module imports.
 - No __init__.py: Direct module imports.
 """
 

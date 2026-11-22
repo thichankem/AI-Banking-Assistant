@@ -3,7 +3,6 @@
 RULES:
 - 0% REGEX LAW: Strictly string methods only (no re).
 - ZERO TERNARY LAW: Explicit if/else statements only.
-- NO TYPING LIBRARY: Native Python types only.
 """
 import hashlib
 import io

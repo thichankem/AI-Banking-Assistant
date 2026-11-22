@@ -18,7 +18,6 @@ Provides execution tools for AI Agents, driven by gitignored YAML/prompt configs
 RULES:
 - 0% REGEX LAW: Absolutely no regex or re library imports.
 - ZERO TERNARY LAW: Explicit if/else only.
-- NO TYPING LIBRARY: Native Python types.
 """
 
 import datetime

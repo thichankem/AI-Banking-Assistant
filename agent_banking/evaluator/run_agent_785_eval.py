@@ -8,7 +8,6 @@ Features:
 - 100% compliant with GEMINI.md rules:
     * 0% REGEX LAW (No regex imports or usage)
     * ZERO TERNARY LAW (Explicit if/else only)
-    * NO TYPING LIBRARY (Native Python types only)
     * NO __INIT__.PY (Direct module imports)
 """
 

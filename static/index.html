@@ -4,16 +4,21 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trợ lý AI A-Bank</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=persona1">
 </head>
 <body>
-    <div class="chat-container">
+    <div class="chat-container is-empty" id="chatContainer">
         <!-- HEADER -->
         <header class="chat-header">
             <div class="header-left">
                 <h2>Trợ lý AI A-Bank</h2>
             </div>
             <div class="header-right">
+                <button type="button" id="debugTraceBtn" class="btn-debug" title="Mở bảng Debug &amp; Tracing chi tiết (Ctrl+Shift+D)">
+                    <span class="debug-live-dot" id="debugLiveDot" hidden></span>
+                    <span>Debug Trace</span>
+                    <span class="debug-count-badge" id="debugTraceCount">0</span>
+                </button>
                 <button type="button" id="clearChatBtn" class="btn-reset">
                     Làm mới phiên
                 </button>
@@ -30,28 +35,153 @@
         </div>
 
         <!-- CHAT MESSAGES -->
-        <main class="chat-messages" id="chatMessages">
-            <div class="message bot-message">
-                <div class="bubble">
-                    <p>Kính chào Quý khách! Tôi là <strong>Trợ lý AI A-Bank</strong>.</p>
-                    <p>Quý khách cần hỗ trợ thông tin gì hôm nay ạ?</p>
-                </div>
-            </div>
-        </main>
+        <main class="chat-messages" id="chatMessages"></main>
+
+        <div class="welcome-hero" id="welcomeHero">
+            <h1 class="welcome-heading">Tôi có thể giúp gì cho Quý khách?</h1>
+        </div>
 
         <!-- CHAT INPUT -->
-        <form class="chat-input-area" id="chatForm">
-            <input 
-                type="text" 
-                id="userInput" 
-                placeholder="Hỏi về biểu phí, mở thẻ, vay mua nhà, kiểm tra sinh trắc học QĐ 2345..." 
-                autocomplete="off" 
-                required
-            >
-            <button type="submit" id="sendBtn">Gửi</button>
-        </form>
+        <div class="chat-composer" id="chatComposer">
+            <div id="composerStatusBanner" class="composer-status-banner" role="status" aria-live="polite" hidden></div>
+            <div id="attachmentPreviewBar" class="attachment-preview-bar" aria-label="Ảnh đính kèm chờ gửi" hidden></div>
+            <form class="chat-input-area" id="chatForm" novalidate>
+                <label for="imageUploadInput" class="visually-hidden">Tải ảnh đính kèm</label>
+                <input
+                    type="file"
+                    id="imageUploadInput"
+                    name="attachments"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    multiple
+                    class="visually-hidden"
+                >
+                <button
+                    type="button"
+                    id="attachImageBtn"
+                    class="btn-composer-icon"
+                    aria-label="Đính kèm hình ảnh"
+                    title="Đính kèm hình ảnh (tối đa 3 ảnh, hoặc dán Ctrl+V)"
+                >
+                    <svg class="composer-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                        <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                        <polyline points="21 15 16 10 5 21"></polyline>
+                    </svg>
+                </button>
+                <label for="userInput" class="visually-hidden">Nội dung câu hỏi</label>
+                <input
+                    type="text"
+                    id="userInput"
+                    name="message"
+                    placeholder="Hỏi về biểu phí, mở thẻ, đính kèm ảnh lỗi hoặc nói bằng giọng nói..."
+                    autocomplete="off"
+                    enterkeyhint="send"
+                >
+                <button
+                    type="button"
+                    id="voiceInputBtn"
+                    class="btn-composer-icon"
+                    aria-label="Nhập bằng giọng nói"
+                    aria-pressed="false"
+                    title="Nhập bằng giọng nói tiếng Việt"
+                >
+                    <svg class="composer-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                        <line x1="12" y1="19" x2="12" y2="23"></line>
+                        <line x1="8" y1="23" x2="16" y2="23"></line>
+                    </svg>
+                </button>
+                <button type="submit" id="sendBtn">Gửi</button>
+            </form>
+        </div>
     </div>
 
-    <script src="/static/app.js"></script>
+    <dialog id="debugTraceDialog" class="debug-dialog" closedby="any" aria-labelledby="debugDialogTitle">
+        <div class="debug-dialog-shell">
+            <header class="debug-dialog-header">
+                <div class="debug-dialog-title-group">
+                    <h3 id="debugDialogTitle">Debug &amp; Tracing Inspector</h3>
+                    <span id="debugLangSmithBadge" class="debug-pill debug-pill-muted">LangSmith</span>
+                    <span id="debugProjectBadge" class="debug-pill debug-pill-muted" hidden></span>
+                </div>
+                <div class="debug-dialog-actions">
+                    <div class="debug-scope-group" role="group" aria-label="Phạm vi trace">
+                        <button type="button" id="debugScopeSessionBtn" class="debug-scope-btn active" aria-pressed="true">Phiên hiện tại</button>
+                        <button type="button" id="debugScopeAllBtn" class="debug-scope-btn" aria-pressed="false">Tất cả</button>
+                    </div>
+                    <button type="button" id="debugRefreshBtn" class="debug-header-btn">Làm mới</button>
+                    <a id="debugLangSmithLink" class="debug-header-btn debug-header-link" target="_blank" rel="noopener noreferrer" hidden>Mở LangSmith ↗</a>
+                    <button type="button" id="debugCopyJsonBtn" class="debug-header-btn" disabled>Copy JSON</button>
+                    <button type="button" id="debugExportJsonBtn" class="debug-header-btn" disabled>Tải JSON</button>
+                    <button type="button" id="debugClearBtn" class="debug-header-btn debug-header-danger">Xóa trace</button>
+                    <form method="dialog" class="debug-close-form">
+                        <button type="submit" value="close" class="debug-close-btn" aria-label="Đóng bảng Debug">×</button>
+                    </form>
+                </div>
+            </header>
+
+            <div class="debug-workbench">
+                <aside class="debug-sidebar" aria-label="Danh sách trace">
+                    <div class="debug-sidebar-controls">
+                        <input
+                            type="search"
+                            id="debugTraceSearch"
+                            class="debug-search-input"
+                            placeholder="Tìm trace ID, truy vấn, intent..."
+                            aria-label="Tìm kiếm trace"
+                        >
+                        <div id="debugSidebarMeta" class="debug-sidebar-meta">Đang tải danh sách trace...</div>
+                    </div>
+                    <div id="debugTraceList" class="debug-trace-list"></div>
+                </aside>
+
+                <section class="debug-main" aria-label="Chi tiết trace">
+                    <div id="debugEmptyState" class="debug-empty-state">
+                        <p class="debug-empty-title">Chưa chọn trace nào</p>
+                        <p class="debug-empty-sub">Hãy gửi một câu hỏi hoặc chọn một trace ở danh sách bên trái để xem Waterfall, LLM Routing, RAG Retrieval, Guardrails và Raw JSON.</p>
+                    </div>
+
+                    <div id="debugTraceDetail" class="debug-trace-detail" hidden>
+                        <div id="debugKpiStrip" class="debug-kpi-strip"></div>
+                        <div id="debugIdentityBar" class="debug-identity-bar"></div>
+
+                        <div class="debug-tablist" role="tablist" focusgroup="tablist nomemory" aria-label="Chi tiết tracing">
+                            <button type="button" role="tab" id="debugTabWaterfall" class="debug-tab" aria-selected="true" focusgroupstart>Waterfall &amp; Spans</button>
+                            <button type="button" role="tab" id="debugTabLlm" class="debug-tab" aria-selected="false">LLM &amp; Routing</button>
+                            <button type="button" role="tab" id="debugTabRag" class="debug-tab" aria-selected="false">RAG &amp; Retrieval</button>
+                            <button type="button" role="tab" id="debugTabAgent" class="debug-tab" aria-selected="false">Agent &amp; Guardrails</button>
+                            <button type="button" role="tab" id="debugTabConfig" class="debug-tab" aria-selected="false">System &amp; Config</button>
+                            <button type="button" role="tab" id="debugTabJson" class="debug-tab" aria-selected="false">Raw JSON</button>
+                        </div>
+
+                        <div class="debug-tabpanels">
+                            <div role="tabpanel" id="debugPanelWaterfall" aria-labelledby="debugTabWaterfall" tabindex="0">
+                                <div class="debug-panel-inner" id="debugPanelWaterfallInner"></div>
+                            </div>
+                            <div role="tabpanel" id="debugPanelLlm" aria-labelledby="debugTabLlm" hidden="until-found">
+                                <div class="debug-panel-inner" id="debugPanelLlmInner"></div>
+                            </div>
+                            <div role="tabpanel" id="debugPanelRag" aria-labelledby="debugTabRag" hidden="until-found">
+                                <div class="debug-panel-inner" id="debugPanelRagInner"></div>
+                            </div>
+                            <div role="tabpanel" id="debugPanelAgent" aria-labelledby="debugTabAgent" hidden="until-found">
+                                <div class="debug-panel-inner" id="debugPanelAgentInner"></div>
+                            </div>
+                            <div role="tabpanel" id="debugPanelConfig" aria-labelledby="debugTabConfig" hidden="until-found">
+                                <div class="debug-panel-inner" id="debugPanelConfigInner"></div>
+                            </div>
+                            <div role="tabpanel" id="debugPanelJson" aria-labelledby="debugTabJson" hidden="until-found">
+                                <div class="debug-panel-inner" id="debugPanelJsonInner"></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </dialog>
+
+    <script src="/static/debug.js?v=debug1"></script>
+    <script src="/static/app.js?v=persona1"></script>
 </body>
 </html>

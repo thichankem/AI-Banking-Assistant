@@ -11,7 +11,6 @@ Features:
 
 MANDATORY RULES (GEMINI.md & AGENTS.md):
 1. NO __INIT__.PY: Direct module imports.
-2. NO TYPING LIBRARY: Native Python types only.
 3. ZERO TERNARY: Explicit if/else statements only.
 4. 0% REGEX LAW: String methods only.
 """

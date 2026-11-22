@@ -13,15 +13,16 @@ Launches web API service and static frontend connected to all RAG and Agentic no
 MANDATORY RULES:
 - 0% REGEX LAW: Strictly string methods only (in, split, startswith, endswith, strip, lower, replace, find).
 - ZERO TERNARY: Explicit if/else syntax only (no x if c else y).
-- NO TYPING LIBRARY: Use Python native types only.
 """
 
 import os
 import sys
 import time
 import json
+import base64
 import asyncio
 from pathlib import Path
+from urllib.parse import quote
 from uuid import uuid4
 
 # Ensure UTF-8 on Windows console
@@ -43,10 +44,12 @@ from pydantic import BaseModel, Field
 import uvicorn
 
 from agent_banking.core.config.settings import CoreConfig, get_core_messages
+from agent_banking.core.cloud_rate_limit import acquire_cloud_slot
 from agent_banking.core.settings import Config
 from agent_banking.pipeline import BankingRAGPipeline
 from agent_banking.node_pipeline import NodePipeline
 from agent_banking.agent_pipeline import BankingAgentPipeline, InteractionError
+from agent_banking.tracing.tracer import trace_span
 from agent_banking.agent.config.response_profiles import (
     PERSONA_PROFILES,
     TONE_PROFILES,
@@ -103,14 +106,32 @@ except RuntimeError as lock_err:
 node_pipe = NodePipeline()
 
 
+_MAX_IMAGE_ATTACHMENTS = 3
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024
+_MAX_VISION_SNIPPET_CHARS = 400
+_ALLOWED_IMAGE_MIMES = ("png", "jpeg", "jpg", "webp", "gif")
+_DEFAULT_IMAGE_QUERY = "Hãy phân tích nội dung hình ảnh đính kèm và tư vấn hướng xử lý theo quy định của A-Bank."
+
+
 # Pydantic Schemas
+class ImageAttachment(BaseModel):
+    name: str = Field(default="", max_length=120)
+    data_url: str = Field(min_length=20, max_length=8_000_000)
+
+
 class ChatRequest(BaseModel):
-    message: str
+    message: str = ""
     persona: str | None = _DEFAULT_PERSONA
     tone: str | None = _DEFAULT_TONE
     format_style: str | None = _DEFAULT_FORMAT_TYPE
     custom_persona: str | None = _DEFAULT_CUSTOM_PERSONA
     session_id: str | None = None
+    attachments: list[ImageAttachment] | None = None
+
+
+class VisionAnalyzeRequest(BaseModel):
+    message: str = ""
+    attachments: list[ImageAttachment] = Field(min_length=1, max_length=3)
 
 
 class SessionRequest(BaseModel):
@@ -125,10 +146,12 @@ class ResumeRequest(SessionRequest):
         min_length=int(_API_CFG["interaction_id_length"]),
         max_length=int(_API_CFG["interaction_id_length"])
     )
-    choice_id: str = Field(
+    choice_id: str | None = Field(
+        default=None,
         min_length=int(_API_CFG["choice_id_min_length"]),
         max_length=int(_API_CFG["choice_id_max_length"])
     )
+    choice_ids: list[str] | None = Field(default=None, min_length=1, max_length=10)
     text: str | None = Field(default=None, max_length=int(_API_CFG["resume_text_max_length"]))
 
 
@@ -246,6 +269,213 @@ def get_agent_pipeline():
     return _agent_pipeline_instance
 
 
+def _get_vision_client():
+    from agent_banking.chunking.universal.models.vision_client import CloudVisionClient
+    return CloudVisionClient()
+
+
+def _decode_image_data_url(data_url: str) -> bytes:
+    """Validate and decode a base64 image data URL without regex."""
+    if not isinstance(data_url, str):
+        raise HTTPException(
+            status_code=400,
+            detail="Định dạng ảnh đính kèm không hợp lệ (chỉ hỗ trợ PNG, JPEG, WEBP, GIF)."
+        )
+    clean = data_url.strip()
+    if not clean.startswith("data:image/") or ";base64," not in clean:
+        raise HTTPException(
+            status_code=400,
+            detail="Định dạng ảnh đính kèm không hợp lệ (chỉ hỗ trợ PNG, JPEG, WEBP, GIF)."
+        )
+    header, encoded = clean.split(";base64,", 1)
+    mime_sub = header[len("data:image/"):].strip().lower()
+    if mime_sub not in _ALLOWED_IMAGE_MIMES:
+        raise HTTPException(
+            status_code=400,
+            detail="Định dạng ảnh đính kèm không hợp lệ (chỉ hỗ trợ PNG, JPEG, WEBP, GIF)."
+        )
+    try:
+        raw = base64.b64decode(encoded.strip(), validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Dữ liệu ảnh base64 không hợp lệ.") from None
+
+    if len(raw) == 0:
+        raise HTTPException(status_code=400, detail="Tệp ảnh đính kèm rỗng.")
+    if len(raw) > _MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=400, detail="Mỗi ảnh đính kèm không được vượt quá 5 MB.")
+
+    is_png = raw.startswith(b"\x89PNG\r\n\x1a\n")
+    is_jpeg = raw.startswith(b"\xff\xd8")
+    is_gif = raw.startswith((b"GIF87a", b"GIF89a"))
+    is_webp = len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP"
+    if not (is_png or is_jpeg or is_gif or is_webp):
+        raise HTTPException(
+            status_code=400,
+            detail="Định dạng ảnh đính kèm không hợp lệ (chỉ hỗ trợ PNG, JPEG, WEBP, GIF)."
+        )
+    return raw
+
+
+def _validate_and_decode_attachments(attachments: list[ImageAttachment] | None) -> list[dict]:
+    """Validate attachment count and decode all image payloads up front."""
+    if not attachments:
+        return []
+    if len(attachments) > _MAX_IMAGE_ATTACHMENTS:
+        raise HTTPException(status_code=400, detail="Tối đa 3 ảnh đính kèm cho mỗi lượt gửi.")
+    decoded = []
+    for idx, item in enumerate(attachments):
+        raw_bytes = _decode_image_data_url(item.data_url)
+        clean_name = str(item.name or "").strip()
+        if not clean_name:
+            clean_name = f"image_{idx + 1}"
+        decoded.append({"name": clean_name, "bytes": raw_bytes})
+    return decoded
+
+
+def _analyze_single_image_bytes(
+    image_bytes: bytes,
+    file_name: str,
+    user_hint: str,
+    agent=None,
+    session_id: str = "",
+) -> str:
+    """Run Cloud Vision OCR/analysis on one image attachment and sanitize output."""
+    prompt = (
+        "Hãy đọc và trích xuất chính xác toàn bộ nội dung hiển thị trong hình ảnh này bằng tiếng Việt ngắn gọn: "
+        "tiêu đề màn hình ứng dụng A-Bank Plus, mã lỗi (ví dụ ABP-...), số tiền, tên sản phẩm/thẻ, "
+        "bảng biểu phí hoặc điều khoản quan trọng. Không bịa đặt thông tin không có trong ảnh."
+    )
+    clean_hint = str(user_hint or "").strip()
+    if clean_hint:
+        prompt = prompt + "\nCâu hỏi kèm theo của khách hàng: " + clean_hint[:200]
+
+    started_ns = time.time_ns()
+    start_perf = time.perf_counter()
+    stashed_attrs = {"role": "vision", "file_name": file_name}
+    stashed_status = "ok"
+    try:
+        with trace_span("vision.attachment_ocr", run_type="llm", role="vision", file_name=file_name) as span_meta:
+            try:
+                client = _get_vision_client()
+                model_name = getattr(client, "model", "")
+                base_url = getattr(client, "base_url", "")
+                if model_name:
+                    span_meta["model"] = model_name
+                    stashed_attrs["model"] = model_name
+                if model_name and base_url:
+                    acquire_cloud_slot(model_name, base_url)
+                raw_text = client.ask(image_bytes, prompt=prompt, max_tokens=600, temperature=0.0)
+                cleaned = " ".join(str(raw_text or "").split())
+                if cleaned:
+                    runtime = getattr(agent, "runtime", None)
+                    if runtime is not None and hasattr(runtime, "guard_artifact"):
+                        guarded = runtime.guard_artifact(cleaned)
+                        if not guarded:
+                            cleaned = "[Nội dung văn bản trong ảnh đã bị chặn bởi bộ lọc an toàn]"
+                        else:
+                            cleaned = guarded
+                if not cleaned:
+                    cleaned = "[Không đọc được nội dung chữ rõ ràng từ ảnh]"
+                if len(cleaned) > _MAX_VISION_SNIPPET_CHARS:
+                    cleaned = cleaned[:_MAX_VISION_SNIPPET_CHARS - 3] + "..."
+                span_meta["extracted_chars"] = len(cleaned)
+                span_meta["status"] = "success"
+                stashed_attrs.update(span_meta)
+                return cleaned
+            except Exception as exc:
+                stashed_status = "error"
+                span_meta["status"] = "error"
+                span_meta["error_type"] = type(exc).__name__
+                stashed_attrs.update(span_meta)
+                return "[Không thể trích xuất chi tiết từ ảnh do lỗi kết nối Cloud Vision]"
+    finally:
+        tracer_obj = _get_active_tracer()
+        if tracer_obj is not None and hasattr(tracer_obj, "stash_pre_turn_span"):
+            has_active = False
+            if hasattr(tracer_obj, "current_trace_id") and tracer_obj.current_trace_id():
+                has_active = True
+            if not has_active and session_id:
+                elapsed_ms = round((time.perf_counter() - start_perf) * 1000.0, 3)
+                tracer_obj.stash_pre_turn_span(
+                    session_id,
+                    {
+                        "name": "vision.attachment_ocr",
+                        "run_type": "llm",
+                        "started_ns": started_ns,
+                        "duration_ms": elapsed_ms,
+                        "status": stashed_status,
+                        "attributes": stashed_attrs,
+                    },
+                )
+
+
+def _extract_vision_text_from_attachments(
+    decoded_items: list[dict],
+    user_hint: str,
+    agent=None,
+    session_id: str = "",
+) -> list[dict]:
+    """Analyze each decoded image attachment and return structured OCR summaries."""
+    analyses = []
+    for idx, item in enumerate(decoded_items):
+        summary = _analyze_single_image_bytes(
+            item["bytes"],
+            item["name"],
+            user_hint,
+            agent=agent,
+            session_id=session_id,
+        )
+        analyses.append({
+            "index": idx + 1,
+            "name": item["name"],
+            "summary": summary,
+        })
+    return analyses
+
+
+def _prepare_query_with_attachments(
+    query_text: str,
+    decoded_items: list[dict],
+    agent=None,
+    session_id: str = "",
+) -> tuple[str, list[dict]]:
+    """Combine user query text with sanitized Cloud Vision extractions from attachments."""
+    base_query = str(query_text or "").strip()
+    if not decoded_items:
+        return base_query, []
+    if not base_query:
+        base_query = _DEFAULT_IMAGE_QUERY
+    analyses = _extract_vision_text_from_attachments(
+        decoded_items,
+        base_query,
+        agent=agent,
+        session_id=session_id,
+    )
+    parts = []
+    for item in analyses:
+        parts.append(f"Ảnh {item['index']} ({item['name']}): {item['summary']}")
+    appendix = "[Thông tin trích xuất từ ảnh đính kèm của khách hàng: " + " | ".join(parts) + "]"
+    max_total = 1450
+    if len(base_query) + len(appendix) + 2 > max_total:
+        avail = max(120, max_total - len(base_query) - 3)
+        appendix = appendix[:avail - 3] + "...]"
+    enriched_query = base_query + "\n\n" + appendix
+    return enriched_query, analyses
+
+
+@app.post("/api/vision/analyze")
+def analyze_vision_attachments(req: VisionAnalyzeRequest):
+    """Analyze up to 3 attached images via Cloud Vision and return sanitized summaries."""
+    decoded_items = _validate_and_decode_attachments(req.attachments)
+    agent = get_agent_pipeline()
+    enriched_query, analyses = _prepare_query_with_attachments(req.message.strip(), decoded_items, agent=agent)
+    return {
+        "status": "completed",
+        "analyses": analyses,
+        "combined_query": enriched_query,
+    }
+
+
 @app.post("/api/chat")
 @app.post("/api/agent/chat")
 def handle_agent_chat(req: ChatRequest):
@@ -253,7 +483,8 @@ def handle_agent_chat(req: ChatRequest):
     Execute a deep agent turn with persistent session memory.
     """
     query_text = req.message.strip()
-    if not query_text:
+    decoded_items = _validate_and_decode_attachments(req.attachments)
+    if not query_text and not decoded_items:
         raise HTTPException(status_code=400, detail=_API_MESSAGES["empty_query_error"])
 
     session_id = req.session_id or uuid4().hex
@@ -262,8 +493,16 @@ def handle_agent_chat(req: ChatRequest):
 
     try:
         agent = get_agent_pipeline()
+        final_query = query_text
+        if decoded_items:
+            final_query, _ = _prepare_query_with_attachments(
+                query_text,
+                decoded_items,
+                agent=agent,
+                session_id=session_id,
+            )
         result = agent.chat(
-            query=query_text,
+            query=final_query,
             session_id=session_id,
             persona=style["persona"],
             tone=style["tone"],
@@ -284,7 +523,13 @@ def agent_status(req: SessionRequest):
 @app.post("/api/agent/resume")
 def agent_resume(req: ResumeRequest):
     try:
-        return get_agent_pipeline().resume(req.session_id, req.interaction_id, req.choice_id, req.text)
+        return get_agent_pipeline().resume(
+            req.session_id,
+            req.interaction_id,
+            req.choice_id,
+            req.text,
+            choice_ids=req.choice_ids,
+        )
     except InteractionError as error:
         headers = None
         if getattr(error, "trace_id", None):
@@ -304,7 +549,8 @@ async def stream_agent_chat(req: ChatRequest):
     Server-Sent Events (SSE) streaming endpoint for real-time node progress and token streaming.
     """
     query_text = req.message.strip()
-    if query_text == "":
+    decoded_items = _validate_and_decode_attachments(req.attachments)
+    if query_text == "" and not decoded_items:
         raise HTTPException(status_code=400, detail=_API_MESSAGES["empty_query_error"])
 
     session_id = req.session_id or uuid4().hex
@@ -312,6 +558,7 @@ async def stream_agent_chat(req: ChatRequest):
     style = _resolve_chat_style(req)
 
     async def event_generator():
+        stream_started = time.perf_counter()
         final_response_text = ""
         audit_status_used = "PASS"
         citations = []
@@ -321,8 +568,34 @@ async def stream_agent_chat(req: ChatRequest):
 
         try:
             agent = get_agent_pipeline()
+            final_query = query_text
+            if decoded_items:
+                vision_start_payload = {
+                    "event_type": "node_progress",
+                    "node": "vision_ocr",
+                    "description": "Đang phân tích hình ảnh đính kèm qua Cloud Vision...",
+                    "action": {"kind": "vision", "name": "cloud_vision_ocr", "status": "RUNNING"},
+                }
+                yield f"data: {json.dumps(vision_start_payload, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(_STREAM_STEP_DELAY)
+                final_query, _ = await asyncio.to_thread(
+                    _prepare_query_with_attachments,
+                    query_text,
+                    decoded_items,
+                    agent,
+                    session_id,
+                )
+                vision_done_payload = {
+                    "event_type": "node_progress",
+                    "node": "vision_ocr",
+                    "description": "Đã trích xuất thông tin từ hình ảnh đính kèm",
+                    "action": {"kind": "vision", "name": "cloud_vision_ocr", "status": "SUCCESS"},
+                }
+                yield f"data: {json.dumps(vision_done_payload, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(_STREAM_STEP_DELAY)
+
             async for step_event in agent.astream_chat(
-                query=query_text,
+                query=final_query,
                 session_id=session_id,
                 persona=style["persona"],
                 tone=style["tone"],
@@ -359,6 +632,8 @@ async def stream_agent_chat(req: ChatRequest):
                         "description": node_description,
                         "action": action
                     }
+                    if "trace_id" in node_state and node_state["trace_id"]:
+                        step_payload["trace_id"] = node_state["trace_id"]
                     if "plan" in node_state:
                         step_payload["plan"] = node_state["plan"]
                     if node_name == "answer_review":
@@ -377,11 +652,13 @@ async def stream_agent_chat(req: ChatRequest):
                 yield f"data: {token_str}\n\n"
                 await asyncio.sleep(_STREAM_TOKEN_DELAY)
 
+            stream_latency_ms = round((time.perf_counter() - stream_started) * 1000.0, 2)
             done_payload = {
                 "event_type": "done",
                 "status": "completed",
                 "session_id": session_id,
                 "audit_status": audit_status_used,
+                "latency_ms": stream_latency_ms,
                 "evaluation_metrics": None,
                 "citations": citations,
                 "sources": sources,
@@ -414,7 +691,127 @@ async def stream_agent_chat(req: ChatRequest):
 
 
 # -----------------------------------------------------------------------------
-# 4. NODE FOLDERS & FILES MANAGEMENT
+# 4. LIVE DEBUG & TRACING INSPECTOR API
+# -----------------------------------------------------------------------------
+def _get_active_tracer():
+    agent = get_agent_pipeline()
+    tracer_obj = getattr(agent, "tracer", None)
+    if tracer_obj is None:
+        tracer_obj = getattr(rag_pipeline, "tracer", None)
+    return tracer_obj
+
+
+def _build_debug_system_config(tracer_obj) -> dict:
+    points_count = None
+    vector_store = getattr(rag_pipeline, "vector_store", None)
+    if vector_store is not None and hasattr(vector_store, "count"):
+        try:
+            points_count = vector_store.count()
+        except Exception:
+            points_count = None
+
+    tracing_enabled = False
+    langsmith_active = False
+    langsmith_project = ""
+    local_export_enabled = False
+    if tracer_obj is not None:
+        tracing_enabled = bool(getattr(tracer_obj, "enabled", False))
+        langsmith_active = bool(getattr(tracer_obj, "is_langsmith_active", False))
+        langsmith_project = str(getattr(tracer_obj, "project_name", "") or "")
+        local_export_enabled = bool(getattr(tracer_obj, "local_export_enabled", False))
+
+    return {
+        "default_model": config.AGENT_LLM_MODEL,
+        "agent_mode": str(_API_CFG["agent_mode"]),
+        "embedding_model": config.EMBEDDING_MODEL_1024,
+        "reranker_model": config.RERANKER_MODEL,
+        "qdrant_collection": config.QDRANT_COLLECTION,
+        "points_count": points_count,
+        "tracing_enabled": tracing_enabled,
+        "tracing_provider": "langsmith",
+        "langsmith_active": langsmith_active,
+        "langsmith_project": langsmith_project,
+        "langsmith_url": str(_API_CFG["langsmith_url"]),
+        "local_export_enabled": local_export_enabled,
+    }
+
+
+def _validate_trace_id(trace_id: str) -> str:
+    if not isinstance(trace_id, str) or "\x00" in trace_id:
+        raise HTTPException(status_code=400, detail="Invalid trace_id")
+    clean = trace_id.strip()
+    if not clean or len(clean) > 128:
+        raise HTTPException(status_code=400, detail="Invalid trace_id")
+    if "/" in clean or "\\" in clean or ".." in clean:
+        raise HTTPException(status_code=400, detail="Invalid trace_id")
+    return clean
+
+
+@app.get("/api/debug/traces")
+def list_debug_traces(
+    session_id: str | None = None,
+    scope: str = "session",
+    limit: int = 50,
+    include_active: bool = True,
+):
+    """Return trace summaries for the UI Debug & Tracing Inspector."""
+    clean_scope = scope.strip().lower()
+    if clean_scope not in ("session", "all"):
+        raise HTTPException(status_code=400, detail="Invalid scope; expected 'session' or 'all'")
+    bounded_limit = max(1, min(int(limit), 200))
+
+    tracer_obj = _get_active_tracer()
+    sys_cfg = _build_debug_system_config(tracer_obj)
+
+    if tracer_obj is not None and hasattr(tracer_obj, "list_debug_traces"):
+        payload = tracer_obj.list_debug_traces(
+            session_id=session_id,
+            scope=clean_scope,
+            limit=bounded_limit,
+            include_active=include_active,
+        )
+    else:
+        payload = {
+            "active_count": 0,
+            "total_stored": 0,
+            "total_in_memory": 0,
+            "session_ref": None,
+            "traces": [],
+        }
+    return {**payload, "system_config": sys_cfg}
+
+
+@app.get("/api/debug/traces/{trace_id}")
+def get_debug_trace_detail(trace_id: str):
+    """Return full hierarchical spans, LLM/RAG/Tool/Agent state, and system config for a trace."""
+    clean_id = _validate_trace_id(trace_id)
+    tracer_obj = _get_active_tracer()
+    if tracer_obj is None or not hasattr(tracer_obj, "get_debug_trace"):
+        raise HTTPException(status_code=404, detail="Trace not found")
+    detail = tracer_obj.get_debug_trace(clean_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Trace not found")
+    return {
+        **detail,
+        "system_config": _build_debug_system_config(tracer_obj),
+    }
+
+
+@app.delete("/api/debug/traces")
+def clear_debug_traces(session_id: str | None = None, scope: str = "session"):
+    """Clear stored in-memory debug traces for the current session or globally."""
+    clean_scope = scope.strip().lower()
+    if clean_scope not in ("session", "all"):
+        raise HTTPException(status_code=400, detail="Invalid scope; expected 'session' or 'all'")
+    tracer_obj = _get_active_tracer()
+    cleared = 0
+    if tracer_obj is not None and hasattr(tracer_obj, "clear_debug_traces"):
+        cleared = int(tracer_obj.clear_debug_traces(session_id=session_id, scope=clean_scope))
+    return {"cleared": cleared}
+
+
+# -----------------------------------------------------------------------------
+# 5. NODE FOLDERS & FILES MANAGEMENT
 # -----------------------------------------------------------------------------
 @app.get("/api/nodes")
 def get_nodes_info():
@@ -544,6 +941,124 @@ def get_visual_asset(asset_id: str):
         str(target),
         media_type="image/png",
         headers={"Cache-Control": "public, max-age=86400"}
+    )
+
+
+_PDF_DOC_INDEX_CACHE = {}
+
+
+def _allowed_pdf_dirs() -> list:
+    """Return deduplicated resolved directories permitted for PDF preview."""
+    raw_dirs = [
+        Path(config.CHUNKING_INPUT_DIR),
+        Path(config.CHUNKING_DATASET_DIR),
+        Path(config.DATASET_DIR),
+        ROOT_DIR / "dataset",
+        ROOT_DIR / "dataset" / "A_Bank",
+    ]
+    resolved_dirs = []
+    seen = set()
+    for folder in raw_dirs:
+        if not folder.is_dir():
+            continue
+        resolved = folder.resolve()
+        key = str(resolved).lower()
+        if key not in seen:
+            seen.add(key)
+            resolved_dirs.append(resolved)
+    return resolved_dirs
+
+
+def _normalize_pdf_source(source: str) -> str:
+    """Validate and normalize a relative PDF source string without regex."""
+    if not isinstance(source, str) or "\x00" in source:
+        raise HTTPException(status_code=400, detail="Invalid PDF source parameter")
+    clean = source.replace("\\", "/").strip()
+    while clean.startswith("/"):
+        clean = clean[1:]
+    if not clean:
+        raise HTTPException(status_code=400, detail="Empty PDF source parameter")
+    if ":" in clean:
+        raise HTTPException(status_code=403, detail="Invalid PDF document path")
+    parts = clean.split("/")
+    for seg in parts:
+        if not seg:
+            continue
+        if seg == "." or seg == "..":
+            raise HTTPException(status_code=403, detail="Invalid PDF document path")
+    if not clean.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF documents are supported")
+    return clean
+
+
+def _is_within_allowed_dirs(resolved: Path, allowed_dirs: list) -> bool:
+    """Return True if resolved path resides inside any allowed base directory."""
+    for allowed_dir in allowed_dirs:
+        if resolved.is_relative_to(allowed_dir):
+            return True
+    return False
+
+
+def _find_pdf_document(source: str):
+    """Locate a PDF file inside allowed dataset/chunking directories."""
+    clean = _normalize_pdf_source(source)
+    allowed_dirs = _allowed_pdf_dirs()
+    parts = [seg for seg in clean.split("/") if seg]
+
+    for base_dir in allowed_dirs:
+        candidate = base_dir
+        for seg in parts:
+            candidate = candidate / seg
+        resolved = candidate.resolve()
+        if not _is_within_allowed_dirs(resolved, allowed_dirs):
+            raise HTTPException(status_code=403, detail="Invalid PDF document path")
+        if resolved.is_file() and resolved.suffix.lower() == ".pdf":
+            return resolved
+
+    if "/" not in clean:
+        cached = _PDF_DOC_INDEX_CACHE.get(clean)
+        if cached is not None and cached.is_file():
+            return cached
+        target_lower = clean.lower()
+        for base_dir in allowed_dirs:
+            for item in base_dir.rglob("*.pdf"):
+                if item.name == clean or item.name.lower() == target_lower:
+                    resolved = item.resolve()
+                    if _is_within_allowed_dirs(resolved, allowed_dirs) and resolved.is_file():
+                        _PDF_DOC_INDEX_CACHE[clean] = resolved
+                        return resolved
+    return None
+
+
+def _build_inline_content_disposition(filename: str) -> str:
+    """Construct RFC 6266 inline Content-Disposition header for UTF-8 filenames."""
+    ascii_chars = []
+    for ch in filename:
+        code = ord(ch)
+        if 32 <= code < 127 and ch not in ('"', "\\"):
+            ascii_chars.append(ch)
+        else:
+            ascii_chars.append("_")
+    ascii_name = "".join(ascii_chars).strip()
+    if not ascii_name:
+        ascii_name = "document.pdf"
+    encoded_name = quote(filename, safe="")
+    return f'inline; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}'
+
+
+@app.get("/api/documents/pdf")
+def get_source_pdf(source: str):
+    """Stream the original source PDF inline so browsers can jump directly to #page=N."""
+    target = _find_pdf_document(source)
+    if target is None:
+        raise HTTPException(status_code=404, detail="PDF document not found")
+    return FileResponse(
+        str(target),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": _build_inline_content_disposition(target.name),
+            "Cache-Control": "public, max-age=3600",
+        },
     )
 
 

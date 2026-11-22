@@ -2,7 +2,7 @@
 """
 Resolve per-module model lists, with secrets referenced by environment name.
 Loads model definitions from module-level config/models.py.
-Complies with 0% Regex Law, Zero Ternary Law, and No Typing Library.
+Complies with 0% Regex Law, Zero Ternary Law.
 """
 
 from dataclasses import replace

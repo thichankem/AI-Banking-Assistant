@@ -217,3 +217,101 @@ def test_api_sse_pause_status_resume_and_plain_chat(tmp_path, monkeypatch):
             assert '"event_type": "done"' in plain_stream.text and '"full_answer": "Chào bạn!"' in plain_stream.text
     finally:
         pipeline.graph.checkpointer.conn.close()
+
+
+def test_multi_select_clarify_resume_and_single_choice_rejection(tmp_path, monkeypatch):
+    multi_clarify = {
+        "kind": "clarify",
+        "question": "Bạn muốn so sánh theo những tiêu chí nào?",
+        "options": ["Tổng tiền lãi", "Lãi suất năm", "Phí trả nợ trước hạn"],
+        "multi_select": True,
+    }
+    pipeline, calls = make_pipeline(monkeypatch, tmp_path / "multi.sqlite", [
+        multi_clarify,
+        {"kind": "final", "answer": "Đã so sánh theo các tiêu chí bạn chọn."},
+        REVIEW,
+        CLARIFY,
+        {"kind": "final", "answer": "Đã so sánh theo tổng tiền lãi."},
+        REVIEW,
+    ])
+    try:
+        pending = pipeline.chat("So sánh giúp tôi", session_id="multi-session")
+        assert pending["status"] == "awaiting_input"
+        card = pending["interaction"]
+        assert card["multi_select"] is True
+
+        with pytest.raises(InteractionError) as exc_cancel:
+            pipeline.resume("multi-session", card["id"], choice_ids=["option_1", "cancel"])
+        assert exc_cancel.value.status_code == 422
+
+        with pytest.raises(InteractionError) as exc_empty:
+            pipeline.resume("multi-session", card["id"], choice_ids=[])
+        assert exc_empty.value.status_code == 422
+
+        resumed = pipeline.resume(
+            "multi-session",
+            card["id"],
+            choice_ids=["option_1", "option_3", "other"],
+            text="Kỳ hạn 12 tháng",
+        )
+        assert resumed["status"] == "completed"
+        assert resumed["audit_status"] == "PASS"
+        assert calls[1]["human_replies"][0]["response"] == "Tổng tiền lãi; Phí trả nợ trước hạn; Kỳ hạn 12 tháng"
+        assert calls[1]["human_replies"][0]["selected_ids"] == ["option_1", "option_3", "other"]
+
+        single_pending = pipeline.chat("So sánh tiếp", session_id="single-session")
+        single_card = single_pending["interaction"]
+        assert single_card["multi_select"] is False
+        with pytest.raises(InteractionError) as exc_single:
+            pipeline.resume("single-session", single_card["id"], choice_ids=["option_1", "option_2"])
+        assert exc_single.value.status_code == 422
+
+        app = load_app(monkeypatch, pipeline)
+        with TestClient(app) as client:
+            http_ok = client.post("/api/agent/resume", json={
+                "session_id": "single-session",
+                "interaction_id": single_card["id"],
+                "choice_ids": ["option_1"],
+            })
+            assert http_ok.status_code == 200
+            assert http_ok.json()["audit_status"] == "PASS"
+    finally:
+        pipeline.graph.checkpointer.conn.close()
+
+
+def test_api_multi_select_resume_via_http(tmp_path, monkeypatch):
+    multi_clarify = {
+        "kind": "clarify",
+        "question": "Chọn các kỳ hạn muốn đối chiếu?",
+        "options": ["3 tháng", "6 tháng", "12 tháng"],
+        "multi_select": True,
+    }
+    pipeline, calls = make_pipeline(monkeypatch, tmp_path / "api_multi.sqlite", [
+        multi_clarify,
+        {"kind": "final", "answer": "Đã đối chiếu 3 tháng và 12 tháng."},
+        REVIEW,
+    ])
+    app = load_app(monkeypatch, pipeline)
+    try:
+        with TestClient(app) as client:
+            paused = client.post("/api/agent/chat", json={"session_id": "api-m", "message": "Tính lãi"}).json()
+            assert paused["status"] == "awaiting_input"
+            assert paused["interaction"]["multi_select"] is True
+            bad = client.post("/api/agent/resume", json={
+                "session_id": "api-m",
+                "interaction_id": paused["interaction"]["id"],
+                "choice_ids": ["option_1", "cancel"],
+            })
+            assert bad.status_code == 422
+            done = client.post("/api/agent/resume", json={
+                "session_id": "api-m",
+                "interaction_id": paused["interaction"]["id"],
+                "choice_ids": ["option_1", "option_3"],
+            })
+            assert done.status_code == 200
+            body = done.json()
+            assert body["status"] == "completed"
+            assert body["audit_status"] == "PASS"
+            assert calls[1]["human_replies"][0]["response"] == "3 tháng; 12 tháng"
+    finally:
+        pipeline.graph.checkpointer.conn.close()

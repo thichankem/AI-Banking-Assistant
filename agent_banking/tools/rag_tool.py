@@ -52,6 +52,69 @@ def matches_exact(item: dict, exact: str) -> bool:
     return any(needle in " " + search_key(value) + " " for value in fields if isinstance(value, str))
 
 
+def _extract_item_pages(raw: dict) -> list:
+    meta = raw.get("business_metadata")
+    if not isinstance(meta, dict):
+        return []
+    cit = meta.get("citation")
+    if isinstance(cit, dict) and isinstance(cit.get("page_numbers"), list) and cit["page_numbers"]:
+        pages = []
+        for p in cit["page_numbers"]:
+            if isinstance(p, int) and p > 0 and p not in pages:
+                pages.append(p)
+        return sorted(pages)
+    prov = meta.get("provenance")
+    if not isinstance(prov, dict):
+        return []
+    locs = prov.get("locations")
+    if not isinstance(locs, list):
+        return []
+    pages = []
+    for loc in locs:
+        if not isinstance(loc, dict):
+            continue
+        pnum = loc.get("page_number")
+        if not isinstance(pnum, int) and isinstance(loc.get("page_index"), int):
+            pnum = loc["page_index"] + 1
+        if isinstance(pnum, int) and pnum > 0 and pnum not in pages:
+            pages.append(pnum)
+    return sorted(pages)
+
+
+def _summarize_rag_items(items, limit=15):
+    """Build compact score and snippet previews of retrieved or reranked candidates for tracing."""
+    if not isinstance(items, list):
+        return []
+    summary = []
+    for idx, item in enumerate(items[:limit]):
+        if not isinstance(item, dict):
+            continue
+        raw = item.get("chunk", item)
+        if not isinstance(raw, dict):
+            raw = {}
+        snippet = str(raw.get("content") or raw.get("original_text") or raw.get("text") or "").strip()
+        if len(snippet) > 240:
+            snippet = snippet[:237] + "..."
+        summary.append({
+            "rank": idx + 1,
+            "chunk_id": str(raw.get("chunk_id") or item.get("chunk_id") or ""),
+            "source": str(raw.get("source") or ""),
+            "section_title": str(raw.get("section_title") or ""),
+            "breadcrumb": str(raw.get("breadcrumb") or ""),
+            "chunk_type": str(raw.get("chunk_type") or "text"),
+            "rrf_score": item.get("rrf_score"),
+            "dense_score": item.get("dense_score"),
+            "bm25_score": item.get("bm25_score"),
+            "dense_rank": item.get("dense_rank"),
+            "bm25_rank": item.get("bm25_rank"),
+            "rerank_score": item.get("rerank_score"),
+            "rerank_method": item.get("rerank_method"),
+            "page_numbers": _extract_item_pages(raw),
+            "snippet": snippet,
+        })
+    return summary
+
+
 def _context_section(chunk, procedure):
     breadcrumb = str(chunk.get("breadcrumb") or "")
     title_key = search_key(str(chunk.get("section_title") or ""))
@@ -386,6 +449,16 @@ class BankingRAGTool:
                 normalized_query=search_query,
                 keywords=list(getattr(parsed_q, "keywords", []) or []),
                 legal_references=list(getattr(parsed_q, "legal_references", []) or []),
+                detected_acronyms=list(getattr(parsed_q, "detected_acronyms", []) or []),
+                financial_amounts=list(getattr(parsed_q, "financial_amounts", []) or []),
+                banks_mentioned=list(getattr(parsed_q, "banks_mentioned", []) or []),
+                parsed_intent=str(getattr(parsed_q, "intent", "") or ""),
+                parsed_sub_intent=str(getattr(parsed_q, "sub_intent", "") or ""),
+                parsed_domain=str(getattr(parsed_q, "domain", "") or ""),
+                expanded_query=str(getattr(parsed_q, "expanded_query", "") or ""),
+                suggested_filters=dict(getattr(parsed_q, "suggested_filters", {}) or {}),
+                exact_filter=exact,
+                source_filter=source,
             )
 
         # 2. Hybrid Retrieval (Dense Vector + BM25 Okapi)
@@ -429,7 +502,14 @@ class BankingRAGTool:
             relaxed = any(item.get("retrieval_meta", {}).get("fallback_unfiltered") for item in candidates)
             if exact:
                 candidates = [item for item in candidates if matches_exact(item, exact)]
-            ret_span.update(candidate_count=len(candidates), relaxed_filters=relaxed)
+            ret_span.update(
+                candidate_count=len(candidates),
+                candidate_k=candidate_count,
+                filters=dict(filters),
+                offset=offset,
+                relaxed_filters=relaxed,
+                candidates_preview=_summarize_rag_items(candidates, limit=15),
+            )
 
         # 3. Cross-Encoder Reranker
         with trace_span("top_k_cross_encoder_reranker", run_type="retriever", query=clean_query, input_count=len(candidates), top_k=top_k) as rr_span:
@@ -437,7 +517,10 @@ class BankingRAGTool:
                 reranked = candidates
             else:
                 reranked = self.pipeline.reranker.rerank(query=clean_query, candidates=candidates, top_k=top_k)
-            rr_span.update(reranked_count=len(reranked))
+            rr_span.update(
+                reranked_count=len(reranked),
+                reranked_preview=_summarize_rag_items(reranked, limit=15),
+            )
 
         # 4. Extract documents and source references
         docs = []

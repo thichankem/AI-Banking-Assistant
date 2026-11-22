@@ -2,7 +2,7 @@
 """
 Global Configuration Aggregator and Path Configuration.
 Module-specific parameters are maintained independently in each module's config folder.
-Complies with 0% Regex Law, Zero Ternary Law, and No Typing Library.
+Complies with 0% Regex Law, Zero Ternary Law.
 """
 
 from agent_banking.core.config.settings import CoreConfig

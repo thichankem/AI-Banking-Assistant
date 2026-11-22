@@ -5,7 +5,6 @@ Script to format A_Bank_golden_master_785.xlsx to contain ONLY ONE sheet:
 MANDATORY CODING RULES:
 1. 0% REGEX LAW
 2. ZERO TERNARY LAW (Explicit if/else)
-3. NO TYPING LIBRARY
 4. NO __INIT__.PY
 """
 

@@ -2,7 +2,7 @@
 """
 Core, Pipeline, and API Settings Loader.
 Loads configuration from settings/config.yaml and prompt bundles from prompts/.
-Complies with 0% Regex Law, Zero Ternary Law, and No Typing Library.
+Complies with 0% Regex Law, Zero Ternary Law.
 """
 
 from importlib import import_module

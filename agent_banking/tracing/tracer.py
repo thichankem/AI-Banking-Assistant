@@ -11,7 +11,6 @@ Centralizes all execution tracing on LangSmith:
 DESIGN INVARIANTS:
 1. 0% REGEX LAW: No regex imports or methods.
 2. ZERO TERNARY: Explicit if/else statements only.
-3. NO TYPING LIBRARY: Native Python types only.
 4. NO __INIT__.PY: Direct module imports.
 """
 
@@ -29,6 +28,7 @@ import sys
 from threading import Lock
 import time
 from time import perf_counter, time_ns
+from uuid import uuid4
 
 from langchain_core.tracers.context import tracing_v2_enabled
 from langchain_core.tracers.langchain import LangChainTracer
@@ -445,6 +445,376 @@ def _format_rag_documents(items):
     return docs
 
 
+def _safe_snapshot_obj(value):
+    """Create a thread-safe shallow/recursive copy of JSON-like structures without mutating live objects."""
+    if isinstance(value, dict):
+        copied = {}
+        for key, item in list(value.items()):
+            copied[key] = _safe_snapshot_obj(item)
+        return copied
+    if isinstance(value, list):
+        return [_safe_snapshot_obj(item) for item in list(value)]
+    if isinstance(value, tuple):
+        return [_safe_snapshot_obj(item) for item in list(value)]
+    return value
+
+
+def _enrich_trace_for_debug(raw_record):
+    """Build hierarchical waterfall spans, LLM/RAG/tool summaries, and KPI totals for UI debugging."""
+    record = _safe_snapshot_obj(raw_record)
+    raw_spans = record.get("spans")
+    if not isinstance(raw_spans, list):
+        raw_spans = []
+
+    is_active = bool(record.get("is_active", False))
+    now_ns = time_ns()
+    root_started_ns = None
+    for sp in raw_spans:
+        if isinstance(sp, dict) and isinstance(sp.get("started_ns"), int):
+            root_started_ns = sp["started_ns"]
+            break
+
+    known_ids = set()
+    for idx, sp in enumerate(raw_spans):
+        if not isinstance(sp, dict):
+            continue
+        sid = str(sp.get("span_id") or sp.get("run_id") or f"span_{idx + 1}")
+        known_ids.add(sid)
+
+    root_span_id = None
+    normalized_spans = []
+    span_by_id = {}
+    standard_keys = {
+        "span_id", "run_id", "parent_span_id", "parent_run_id",
+        "run_type", "name", "started_ns", "duration_ms", "status", "attributes",
+    }
+
+    for idx, sp in enumerate(raw_spans):
+        if not isinstance(sp, dict):
+            continue
+        sid = str(sp.get("span_id") or sp.get("run_id") or f"span_{idx + 1}")
+        rid = str(sp.get("run_id") or sid)
+        if root_span_id is None:
+            root_span_id = sid
+
+        raw_parent = sp.get("parent_span_id")
+        if not raw_parent:
+            raw_parent = sp.get("parent_run_id")
+        if raw_parent:
+            parent_id = str(raw_parent)
+        else:
+            parent_id = None
+
+        if parent_id and parent_id in known_ids and parent_id != sid:
+            effective_parent_id = parent_id
+        elif sid != root_span_id:
+            effective_parent_id = root_span_id
+        else:
+            effective_parent_id = None
+
+        raw_attrs = sp.get("attributes")
+        if isinstance(raw_attrs, dict):
+            attrs = dict(raw_attrs)
+        else:
+            attrs = {}
+        for extra_k, extra_v in sp.items():
+            if extra_k not in standard_keys and extra_k not in attrs:
+                attrs[extra_k] = extra_v
+        attrs = _sanitize_value(attrs)
+
+        started_ns = sp.get("started_ns")
+        if isinstance(started_ns, int) and root_started_ns is not None:
+            offset_ms = round(max(0.0, (started_ns - root_started_ns) / 1_000_000.0), _DURATION_ROUND_DIGITS)
+        else:
+            offset_ms = 0.0
+
+        raw_duration = sp.get("duration_ms")
+        status_val = str(sp.get("status") or _OK_STATUS)
+        if isinstance(raw_duration, (int, float)):
+            duration_ms = round(float(raw_duration), _DURATION_ROUND_DIGITS)
+        elif is_active and isinstance(started_ns, int):
+            duration_ms = round(max(0.0, (now_ns - started_ns) / 1_000_000.0), _DURATION_ROUND_DIGITS)
+            if status_val == _OK_STATUS:
+                status_val = "running"
+        else:
+            duration_ms = 0.0
+
+        end_ms = round(offset_ms + duration_ms, _DURATION_ROUND_DIGITS)
+        usage_obj = attrs.get("usage")
+        if not isinstance(usage_obj, dict):
+            usage_obj = attrs.get("usage_metadata")
+        tokens_info = _to_langsmith_usage(usage_obj)
+
+        span_name_val = str(sp.get("name") or f"span_{idx + 1}")
+        run_type_val = str(sp.get("run_type") or "chain")
+        role_attr = str(attrs.get("role") or "")
+        is_embedding_span = False
+        if run_type_val == "embedding":
+            is_embedding_span = True
+        elif role_attr == "embedding":
+            is_embedding_span = True
+        elif span_name_val == "query_embedding":
+            is_embedding_span = True
+        if is_embedding_span:
+            run_type_val = "embedding"
+
+        norm = {
+            "span_id": sid,
+            "run_id": rid,
+            "parent_span_id": parent_id,
+            "effective_parent_id": effective_parent_id,
+            "depth": 0,
+            "order": len(normalized_spans),
+            "name": span_name_val,
+            "run_type": run_type_val,
+            "status": status_val,
+            "started_ns": started_ns,
+            "offset_ms": offset_ms,
+            "duration_ms": duration_ms,
+            "end_ms": end_ms,
+            "self_duration_ms": duration_ms,
+            "children_count": 0,
+            "tokens": tokens_info,
+            "attributes": attrs,
+        }
+        normalized_spans.append(norm)
+        if sid not in span_by_id:
+            span_by_id[sid] = norm
+
+    children_map = {}
+    for norm in normalized_spans:
+        ep = norm["effective_parent_id"]
+        if ep is not None:
+            if ep not in children_map:
+                children_map[ep] = []
+            children_map[ep].append(norm)
+
+    for norm in normalized_spans:
+        depth = 0
+        cursor = norm["effective_parent_id"]
+        visited = {norm["span_id"]}
+        while cursor is not None and cursor in span_by_id and cursor not in visited:
+            visited.add(cursor)
+            depth += 1
+            cursor = span_by_id[cursor]["effective_parent_id"]
+        norm["depth"] = depth
+
+        direct_children = children_map.get(norm["span_id"], [])
+        norm["children_count"] = len(direct_children)
+        children_dur = 0.0
+        for child in direct_children:
+            children_dur += float(child["duration_ms"])
+        norm["self_duration_ms"] = round(max(0.0, float(norm["duration_ms"]) - children_dur), _DURATION_ROUND_DIGITS)
+
+    llm_calls = []
+    rag_parsers = []
+    rag_retrievals = []
+    rag_rerankers = []
+    rag_embeddings = []
+    tool_calls = []
+    graph_nodes = []
+    error_spans = []
+
+    total_in_tokens = 0
+    total_out_tokens = 0
+    total_all_tokens = 0
+    models_used = []
+    models_seen = set()
+
+    has_query_embedding = any(item["name"] == "query_embedding" for item in normalized_spans)
+
+    for norm in normalized_spans:
+        s_name = norm["name"]
+        s_type = norm["run_type"]
+        attrs = norm["attributes"]
+        role_attr = str(attrs.get("role") or "")
+        is_embed = False
+        if s_type == "embedding" or role_attr == "embedding" or s_name == "query_embedding":
+            is_embed = True
+
+        if norm["status"] == _ERROR_STATUS or attrs.get("result") == "failed" or bool(attrs.get("error_type")):
+            error_spans.append(norm)
+
+        if (s_name in ("model.attempt", "model.route") or s_type == "llm") and not is_embed:
+            model_name = str(attrs.get("model") or attrs.get("ls_model_name") or "")
+            if model_name and model_name not in models_seen:
+                models_seen.add(model_name)
+                models_used.append(model_name)
+
+            alias_val = str(attrs.get("alias") or attrs.get("profile") or "")
+            protocol_val = str(attrs.get("protocol") or attrs.get("ls_provider") or "")
+            tok = norm["tokens"]
+            if isinstance(tok, dict) and s_type == "llm":
+                total_in_tokens += int(tok.get("input_tokens") or 0)
+                total_out_tokens += int(tok.get("output_tokens") or 0)
+                total_all_tokens += int(tok.get("total_tokens") or 0)
+
+            llm_calls.append({
+                "span_id": norm["span_id"],
+                "name": s_name,
+                "run_type": s_type,
+                "status": norm["status"],
+                "offset_ms": norm["offset_ms"],
+                "duration_ms": norm["duration_ms"],
+                "role": role_attr,
+                "configured_role": str(attrs.get("configured_role") or ""),
+                "model": model_name,
+                "alias": alias_val,
+                "protocol": protocol_val,
+                "reason": str(attrs.get("reason") or ""),
+                "attempt": attrs.get("attempt"),
+                "result": str(attrs.get("result") or ""),
+                "error_type": str(attrs.get("error_type") or ""),
+                "http_status": attrs.get("http_status"),
+                "input_bytes": attrs.get("input_bytes"),
+                "input_budget_bytes": attrs.get("input_budget_bytes"),
+                "context_window": attrs.get("context_window"),
+                "temperature": attrs.get("temperature"),
+                "reasoning_effort": attrs.get("reasoning_effort"),
+                "max_tokens": attrs.get("max_tokens"),
+                "max_completion_tokens": attrs.get("max_completion_tokens"),
+                "output_tokens_limit": attrs.get("output_tokens_limit"),
+                "repair": bool(attrs.get("repair", False)),
+                "tokens": tok,
+                "attributes": attrs,
+            })
+
+        if s_name == "query_parser" or s_type == "parser":
+            rag_parsers.append(norm)
+        elif s_name == "top_k_cross_encoder_reranker" or (s_type == "retriever" and "rerank" in s_name.lower()):
+            rag_rerankers.append(norm)
+        elif s_name == "top_k_hybrid_retrieval" or s_type == "retriever":
+            rag_retrievals.append(norm)
+        elif is_embed or "embed" in s_name.lower():
+            if not (s_name == "model.attempt" and has_query_embedding):
+                rag_embeddings.append(norm)
+
+        if s_type == "tool":
+            tool_calls.append(norm)
+
+        if s_name.startswith("graph."):
+            graph_nodes.append(norm)
+
+    turn_snapshot = record.get("turn_snapshot")
+    if not isinstance(turn_snapshot, dict):
+        turn_snapshot = {}
+
+    root_attrs = {}
+    if normalized_spans:
+        root_attrs = normalized_spans[0]["attributes"]
+
+    intent_val = turn_snapshot.get("intent")
+    if not intent_val:
+        intent_val = root_attrs.get("intent")
+    audit_val = turn_snapshot.get("audit_status")
+    if not audit_val:
+        audit_val = root_attrs.get("audit_status")
+    if turn_snapshot.get("interaction"):
+        if audit_val in (None, "", "PENDING", "UNKNOWN"):
+            audit_val = "AWAITING_INPUT"
+        if not intent_val and isinstance(turn_snapshot.get("interaction"), dict):
+            kind_label = str(turn_snapshot["interaction"].get("kind") or "clarify").upper()
+            intent_val = "INTERACTION_" + kind_label
+    error_cat_val = turn_snapshot.get("error_category")
+    if not error_cat_val:
+        error_cat_val = root_attrs.get("error_category")
+
+    citation_count_val = turn_snapshot.get("citations_count")
+    if citation_count_val is None:
+        citation_count_val = root_attrs.get("citation_count")
+    if citation_count_val is None:
+        citation_count_val = 0
+
+    query_preview = str(turn_snapshot.get("query") or root_attrs.get("user_query") or "")
+    if len(query_preview) > 200:
+        query_preview = query_preview[:197] + "..."
+
+    total_duration_ms = record.get("duration_ms")
+    if not isinstance(total_duration_ms, (int, float)):
+        if normalized_spans:
+            total_duration_ms = normalized_spans[0]["duration_ms"]
+        else:
+            total_duration_ms = 0.0
+    total_duration_ms = round(float(total_duration_ms), _DURATION_ROUND_DIGITS)
+
+    return {
+        "schema_version": record.get("schema_version", _SCHEMA_VERSION),
+        "provider": record.get("provider", "langsmith"),
+        "project_name": record.get("project_name", ""),
+        "trace_id": str(record.get("trace_id") or ""),
+        "run_id": str(record.get("run_id") or ""),
+        "turn_id": str(record.get("turn_id") or ""),
+        "timestamp": str(record.get("timestamp") or ""),
+        "entrypoint": str(record.get("entrypoint") or ""),
+        "session_ref": record.get("session_ref"),
+        "outcome": str(record.get("outcome") or _DEFAULT_OUTCOME),
+        "is_active": is_active,
+        "duration_ms": total_duration_ms,
+        "langsmith_run_url": record.get("langsmith_run_url"),
+        "summary": {
+            "span_count": len(normalized_spans),
+            "llm_call_count": len(llm_calls),
+            "tool_call_count": len(tool_calls),
+            "retriever_call_count": len(rag_retrievals) + len(rag_rerankers),
+            "parser_call_count": len(rag_parsers),
+            "embedding_call_count": len(rag_embeddings),
+            "graph_node_count": len(graph_nodes),
+            "error_count": len(error_spans),
+            "token_usage": {
+                "input_tokens": total_in_tokens,
+                "output_tokens": total_out_tokens,
+                "total_tokens": total_all_tokens,
+            },
+            "models_used": models_used,
+            "intent": intent_val,
+            "audit_status": audit_val,
+            "error_category": error_cat_val,
+            "citation_count": int(citation_count_val),
+            "query_preview": query_preview,
+        },
+        "spans": normalized_spans,
+        "llm_calls": llm_calls,
+        "rag_stages": {
+            "query_parsers": rag_parsers,
+            "retrievals": rag_retrievals,
+            "rerankers": rag_rerankers,
+            "embeddings": rag_embeddings,
+        },
+        "tool_calls": tool_calls,
+        "graph_nodes": graph_nodes,
+        "error_spans": error_spans,
+        "turn_snapshot": turn_snapshot,
+    }
+
+
+def _build_trace_list_item(enriched):
+    """Return compact summary entry for the debug trace sidebar list."""
+    summary = enriched["summary"]
+    return {
+        "trace_id": enriched["trace_id"],
+        "run_id": enriched["run_id"],
+        "turn_id": enriched["turn_id"],
+        "timestamp": enriched["timestamp"],
+        "entrypoint": enriched["entrypoint"],
+        "session_ref": enriched["session_ref"],
+        "outcome": enriched["outcome"],
+        "is_active": enriched["is_active"],
+        "duration_ms": enriched["duration_ms"],
+        "project_name": enriched["project_name"],
+        "langsmith_run_url": enriched["langsmith_run_url"],
+        "query_preview": summary["query_preview"],
+        "intent": summary["intent"],
+        "audit_status": summary["audit_status"],
+        "error_category": summary["error_category"],
+        "span_count": summary["span_count"],
+        "llm_call_count": summary["llm_call_count"],
+        "tool_call_count": summary["tool_call_count"],
+        "error_count": summary["error_count"],
+        "token_usage": summary["token_usage"],
+        "models_used": summary["models_used"],
+    }
+
+
 class LangSmithTraceRun:
     """
     Unified LangSmith RunTree trace lifecycle for agent turns, RAG queries,
@@ -478,12 +848,16 @@ class LangSmithTraceRun:
         self.run_id = None
         self.turn_id = None
         self.spans = []
+        self._spans_lock = Lock()
         self.outcome = _DEFAULT_OUTCOME
         self.details = {}
         self.start_time = time.time()
         self.finished = False
         self.root_run_tree = None
         self._active = True
+        self.debug_snapshot = None
+        self._capture_start_perf = None
+        self._capture_timestamp = None
 
         if tracer is not None:
             self.enabled = bool(tracer.enabled)
@@ -498,6 +872,67 @@ class LangSmithTraceRun:
             self.project_name = TracingConfig.LANGSMITH_PROJECT or "ai-banking-assistant"
             self.is_remote = False
 
+    def attach_debug_snapshot(self, snapshot):
+        """Attach sanitized turn-level diagnostics in memory for the UI debug inspector."""
+        if not isinstance(snapshot, dict):
+            return
+        safe_snap = _sanitize_value(_safe_snapshot_obj(snapshot))
+        with self._spans_lock:
+            self.debug_snapshot = safe_snap
+
+    def get_langsmith_run_url(self):
+        """Resolve LangSmith web URL for the active root run when remote tracing is active."""
+        if not self.is_remote or self.root_run_tree is None or self.client is None:
+            return None
+        if not hasattr(self.client, "get_run_url"):
+            return None
+        try:
+            return self.client.get_run_url(run=self.root_run_tree, project_name=self.project_name)
+        except Exception:
+            return None
+
+    def build_debug_record(self, *, is_active=False, duration_ms=None):
+        """Snapshot sanitized trace state in memory for live or completed debug inspection."""
+        with self._spans_lock:
+            spans_copy = _safe_snapshot_obj(self.spans)
+            snapshot_copy = _safe_snapshot_obj(self.debug_snapshot)
+        if not isinstance(snapshot_copy, dict):
+            snapshot_copy = {}
+
+        if isinstance(duration_ms, (int, float)):
+            elapsed_ms = round(float(duration_ms), _DURATION_ROUND_DIGITS)
+        elif self._capture_start_perf is not None:
+            elapsed_ms = round((perf_counter() - self._capture_start_perf) * 1000, _DURATION_ROUND_DIGITS)
+        else:
+            elapsed_ms = round((time.time() - self.start_time) * 1000, _DURATION_ROUND_DIGITS)
+
+        if is_active:
+            outcome_val = "running"
+        else:
+            outcome_val = self.outcome
+
+        timestamp_val = self._capture_timestamp
+        if not timestamp_val:
+            timestamp_val = datetime.now(timezone.utc).isoformat()
+
+        return {
+            "schema_version": _SCHEMA_VERSION,
+            "provider": "langsmith",
+            "project_name": self.project_name,
+            "trace_id": self.trace_id,
+            "run_id": self.run_id,
+            "turn_id": self.turn_id,
+            "timestamp": timestamp_val,
+            "entrypoint": self.entrypoint,
+            "session_ref": self.session_ref,
+            "outcome": outcome_val,
+            "is_active": bool(is_active),
+            "duration_ms": elapsed_ms,
+            "langsmith_run_url": self.get_langsmith_run_url(),
+            "spans": _sanitize_value(spans_copy),
+            "turn_snapshot": _sanitize_value(snapshot_copy),
+        }
+
     def link_turn(self, state):
         if self.trace_id and isinstance(state, dict) and state.get("agent_turn_id"):
             self.turn_id = state["agent_turn_id"]
@@ -507,14 +942,26 @@ class LangSmithTraceRun:
     def result(self, response):
         if self.trace_id and isinstance(response, dict):
             audit = response.get("audit_status")
-            if audit in _BLOCKED_AUDIT_STATUSES:
+            resp_status = response.get("status")
+            if resp_status == "awaiting_input" and not audit:
+                audit = "AWAITING_INPUT"
+            if audit in _BLOCKED_AUDIT_STATUSES or audit == "AWAITING_INPUT":
                 self.outcome = str(audit).lower()
             else:
-                self.outcome = response.get("status", _DEFAULT_OUTCOME)
+                if resp_status:
+                    self.outcome = resp_status
+                else:
+                    self.outcome = _DEFAULT_OUTCOME
+            intent_val = response.get("intent")
+            if not intent_val:
+                intent_val = self.details.get("intent")
+            err_cat = response.get("error_category")
+            if not err_cat:
+                err_cat = self.details.get("error_category")
             self.details.update(
                 audit_status=audit,
-                intent=response.get("intent"),
-                error_category=response.get("error_category"),
+                intent=intent_val,
+                error_category=err_cat,
                 citation_count=len(response.get("citations", [])),
             )
             response.update(trace_id=self.trace_id, turn_id=self.turn_id)
@@ -574,6 +1021,8 @@ class LangSmithTraceRun:
 
         timestamp = datetime.now(timezone.utc).isoformat()
         start = perf_counter()
+        self._capture_timestamp = timestamp
+        self._capture_start_perf = start
         root_attrs = {}
         root_record = {
             "span_id": self.run_id,
@@ -586,8 +1035,20 @@ class LangSmithTraceRun:
             "status": _OK_STATUS,
             "attributes": root_attrs,
         }
-        self.spans.append(root_record)
+        self._append_span(root_record)
         self.details = root_attrs
+        if self.tracer is not None and hasattr(self.tracer, "pop_pre_turn_spans"):
+            for pre_span in self.tracer.pop_pre_turn_spans(self.session_ref):
+                if not isinstance(pre_span, dict):
+                    continue
+                pre_sid = str(pre_span.get("span_id") or uuid4().hex)
+                pre_span["span_id"] = pre_sid
+                pre_span["run_id"] = str(pre_span.get("run_id") or pre_sid)
+                pre_span["parent_span_id"] = self.run_id
+                pre_span["parent_run_id"] = self.run_id
+                self._append_span(pre_span)
+        if self.tracer is not None and hasattr(self.tracer, "register_active_run"):
+            self.tracer.register_active_run(self)
 
         token = _current_run.set((self, root_rt, root_attrs))
         error_msg = None
@@ -636,10 +1097,23 @@ class LangSmithTraceRun:
                 root_rt.end(outputs=root_outputs)
             _safe_patch(root_rt)
 
+            if self.tracer is not None and hasattr(self.tracer, "record_completed_trace"):
+                self.tracer.record_completed_trace(
+                    self.build_debug_record(is_active=False, duration_ms=duration_ms)
+                )
+            if self.tracer is not None and hasattr(self.tracer, "unregister_active_run"):
+                self.tracer.unregister_active_run(self.trace_id)
+
             if self.trace_dir is not None:
                 self._write_local_record(timestamp, duration_ms)
 
+    def _append_span(self, record):
+        with self._spans_lock:
+            self.spans.append(record)
+
     def _write_local_record(self, timestamp, duration_ms):
+        with self._spans_lock:
+            spans_copy = _safe_snapshot_obj(self.spans)
         record = {
             "schema_version": _SCHEMA_VERSION,
             "provider": "langsmith",
@@ -652,7 +1126,7 @@ class LangSmithTraceRun:
             "session_ref": self.session_ref,
             "outcome": self.outcome,
             "duration_ms": duration_ms,
-            "spans": _sanitize_value(self.spans),
+            "spans": _sanitize_value(spans_copy),
         }
         try:
             line = json.dumps(record, ensure_ascii=False, allow_nan=False)
@@ -710,7 +1184,7 @@ class LangSmithTraceRun:
             "status": _OK_STATUS,
             "attributes": safe_attrs,
         }
-        self.spans.append(record)
+        self._append_span(record)
         token = _current_run.set((self, child_rt, record["attributes"]))
         err_str = None
         try:
@@ -762,9 +1236,13 @@ class LangSmithTraceRun:
                 yield details
             return
 
-        parent_id = None
+        parent_id = self.run_id
         if active_rt.parent_run_id is not None:
-            parent_id = str(active_rt.parent_run_id)
+            candidate_parent = str(active_rt.parent_run_id)
+            with self._spans_lock:
+                known_ids = {str(sp.get("span_id") or "") for sp in self.spans}
+            if candidate_parent == str(self.run_id) or candidate_parent in known_ids:
+                parent_id = candidate_parent
         span_id = str(active_rt.id)
         node_attrs = {}
         start = perf_counter()
@@ -779,7 +1257,7 @@ class LangSmithTraceRun:
             "status": _OK_STATUS,
             "attributes": node_attrs,
         }
-        self.spans.append(record)
+        self._append_span(record)
         token = _current_run.set((self, active_rt, node_attrs))
         try:
             yield node_attrs
@@ -824,7 +1302,7 @@ class LangSmithTraceRun:
         if duration_ms is None:
             duration_ms = float(_DEFAULTS_CFG.get("chunking_info_duration_ms") or 0.0)
 
-        self.spans.append({
+        self._append_span({
             "name": _lbl("chunking_info_display"),
             "run_type": "chain",
             "duration_ms": duration_ms,
@@ -859,7 +1337,7 @@ class LangSmithTraceRun:
         else:
             final_count = len(extracted_list)
 
-        self.spans.append({
+        self._append_span({
             "name": _lbl("chunking_display"),
             "run_type": "chain",
             "duration_ms": duration_ms,
@@ -932,7 +1410,7 @@ class LangSmithTraceRun:
                 "sqlite_cache_hits": cache_hits,
             }
 
-        self.spans.append({
+        self._append_span({
             "name": disp_name,
             "run_type": "embedding",
             "duration_ms": duration_ms,
@@ -961,7 +1439,7 @@ class LangSmithTraceRun:
         acronyms = getattr(parsed, "detected_acronyms", getattr(parsed, "expanded_acronyms", []))
         legal_refs = getattr(parsed, "legal_references", [])
 
-        self.spans.append({
+        self._append_span({
             "name": _lbl("query_parser_display"),
             "run_type": "parser",
             "duration_ms": duration_ms,
@@ -987,7 +1465,7 @@ class LangSmithTraceRun:
     def record_retrieval(self, query, candidates, duration_ms, params=None):
         doc_count = len(candidates)
         formatted_docs = _format_rag_documents(candidates)
-        self.spans.append({
+        self._append_span({
             "name": _lbl("retrieval_display"),
             "run_type": "retriever",
             "duration_ms": duration_ms,
@@ -1004,7 +1482,7 @@ class LangSmithTraceRun:
 
     def record_rerank(self, query, candidates, reranked, duration_ms):
         formatted_docs = _format_rag_documents(reranked)
-        self.spans.append({
+        self._append_span({
             "name": _lbl("rerank_display"),
             "run_type": "retriever",
             "duration_ms": duration_ms,
@@ -1025,7 +1503,7 @@ class LangSmithTraceRun:
             dt_str = str(details)
         else:
             dt_str = ""
-        self.spans.append({
+        self._append_span({
             "name": _lbl("guardrail_block_display"),
             "run_type": "chain",
             "duration_ms": duration_ms,
@@ -1047,7 +1525,7 @@ class LangSmithTraceRun:
             dt_list = details
         else:
             dt_list = []
-        self.spans.append({
+        self._append_span({
             "name": f"{_lbl('guardrail_check_prefix')}{layer}",
             "run_type": "chain",
             "duration_ms": duration_ms,
@@ -1208,9 +1686,207 @@ class BankingTracer:
         )
         self.is_langsmith_active = False
         self.client = OfflineLangSmithClient(api_url=self.endpoint, web_url=self.web_url)
+        self._store_lock = Lock()
+        self._max_stored_traces = 200
+        self._trace_store = {}
+        self._active_runs = {}
+        self._pre_turn_spans = {}
 
         if self.enabled and self.langsmith_tracing:
             self._init_langsmith()
+
+    def current_trace_id(self):
+        """Return the active ContextVar trace_id when inside a LangSmithTraceRun."""
+        current = _current_run.get()
+        if current is None:
+            return None
+        return getattr(current[0], "trace_id", None)
+
+    def stash_pre_turn_span(self, session_id, span_payload):
+        """Hold spans emitted right before trace_agent starts (e.g. Vision OCR pre-turn)."""
+        if not session_id or not isinstance(span_payload, dict):
+            return
+        session_ref = fingerprint(session_id)
+        if not session_ref:
+            return
+        safe_payload = _sanitize_value(_safe_snapshot_obj(span_payload))
+        with self._store_lock:
+            bucket = self._pre_turn_spans.get(session_ref)
+            if bucket is None:
+                bucket = []
+                self._pre_turn_spans[session_ref] = bucket
+            bucket.append(safe_payload)
+
+    def pop_pre_turn_spans(self, session_ref_or_id):
+        """Adopt and clear pre-turn spans matching a session fingerprint or raw id."""
+        if not session_ref_or_id:
+            return []
+        fp_key = fingerprint(session_ref_or_id)
+        with self._store_lock:
+            spans = self._pre_turn_spans.pop(str(session_ref_or_id), None)
+            if spans is None and fp_key:
+                spans = self._pre_turn_spans.pop(fp_key, None)
+        if not spans:
+            return []
+        return list(spans)
+
+    def register_active_run(self, run):
+        """Register an in-flight LangSmithTraceRun for live UI debugging."""
+        trace_id = getattr(run, "trace_id", None)
+        if not trace_id:
+            return
+        with self._store_lock:
+            self._active_runs[str(trace_id)] = run
+
+    def unregister_active_run(self, trace_id):
+        """Remove a completed or failed LangSmithTraceRun from active tracking."""
+        if not trace_id:
+            return
+        with self._store_lock:
+            self._active_runs.pop(str(trace_id), None)
+
+    def record_completed_trace(self, record):
+        """Store a sanitized completed trace in the bounded FIFO in-memory buffer."""
+        if not isinstance(record, dict):
+            return
+        trace_id = str(record.get("trace_id") or "").strip()
+        if not trace_id:
+            return
+        safe_record = _sanitize_value(_safe_snapshot_obj(record))
+        with self._store_lock:
+            if trace_id in self._trace_store:
+                self._trace_store.pop(trace_id, None)
+            self._trace_store[trace_id] = safe_record
+            while len(self._trace_store) > self._max_stored_traces:
+                oldest_key = next(iter(self._trace_store))
+                self._trace_store.pop(oldest_key, None)
+
+    def _load_disk_traces_fallback(self, limit=50):
+        """Read recent sanitized traces from local JSONL export when present on disk."""
+        jsonl_path = Path(self.trace_dir) / _LANGSMITH_RUNS_FILENAME
+        if not jsonl_path.is_file():
+            return []
+        try:
+            raw_lines = jsonl_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return []
+
+        non_empty = [line.strip() for line in raw_lines if line.strip()]
+        if limit > 0 and len(non_empty) > limit * 2:
+            non_empty = non_empty[-(limit * 2):]
+
+        parsed = []
+        for line in reversed(non_empty):
+            try:
+                item = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(item, dict) and item.get("trace_id"):
+                parsed.append(_sanitize_value(item))
+        return parsed
+
+    def list_debug_traces(self, *, session_id=None, scope="session", limit=50, include_active=True):
+        """Return compact debug trace summaries ordered newest-first."""
+        target_ref = None
+        if scope == "session" and session_id:
+            target_ref = fingerprint(session_id)
+
+        with self._store_lock:
+            active_runs = list(self._active_runs.values())
+            completed_records = list(reversed(list(self._trace_store.values())))
+            known_ids = set(self._trace_store.keys())
+            mem_total = len(self._trace_store) + len(self._active_runs)
+
+        active_items = []
+        active_ids = set()
+        if include_active:
+            for run in active_runs:
+                raw_active = run.build_debug_record(is_active=True)
+                tid = str(raw_active.get("trace_id") or "")
+                if target_ref is not None and raw_active.get("session_ref") != target_ref:
+                    continue
+                enriched_active = _enrich_trace_for_debug(raw_active)
+                active_items.append(_build_trace_list_item(enriched_active))
+                if tid:
+                    active_ids.add(tid)
+            active_items.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
+
+        completed_items = []
+        for raw_rec in completed_records:
+            tid = str(raw_rec.get("trace_id") or "")
+            if tid in active_ids:
+                continue
+            if target_ref is not None and raw_rec.get("session_ref") != target_ref:
+                continue
+            enriched_rec = _enrich_trace_for_debug(raw_rec)
+            completed_items.append(_build_trace_list_item(enriched_rec))
+
+        if len(completed_items) < limit:
+            disk_records = self._load_disk_traces_fallback(limit=max(limit, 50))
+            for disk_rec in disk_records:
+                tid = str(disk_rec.get("trace_id") or "")
+                if not tid or tid in known_ids or tid in active_ids:
+                    continue
+                if target_ref is not None and disk_rec.get("session_ref") != target_ref:
+                    continue
+                known_ids.add(tid)
+                enriched_disk = _enrich_trace_for_debug(disk_rec)
+                completed_items.append(_build_trace_list_item(enriched_disk))
+                if len(completed_items) >= limit:
+                    break
+
+        combined = active_items + completed_items
+        return {
+            "active_count": len(active_items),
+            "total_stored": len(combined),
+            "total_in_memory": mem_total,
+            "session_ref": target_ref,
+            "traces": combined[:limit],
+        }
+
+    def get_debug_trace(self, trace_id):
+        """Return full enriched debug payload for a live or completed trace_id."""
+        if not trace_id:
+            return None
+        key = str(trace_id).strip()
+        if not key:
+            return None
+
+        active_run = None
+        completed_rec = None
+        with self._store_lock:
+            active_run = self._active_runs.get(key)
+            if active_run is None:
+                completed_rec = _safe_snapshot_obj(self._trace_store.get(key))
+
+        if active_run is not None:
+            return _enrich_trace_for_debug(active_run.build_debug_record(is_active=True))
+        if completed_rec is not None:
+            return _enrich_trace_for_debug(completed_rec)
+
+        for disk_rec in self._load_disk_traces_fallback(limit=200):
+            if str(disk_rec.get("trace_id") or "") == key:
+                return _enrich_trace_for_debug(disk_rec)
+        return None
+
+    def clear_debug_traces(self, *, session_id=None, scope="all"):
+        """Clear completed in-memory traces matching scope (all or current session)."""
+        target_ref = None
+        if scope == "session" and session_id:
+            target_ref = fingerprint(session_id)
+
+        with self._store_lock:
+            if target_ref is None:
+                cleared = len(self._trace_store)
+                self._trace_store.clear()
+                return cleared
+            to_delete = [
+                tid for tid, rec in self._trace_store.items()
+                if rec.get("session_ref") == target_ref
+            ]
+            for tid in to_delete:
+                self._trace_store.pop(tid, None)
+            return len(to_delete)
 
     def _resolve_langsmith_flag(self):
         env_flag = os.getenv("LANGSMITH_TRACING")

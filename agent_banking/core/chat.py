@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Chat adapter with ordered fallback and bounded retries.
-Complies with 0% Regex Law, Zero Ternary Law, and No Typing Library.
+Complies with 0% Regex Law, Zero Ternary Law.
 """
 
 from agent_banking.core.cloud_rate_limit import acquire_cloud_slot
@@ -71,18 +71,66 @@ class FallbackChatClient:
         if _candidate is not None:
             return call(_candidate)
 
+        trace_meta = getattr(self, "_pending_trace_meta", None)
+        if hasattr(self, "_pending_trace_meta"):
+            self._pending_trace_meta = None
+        if not isinstance(trace_meta, dict):
+            trace_meta = {}
+
+        span_role = str(trace_meta.get("role") or self.module)
+        configured_role = str(trace_meta.get("configured_role") or self.module)
+        base_reason = str(trace_meta.get("reason") or "legacy_order")
+        base_attempt = int(trace_meta.get("attempt") or 1)
+        input_bytes = trace_meta.get("input_bytes")
+        if input_bytes is None and isinstance(kwargs.get("messages"), list):
+            input_bytes = sum(len(str(msg.get("content") or "").encode("utf-8")) for msg in kwargs["messages"])
+        input_budget_bytes = trace_meta.get("input_budget_bytes")
+        output_tokens_limit = trace_meta.get("output_tokens_limit")
+        if output_tokens_limit is None:
+            output_tokens_limit = kwargs.get("max_tokens")
+            if output_tokens_limit is None:
+                output_tokens_limit = kwargs.get("max_completion_tokens")
+        is_repair = bool(trace_meta.get("repair", False))
+        fallback_attempt_idx = 0
+
         def legacy_call(candidate):
-            nonlocal _usage
+            nonlocal _usage, fallback_attempt_idx
+            attempt_num = base_attempt + fallback_attempt_idx
+            if fallback_attempt_idx > 0 and base_reason == "standard":
+                attempt_reason = "provider_fallback"
+            else:
+                attempt_reason = base_reason
+            fallback_attempt_idx += 1
+            span_attrs = {
+                "role": span_role,
+                "configured_role": configured_role,
+                "reason": attempt_reason,
+                "attempt": attempt_num,
+                "input_bytes": input_bytes,
+                "input_budget_bytes": input_budget_bytes,
+                "output_tokens_limit": output_tokens_limit,
+                "repair": is_repair,
+            }
+            span_attrs.update(request_metadata(kwargs, candidate))
             with trace_span(
                 "model.attempt",
                 run_type="llm",
-                role=self.module,
-                reason="legacy_order",
-                **request_metadata(kwargs, candidate),
+                **span_attrs,
             ) as details:
                 _usage = lambda usage: details.update(usage=usage_metadata(usage))
-                response = call(candidate)
-                details["result"] = "success"
-                return response
+                try:
+                    response = call(candidate)
+                    details["result"] = "success"
+                    return response
+                except Exception as error:
+                    status = getattr(error, "status_code", None)
+                    details.update(
+                        result="failed",
+                        error_type=type(error).__name__,
+                        error_message=str(error)[:240],
+                    )
+                    if type(status) is int:
+                        details["http_status"] = status
+                    raise
 
         return run_fallback(self.module, self.candidates, legacy_call, self.retry_delays)

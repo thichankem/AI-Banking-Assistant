@@ -912,3 +912,84 @@ def test_grouped_citations_retained_in_output_guardrail_and_worker_delegate(tmp_
         assert state["sources"] == ["THE 02.docx", "THE 05.docx"]
     finally:
         graph.checkpointer.conn.close()
+
+
+def test_validate_review_accepts_support_line_and_vietnamese_thousands_quote():
+    draft = (
+        "Kính thưa Quý khách,\n"
+        "Lãi suất áp dụng là 4,6%/năm.\n"
+        "| Tiền lãi dự kiến | 4.600.000 VNĐ |\n"
+        "| Tổng tiền nhận khi đáo hạn | 104.600.000 VNĐ |"
+    )
+    support = {
+        "[Khách]": "Tính tiền lãi giúp tôi cho số tiền 100 triệu đồng.\nGửi tiết kiệm",
+        "[Tool 1]": json.dumps({
+            "result": {
+                "status": "SUCCESS",
+                "principal_amount_vnd": 100000000.0,
+                "term_months": 12,
+                "applicable_rate_percent": 4.6,
+                "interest_earned_vnd": 4600000.0,
+                "total_at_maturity_vnd": 104600000.0,
+                "formatted_summary": "Tiền lãi dự kiến là 4,600,000 VND. Tổng là 104,600,000 VND.",
+            },
+            "simulation": True,
+        }, ensure_ascii=False),
+    }
+    coverage = [{"item": "Tính tiền lãi", "status": "answered"}]
+
+    # 1. Line pointer on single-line [Tool 1] support must succeed.
+    validate_review(
+        {
+            "verdict": "approve",
+            "coverage": coverage,
+            "claims": [
+                {"draft_line": 2, "source": "[Tool 1]", "line": 1, "claim": "4,6%/năm"},
+                {"draft_line": 3, "source": "[Tool 1]", "line": 1, "claim": "4.600.000 VNĐ"},
+                {"draft_line": 4, "source": "[Tool 1]", "line": 1, "claim": "104.600.000 VNĐ"},
+            ],
+        },
+        draft,
+        [],
+        [],
+        support,
+    )
+
+    # 2. Out-of-range line pointer on support must still be rejected.
+    with pytest.raises(ValueError, match="Invalid claim evidence line"):
+        validate_review(
+            {
+                "verdict": "approve",
+                "coverage": coverage,
+                "claims": [{"draft_line": 3, "source": "[Tool 1]", "line": 99}],
+            },
+            draft,
+            [],
+            [],
+            support,
+        )
+
+    # 3. Vietnamese dot-thousands quote matches raw integer / comma-thousands in [Tool 1], while wrong numbers fail.
+    validate_review(
+        {
+            "verdict": "approve",
+            "coverage": coverage,
+            "claims": [{"draft_line": 3, "source": "[Tool 1]", "quote": "4.600.000"}],
+        },
+        draft,
+        [],
+        [],
+        support,
+    )
+    with pytest.raises(ValueError, match="Invalid claim evidence excerpt"):
+        validate_review(
+            {
+                "verdict": "approve",
+                "coverage": coverage,
+                "claims": [{"draft_line": 3, "source": "[Tool 1]", "quote": "7.600.000"}],
+            },
+            draft,
+            [],
+            [],
+            support,
+        )

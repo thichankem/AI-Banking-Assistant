@@ -144,6 +144,16 @@ class BankingAgentPipeline:
             if run.turn_id:
                 state["agent_turn_id"] = run.turn_id
             self._restore_history(state, snapshot.values)
+            if hasattr(run, "attach_debug_snapshot"):
+                run.attach_debug_snapshot(
+                    self._build_debug_snapshot(
+                        state,
+                        query=query,
+                        persona=persona,
+                        tone=tone,
+                        format_type=format_type,
+                    )
+                )
             return state
 
     @staticmethod
@@ -173,17 +183,24 @@ class BankingAgentPipeline:
                 return self._format_result(snapshot.values, session_id, 0.0)
         return {"status": "idle", "session_id": session_id}
 
-    def resume(self, session_id: str, interaction_id: str, choice_id: str, text: str | None = None) -> dict:
+    def resume(
+        self,
+        session_id: str,
+        interaction_id: str,
+        choice_id: str | None = None,
+        text: str | None = None,
+        choice_ids: list[str] | None = None,
+    ) -> dict:
         run = None
         try:
             with self._trace("resume", session_id) as run:
-                return run.result(self._resume(run, session_id, interaction_id, choice_id, text))
+                return run.result(self._resume(run, session_id, interaction_id, choice_id, text, choice_ids))
         except Exception as error:
             if run is not None and run.trace_id:
                 error.trace_id = run.trace_id
             raise
 
-    def _resume(self, run, session_id, interaction_id, choice_id, text):
+    def _resume(self, run, session_id, interaction_id, choice_id, text, choice_ids=None):
         started = time.perf_counter()
         config = self._thread_config(session_id)
         with self._session_lock(session_id):
@@ -192,10 +209,37 @@ class BankingAgentPipeline:
             if not snapshot.interrupts or snapshot.interrupts[0].value["id"] != interaction_id:
                 raise InteractionError(409, _MESSAGES["stale_interaction_error"])
             pending = snapshot.interrupts[0]
-            if not any(option["id"] == choice_id for option in pending.value["options"]):
+            selected_ids = []
+            if choice_ids is not None:
+                if not isinstance(choice_ids, list) or not choice_ids:
+                    raise InteractionError(422, _MESSAGES["invalid_choice_error"])
+                for item in choice_ids:
+                    if not isinstance(item, str) or not item:
+                        raise InteractionError(422, _MESSAGES["invalid_choice_error"])
+                    if item not in selected_ids:
+                        selected_ids.append(item)
+                if choice_id is not None and choice_id not in selected_ids:
+                    raise InteractionError(422, _MESSAGES["invalid_choice_error"])
+            elif isinstance(choice_id, str) and choice_id:
+                selected_ids = [choice_id]
+            else:
                 raise InteractionError(422, _MESSAGES["invalid_choice_error"])
-            reply = {"interaction_id": interaction_id, "choice_id": choice_id}
-            if choice_id == "other":
+
+            valid_ids = {option["id"] for option in pending.value["options"]}
+            if any(cid not in valid_ids for cid in selected_ids):
+                raise InteractionError(422, _MESSAGES["invalid_choice_error"])
+            is_multi = pending.value.get("multi_select") is True
+            if len(selected_ids) > 1:
+                if not is_multi:
+                    err_msg = _MESSAGES.get("single_choice_only_error")
+                    if not err_msg:
+                        err_msg = _MESSAGES["invalid_choice_error"]
+                    raise InteractionError(422, err_msg)
+                if "cancel" in selected_ids or "reject" in selected_ids:
+                    raise InteractionError(422, _MESSAGES["invalid_choice_error"])
+
+            reply = {"interaction_id": interaction_id, "choice_id": selected_ids[0], "choice_ids": selected_ids}
+            if "other" in selected_ids:
                 if not text or not text.strip() or len(text) > _MAX_RESUME_REPLY_CHARS:
                     raise InteractionError(422, _MESSAGES["invalid_free_text_error"])
                 screened = self.runtime.screen_input(text)
@@ -207,11 +251,42 @@ class BankingAgentPipeline:
                 reply["text"] = guarded
             elif text is not None:
                 raise InteractionError(422, _MESSAGES["other_only_text_error"])
+            if hasattr(run, "attach_debug_snapshot"):
+                pre_latency = round((time.perf_counter() - started) * 1000, 2)
+                pre_nodes = self._format_result(snapshot.values, session_id, pre_latency).get("nodes")
+                run.attach_debug_snapshot(
+                    self._build_debug_snapshot(
+                        snapshot.values,
+                        query=str(snapshot.values.get("user_query") or "[resume]"),
+                        latency_ms=pre_latency,
+                        nodes_detail=pre_nodes,
+                    )
+                )
             self.graph.invoke(Command(resume={pending.id: reply}), config=config, durability="sync")
             snapshot = self._snapshot(config)
             if snapshot.interrupts:
-                return self._waiting(snapshot, session_id)
-        return self._format_result(snapshot.values, session_id, round((time.perf_counter() - started) * 1000, 2))
+                waiting_res = self._waiting(snapshot, session_id)
+                paused_latency = round((time.perf_counter() - started) * 1000, 2)
+                paused_nodes = self._format_result(snapshot.values, session_id, paused_latency).get("nodes")
+                if hasattr(run, "attach_debug_snapshot"):
+                    run.attach_debug_snapshot(
+                        self._build_debug_snapshot(
+                            snapshot.values,
+                            latency_ms=paused_latency,
+                            nodes_detail=paused_nodes,
+                        )
+                    )
+                return waiting_res
+        res = self._format_result(snapshot.values, session_id, round((time.perf_counter() - started) * 1000, 2))
+        if hasattr(run, "attach_debug_snapshot"):
+            run.attach_debug_snapshot(
+                self._build_debug_snapshot(
+                    snapshot.values,
+                    latency_ms=res.get("latency_ms"),
+                    nodes_detail=res.get("nodes"),
+                )
+            )
+        return res
 
     def _restore_history(self, state: dict, previous: dict) -> None:
         # The graph uses a root dict channel, which is replaced by each new request.
@@ -250,7 +325,7 @@ class BankingAgentPipeline:
         if clean_query == "":
             run.details["empty_input"] = True
             reply = self.runtime.guardrails.guard_output(_MESSAGES["empty_query_prompt"])
-            return {
+            empty_res = {
                 "answer": reply.sanitized_answer,
                 "citations": [],
                 "sources": [],
@@ -264,6 +339,25 @@ class BankingAgentPipeline:
                 "execution_steps": [],
                 "nodes": {}
             }
+            if hasattr(run, "attach_debug_snapshot"):
+                run.attach_debug_snapshot(
+                    self._build_debug_snapshot(
+                        {
+                            "user_query": query,
+                            "persona": persona,
+                            "tone": tone,
+                            "format_type": format_type,
+                            "intent": "CHIT_CHAT",
+                            "audit_status": "PASS",
+                        },
+                        query=query,
+                        persona=persona,
+                        tone=tone,
+                        format_type=format_type,
+                        latency_ms=0.0,
+                    )
+                )
+            return empty_res
 
         # Configure Thread ID for Checkpointer (session memory)
         thread_config = self._thread_config(session_id)
@@ -273,16 +367,64 @@ class BankingAgentPipeline:
                 snapshot = self._snapshot(thread_config)
                 if snapshot.interrupts:
                     run.link_turn(snapshot.values)
+                    paused_latency = round((time.perf_counter() - start_time) * 1000.0, 2)
+                    paused_nodes = self._format_result(snapshot.values, session_id, paused_latency).get("nodes")
+                    if hasattr(run, "attach_debug_snapshot"):
+                        run.attach_debug_snapshot(
+                            self._build_debug_snapshot(
+                                snapshot.values,
+                                query=query,
+                                persona=persona,
+                                tone=tone,
+                                format_type=format_type,
+                                latency_ms=paused_latency,
+                                nodes_detail=paused_nodes,
+                            )
+                        )
                     return self._waiting(snapshot, session_id)
                 initial_state = self._initial_turn(run, snapshot, query, session_id, persona, tone, format_type, custom_persona)
                 final_state = self.graph.invoke(initial_state, config=thread_config, durability="sync")
                 if "__interrupt__" in final_state:
-                    return self._waiting(self._snapshot(thread_config), session_id)
+                    paused_snapshot = self._snapshot(thread_config)
+                    paused_latency = round((time.perf_counter() - start_time) * 1000.0, 2)
+                    paused_nodes = self._format_result(paused_snapshot.values, session_id, paused_latency).get("nodes")
+                    if hasattr(run, "attach_debug_snapshot"):
+                        run.attach_debug_snapshot(
+                            self._build_debug_snapshot(
+                                paused_snapshot.values,
+                                query=query,
+                                persona=persona,
+                                tone=tone,
+                                format_type=format_type,
+                                latency_ms=paused_latency,
+                                nodes_detail=paused_nodes,
+                            )
+                        )
+                    return self._waiting(paused_snapshot, session_id)
         except Exception as e:
             run.details["error_type"] = type(e).__name__
             print(f"[LangGraph Execution Error]: {type(e).__name__}")
             latency_err = round((time.perf_counter() - start_time) * 1000.0, 2)
             reply = self.runtime.guardrails.guard_output(FALLBACK_ANSWER)
+            if hasattr(run, "attach_debug_snapshot"):
+                run.attach_debug_snapshot(
+                    self._build_debug_snapshot(
+                        {
+                            "user_query": query,
+                            "persona": persona,
+                            "tone": tone,
+                            "format_type": format_type,
+                            "intent": "ERROR",
+                            "audit_status": "ERROR",
+                            "error_category": type(e).__name__,
+                        },
+                        query=query,
+                        persona=persona,
+                        tone=tone,
+                        format_type=format_type,
+                        latency_ms=latency_err,
+                    )
+                )
             return {
                 "answer": reply.sanitized_answer,
                 "citations": [],
@@ -299,7 +441,181 @@ class BankingAgentPipeline:
             }
 
         total_latency_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
-        return self._format_result(final_state, session_id, total_latency_ms)
+        formatted = self._format_result(final_state, session_id, total_latency_ms)
+        if hasattr(run, "attach_debug_snapshot"):
+            run.attach_debug_snapshot(
+                self._build_debug_snapshot(
+                    final_state,
+                    query=query,
+                    persona=persona,
+                    tone=tone,
+                    format_type=format_type,
+                    latency_ms=total_latency_ms,
+                    nodes_detail=formatted.get("nodes"),
+                )
+            )
+        return formatted
+
+    @staticmethod
+    def _extract_chunk_pages(chunk: dict) -> list:
+        meta = chunk.get("business_metadata")
+        if not isinstance(meta, dict):
+            return []
+        cit = meta.get("citation")
+        if isinstance(cit, dict) and isinstance(cit.get("page_numbers"), list) and cit["page_numbers"]:
+            pages = []
+            for p in cit["page_numbers"]:
+                if isinstance(p, int) and p > 0 and p not in pages:
+                    pages.append(p)
+            return sorted(pages)
+        prov = meta.get("provenance")
+        if not isinstance(prov, dict):
+            return []
+        locs = prov.get("locations")
+        if not isinstance(locs, list):
+            return []
+        pages = []
+        for loc in locs:
+            if not isinstance(loc, dict):
+                continue
+            pnum = loc.get("page_number")
+            if not isinstance(pnum, int) and isinstance(loc.get("page_index"), int):
+                pnum = loc["page_index"] + 1
+            if isinstance(pnum, int) and pnum > 0 and pnum not in pages:
+                pages.append(pnum)
+        return sorted(pages)
+
+    def _build_debug_snapshot(
+        self,
+        state: dict,
+        *,
+        query: str = "",
+        persona: str = "",
+        tone: str = "",
+        format_type: str = "",
+        latency_ms: float | None = None,
+        nodes_detail: dict | None = None,
+    ) -> dict:
+        """Build a bounded, sanitized turn diagnostics snapshot for the UI debug inspector."""
+        if not isinstance(state, dict):
+            state = {}
+        raw_query = query
+        if not raw_query:
+            raw_query = str(state.get("user_query") or "")
+        if len(raw_query) > 500:
+            raw_query = raw_query[:497] + "..."
+
+        persona_val = persona
+        if not persona_val:
+            persona_val = str(state.get("persona") or "")
+        tone_val = tone
+        if not tone_val:
+            tone_val = str(state.get("tone") or "")
+        format_val = format_type
+        if not format_val:
+            format_val = str(state.get("format_type") or "")
+
+        chunks_preview = []
+        raw_chunks = state.get("retrieved_chunks")
+        if isinstance(raw_chunks, list):
+            for idx, chunk in enumerate(raw_chunks[:15]):
+                if not isinstance(chunk, dict):
+                    continue
+                excerpt = str(chunk.get("content") or chunk.get("original_text") or "").strip()
+                if len(excerpt) > 240:
+                    excerpt = excerpt[:237] + "..."
+                chunks_preview.append({
+                    "index": idx + 1,
+                    "chunk_id": str(chunk.get("chunk_id") or ""),
+                    "source": str(chunk.get("source") or ""),
+                    "section_title": str(chunk.get("section_title") or ""),
+                    "breadcrumb": str(chunk.get("breadcrumb") or ""),
+                    "chunk_type": str(chunk.get("chunk_type") or "text"),
+                    "page_numbers": self._extract_chunk_pages(chunk),
+                    "excerpt_preview": excerpt,
+                })
+
+        citations = state.get("citations")
+        if isinstance(citations, list):
+            citations_count = len(citations)
+        else:
+            citations_count = 0
+
+        images = state.get("images")
+        if isinstance(images, list):
+            images_count = len(images)
+        else:
+            images_count = 0
+
+        sources = state.get("sources")
+        if isinstance(sources, list):
+            sources_list = list(sources)
+        else:
+            sources_list = []
+
+        interaction_payload = state.get("interaction")
+        if not isinstance(interaction_payload, dict):
+            interaction_payload = None
+
+        raw_audit_status = state.get("audit_status")
+        if interaction_payload and raw_audit_status in (None, "", "PENDING"):
+            raw_audit_status = "AWAITING_INPUT"
+
+        raw_intent = state.get("intent")
+        if interaction_payload and (not raw_intent or raw_intent == "ROUTING"):
+            kind_label = str(interaction_payload.get("kind") or "clarify").upper()
+            raw_intent = "INTERACTION_" + kind_label
+
+        normalized_plan = []
+        for item in list(state.get("plan") or []):
+            if isinstance(item, dict):
+                copied_item = dict(item)
+                if raw_audit_status == "PASS" and not interaction_payload:
+                    if copied_item.get("status") in ("pending", "in_progress"):
+                        copied_item["status"] = "done"
+                normalized_plan.append(copied_item)
+            else:
+                normalized_plan.append(item)
+
+        if nodes_detail is None:
+            if isinstance(latency_ms, (int, float)):
+                eff_latency = float(latency_ms)
+            else:
+                eff_latency = 0.0
+            resolved_nodes = self._format_result(state, "", eff_latency).get("nodes")
+        else:
+            resolved_nodes = nodes_detail
+
+        return {
+            "query": raw_query,
+            "persona": persona_val,
+            "tone": tone_val,
+            "format_style": format_val,
+            "intent": raw_intent,
+            "audit_status": raw_audit_status,
+            "error_category": state.get("error_category"),
+            "retry_count": int(state.get("retry_count") or 0),
+            "hallucination_retries": int(state.get("hallucination_retries") or 0),
+            "audit_feedback": str(state.get("audit_feedback") or ""),
+            "input_guard": state.get("input_guard") or {"is_safe": state.get("is_safe", True), "flags": []},
+            "output_guard": state.get("output_guard") or {},
+            "plan": normalized_plan,
+            "plan_revision": int(state.get("plan_revision") or 0),
+            "execution_steps": list(state.get("execution_steps") or []),
+            "tool_calls": list(state.get("tool_outputs") or []),
+            "delegations": list(state.get("delegations") or []),
+            "review_outcomes": list(state.get("reviews") or []),
+            "verification": dict(state.get("verification") or {}),
+            "memory": dict(state.get("memory_status") or {}),
+            "interaction": interaction_payload,
+            "human_replies": list(state.get("human_replies") or []),
+            "citations_count": citations_count,
+            "sources": sources_list,
+            "images_count": images_count,
+            "latency_ms": latency_ms,
+            "nodes": resolved_nodes,
+            "retrieved_chunks": chunks_preview,
+        }
 
     def _format_result(self, final_state: dict, session_id: str, total_latency_ms: float) -> dict:
         # Extract output fields for Frontend UI Inspector
@@ -417,6 +733,7 @@ class BankingAgentPipeline:
         sentinel = object()
 
         def _stream(run):
+            stream_started = time.perf_counter()
             with self._session_lock(session_id):
                 if stop_event.is_set():
                     run.outcome = "disconnected"
@@ -424,6 +741,20 @@ class BankingAgentPipeline:
                 snapshot = self._snapshot(thread_config)
                 if snapshot.interrupts:
                     run.link_turn(snapshot.values)
+                    paused_latency = round((time.perf_counter() - stream_started) * 1000.0, 2)
+                    paused_nodes = self._format_result(snapshot.values, session_id, paused_latency).get("nodes")
+                    if hasattr(run, "attach_debug_snapshot"):
+                        run.attach_debug_snapshot(
+                            self._build_debug_snapshot(
+                                snapshot.values,
+                                query=query,
+                                persona=persona,
+                                tone=tone,
+                                format_type=format_type,
+                                latency_ms=paused_latency,
+                                nodes_detail=paused_nodes,
+                            )
+                        )
                     return {"awaiting_input": run.result(self._waiting(snapshot, session_id))}
                 initial_state = self._initial_turn(
                     run, snapshot, query, session_id, persona, tone, format_type, custom_persona
@@ -439,6 +770,21 @@ class BankingAgentPipeline:
                             continue
                         progress = {}
                         for node, node_state in event.items():
+                            elapsed_ms = round((time.perf_counter() - stream_started) * 1000.0, 2)
+                            live_nodes = None
+                            if isinstance(node_state, dict) and hasattr(run, "attach_debug_snapshot"):
+                                live_nodes = self._format_result(node_state, session_id, elapsed_ms).get("nodes")
+                                run.attach_debug_snapshot(
+                                    self._build_debug_snapshot(
+                                        node_state,
+                                        query=query,
+                                        persona=persona,
+                                        tone=tone,
+                                        format_type=format_type,
+                                        latency_ms=elapsed_ms,
+                                        nodes_detail=live_nodes,
+                                    )
+                                )
                             public = {}
                             if node in _STREAM_ACTION_NODES:
                                 if node_state.get("last_action"):
@@ -450,14 +796,32 @@ class BankingAgentPipeline:
                             if node == "output_guardrail":
                                 for key in _OUTPUT_GUARDRAIL_KEYS:
                                     public[key] = node_state[key]
+                                public["intent"] = node_state.get("intent")
+                                public["error_category"] = node_state.get("error_category")
                                 public["review_outcomes"] = node_state["reviews"]
                                 public["verification"] = node_state.get("verification", {})
                                 public["memory"] = node_state["memory_status"]
                                 run.result(public)
+                            if getattr(run, "trace_id", None):
+                                public["trace_id"] = run.trace_id
                             progress[node] = public
                         loop.call_soon_threadsafe(queue.put_nowait, ("event", progress))
                 if paused and not stop_event.is_set():
                     snapshot = self._snapshot(thread_config)
+                    paused_latency = round((time.perf_counter() - stream_started) * 1000.0, 2)
+                    paused_nodes = self._format_result(snapshot.values, session_id, paused_latency).get("nodes")
+                    if hasattr(run, "attach_debug_snapshot"):
+                        run.attach_debug_snapshot(
+                            self._build_debug_snapshot(
+                                snapshot.values,
+                                query=query,
+                                persona=persona,
+                                tone=tone,
+                                format_type=format_type,
+                                latency_ms=paused_latency,
+                                nodes_detail=paused_nodes,
+                            )
+                        )
                     return {"awaiting_input": run.result(self._waiting(snapshot, session_id))}
             if stop_event.is_set() and "audit_status" not in run.details:
                 run.outcome = "disconnected"

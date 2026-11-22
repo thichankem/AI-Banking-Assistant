@@ -12,7 +12,6 @@ Features:
 MANDATORY INVARIANTS:
 1. 0% REGEX LAW: No regex library or import re.
 2. ZERO TERNARY LAW: Explicit if/else statements only.
-3. NO TYPING LIBRARY: Native types only.
 4. NO __INIT__.PY: Direct module imports.
 5. 100% MERMAID: No draw.io.
 6. ZERO NOTEBOOKLM: No NotebookLM / NLM.

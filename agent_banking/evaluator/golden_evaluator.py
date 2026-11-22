@@ -7,7 +7,6 @@ Tier-2: LLM-as-a-Judge for Banking Semantic Rubric (configured via environment).
 DESIGN PRINCIPLES:
 1. 0% REGEX LAW: No regex imports or functions; string methods only.
 2. ZERO TERNARY: Explicit if/else statements only.
-3. NO TYPING LIBRARY: Native Python types only.
 4. NO __INIT__.PY: Direct module imports.
 """
 

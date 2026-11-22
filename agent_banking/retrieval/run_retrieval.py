@@ -14,7 +14,6 @@ Features:
 
 MANDATORY INVARIANTS:
 1. NO __INIT__.PY: Direct module imports.
-2. NO TYPING LIBRARY: Native types only.
 3. ZERO TERNARY: Explicit if/else statements.
 4. 0% REGEX LAW: No regex methods or import re.
 """

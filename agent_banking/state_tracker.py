@@ -9,7 +9,6 @@ Controls input and output state for each module in the AI Banking Assistant syst
 
 MANDATORY RULES:
 1. NO __INIT__.PY: Import module files directly.
-2. NO TYPING LIBRARY: Use Python native types only.
 3. ZERO TERNARY: Explicit if/else blocks only (no ?: or conditional expressions).
 4. 0% REGEX LAW: Strictly string methods only (in, split, startswith, endswith, strip, lower, replace, find).
 """

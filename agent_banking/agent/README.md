@@ -2,14 +2,15 @@
 
 ## Trả lời câu hỏi của agent
 
-Trong web chat, chọn một đáp án ngay trên thẻ khi agent cần làm rõ hoặc xin chốt
+Trong web chat, chọn một đáp án (hoặc nhiều đáp án nếu thẻ bật `multi_select`) ngay trên thẻ khi agent cần làm rõ hoặc xin chốt
 phương án. Có thể dùng **Khác** để nhập câu trả lời khi làm rõ, hoặc chọn
 **Hủy yêu cầu** hay **Không tiếp tục** để dừng. Tải lại cùng tab sẽ lấy lại thẻ
 đang chờ. Checkpoint SQLite giữ các bước đã hoàn thành khi server khởi động lại.
 
 Với API local, chat đồng bộ trả `status: awaiting_input` và SSE kết thúc bằng
 sự kiện `awaiting_input`. Gửi `session_id`, `interaction_id` (từ `interaction.id`)
-và `choice_id` (từ `interaction.options`) đến `POST /api/agent/resume`.
+và `choice_id` (hoặc mảng `choice_ids` khi `interaction.multi_select` là `true`)
+từ `interaction.options` đến `POST /api/agent/resume`.
 Thêm `text` nếu chọn `other`. Gửi `session_id` đến `POST /api/agent/status`
 để lấy lại thẻ hoặc kết quả tiếp tục gần nhất. ID phiên là dữ liệu truy cập của
 phiên trong bản local và cần được giữ riêng.

@@ -2,7 +2,7 @@
 """
 Evaluator Settings & Prompt Loader.
 Loads configuration from settings/config.yaml and settings/excel.yaml.
-Complies with 0% Regex Law, Zero Ternary Law, and No Typing Library.
+Complies with 0% Regex Law, Zero Ternary Law.
 """
 
 from importlib import import_module

@@ -76,6 +76,32 @@ def verify_calculation(tool_name: str, data: dict, params: dict) -> bool:
     )
 
 
+def _preview_trace_dict(payload, max_chars=300):
+    """Build a bounded preview dict of tool inputs or outputs for tracing."""
+    if not isinstance(payload, dict):
+        return {}
+    out = {}
+    for k, v in list(payload.items())[:25]:
+        if isinstance(v, str):
+            if len(v) > max_chars:
+                out[k] = v[:max_chars - 3] + "..."
+            else:
+                out[k] = v
+        elif isinstance(v, (int, float, bool)) or v is None:
+            out[k] = v
+        elif isinstance(v, list):
+            out[k] = f"[{len(v)} items]"
+        elif isinstance(v, dict):
+            out[k] = _preview_trace_dict(v, max_chars=max_chars)
+        else:
+            text_val = str(v)
+            if len(text_val) > max_chars:
+                out[k] = text_val[:max_chars - 3] + "..."
+            else:
+                out[k] = text_val
+    return out
+
+
 def _normalize_citation_markers(answer: str) -> str:
     """Normalize accepted citation bracket prefixes to canonical '[Nguồn '."""
     norm_answer = answer
@@ -180,6 +206,7 @@ class BankingReActNodes:
             "is_safe": screened["is_safe"],
             "user_query": screened["query"],
             "intent": "ROUTING",
+            "last_action": None,
             "retry_count": 0,
             "search_count": 0,
             "hallucination_retries": 0,
@@ -430,7 +457,14 @@ class BankingReActNodes:
             else:
                 execution = self.skills.get_skill(name, definition=definition).execute
                 arguments = (params,)
-            with trace_span(f"{kind}.{name}", run_type="tool", kind=kind, action_name=name, tool_name=tool_name) as span_details:
+            with trace_span(
+                f"{kind}.{name}",
+                run_type="tool",
+                kind=kind,
+                action_name=name,
+                tool_name=tool_name,
+                params=_preview_trace_dict(params, max_chars=300),
+            ) as span_details:
                 result = execution(*arguments, **kwargs)
                 retried = False
                 elapsed = result.get("latency_ms", 0.0)
@@ -478,11 +512,28 @@ class BankingReActNodes:
                     elif result.get("temporary") is True:
                         observation["error_code"] = "temporary_failure"
 
+                docs_count = None
+                out_keys = []
+                out_preview = None
+                obs_data = observation.get("data")
+                if observation.get("retrieval") and isinstance(obs_data, dict):
+                    docs_val = obs_data.get("documents")
+                    if isinstance(docs_val, list):
+                        docs_count = len(docs_val)
+                elif isinstance(obs_data, dict):
+                    out_keys = list(obs_data.keys())[:20]
+                    out_preview = _preview_trace_dict(obs_data, max_chars=240)
+
                 span_details.update(
                     status=observation["status"],
                     error_code=observation.get("error_code"),
                     retried=retried,
                     latency_ms=elapsed,
+                    simulation=bool(observation.get("simulation", False)),
+                    retrieval=bool(observation.get("retrieval", False)),
+                    documents_count=docs_count,
+                    output_keys=out_keys,
+                    output_preview=out_preview,
                 )
 
             if retried:

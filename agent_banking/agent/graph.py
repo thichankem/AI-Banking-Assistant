@@ -57,12 +57,20 @@ def _trace_node(name, action):
                     decision_kind = None
                 else:
                     decision_kind = decision.get("kind")
+                decision_summary = {}
+                if isinstance(decision, dict):
+                    for key in ("kind", "name", "tool", "skill", "insufficient_evidence", "reason"):
+                        if key in decision and decision.get(key) is not None:
+                            decision_summary[key] = decision.get(key)
                 details.update(next_node=_after_decision(result),
                                decision_kind=decision_kind,
+                               decision_summary=decision_summary,
                                error_category=result.get("error_category"))
             elif name in ("input_guardrail", "output_guardrail"):
                 guard = result.get("output_guard", result.get("input_guard", {}))
-                details.update(is_safe=guard.get("is_safe"), flag_count=len(guard.get("flags", [])),
+                flags_list = list(guard.get("flags", []))
+                details.update(is_safe=guard.get("is_safe"), flag_count=len(flags_list),
+                               flags=flags_list,
                                audit_status=result.get("audit_status"))
                 if name == "output_guardrail":
                     details["citation_refs"] = [fingerprint(citation.get("chunk_id")) for citation in result["citations"]]
@@ -75,7 +83,8 @@ def _trace_node(name, action):
                                audit_status=result["audit_status"])
             elif name == "context_prepare":
                 details.update(history_count=len(result.get("chat_history", [])),
-                               compactions=result["compactions_this_turn"])
+                               compactions=result["compactions_this_turn"],
+                               memory_status=dict(result.get("memory_status", {})))
             else:
                 observations = result["react_turn"]["observations"]
                 if observations:
@@ -86,6 +95,10 @@ def _trace_node(name, action):
                     # Failed actions may have been supplied with arbitrary model-generated names.
                     if observation.get("status") == "SUCCESS":
                         details["action_name"] = observation.get("name")
+                if name == "plan_update":
+                    details["plan_steps_count"] = len(result.get("plan", []))
+                elif name == "subagent":
+                    details["delegations_count"] = len(result.get("delegations", []))
                 details.update(plan_revision=result["plan_revision"], search_count=result["search_count"],
                                evidence_count=len(result["react_turn"]["evidence"]))
             return result

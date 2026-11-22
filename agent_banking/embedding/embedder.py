@@ -11,7 +11,6 @@ Core Responsibilities:
 DESIGN PRINCIPLES (GEMINI.md & AGENTS.md):
 1. 0% REGEX LAW: String methods only, no regex imports or functions.
 2. ZERO TERNARY LAW: Explicit if/else statements only, no ternary operators.
-3. NO TYPING LIBRARY: Native Python types only, no typing module imports.
 4. NO __INIT__.PY: Direct module imports.
 """
 
@@ -23,6 +22,7 @@ import hashlib
 from pathlib import Path
 from agent_banking.core.models import model_primary
 from agent_banking.embedding.config.settings import EmbeddingConfig
+from agent_banking.tracing.tracer import trace_span
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -240,7 +240,6 @@ class BankingEmbedder:
         Categorizes by 3 chunk types: 'text', 'table', 'multimodal'.
         Preserves 100% of raw content in chunk['content'].
         Prevents double prefixing of context tags and passage: prefix.
-        0% regex, no typing, zero ternary.
         """
         if not isinstance(chunk, dict):
             return ""
@@ -523,6 +522,28 @@ class BankingEmbedder:
             virtual_passage = self.format_virtual_passage(chunk_mock)
 
         self._validate_passages([virtual_passage])
+        if is_query:
+            with trace_span(
+                "query_embedding",
+                run_type="embedding",
+                model=self.model_name,
+                dimension=self.dimension,
+            ) as span_details:
+                cached = self._get_cached_vector(virtual_passage)
+                if cached:
+                    span_details["cache_hit"] = True
+                    span_details["result"] = "cache_hit"
+                    return cached
+                span_details["cache_hit"] = False
+                vectors = self._call_api([virtual_passage], input_type=input_type)
+                if vectors:
+                    h = self._get_hash(virtual_passage)
+                    self._save_cache_batch([(h, vectors[0])])
+                    span_details["result"] = "api_ok"
+                    return vectors[0]
+                span_details["result"] = "fallback_zero"
+                return [0.0] * self.dimension
+
         cached = self._get_cached_vector(virtual_passage)
         if cached:
             return cached

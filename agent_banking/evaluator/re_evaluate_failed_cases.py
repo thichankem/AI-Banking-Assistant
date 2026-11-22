@@ -6,7 +6,6 @@ Synchronizes the results to both JSON caches and the master Excel file.
 RULES COMPLIANCE:
 1. 0% REGEX LAW: No regex imports or functions.
 2. ZERO TERNARY LAW: Explicit if/else statements only.
-3. NO TYPING LIBRARY: Native Python types only.
 4. NO __INIT__.PY: Direct imports only.
 """
 

@@ -2,7 +2,7 @@
 """
 Environment and project path management.
 Loads project-local secrets once; process environment always takes precedence.
-Complies with 0% Regex Law, Zero Ternary Law, and No Typing Library.
+Complies with 0% Regex Law, Zero Ternary Law.
 """
 
 import os

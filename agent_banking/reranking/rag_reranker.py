@@ -10,7 +10,6 @@ Core Responsibilities:
 DESIGN PRINCIPLES (GEMINI.md & AGENTS.md):
 1. 0% REGEX LAW: String methods only, no regex imports or functions.
 2. ZERO TERNARY: Explicit if/else statements only, no ternary operators.
-3. NO TYPING LIBRARY: Native Python types only, no typing module imports.
 4. NO __INIT__.PY: Direct module imports.
 """
 

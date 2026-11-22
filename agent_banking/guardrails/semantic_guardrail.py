@@ -9,7 +9,6 @@ and a Benign Banking Template Bank using Contrastive Guardrail verification.
 DESIGN INVARIANTS:
 1. 0% REGEX LAW: No regex methods or import re.
 2. ZERO TERNARY LAW: Explicit if/else statements only.
-3. NO TYPING LIBRARY: No typing library imports.
 4. NO __INIT__.PY: Direct module imports.
 """
 

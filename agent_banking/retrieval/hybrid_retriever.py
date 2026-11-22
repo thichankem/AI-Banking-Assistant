@@ -15,7 +15,6 @@ Core Capabilities:
 DESIGN INVARIANTS:
 1. 0% REGEX LAW: No regex library or regex methods.
 2. ZERO TERNARY: Explicit if/else statements only.
-3. NO TYPING LIBRARY: Native types only.
 4. NO __INIT__.PY: Direct module imports.
 """
 

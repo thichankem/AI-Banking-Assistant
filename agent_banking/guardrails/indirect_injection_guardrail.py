@@ -11,7 +11,6 @@ commands embedded in retrieved text chunks before passing them to the generator.
 DESIGN INVARIANTS:
 1. 0% REGEX LAW: No regex methods or import re.
 2. ZERO TERNARY LAW: Explicit if/else statements only.
-3. NO TYPING LIBRARY: No typing library imports.
 4. NO __INIT__.PY: Direct module imports.
 """
 

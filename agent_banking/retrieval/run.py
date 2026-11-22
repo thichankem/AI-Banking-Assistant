@@ -5,7 +5,6 @@ Supports single query CLI execution (--query) and batch execution (--force).
 INVARIANTS:
 1. 0% REGEX LAW: No import re.
 2. ZERO TERNARY: Explicit if/else statements.
-3. NO TYPING LIBRARY: No typing library imports.
 4. NO __INIT__.PY: Direct module imports.
 """
 
