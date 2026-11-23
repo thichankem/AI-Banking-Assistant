@@ -10,29 +10,29 @@ parameters_schema:
       - fx_rates
       - interest_rates
       default: auto
-      description: Loại nghiệp vụ tính toán hoặc tra cứu
+      description: Calculation or lookup operation type
     raw_text:
       type: string
-      description: Câu hỏi nguyên bản để tự động trích xuất tham số tài chính
+      description: Raw inquiry text for automatic extraction of financial parameters
     principal:
       type: number
-      description: Số tiền gốc (VND) cho vay hoặc gửi tiết kiệm
+      description: Principal amount (VND) for loan or savings deposit
       default: 100000000.0
     annual_rate_percent:
       type: number
-      description: Lãi suất năm (%/năm)
+      description: Annual interest rate (%/year)
       default: 7.5
     term_months:
       type: integer
-      description: Kỳ hạn vay hoặc gửi tiết kiệm (tháng)
+      description: Loan or savings deposit term (months)
       default: 12
     currency:
       type: string
-      description: Mã ngoại tệ tra cứu tỷ giá (USD, EUR, JPY...)
+      description: Foreign currency code for exchange rate lookup (USD, EUR, JPY...)
       default: USD
     deposit_type:
       type: string
-      description: Loại tiền gửi tra cứu lãi suất ('vnd' hoặc 'usd')
+      description: Deposit currency type for interest rate lookup ('vnd' or 'usd')
       default: vnd
 output_schema:
   type: object

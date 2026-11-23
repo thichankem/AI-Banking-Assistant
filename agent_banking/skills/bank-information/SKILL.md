@@ -1,21 +1,21 @@
 ---
 name: bank-information
-description: Tra cứu giờ làm việc, kênh hỗ trợ, địa chỉ và thông tin chung của A-Bank.
-  Dùng khi khách muốn biết liên hệ ở đâu hoặc khi nào.
-compatibility: Các thao tác nghiệp vụ sử dụng các công cụ được cấp trong A-Bank.
+description: Look up working hours, support channels, addresses, and general information of A-Bank.
+  Use when customers want to know where or when to contact.
+compatibility: Operational procedures use authorized tools within A-Bank.
 metadata:
   version: 1.0.0
-  a-bank-category: Thông tin chung
+  a-bank-category: General Information
   a-bank-display-name: bank-information
   a-bank-tool: search_banking_knowledge
 ---
 
 # bank-information
 
-## Cách làm
+## Instructions
 
-1. Xác định kênh hoặc địa điểm khách hỏi. Nếu câu trả lời phụ thuộc vào khu vực hoặc loại yêu cầu, hỏi lại đúng thông tin đó.
-2. Tìm nguồn bằng `search_banking_knowledge`, kết hợp tên kênh với loại hỗ trợ. Phân biệt trợ giúp trong A-Bank Plus, chi nhánh và tổng đài.
-3. Trả kênh, cách tiếp cận và giờ phục vụ ghi trong cùng nguồn. Gắn nguồn ngay sau thông tin có thể sử dụng.
+1. Identify the channel or location requested by the customer. If the answer depends on a region or request type, ask back for that specific information.
+2. Locate sources using `search_banking_knowledge`, combining channel name with support type. Distinguish between help in A-Bank Plus, physical branches, and the hotline.
+3. Return the channel, access method, and service hours recorded in the same source. Attach sources immediately after usable information.
 
-Nếu nguồn không ghi giờ hoặc số liên hệ, nói rõ phần chưa xác minh. Không dùng thông tin của ngân hàng khác hoặc số từ công cụ giả lập.
+If the source does not state hours or contact numbers, clearly indicate the unverified portion. Do not use information from other banks or numbers from simulation tools.

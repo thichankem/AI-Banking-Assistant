@@ -96,6 +96,8 @@ def main():
     parser.add_argument("--priority-ids", nargs="*", default=[],
                         help="Evaluate these cases first while keeping the complete selection.")
     parser.add_argument("--index", type=Path)
+    parser.add_argument("--reference-corrections", type=Path,
+                        help="Apply source-verified benchmark references only when grading.")
     parser.add_argument("--retry-errors", action="store_true")
     args = parser.parse_args()
     from langgraph.checkpoint.memory import MemorySaver
@@ -107,6 +109,11 @@ def main():
     from agent_banking.evaluator.master_785_runner import call_llm_judge
 
     root = Path(__file__).resolve().parents[2]
+    config = Config()
+    index = args.index.resolve() if args.index else Path(config.ABANK_QDRANT_STORAGE_PATH or config.QDRANT_STORAGE_PATH)
+    if not index.is_absolute():
+        index = root / index
+    inventory = index / "knowledge_inventory.json"
     cases = select_cases(root, args.limit, args.seed)
     if args.ids:
         total_cases = int(_DS_CFG["expected_total_cases"])
@@ -117,8 +124,26 @@ def main():
             parser.error("Every priority ID must be part of the selected cases")
         priority = list(dict.fromkeys(args.priority_ids))
         cases = [by_id[cid] for cid in priority] + [case for case in cases if case["id"] not in priority]
+    if args.reference_corrections:
+        from agent_banking.evaluator.reference_alignment import validate_corrections
+
+        corrections = validate_corrections(args.reference_corrections,
+                                           select_cases(root, int(_DS_CFG["expected_total_cases"]), args.seed),
+                                           json.loads(inventory.read_bytes()), config.CHUNKING_INPUT_DIR)
+        for case in cases:
+            if case["id"] in corrections:
+                correction = corrections[case["id"]]
+                case["reference_answer"] = correction["reference_answer"]
+                case["rubric"] = {**case["rubric"], "must_include": correction["must_include"]}
     code_paths = list(EvaluatorConfig.TUNING_CODE_PATHS)
     package = Path(__file__).resolve().parents[1]
+    code_paths.extend(name for name in (
+        "tools/extensions/legal_web_search.py", "tools/search_legal_web/tool.yaml", "reranking/rag_reranker.py",
+        "tools/config/settings/query_rules.yaml", "tools/tool_registry.py",
+        "agent/config/prompts/deep/base.md", "agent/config/prompts/deep/coordinator.md",
+        "agent/config/prompts/deep/review.md", "agent/config/prompts/deep/partial_recovery.md",
+        "agent/config/prompts/messages.yaml", "evaluator/config/prompts/master_785_judge.md",
+    ) if name not in code_paths and (package / name).is_file())
     template = _DS_CFG["group_path_template"]
     metadata = {"case_ids": [case["id"] for case in cases], "seed": args.seed,
                 "code": {name: sha256((package / name).read_bytes()).hexdigest() for name in code_paths},
@@ -129,14 +154,15 @@ def main():
                 "judge_models": [candidate.model for candidate in get_model_chain(
                     str(_TE_CFG["judge_module"]), routed=bool(_TE_CFG["judge_routed"])
                 )],
-                "agent_context_bytes": int(os.getenv("AGENT_CONTEXT_BYTES", str(_TE_CFG["default_agent_context_bytes"]))),
+                "agent_context_bytes": config.AGENT_CONTEXT_BYTES,
                 "cloud_requests_per_minute": float(os.getenv("CLOUD_REQUESTS_PER_MINUTE", str(_TE_CFG["default_cloud_rpm"]))),
                 "hybrid_candidate_k": Config.HYBRID_CANDIDATE_K,
                 "datasets": {group: sha256(resolve_repo_path(template.replace("{group}", group), root=root).read_bytes()).hexdigest()
                              for group in EvaluatorConfig.DATASET_GROUPS}}
-    if args.index:
-        inventory = args.index / "knowledge_inventory.json"
+    if inventory.is_file():
         metadata["index_inventory_sha256"] = sha256(inventory.read_bytes()).hexdigest()
+    if args.reference_corrections:
+        metadata["reference_corrections_sha256"] = sha256(args.reference_corrections.read_bytes()).hexdigest()
     metadata_path = args.output.with_suffix(".metadata.json")
     if metadata_path.exists() and json.loads(metadata_path.read_text(encoding="utf-8")) != metadata:
         raise ValueError("Code, case selection or corpus changed; choose a fresh output path")
@@ -151,12 +177,17 @@ def main():
         args.output.with_suffix(".summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps(summary, ensure_ascii=False, indent=2))
         return
-    config = Config()
     if args.index:
-        config.ABANK_QDRANT_STORAGE_PATH = str(args.index.resolve())
+        config.ABANK_QDRANT_STORAGE_PATH = str(index)
         config.KNOWLEDGE_PUBLICATION_SCOPE = ""
     checkpointer = MemorySaver()
     pipeline = BankingAgentPipeline(config=config, checkpointer=checkpointer)
+    if inventory.is_file():
+        expected_chunks = int(json.loads(inventory.read_bytes())["chunks"])
+        actual_chunks = pipeline.rag_pipeline.vector_store.count()
+        if actual_chunks != expected_chunks:
+            pipeline.rag_pipeline.close()
+            raise RuntimeError(f"Benchmark index opened with {actual_chunks} chunks; expected {expected_chunks}.")
     judge = FallbackChatClient(module=str(_TE_CFG["judge_module"]), routed=bool(_TE_CFG["judge_routed"]))
     run_id = uuid4().hex
     review_errors = ContextVar("tuning_review_errors", default=None)

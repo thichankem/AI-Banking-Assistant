@@ -1,7 +1,7 @@
 name: get_interest_rates
-title: Tra Cứu Bảng Lãi Suất Tiền Gửi Niêm Yết
-description: Đọc lãi suất tiền gửi mẫu để mô phỏng. Dùng tài liệu A-Bank cho biểu
-  niêm yết.
+title: Published Deposit Interest Rate Lookup
+description: Read sample deposit interest rates for simulation. Use A-Bank documents
+  for official published rates.
 inputSchema:
   $schema: https://json-schema.org/draft/2020-12/schema
   type: object
@@ -12,8 +12,8 @@ inputSchema:
       - vnd
       - usd
       default: vnd
-      description: 'Loại đồng tiền gửi tiết kiệm: ''vnd'' (đồng Việt Nam) hoặc ''usd''
-        (đô la Mỹ)'
+      description: 'Savings deposit currency type: ''vnd'' (Vietnamese Dong) or ''usd''
+        (US Dollar)'
   additionalProperties: false
 outputSchema:
   $schema: https://json-schema.org/draft/2020-12/schema

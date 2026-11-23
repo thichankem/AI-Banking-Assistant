@@ -266,15 +266,16 @@ class ChunkPlanner:
             provenance["relations"] = [ir["relations"][index] for index in sorted(indices)]
         from ..extraction.pdf.visual_cropper import collect_page_step_numbers, match_chunk_visual_assets
 
+        # Coverage checks source image occurrences. PDF page crops are additional
+        # display attachments and do not correspond to image blocks in the IR.
+        link_chunk_sequence(self.chunks)
+        quality = validate_coverage(self)
         page_step_numbers = collect_page_step_numbers(ir.get("blocks", []))
         ir_assets = ir.get("assets", {})
         for chunk in self.chunks:
             chunk["images"] = match_chunk_visual_assets(
                 chunk, ir_assets, page_step_numbers=page_step_numbers
             )
-        link_chunk_sequence(self.chunks)
-        quality = validate_coverage(self)
-        excel_linked_assets = set()
         for chunk in self.chunks:
             _page_citation(chunk)
             if excel:
@@ -283,9 +284,7 @@ class ChunkPlanner:
                     if digest and digest in ir_assets and not any(image.get("sha256") == digest for image in chunk["images"]):
                         chunk["images"].append({**ir_assets[digest], "asset_id": digest, "match_strength": "direct",
                                                 "display_caption": location.get("cell_range") or location["sheet_name"]})
-                        excel_linked_assets.add(digest)
-        if excel:
-            quality["linked_assets"] = len(excel_linked_assets)
+        quality["linked_assets"] = len({image["sha256"] for chunk in self.chunks for image in chunk["images"]})
         return self.chunks, {"parents": self.parents, "document": ir, "quality": quality}
 
     def _caption_conflicts(self, block, target):

@@ -32,6 +32,7 @@ def chunker_fingerprint(chunker, pipeline_version):
                      "max_page_pixels": chunker.pdf_extractor.max_page_pixels,
                      "vision_client": getattr(chunker.pdf_extractor.vision_client, "model", None),
                      "review_client": getattr(chunker.pdf_extractor.review_client, "model", None),
+                     "review_incomplete_pdf": getattr(chunker.pdf_extractor, "review_incomplete", False),
                      "image_policy": IMAGE_POLICY, "max_words": chunker.max_chunk_words,
                      "target_tokens": chunker.planner.budget.target, "max_tokens": chunker.planner.budget.maximum,
                      "min_tokens": chunker.planner.min_tokens,

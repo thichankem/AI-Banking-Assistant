@@ -1,10 +1,10 @@
-# Tham số tính toán
+# Calculation Parameters
 
-| Thao tác | Tham số |
+| Operation | Parameters |
 |---|---|
-| `loan_amortization` | `principal` (VND), `annual_rate_percent` (%/năm), `term_months` (tháng) |
-| `savings_profit` | `principal` (VND), `term_months` (tháng) |
+| `loan_amortization` | `principal` (VND), `annual_rate_percent` (%/year), `term_months` (months) |
+| `savings_profit` | `principal` (VND), `term_months` (months) |
 | `interest_rates` | `deposit_type` |
 | `fx_rates` | `currency` |
 
-Giữ nguyên tiền gốc, lãi suất và kỳ hạn khách cung cấp. Đánh dấu lãi tiết kiệm, lãi suất và tỷ giá do công cụ trả về là mô phỏng. Đối với biểu phí hoặc mức lãi suất niêm yết, tra tài liệu theo sản phẩm và điều kiện cụ thể.
+Preserve principal amounts, interest rates, and terms provided by the customer. Mark savings interest, interest rates, and exchange rates returned by tools as simulated. For fee schedules or officially listed interest rates, look up documentation according to the specific product and conditions.

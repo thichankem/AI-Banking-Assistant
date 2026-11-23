@@ -1,21 +1,21 @@
 ---
 name: business-procedure
-description: Tra quy trình, điều kiện, hồ sơ và thủ tục A-Bank. Dùng cho yêu cầu mở,
-  thay đổi, đóng hoặc xử lý hồ sơ nghiệp vụ.
-compatibility: Các thao tác nghiệp vụ sử dụng các công cụ được cấp trong A-Bank.
+description: Look up A-Bank procedures, conditions, documentation, and formalities. Use for opening,
+  modifying, closing, or processing operational files.
+compatibility: Operational procedures use authorized tools within A-Bank.
 metadata:
   version: 1.0.0
-  a-bank-category: Nghiệp vụ
+  a-bank-category: Business Operations
   a-bank-display-name: business-procedure
   a-bank-tool: search_banking_knowledge
 ---
 
 # business-procedure
 
-## Cách làm
+## Instructions
 
-1. Xác định nghiệp vụ, đối tượng khách hàng và giai đoạn trong quy trình. Tách các điều kiện khác nhau nếu câu hỏi có nhiều trường hợp.
-2. Tra bằng `search_banking_knowledge`. Đưa tên thủ tục và điều kiện vào `query`. Dùng `exact` khi khách cung cấp mã quy trình hoặc tên cần khớp.
-3. Tóm tắt điều kiện, giấy tờ và các bước theo thứ tự. Gắn nguồn cho từng nhóm yêu cầu.
+1. Identify the banking operation, customer segment, and stage in the process. Separate distinct conditions if the inquiry covers multiple cases.
+2. Look up using `search_banking_knowledge`. Include procedure name and conditions in `query`. Use `exact` when the customer provides a process code or name to match.
+3. Summarize conditions, paperwork, and steps in sequence. Attach sources to each group of requirements.
 
-Khi tài liệu chỉ bao phủ một trường hợp, giới hạn đáp án trong trường hợp đó hoặc hỏi lại. Không biến tình huống minh họa thành thủ tục bắt buộc.
+When documents cover only one case, limit the answer to that case or ask back. Do not turn illustrative situations into mandatory procedures.

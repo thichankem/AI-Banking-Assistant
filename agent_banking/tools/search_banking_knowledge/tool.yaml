@@ -1,43 +1,47 @@
 name: search_banking_knowledge
-title: Tra Cứu Tri Thức Quy Chế & Biểu Phí A-Bank (Agentic RAG)
-description: Tra cứu tài liệu quy chế ngân hàng, sản phẩm thẻ, pháp lý tuân thủ, hướng
-  dẫn app A-Bank Plus, bảo hiểm A-Life, tín dụng, báo cáo tài chính và SLA bằng công
-  nghệ Hybrid Vector + BM25 và Cross-Encoder Reranker. Với bảng Excel, dùng excel
-  để lọc điều kiện trên cùng một hàng và chọn phiên bản theo ngày hiệu lực.
+title: Search A-Bank Regulations & Fee Knowledge (Agentic RAG)
+description: Search banking regulations, card products, compliance, A-Bank Plus app
+  guides, A-Life insurance, credit, financial reports, and SLAs using Hybrid Vector
+  + BM25 and Cross-Encoder Reranker. For Excel tables, use excel to filter conditions
+  on the same row and choose versions by effective date.
 inputSchema:
   $schema: https://json-schema.org/draft/2020-12/schema
   type: object
   properties:
     query:
       type: string
-      description: Câu tìm kiếm tự chứa chủ đề, đối tượng và điều kiện còn áp dụng.
-        Với câu nối tiếp, dùng đối tượng xác định được từ ngữ cảnh của phiên.
+      description: Self-contained search query with topic, subject, and applicable conditions.
+        For follow-up questions, use the subject determined from session context.
       minLength: 1
     exact:
       type: string
       minLength: 2
       maxLength: 100
-      description: Nếu cần, tên sản phẩm hoặc mã dịch vụ phải xuất hiện trong kết
-        quả.
+      description: If needed, product name or service code that must appear in results.
     top_k:
       type: integer
       default: 3
-      description: Số lượng tài liệu tinh lọc sau Rerank
+      description: Number of refined documents after Rerank
       minimum: 1
       maximum: 6
     source:
       type: string
       minLength: 2
       maxLength: 400
-      description: Tên nguồn đã tìm thấy, hoặc đường dẫn nguồn đầy đủ để giới hạn đúng tài liệu.
+      description: Source name, document code, or full indexed path. To search one category, use its full indexed folder, such as A_Bank/4. Hướng dẫn sử dụng app Digital for app navigation.
     offset:
       type: integer
       minimum: 0
       maximum: 10000
-      description: Khi có source, đọc các đoạn liên tiếp theo thứ tự nguồn từ vị trí này, không rerank. Dùng next_offset để đọc tiếp hướng dẫn hoặc bảng bị chia đoạn.
+      description: Read consecutive chunks from a specific document without reranking. With page, offset and next_offset count chunks within that page. Omit offset for relevance searches and folder searches.
+    page:
+      type: integer
+      minimum: 1
+      maximum: 10000
+      description: One-based PDF page to read from the specified document. If the page lacks the requested fact, check related_documents for same-source matches on other pages and cite where the evidence actually appears. Use a topic search in the same source if additional evidence is needed.
     excel:
       type: object
-      description: Tra theo hàng Excel. Tìm bảng trước với query và lấy excel_table_id trong business_metadata.
+      description: Look up by Excel row. Find table first using query and obtain excel_table_id from business_metadata.
       additionalProperties: false
       required: [table_id]
       properties:
@@ -47,7 +51,7 @@ inputSchema:
         as_of:
           type: string
           pattern: '^\d{4}-\d{2}-\d{2}$'
-          description: Ngày cần tra cứu theo YYYY-MM-DD.
+          description: Target date for lookup in YYYY-MM-DD format.
         filters:
           type: array
           maxItems: 20
@@ -61,7 +65,7 @@ inputSchema:
               value:
                 type: [string, number, boolean]
                 maxLength: 400
-                description: Giá trị theo kiểu cột. Dùng ngày ISO và phần trăm theo điểm phần trăm, ví dụ 2.5 cho 2.5%.
+                description: Value matching column type. Use ISO dates and percentages in percentage points, e.g., 2.5 for 2.5%.
               unit: {type: string, minLength: 1, maxLength: 16}
             if:
               properties:
@@ -70,6 +74,10 @@ inputSchema:
               required: [value]
   required:
   - query
+  dependentRequired:
+    page: [source]
+  not:
+    required: [page, excel]
   additionalProperties: false
 outputSchema:
   $schema: https://json-schema.org/draft/2020-12/schema
@@ -89,7 +97,7 @@ outputSchema:
         required: [chunk_id, source, content]
     related_documents:
       $ref: '#/properties/documents'
-      description: Các đoạn liền kề có liên kết cùng mục hoặc cùng quy trình để bổ sung ngữ cảnh.
+      description: Adjacent chunks or chunks matching sections, tables, figures, and conditions of the inquiry to supplement.
     sources:
       type: array
       items: {type: string}

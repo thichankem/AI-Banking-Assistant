@@ -9,6 +9,7 @@ from jsonschema import Draft202012Validator
 
 from agent_banking.agent.config.response_profiles import get_prompt
 from agent_banking.agent.config.settings import get_float_setting, get_int_setting, get_setting
+from agent_banking.core.chat import CHAT_TRACE_METADATA
 from agent_banking.core.cloud_rate_limit import retry_delay
 from agent_banking.core.fallback import ModelFallbackError, is_temporary_error
 from agent_banking.core.model_routing import apply_chat_options, ordered_candidates, request_metadata, usage_metadata
@@ -104,33 +105,58 @@ SCHEMAS = {
 }
 REVIEW_SCHEMA = object_schema(
     {"verdict": {"enum": ["approve", "revise"]}, "feedback": {"type": "string", "maxLength": _REVIEW_FEEDBACK_MAX_CHARS},
-     "coverage": {"type": "array", "items": COVERAGE, "minItems": 1, "maxItems": 16},
+     "coverage": {"type": "array", "items": COVERAGE, "maxItems": 16},
      "claims": {"type": "array", "items": CLAIM, "maxItems": 40},
-     "issues": {"type": "array", "items": REVIEW_ISSUE, "maxItems": 4}},
+     "issues": {"type": "array", "items": REVIEW_ISSUE, "maxItems": 4},
+     "visualization_approved": {"type": "boolean"}},
     ["verdict", "feedback", "coverage", "claims"]
 )
+REVIEW_SCHEMA["if"] = {"properties": {"verdict": {"const": "approve"}}}
+REVIEW_SCHEMA["then"] = {"properties": {"coverage": {"minItems": 1}}}
+ARTIFACT_REVIEW_SCHEMA = {**REVIEW_SCHEMA, "required": [*REVIEW_SCHEMA["required"], "visualization_approved"]}
 SUMMARY_SCHEMA = object_schema({"summary": text_schema(1800)}, ["summary"])
 
 
-def _bound_review_advice(result):
-    # Free-text suggestions are advisory. Evidence pointers and quotes stay strict.
+def _normalize_review(result):
+    # Ignore provider metadata. Preserve required approval fields and grounding checks.
+    result = {key: value for key, value in result.items() if key in REVIEW_SCHEMA["properties"]}
+    if type(result.get("visualization_approved")) is not bool:
+        result.pop("visualization_approved", None)
     if isinstance(result.get("feedback"), str):
         result["feedback"] = result["feedback"][:_REVIEW_FEEDBACK_MAX_CHARS]
+    if result.get("verdict") == "revise":
+        result.setdefault("coverage", [])
+        result.setdefault("claims", [])
+        if isinstance(result["coverage"], list):
+            result["coverage"] = [item for item in result["coverage"] if Draft202012Validator(COVERAGE).is_valid(item)]
+        # Draft repair uses feedback and issues. A rejected draft needs no claim proof.
+        if isinstance(result["claims"], list):
+            result["claims"] = []
     issues = result.get("issues")
     if isinstance(issues, list):
+        cleaned = []
         for issue in issues:
             if isinstance(issue, dict):
-                for key, limit in (("item", _REVIEW_ISSUE_ITEM_MAX_CHARS), ("problem", _REVIEW_ISSUE_PROBLEM_MAX_CHARS)):
-                    if isinstance(issue.get(key), str):
-                        issue[key] = issue[key][:limit]
+                advice = {key: issue[key][:limit] for key, limit in (("item", _REVIEW_ISSUE_ITEM_MAX_CHARS),
+                          ("problem", _REVIEW_ISSUE_PROBLEM_MAX_CHARS)) if isinstance(issue.get(key), str) and issue[key].strip()}
+                if len(advice) != 2:
+                    continue
+                if isinstance(issue.get("source"), str) and 1 <= len(issue["source"]) <= 32:
+                    advice["source"] = issue["source"]
+                if type(issue.get("draft_line")) is int and 1 <= issue["draft_line"] <= 500:
+                    advice["draft_line"] = issue["draft_line"]
+                cleaned.append(advice)
+        result["issues"] = cleaned[:4]
     coverage = result.get("coverage")
     if isinstance(coverage, list):
-        for item in coverage:
-            if isinstance(item, dict):
-                if isinstance(item.get("item"), str):
-                    item["item"] = item["item"][:240]
-                if item.get("status") not in ("answered", "limited", "missing"):
-                    item["status"] = "answered"
+        result["coverage"] = [{key: value[:240] if key == "item" and isinstance(value, str) else value
+                               for key, value in item.items() if key in COVERAGE["properties"]}
+                              if isinstance(item, dict) else item for item in coverage]
+    claims = result.get("claims")
+    if isinstance(claims, list):
+        result["claims"] = [{key: value for key, value in item.items() if key in CLAIM["properties"] and value is not None}
+                            if isinstance(item, dict) else item for item in claims]
+    return result
 
 
 def pack_context(data: dict, budget: int, *, keep_evidence=False) -> str:
@@ -186,11 +212,10 @@ def pack_context(data: dict, budget: int, *, keep_evidence=False) -> str:
 
 def _parse(text: str) -> dict:
     text = text.strip()
-    while text.startswith("<think>") and "</think>" in text:
+    while "</think>" in text:
         text = text.split("</think>", 1)[1].strip()
-    fence = chr(96) * 3
-    if text.startswith(fence) and text.endswith(fence):
-        text = text.partition("\n")[2][:-3].strip()
+    if text.startswith("<think>"):
+        raise ValueError("Structured response was truncated inside think tags")
 
     def reject_constant(value):
         raise ValueError("Non-finite JSON number")
@@ -209,14 +234,54 @@ def _parse(text: str) -> dict:
             result[key] = value
         return result
 
-    result = json.loads(text, parse_constant=reject_constant, parse_float=finite_float, object_pairs_hook=distinct_keys)
-    if not isinstance(result, dict):
-        raise ValueError("Expected a JSON object")
-    if result.get("kind") == "final":
-        ans_text = str(result.get("answer") or "").strip()
-        if not ans_text or not any(ch.isalnum() for ch in ans_text):
-            raise ValueError("Final answer must contain readable text")
-    return result
+    cleaned = text
+    fence = chr(96) * 3
+    if fence in cleaned:
+        open_pos = cleaned.find(fence)
+        rest = cleaned[open_pos + 3:]
+        if rest.startswith("json"):
+            rest = rest[4:]
+        if rest.startswith("\n"):
+            rest = rest[1:]
+        close_pos = rest.rfind(fence)
+        if close_pos != -1:
+            rest = rest[:close_pos].strip()
+        cleaned = rest
+
+    candidates = [cleaned, text]
+    first_brace = text.find("{")
+    last_brace = text.rfind("}")
+    if first_brace != -1:
+        if last_brace != -1:
+            if last_brace > first_brace:
+                candidates.append(text[first_brace : last_brace + 1])
+
+    last_error = None
+    for cand in candidates:
+        cand = cand.strip()
+        if not cand:
+            continue
+        try:
+            result = json.loads(
+                cand,
+                strict=False,
+                parse_constant=reject_constant,
+                parse_float=finite_float,
+                object_pairs_hook=distinct_keys
+            )
+            if not isinstance(result, dict):
+                raise ValueError("Expected a JSON object")
+            if result.get("kind") == "final":
+                ans_text = str(result.get("answer") or "").strip()
+                if not ans_text or not any(ch.isalnum() for ch in ans_text):
+                    raise ValueError("Final answer must contain readable text")
+            return result
+        except (json.JSONDecodeError, ValueError) as err:
+            last_error = err
+
+    if last_error is not None:
+        raise last_error
+    raise ValueError("No valid JSON content found")
 
 
 class StructuredModel:
@@ -251,8 +316,8 @@ class StructuredModel:
                 result = {key: value for key, value in result.items() if key in fields}
             if result.get("kind") == "final" and isinstance(result.get("answer"), str):
                 result["answer"] = result["answer"][:8000]
-            if any(schema is REVIEW_SCHEMA for schema in schemas):
-                _bound_review_advice(result)
+            if any(schema is REVIEW_SCHEMA or schema is ARTIFACT_REVIEW_SCHEMA for schema in schemas):
+                result = _normalize_review(result)
             if not any(validator.is_valid(result) for validator in validators):
                 issues = []
                 for validator in validators:
@@ -303,10 +368,7 @@ class StructuredModel:
                 "output_tokens_limit": max_tokens,
                 "repair": bool(attempt > 0),
             }
-            try:
-                setattr(self.client, "_pending_trace_meta", pending_meta)
-            except Exception:
-                pass
+            trace_token = CHAT_TRACE_METADATA.set(pending_meta)
             try:
                 self.client.create(
                     model=self.model, messages=messages, validate=validate,
@@ -330,6 +392,8 @@ class StructuredModel:
                     {"role": "system", "content": system + "\n" + repair_suffix},
                     {"role": "user", "content": payload}
                 ]
+            finally:
+                CHAT_TRACE_METADATA.reset(trace_token)
         raise RuntimeError("Unreachable structured model state")
 
     def _routed_request(self, system, data, contract, max_tokens, validate, role, deep_reason):

@@ -16,13 +16,14 @@ from agent_banking.evaluator.config.settings import EvaluatorConfig
 _KB_CFG = EvaluatorConfig.KNOWLEDGE_BUILD
 
 
-def build_document(path, output, ocr_docx_images=False):
+def build_document(path, output, ocr_docx_images=False, recheck_partial=False):
     from agent_banking.core.settings import Config
     from agent_banking.chunking.run_chunking import load_published_chunks
     from agent_banking.chunking.publication import (
         _publish_document_files, _validate_document, publish_snapshot, use_relative_asset_paths,
     )
     from agent_banking.chunking.publication_io import file_hash
+    from agent_banking.chunking.universal.extraction.pdf.extractor import PartialOCRNotImproved
     from agent_banking.chunking.universal.pipeline import LayoutAwareChunker
     from agent_banking.evaluator.index_knowledge import unavailable_images
 
@@ -34,6 +35,8 @@ def build_document(path, output, ocr_docx_images=False):
     digest = file_hash(path)
     result = {"source": source, "publication": str(folder), "status": "ERROR"}
     try:
+        previous_partial = 0
+        cached_chunks = 0
         if (folder / "chunking_manifest.json").exists():
             chunks, manifest = load_published_chunks(folder, return_manifest=True)
             record = manifest["records"][0]
@@ -43,10 +46,20 @@ def build_document(path, output, ocr_docx_images=False):
                 previous = json.loads((folder / record["artifact_file"]).read_text(encoding="utf-8"))
                 usable = usable and not unavailable_images(previous["document"])
             if usable and record["input_sha256"] == digest and bool(record.get("ocr_docx_images")) == ocr_docx_images:
-                return {**result, "status": "CACHED", "chunks": len(chunks), "seconds": 0}
-        with LayoutAwareChunker(config=config, asset_dir=folder / "assets", ocr_docx_images=ocr_docx_images) as chunker:
+                previous_partial = quality.get("ocr_partial_pages", 0)
+                if not recheck_partial or not previous_partial:
+                    return {**result, "status": "CACHED", "chunks": len(chunks), "seconds": 0}
+                cached_chunks = len(chunks)
+        chunker_options = {"workers": 1} if recheck_partial else {}
+        with LayoutAwareChunker(config=config, asset_dir=folder / "assets", ocr_docx_images=ocr_docx_images,
+                                review_incomplete_pdf=recheck_partial, previous_partial_pdf_pages=previous_partial,
+                                **chunker_options) as chunker:
             chunks = chunker.chunk_file(path, source_name=source)
             artifact = chunker.last_artifact
+            if previous_partial and (not artifact["quality"].get("index_ready") or artifact["quality"].get("ocr_failed_pages", 0)
+                                     or artifact["quality"].get("ocr_partial_pages", 0) >= previous_partial):
+                return {**result, "status": "RETAINED", "chunks": cached_chunks, "ocr_partial_pages": previous_partial,
+                        "seconds": round(time.perf_counter() - started, 2)}
             use_relative_asset_paths(folder, chunks, artifact)
             fingerprint = chunker.fingerprint()
             _validate_document(folder, chunks, artifact, source, digest, fingerprint)
@@ -62,6 +75,8 @@ def build_document(path, output, ocr_docx_images=False):
                         "new_files": 1, "total_chunks": len(chunks), "index_ready": True, "records": [record]}
             publish_snapshot(folder, chunks, manifest, {artifact["document"]["document_id"]: chunks})
             result.update(status="SUCCESS", chunks=len(chunks), quality=artifact["quality"])
+    except PartialOCRNotImproved:
+        result.update(status="RETAINED", chunks=cached_chunks, ocr_partial_pages=previous_partial)
     except Exception as error:
         result.update(error_type=type(error).__name__, error=str(error))
     result["seconds"] = round(time.perf_counter() - started, 2)
@@ -77,6 +92,7 @@ def main():
     parser.add_argument("--names", nargs="*")
     parser.add_argument("--extensions", nargs="*", default=[*_KB_CFG["default_extensions"], ".xlsx"])
     parser.add_argument("--ocr-docx-images", action="store_true")
+    parser.add_argument("--recheck-partial", action="store_true", help="Retry partially read PDF pages and keep the better publication.")
     args = parser.parse_args()
     from agent_banking.core.settings import Config
     from agent_banking.chunking.universal.extraction.sources import discover_documents
@@ -90,7 +106,7 @@ def main():
     print("Building", len(files), "source publications", flush=True)
     failures = 0
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
-        futures = [pool.submit(build_document, path, args.output.resolve(), args.ocr_docx_images) for path in files]
+        futures = [pool.submit(build_document, path, args.output.resolve(), args.ocr_docx_images, args.recheck_partial) for path in files]
         for future in as_completed(futures):
             record = future.result()
             if record["status"] == "ERROR":

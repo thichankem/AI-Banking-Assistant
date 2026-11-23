@@ -9,6 +9,7 @@ into a standard tool for AI Agents:
 - Returns normalized payload for Context Grounding and Citation.
 """
 
+import re
 import time
 
 from agent_banking.chunking.universal.planning.schema import payload_index_key
@@ -42,6 +43,54 @@ _DIAGRAM_CHUNK_MARKERS = (
     " hinh 1 ", " hinh 2 ", " hinh 3 ", " so do ",
     " quy trinh chuan ", " ma tran ",
 )
+_SOURCE_CODE = re.compile(r"^([a-z]{2,5})\s*0*(\d{1,3})\b")
+_STRUCTURAL_QUERY_TARGET = re.compile(r"\b(?:dieu|buoc|hinh|bang|phu luc) \d{1,3}[a-z]?\b")
+_QUERY_PAGE = re.compile(r"\b(?:trang|page)\s+(?:s[ốo]\s+)?([1-9]\d{0,3})\b", re.IGNORECASE)
+_WORKFLOW_DISCRIMINATORS = ("lan dau", "dinh ky", "sau khi kich hoat", "truoc han", "toan bo", "mot phan")
+
+
+class AmbiguousSource(ValueError):
+    def __init__(self, sources):
+        super().__init__("Source basename is ambiguous; use the complete source label")
+        self.sources = sorted(sources)
+
+
+def _source_stem(value):
+    name = value.replace("\\", "/").rsplit("/", 1)[-1].casefold()
+    for extension in (".pdf", ".docx", ".xlsx"):
+        if name.endswith(extension):
+            return name.removesuffix(extension)
+    return name
+
+
+def _reserve_query_targets(candidates, ranked, seen, query):
+    """Keep bounded, structurally aligned evidence that the reranker missed."""
+    query_key = search_key(query)
+    targets = set(_STRUCTURAL_QUERY_TARGET.findall(query_key))
+    workflow = {term for term in _WORKFLOW_DISCRIMINATORS if f" {term} " in f" {query_key} "}
+    if not targets and not workflow:
+        return []
+    ranked_sources = {chunk.get("source") for chunk in ranked}
+    chosen = []
+    for item in candidates[:15]:
+        if not isinstance(item, dict):
+            continue
+        chunk = item.get("chunk", item)
+        source = chunk.get("source")
+        identity = source, payload_index_key(chunk)
+        if identity in seen or not source:
+            continue
+        heading = search_key(str(chunk.get("section_title") or "") + " " + str(chunk.get("content") or "")[:180])
+        title = search_key(_source_stem(source))
+        is_target = bool(targets.intersection(_STRUCTURAL_QUERY_TARGET.findall(heading)))
+        is_workflow = source not in ranked_sources and any(f" {term} " in f" {title} " for term in workflow)
+        if is_target or is_workflow:
+            chosen.append(item)
+            seen.add(identity)
+            ranked_sources.add(source)
+            if len(chosen) == 2:
+                break
+    return chosen
 
 
 def matches_exact(item: dict, exact: str) -> bool:
@@ -355,59 +404,48 @@ class BankingRAGTool:
     def _source_chunks(self, source, scope):
         corpus = getattr(getattr(self.pipeline, "vector_store", None), "_bm25_corpus", [])
         source = source.replace("\\", "/").casefold()
+        path_requested = "/" in source
         matches = []
         for chunk in corpus:
             name = str(chunk.get("source", "")).replace("\\", "/").casefold()
             basename = name.rsplit("/", 1)[-1]
-            if name != source and basename != source and basename.rsplit(".", 1)[0] != source:
+            if path_requested:
+                matches_name = name == source or name.endswith("/" + source)
+            else:
+                matches_name = name == source or basename == source or _source_stem(basename) == source
+            if not matches_name:
                 continue
             if scope and scope not in chunk.get("business_metadata", {}).get("publication_scopes", []):
                 continue
             matches.append(chunk)
         min_key_len = int(_SOURCE_CFG["min_key_length"])
         min_non_digit_len = int(_SOURCE_CFG["min_non_digit_key_length"])
-        if not matches:
-            tail = source.rsplit("/", 1)[-1]
-            if "." in tail:
-                stem = tail.rsplit(".", 1)[0]
-            else:
-                stem = tail
-            src_key = search_key(stem)
+        if not matches and not path_requested:
+            src_key = search_key(_source_stem(source))
             if src_key:
-                prefix_matches = []
+                sources = {}
                 for chunk in corpus:
-                    if scope and scope not in chunk.get("business_metadata", {}).get("publication_scopes", []):
-                        continue
-                    basename = str(chunk.get("source", "")).replace("\\", "/").casefold().rsplit("/", 1)[-1]
-                    if "." in basename:
-                        base_stem = basename.rsplit(".", 1)[0]
-                    else:
-                        base_stem = basename
-                    base_key = search_key(base_stem)
-                    if base_key == src_key or base_key.startswith(src_key + " "):
-                        prefix_matches.append(chunk)
-                if prefix_matches:
-                    matches = prefix_matches
-                elif len(src_key) >= min_key_len:
-                    padded_src = " " + src_key + " "
-                    has_digit = any(ch.isdigit() for ch in src_key)
-                    if has_digit or len(src_key) >= min_non_digit_len:
-                        sub_matches = []
-                        for chunk in corpus:
-                            if scope and scope not in chunk.get("business_metadata", {}).get("publication_scopes", []):
-                                continue
-                            basename = str(chunk.get("source", "")).replace("\\", "/").casefold().rsplit("/", 1)[-1]
-                            if "." in basename:
-                                base_stem = basename.rsplit(".", 1)[0]
-                            else:
-                                base_stem = basename
-                            padded_base = " " + search_key(base_stem) + " "
-                            if padded_src in padded_base:
-                                sub_matches.append(chunk)
-                        if len({chunk["source"] for chunk in sub_matches}) == 1:
-                            matches = sub_matches
-        if len({chunk["source"] for chunk in matches}) > 1:
-            raise ValueError("Source basename is ambiguous; use the complete source label")
+                    meta = chunk.get("business_metadata", {})
+                    name = chunk.get("source")
+                    if isinstance(name, str) and name and (not scope or scope in meta.get("publication_scopes", [])):
+                        sources.setdefault(name, []).append(chunk)
+                labels = {name: search_key(_source_stem(name)) for name in sources}
+                matched_names = [name for name, label in labels.items() if label == src_key or label.startswith(src_key + " ")]
+                source_code = _SOURCE_CODE.match(src_key)
+                if not matched_names and source_code:
+                    matched_names = [name for name, label in labels.items()
+                                     if (code := _SOURCE_CODE.match(label)) and code.groups() == source_code.groups()]
+                if not matched_names and len(src_key) >= min_key_len and (
+                    any(ch.isdigit() for ch in src_key) or len(src_key) >= min_non_digit_len
+                ):
+                    matched_names = [name for name, label in labels.items() if f" {src_key} " in f" {label} "]
+                    terms = set(src_key.split())
+                    if not matched_names and len(terms) >= 3:
+                        matched_names = [name for name, label in labels.items() if terms <= set(label.split())]
+                matches = [chunk for name in matched_names for chunk in sources[name]]
+        matched_sources = {chunk["source"] for chunk in matches}
+        if len(matched_sources) > 1:
+            raise AmbiguousSource(matched_sources)
         by_id = {chunk["chunk_id"]: chunk for chunk in matches}
         ordered = []
         seen = set()
@@ -421,7 +459,8 @@ class BankingRAGTool:
         return ordered
 
     def execute(self, query: str, top_k: int | None = None, exact: str = "", candidate_k: int | None = None,
-                source: str = "", offset: int | None = None, excel: dict | None = None) -> dict:
+                source: str = "", offset: int | None = None, excel: dict | None = None,
+                page: int | None = None) -> dict:
         """
         Execute banking knowledge retrieval via Hybrid Retrieval & Reranker.
         """
@@ -444,6 +483,11 @@ class BankingRAGTool:
                 "citations": [],
                 "latency_ms": 0.0
             }
+        if page is not None and (not source or type(page) is not int or page < 1):
+            raise ValueError("Reading a page requires a source and a positive page number")
+        reading = offset is not None or page is not None
+        if offset is not None and (not source or type(offset) is not int or offset < 0):
+            raise ValueError("Reading a document requires source and a nonnegative offset")
 
         # 1. Parse Query & Acronym Normalization
         search_text = clean_query
@@ -483,47 +527,102 @@ class BankingRAGTool:
         if scope:
             filters = {"business_metadata.publication_scopes": scope}
         source_chunks = []
+        source_status = ""
+        source_candidates = []
         if source:
-            source_chunks = self._source_chunks(source, scope)
+            try:
+                source_chunks = self._source_chunks(source, scope)
+            except AmbiguousSource as error:
+                source_status = "source_ambiguous"
+                terms = set(search_key(search_query).split()) - _PIN_STOPWORDS
+                source_candidates = sorted(error.sources, key=lambda name: -len(terms.intersection(
+                    search_key(_source_stem(name)).split())))[:8]
+            if not source_chunks and not source_status:
+                folder = source.strip().replace("\\", "/").rstrip("/").casefold()
+                if folder:
+                    corpus = getattr(getattr(self.pipeline, "vector_store", None), "_bm25_corpus", ())
+                    source_chunks = [
+                        chunk for chunk in corpus
+                        if str(chunk.get("source", "")).replace("\\", "/").casefold().startswith(folder + "/")
+                        and (not scope or scope in chunk.get("business_metadata", {}).get("publication_scopes", ()))
+                    ]
+                    if source_chunks and offset == 0 and page is None:
+                        offset = None
+                        reading = False
+                    elif source_chunks and reading:
+                        source_status = "source_ambiguous"
+                        source_candidates = sorted({chunk["source"] for chunk in source_chunks})[:8]
+                        source_chunks = []
             if source_chunks:
-                filters["source"] = source_chunks[0]["source"]
+                names = sorted({chunk["source"] for chunk in source_chunks})
+                filters["source"] = names[0] if len(names) == 1 else names
+            elif not source_status:
+                source_status = "source_not_found"
+        reading_chunks = source_chunks
+        start_offset = offset or 0
+        if page is None and source_chunks and offset is not None:
+            pages = set(_QUERY_PAGE.findall(clean_query))
+            if len(pages) == 1:
+                page = int(pages.pop())
+        if page is not None and source_chunks:
+            reading_chunks = [chunk for chunk in source_chunks if page in _extract_item_pages(chunk)]
+            if not reading_chunks:
+                source_status = "page_not_found"
+        allowed = {(chunk["source"], payload_index_key(chunk)) for chunk in source_chunks}
+
+        def search(query):
+            items = self.pipeline.retriever.retrieve(
+                query=query, top_k=top_candidates, candidate_k=candidate_count, filter_dict=filters,
+            )
+            if not source:
+                return items
+            selected = []
+            for item in items:
+                raw = item.get("chunk", item)
+                if (raw.get("source"), payload_index_key(raw)) not in allowed:
+                    continue
+                if scope and scope not in raw.get("business_metadata", {}).get("publication_scopes", []):
+                    continue
+                selected.append(item)
+            return selected
+
         with trace_span("top_k_hybrid_retrieval", run_type="retriever", query=search_query, top_k=top_candidates) as ret_span:
-            if offset is not None:
-                if not source or type(offset) is not int or offset < 0:
-                    raise ValueError("Reading a document requires source and a nonnegative offset")
-                candidates = [{"chunk": chunk} for chunk in source_chunks[offset:offset + top_k]]
+            if reading:
+                candidates = [{"chunk": chunk} for chunk in reading_chunks[start_offset:start_offset + top_k]]
             elif source and not source_chunks:
                 candidates = []
             else:
-                candidates = self.pipeline.retriever.retrieve(
-                    query=parsed_q, top_k=top_candidates, candidate_k=candidate_count, filter_dict=filters,
-                )
-                if source:
-                    allowed = {(chunk["source"], payload_index_key(chunk)) for chunk in source_chunks}
-                    selected = []
-                    for item in candidates:
-                        raw = item.get("chunk", item)
-                        if (raw.get("source"), payload_index_key(raw)) not in allowed:
-                            continue
-                        if scope and scope not in raw.get("business_metadata", {}).get("publication_scopes", []):
-                            continue
-                        selected.append(item)
-                    candidates = selected
+                candidates = search(parsed_q)
             relaxed = any(item.get("retrieval_meta", {}).get("fallback_unfiltered") for item in candidates)
             if exact:
                 candidates = [item for item in candidates if matches_exact(item, exact)]
+            source_fallback = bool(source_chunks and not reading and not candidates)
+            if source_fallback:
+                terms = set(search_key(search_query).split()) - _PIN_STOPWORDS
+                scored = []
+                for chunk in source_chunks:
+                    if exact and not matches_exact(chunk, exact):
+                        continue
+                    passage = search_key(str(chunk.get("section_title") or "") + " " + str(chunk.get("content") or ""))
+                    overlap = len(terms.intersection(passage.split()))
+                    if overlap or exact:
+                        scored.append((overlap, chunk))
+                scored.sort(key=lambda pair: pair[0], reverse=True)
+                candidates = [{"chunk": chunk} for _, chunk in scored[:top_candidates]]
             ret_span.update(
                 candidate_count=len(candidates),
                 candidate_k=candidate_count,
                 filters=dict(filters),
                 offset=offset,
+                page=page,
                 relaxed_filters=relaxed,
+                source_fallback=source_fallback,
                 candidates_preview=_summarize_rag_items(candidates, limit=15),
             )
 
         # 3. Cross-Encoder Reranker
         with trace_span("top_k_cross_encoder_reranker", run_type="retriever", query=clean_query, input_count=len(candidates), top_k=top_k) as rr_span:
-            if offset is not None:
+            if reading:
                 reranked = candidates
             else:
                 reranked = self.pipeline.reranker.rerank(query=clean_query, candidates=candidates, top_k=top_k)
@@ -539,6 +638,35 @@ class BankingRAGTool:
         primary_count = len(reranked)
         ordered = {}
         related = []
+        if page is not None and source_chunks and start_offset == 0:
+            topic = " ".join(_QUERY_PAGE.sub(" ", search_text).split())
+            topic_words = {word for word in search_key(topic).split() if word.isalpha()} - _PIN_STOPWORDS
+            if len(topic_words) >= 3:
+                with trace_span("source_page_alternatives", run_type="retriever", page=page) as span:
+                    off_page = []
+                    parsed_topic = self.pipeline.parse_query(topic)
+                    for item in search(parsed_topic):
+                        pages = _extract_item_pages(item.get("chunk", item))
+                        if pages and page not in pages and (not exact or matches_exact(item, exact)):
+                            off_page.append(item)
+                    if off_page:
+                        related = self.pipeline.reranker.rerank(query=parsed_topic.normalized_query, candidates=off_page, top_k=3)
+                        positions = {payload_index_key(chunk): i for i, chunk in enumerate(source_chunks)}
+                        included = {payload_index_key(item.get("chunk", item)) for item in related}
+                        for item in list(related):
+                            anchor = item.get("chunk", item)
+                            if anchor.get("chunk_type") == "table" or anchor.get("table_data"):
+                                continue
+                            for _, _, neighbor in _source_neighbors(anchor, source_chunks, positions, procedure=False):
+                                key = payload_index_key(neighbor)
+                                if (neighbor.get("chunk_type") != "table" or key in included
+                                        or not set(_extract_item_pages(anchor)).intersection(_extract_item_pages(neighbor))
+                                        or (exact and not matches_exact(neighbor, exact))):
+                                    continue
+                                related.append({"chunk": neighbor, "context_for": anchor["chunk_id"]})
+                                included.add(key)
+                                break
+                    span.update(candidate_count=len(off_page), alternatives=_summarize_rag_items(related, limit=6))
         ranked = [item.get("chunk", item) for item in reranked if isinstance(item, dict)]
         ranked = [chunk for chunk in ranked if isinstance(chunk, dict)]
         seen = {(chunk.get("source"), payload_index_key(chunk)) for chunk in ranked}
@@ -546,18 +674,22 @@ class BankingRAGTool:
         procedure = is_procedure_query(clean_query)
         contact_phrases = tuple(_RAG_CFG["contact_phrases"])
         contact = any(phrase in query_key for phrase in contact_phrases)
-        for chunk in ranked:
+        for chunk in [*ranked, *(item.get("chunk", item) for item in related)]:
             name = chunk.get("source")
             if name and name not in ordered:
                 passages = self._source_chunks(name, scope)
                 ordered[name] = (passages, {payload_index_key(p): i for i, p in enumerate(passages)})
-        if offset is None:
+        if not reading:
             related_limit = int(_RAG_CFG["related_limit"])
             if procedure and ranked and _app_guide(ranked[0]):
                 related_limit = int(_RAG_CFG["app_procedure_related_limit"])
+            reserved = []
+            if top_k >= 3 and ranked:
+                reserved = _reserve_query_targets(candidates, ranked, seen, clean_query)[:related_limit]
+                related_limit -= len(reserved)
             header_scan_limit = int(_RAG_CFG["guide_header_scan_limit"])
             anchor_limit = int(_RAG_CFG["neighbor_anchor_limit"])
-            if contact and ranked:
+            if related_limit and contact and ranked:
                 anchor = ranked[0]
                 name = anchor.get("source")
                 if name in ordered and _app_guide(anchor):
@@ -577,6 +709,8 @@ class BankingRAGTool:
                                 seen.add(identity)
                             break
             for anchor in ranked[:anchor_limit]:
+                if len(related) >= related_limit:
+                    break
                 is_table = anchor.get("chunk_type") == "table" or bool(anchor.get("table_data"))
                 if not (procedure or is_table) or anchor.get("source") not in ordered:
                     continue
@@ -593,6 +727,7 @@ class BankingRAGTool:
                     break
             if top_k >= 3 and len(related) < related_limit:
                 _pin_intra_document_targets(ranked, ordered, seen, clean_query, related, related_limit)
+            related.extend(reserved)
 
         default_source = TOOL_TEMPLATES["rag_default_source_label"]
         score_precision = int(_RAG_CFG["score_precision"])
@@ -716,8 +851,8 @@ class BankingRAGTool:
             if count:
                 inventory.append({"source": name, "chunks": count})
         method = "none"
-        if offset is not None:
-            method = "source_order"
+        if reading:
+            method = "page_order" if page is not None else "source_order"
         elif reranked:
             method = reranked[0].get("rerank_method", "unknown")
 
@@ -732,13 +867,16 @@ class BankingRAGTool:
             "citations": citations[:primary_count],
             "latency_ms": latency_ms,
             "retrieval_quality": {
+                **({"source_status": source_status, "source_candidates": source_candidates} if source_status else {}),
                 "relaxed_filters": relaxed,
                 "reranker": method,
                 "exact_match_missing": bool(exact and not docs),
                 "searched_candidates": len(candidates),
                 "top_scores": [round(item["relevance_score"], score_precision) for item in docs[:primary_count]],
                 "source_chunk_count": len(source_chunks),
-                "next_offset": self._next_offset(offset, top_k, len(source_chunks)),
+                **({"page": page, "page_chunk_count": len(reading_chunks), "other_page_matches": len(related)}
+                   if page is not None else {}),
+                "next_offset": self._next_offset(start_offset if reading else None, top_k, len(reading_chunks)),
                 "source_inventory": inventory,
             }
         }

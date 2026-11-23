@@ -15,9 +15,10 @@ from agent_banking.agent.document_context import (
 )
 from agent_banking.core.chat import FallbackChatClient
 from agent_banking.core.models import auto_routing_enabled
+from agent_banking.core.search_text import search_key
 from agent_banking.guardrails.rag_guardrails import BankingGuardrailManager
 from agent_banking.skills.skill_registry import SkillRegistry, mapped_arguments, resolve_skill
-from agent_banking.tools.extensions.legal_web_search import TOOL_NAME as LEGAL_WEB_SEARCH_TOOL
+from agent_banking.tools.extensions.legal_web_search import MAX_SEARCHES_PER_TURN, TOOL_NAME as LEGAL_WEB_SEARCH_TOOL
 from agent_banking.tools.tool_registry import BankingToolRegistry, ONCE_PER_TURN, is_extension, tool_contract, tool_input_schema
 from agent_banking.tracing.tracer import trace_span
 
@@ -40,6 +41,10 @@ _MAX_CITATION_DIGITS = get_int_setting("max_citation_number_digits")
 _INTERNAL_THINKING_TAGS = tuple(get_setting("internal_thinking_tags", ()))
 _INCIDENT_DEFAULTS = dict(get_setting("incident_defaults") or {})
 _REACT_MESSAGES = get_messages("react")
+
+
+def legal_searches_remaining(calls):
+    return max(0, MAX_SEARCHES_PER_TURN - sum(call.get("tool") == LEGAL_WEB_SEARCH_TOOL for call in calls))
 
 
 def verify_calculation(tool_name: str, data: dict, params: dict) -> bool:
@@ -412,6 +417,9 @@ class BankingReActNodes:
         elif not error:
             params, error = self._guard_tool(name, params, tools)
         key = ""
+        calls = list(state.get("tool_outputs", []))
+        if not error and tool_name == LEGAL_WEB_SEARCH_TOOL and not legal_searches_remaining(calls):
+            error = _REACT_MESSAGES.get("legal_search_limit") or "Legal search limit reached for this turn."
         if not error and state.get("worker") and tool_name in ONCE_PER_TURN:
             error = _REACT_MESSAGES.get("worker_readonly_only", "")
         if not error:
@@ -420,6 +428,8 @@ class BankingReActNodes:
             else:
                 # Fact-checking documents come from state and need not be stored twice.
                 fingerprint_input = {k: v for k, v in params.items() if k != "documents"}
+                if tool_name == LEGAL_WEB_SEARCH_TOOL:
+                    fingerprint_input["query"] = search_key(params["query"])
                 if kind == "tool" and name == "search_banking_knowledge" and params.get("offset") is not None and params.get("source"):
                     fingerprint_input.pop("query", None)
                     raw_src = str(params.get("source") or "").replace("\\", "/").casefold().rsplit("/", 1)[-1]
@@ -447,7 +457,6 @@ class BankingReActNodes:
                 else:
                     error = _REACT_MESSAGES.get("action_already_executed", "")
 
-        calls = list(state.get("tool_outputs", []))
         observation = {"kind": kind, "name": name, "status": "ERROR", "error": error}
         if error:
             observation["error_code"] = "invalid_action"
@@ -486,6 +495,7 @@ class BankingReActNodes:
                 web_details = {}
                 if web_search and isinstance(data, dict):
                     web_details = {key: data[key] for key in ("provider", "attempts") if key in data}
+                    web_details["web_evidence_status"] = data.get("status")
                 if result.get("status") == "SUCCESS" and isinstance(data, dict) and str(data.get("status", "")).lower() not in ("failed", "error"):
                     observation = {"kind": kind, "name": name, "status": "SUCCESS"}
                     simulated = tool_name in SIMULATED_TOOLS or data.get("simulation") is True
@@ -505,8 +515,9 @@ class BankingReActNodes:
                     if retrieval:
                         observation["data"] = data
                         if not data["documents"]:
-                            observation.update(status="ERROR", error_code="insufficient_evidence",
-                                               error=_REACT_MESSAGES.get("insufficient_evidence", ""))
+                            code = data.get("retrieval_quality", {}).get("source_status") or "insufficient_evidence"
+                            observation.update(status="ERROR", error_code=code,
+                                               error=_REACT_MESSAGES.get(code, _REACT_MESSAGES.get("insufficient_evidence", "")))
                     elif not verify_calculation(tool_name, data, params):
                         observation.update(status="ERROR", error_code="verification_failed",
                                            error=_REACT_MESSAGES.get("calculation_verification_failed", ""))

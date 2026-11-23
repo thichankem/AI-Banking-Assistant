@@ -1,21 +1,21 @@
 ---
 name: service-troubleshooting
-description: Hướng dẫn khắc phục lỗi A-Bank Plus, giao dịch hoặc dịch vụ. Dùng khi
-  khách nêu lỗi ứng dụng, mã lỗi, thất bại ở một bước hoặc cần kênh hỗ trợ.
-compatibility: Các thao tác nghiệp vụ sử dụng các công cụ được cấp trong A-Bank.
+description: Troubleshooting guidance for A-Bank Plus, transactions, or services. Use when
+  customers report app errors, error codes, failures at a step, or need support channels.
+compatibility: Operational procedures use authorized tools within A-Bank.
 metadata:
   version: 1.0.0
-  a-bank-category: Vận hành
+  a-bank-category: Operations
   a-bank-display-name: service-troubleshooting
   a-bank-tool: search_banking_knowledge
 ---
 
 # service-troubleshooting
 
-## Cách làm
+## Instructions
 
-1. Xác định tính năng và bước xảy ra lỗi. Nếu có mã lỗi, đưa mã vào `exact` khi tra `search_banking_knowledge`.
-2. Tra đúng lỗi và nền tảng. Trình bày các bước theo thứ tự trong nguồn, phân biệt bước khách đã thử và bước còn lại.
-3. Nếu sự cố tiếp diễn, chỉ dẫn kênh được ghi trong tài liệu tương ứng. Gắn nhãn nguồn cho hướng dẫn.
+1. Identify the feature and step where the error occurred. If an error code exists, include the code in `exact` when searching `search_banking_knowledge`.
+2. Look up the exact error and platform. Present steps in the order found in the source, distinguishing between steps the customer has already tried and remaining steps.
+3. If the issue persists, provide guidance on channels recorded in the corresponding document. Attach source labels to instructions.
 
-Hỏi thêm thông tin kỹ thuật tối thiểu nếu một chi tiết quyết định cách xử lý. Không yêu cầu thông tin xác thực hay mã OTP.
+Ask for minimal technical details if a specific detail determines the resolution method. Never request authentication credentials or OTP codes.

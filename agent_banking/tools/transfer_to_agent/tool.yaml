@@ -1,6 +1,6 @@
 name: transfer_to_agent
-title: Chuyển Giao Tư Vấn Viên Trực Tuyến
-description: Mô phỏng trạng thái chuyển giao cho tư vấn viên theo khung giờ mẫu.
+title: Transfer to Online Human Advisor
+description: Simulate transfer status to human advisors based on sample working hours.
 inputSchema:
   $schema: https://json-schema.org/draft/2020-12/schema
   type: object
@@ -8,11 +8,11 @@ inputSchema:
     business_process:
       type: string
       default: request_human_agent
-      description: Nghiệp vụ hoặc lý do chuyển tiếp chuyên viên tư vấn
+      description: Business process or reason for forwarding to an advisor
     customer_segment:
       type: string
       default: individual
-      description: Phân khúc khách hàng ('individual' hoặc 'corporate')
+      description: Customer segment ('individual' or 'corporate')
   additionalProperties: false
 outputSchema:
   $schema: https://json-schema.org/draft/2020-12/schema

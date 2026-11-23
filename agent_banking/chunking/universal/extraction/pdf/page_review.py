@@ -116,19 +116,22 @@ class PdfVisualReviewer:
             "clients": [_client_identity(client) for client in clients],
             "models": [chain_fingerprint(role) for role in ("chunking.vision", "chunking.vision_review")],
         }
+        base_key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+        key = base_key
         if review_incomplete:
             identity["review_incomplete"] = True
-        key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
-        cached = self.cache.get(key)
-        if isinstance(cached, dict):
-            try:
-                evidence = cached["visual_review"]
-                if evidence.get("layout_sha256") == _layout_hash(cached):
-                    _validate_layout(cached, pixels)
-                    annotate_span(cache_hit=True)
-                    return deepcopy(cached)
-            except (AttributeError, KeyError, TypeError, ValueError):
-                pass
+            key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+        for cache_key in dict.fromkeys((key, base_key)):
+            cached = self.cache.get(cache_key)
+            if isinstance(cached, dict):
+                try:
+                    evidence = cached["visual_review"]
+                    if not evidence.get("incomplete") and evidence.get("layout_sha256") == _layout_hash(cached):
+                        _validate_layout(cached, pixels)
+                        annotate_span(cache_hit=True)
+                        return deepcopy(cached)
+                except (AttributeError, KeyError, TypeError, ValueError):
+                    pass
 
         instructions = SCAN_PAGE_PROMPT
         if region_depth:

@@ -1,7 +1,7 @@
 name: get_foreign_exchange_rates
-title: Tra Cứu Bảng Tỷ Giá Ngoại Tệ
-description: Đọc tỷ giá mẫu để mô phỏng. Không đại diện tỷ giá niêm yết hay thời gian
-  thực của A-Bank.
+title: Foreign Exchange Rate Lookup
+description: Read sample foreign exchange rates for simulation. Does not represent
+  official or real-time rates of A-Bank.
 inputSchema:
   $schema: https://json-schema.org/draft/2020-12/schema
   type: object
@@ -9,8 +9,8 @@ inputSchema:
     currency:
       type: string
       default: USD
-      description: Mã ngoại tệ 3 ký tự chuẩn ISO (USD, EUR, JPY, GBP, SGD, AUD, CAD,
-        CNY). Bỏ trống để lấy toàn bộ bảng tỷ giá.
+      description: Standard 3-character ISO currency code (USD, EUR, JPY, GBP, SGD,
+        AUD, CAD, CNY). Leave empty to retrieve the entire exchange rate table.
   additionalProperties: false
 outputSchema:
   $schema: https://json-schema.org/draft/2020-12/schema

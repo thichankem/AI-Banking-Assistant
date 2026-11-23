@@ -1,21 +1,21 @@
 ---
 name: financial-calculator
-description: Tính khoản trả nợ theo dư nợ giảm dần và mô phỏng tiền lãi tiết kiệm.
-  Dùng khi khách yêu cầu phép tính hoặc ví dụ lãi suất, tỷ giá hoặc kỳ hạn.
-compatibility: Các thao tác nghiệp vụ sử dụng các công cụ được cấp trong A-Bank.
+description: Calculate loan amortization using declining balance and simulate savings interest.
+  Use when customers request financial calculations or examples of interest rates, exchange rates, or terms.
+compatibility: Operational procedures use authorized tools within A-Bank.
 metadata:
   version: 2.0.0
   a-bank-category: CALCULATION
-  a-bank-display-name: Tính toán Tài chính & Lịch Trả Nợ Vay
+  a-bank-display-name: Financial Calculations & Loan Amortization Schedule
 ---
 
-# Tính toán Tài chính & Lịch Trả Nợ Vay
+# Financial Calculations & Loan Amortization Schedule
 
-## Cách làm
+## Instructions
 
-1. Xác nhận các tham số ảnh hưởng đến phép tính. Với trả nợ, cần tiền gốc, lãi suất năm và kỳ hạn tháng. Với tiết kiệm, cần tiền gốc và kỳ hạn.
-2. Chọn `operation` phù hợp. Xem [bảng thao tác](references/operations.md) nếu cần đối chiếu tham số.
-3. Giải thích kết quả bằng VND và nêu giả định. Với khoản vay, phân biệt khoản trả tháng đầu, tổng lãi và tổng phải trả.
-4. Đánh dấu lãi suất, tỷ giá và lãi tiết kiệm mẫu là mô phỏng. Nếu khách hỏi biểu niêm yết, tra tài liệu A-Bank đúng sản phẩm và điều kiện.
+1. Confirm parameters affecting calculations. For loan repayment, principal, annual interest rate, and term in months are required. For savings, principal and term are required.
+2. Select the appropriate `operation`. Consult the [operations reference](references/operations.md) if parameter verification is needed.
+3. Explain results in VND and state assumptions clearly. For loans, distinguish between first-month payment, total interest, and total amount payable.
+4. Mark sample interest rates, exchange rates, and savings yields as simulated. If customers ask for official published tables, look up A-Bank documents for the exact product and conditions.
 
-Ví dụ, chuyển “12 tháng” thành `term_months: 12`. Giữ nguyên lãi suất và số tiền khách đưa.
+For example, convert "12 tháng" to `term_months: 12`. Preserve interest rates and amounts stated by the customer.

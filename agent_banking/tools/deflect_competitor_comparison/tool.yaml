@@ -1,7 +1,7 @@
 name: deflect_competitor_comparison
-title: Điều Hướng So Sánh Đối Thủ Cạnh Tranh
-description: Điều hướng câu hỏi so sánh trực tiếp với ngân hàng đối thủ (Techcombank,
-  MB, VPBank...) về lợi thế và chính sách vượt trội của A-Bank.
+title: Deflect Competitor Comparison
+description: Deflect direct comparison questions regarding competitor banks (Techcombank,
+  MB, VPBank...) towards the advantages and distinct policies of A-Bank.
 inputSchema:
   $schema: https://json-schema.org/draft/2020-12/schema
   type: object
@@ -9,11 +9,11 @@ inputSchema:
     competitor_name:
       type: string
       default: ''
-      description: Tên ngân hàng đối thủ khách hàng nhắc đến
+      description: Name of competitor bank mentioned by the customer
     query:
       type: string
       default: ''
-      description: Câu hỏi hoặc nội dung đối sánh ban đầu của khách hàng
+      description: Initial question or comparison content from the customer
   required:
   - competitor_name
   additionalProperties: false

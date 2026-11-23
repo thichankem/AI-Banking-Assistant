@@ -1,14 +1,14 @@
 name: parse_vietnamese_financial_params
-title: Bóc Tách Tham Số Tài Chính Tiếng Việt
-description: Bóc tách số tiền (triệu, tỷ, k, củ), kỳ hạn vay/gửi (tháng, năm), lãi
-  suất từ câu hỏi văn bản tự nhiên tiếng Việt thuần túy 0% regex.
+title: Extract Vietnamese Financial Parameters
+description: Extract financial amounts (triệu, tỷ, k, củ), loan/savings terms (tháng,
+  năm), and interest rates from natural Vietnamese text using 0% regex.
 inputSchema:
   $schema: https://json-schema.org/draft/2020-12/schema
   type: object
   properties:
     query:
       type: string
-      description: Câu hỏi của khách hàng chứa thông tin tài chính
+      description: Customer inquiry containing financial information
   required:
   - query
   additionalProperties: false

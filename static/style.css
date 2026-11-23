@@ -208,6 +208,244 @@ body {
     padding: 2px 0;
 }
 
+.message-visualization {
+    margin: 18px 0;
+    min-width: 0;
+}
+
+.message-visualization-surface.composed:empty {
+    min-height: 3rem;
+}
+
+.visual-layout-block {
+    min-width: 0;
+}
+
+.visual-layout-column,
+.visual-layout-grid {
+    display: grid;
+    gap: 0.9rem;
+}
+
+.visual-layout-grid {
+    grid-template-columns: repeat(var(--layout-columns, 2), minmax(0, 1fr));
+}
+
+.visual-layout-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: start;
+    gap: 0.9rem;
+}
+
+.visual-layout-row > .visual-layout-block {
+    flex: 1 1 10rem;
+}
+
+.visual-layout-card,
+.visual-layout-accent {
+    padding: 0.8rem;
+    border: 1px solid var(--border-default);
+    border-radius: 12px;
+    background: var(--bg-card);
+}
+
+.visual-layout-accent {
+    background: var(--bg-surface-elevated);
+    border-color: var(--focus-ring);
+}
+
+.visual-layout-accent .simulator-result strong {
+    font-size: 1.4rem;
+}
+
+@media (max-width: 550px) {
+    .visual-layout-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.message-visualization figcaption {
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+.message-visualization-revision {
+    margin-inline-start: 8px;
+    color: var(--text-muted);
+    font-size: 0.85em;
+    font-weight: 400;
+}
+
+.message-visualization-surface {
+    width: 100%;
+}
+
+.message-visualization-surface.echarts {
+    height: clamp(260px, 42vh, 370px);
+}
+
+.message-visualization-surface.mermaid {
+    min-height: 180px;
+}
+
+.message-visualization-surface.mermaid img {
+    width: 100%;
+    max-height: min(72vh, 620px);
+    object-fit: contain;
+    display: block;
+}
+
+.message-visualization-surface.message-visualization-error {
+    height: auto;
+    min-height: 0;
+    color: var(--text-muted);
+}
+
+.message-visualization-data {
+    margin-top: 8px;
+}
+
+.message-visualization-data > div {
+    overflow-x: auto;
+}
+
+.simulator-panel {
+    display: grid;
+    gap: 1rem;
+    padding: clamp(12px, 3vw, 22px);
+    border: 1px solid var(--border-default);
+    border-radius: 16px;
+    background: var(--bg-card);
+    min-width: 0;
+}
+
+.simulator-fields {
+    display: grid;
+    gap: 0.9rem;
+}
+
+.simulator-limits {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.simulator-input-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, min(59%, 19rem));
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.simulator-value-field {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+}
+
+.simulator-value-field input {
+    width: min(11rem, 65%);
+    min-width: 0;
+    min-height: 2.5rem;
+    padding: 4px 9px;
+    border: 1px solid var(--border-control);
+    border-radius: 8px;
+    background: var(--bg-surface-elevated);
+    color: var(--text-primary);
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+}
+
+.simulator-value-field input:only-child {
+    width: min(11rem, 100%);
+}
+
+.simulator-value-field input[aria-invalid="true"] {
+    border-color: var(--accent-danger);
+}
+
+.simulator-value-field span,
+.simulator-limits,
+.simulator-note,
+.simulator-assumptions {
+    color: var(--text-muted);
+    font-size: 0.86rem;
+}
+
+.simulator-input input[type="range"] {
+    display: block;
+    width: 100%;
+    min-height: 2.5rem;
+    margin: 4px 0 0;
+    accent-color: var(--btn-primary-bg);
+}
+
+.simulator-limits {
+    justify-content: space-between;
+}
+
+.simulator-input-error {
+    color: var(--accent-danger);
+    font-size: 0.86rem;
+}
+
+.simulator-results {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+    gap: 0.85rem 1.2rem;
+    border-block-start: 1px solid var(--border-default);
+    padding-top: 0.8rem;
+}
+
+.simulator-result-primary {
+    grid-column: 1 / -1;
+}
+
+.simulator-result-label {
+    color: var(--text-secondary);
+    margin-bottom: 0.15rem;
+}
+
+.simulator-result strong {
+    color: var(--text-primary);
+    font-size: 1.15rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.simulator-result-primary strong {
+    font-size: clamp(1.4rem, 4vw, 2rem);
+}
+
+.simulator-formula-table {
+    margin-block: 0.45rem;
+    overflow-x: auto;
+}
+
+.simulator-formulas summary,
+.simulator-reset {
+    width: fit-content;
+    cursor: pointer;
+}
+
+.simulator-formulas summary:focus-visible,
+.simulator-reset:focus-visible,
+.simulator-input input:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+.simulator-reset {
+    padding: 0.35rem 0.65rem;
+    color: var(--text-primary);
+    background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: 8px;
+    font: inherit;
+    font-size: 0.86rem;
+}
+
 .message-copy-btn {
     margin-top: 6px;
     padding: 5px 8px;

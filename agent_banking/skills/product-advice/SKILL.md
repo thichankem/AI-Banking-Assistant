@@ -1,22 +1,22 @@
 ---
 name: product-advice
-description: So sánh sản phẩm A-Bank như thẻ, khoản vay, tiết kiệm, hạn mức, biểu
-  phí và ưu đãi. Dùng khi khách muốn chọn phương án theo nhu cầu cụ thể.
-compatibility: Các thao tác nghiệp vụ sử dụng các công cụ được cấp trong A-Bank.
+description: Compare A-Bank products such as cards, loans, savings, limits, fee
+  schedules, and promotions. Use when customers want to choose options based on specific needs.
+compatibility: Operational procedures use authorized tools within A-Bank.
 metadata:
   version: 1.0.0
-  a-bank-category: Tư vấn
+  a-bank-category: Advisory
   a-bank-display-name: product-advice
   a-bank-tool: search_banking_knowledge
 ---
 
 # product-advice
 
-## Cách làm
+## Instructions
 
-1. Xác định tên sản phẩm và tiêu chí. Hỏi lại nếu thiếu đối tượng hoặc kỳ hạn làm thay đổi so sánh.
-2. Tra bằng `search_banking_knowledge`, dùng `exact` khi cần khớp tên. Đối chiếu tên dòng, kỳ hạn, đơn vị và điều kiện cùng nhau.
-3. Khi so sánh nhiều phương án, dùng bảng với các cột cùng tiêu chí. Gắn nguồn cho các mức phí, hạn mức hoặc điều kiện.
-4. Nếu khách muốn xem ví dụ tính tiền, dùng skill `financial-calculator` và nói rõ giả định.
+1. Identify product names and criteria. Ask back if missing subjects or terms would change the comparison.
+2. Search using `search_banking_knowledge`, using `exact` when name matching is required. Cross-reference product line names, terms, units, and conditions together.
+3. When comparing multiple options, use a table with identical criteria columns. Attach sources for fee rates, limits, or conditions.
+4. If the customer wants calculation examples, use the `financial-calculator` skill and state assumptions clearly.
 
-Nếu nguồn có nội dung khác nhau cho cùng đối tượng và điều kiện, nêu cả hai thay vì tự chọn giá trị.
+If sources contain divergent content for the same subject and conditions, state both rather than choosing one arbitrarily.

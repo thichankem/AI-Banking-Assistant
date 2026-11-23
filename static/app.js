@@ -9,6 +9,40 @@ document.addEventListener("DOMContentLoaded", () => {
     const userInput = document.getElementById("userInput");
     const sendBtn = document.getElementById("sendBtn");
     const chatMessages = document.getElementById("chatMessages");
+    let visualizationModule;
+
+    function clearChatMessages() {
+        visualizationModule?.releaseVisualizations(chatMessages);
+        chatMessages.replaceChildren();
+    }
+
+    function appendVisualization(bubble, visual) {
+        if (visual?.schema_version !== 1 || typeof visual.title !== "string") return;
+        if (!["echarts", "mermaid", "simulator"].includes(visual.engine)) return;
+        const figure = document.createElement("figure");
+        figure.className = "message-visualization";
+        const caption = document.createElement("figcaption");
+        caption.textContent = visual.title;
+        if (visual.revision > 1) {
+            const revision = document.createElement("span");
+            revision.className = "message-visualization-revision";
+            revision.textContent = "Phiên bản " + visual.revision;
+            caption.append(revision);
+        }
+        const surface = document.createElement("div");
+        surface.className = "message-visualization-surface " + (visual.layout ? "composed" : visual.engine);
+        if (visual.layout) figure.setAttribute("aria-label", visual.title);
+        else figure.append(caption);
+        figure.append(surface);
+        bubble.append(figure);
+        import("/static/visualization.js?v=7").then(module => {
+            visualizationModule = module;
+            if (figure.isConnected) module.observeVisualization(figure, surface, visual, chatMessages);
+        }).catch(() => {
+            surface.classList.add("message-visualization-error");
+            surface.textContent = "Không thể tải hình minh họa.";
+        });
+    }
 
     // Stepper & Live DAG DOM Elements
     const nodeStepper = document.getElementById("nodeStepper");
@@ -1534,7 +1568,7 @@ document.addEventListener("DOMContentLoaded", () => {
         stopVoiceRecording();
         clearComposerStatus();
         setBusy(false);
-        chatMessages.innerHTML = "";
+        clearChatMessages();
         enterWelcomeState();
         resetDagState(false);
         if (nodeStepper) {
@@ -1569,11 +1603,11 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    async function switchToSession(targetSessionId) {
+    async function switchToSession(targetSessionId, { restoring = false } = {}) {
         if (!targetSessionId) {
             return;
         }
-        if (busy) {
+        if (busy && !restoring) {
             showComposerStatus("Vui lòng đợi phản hồi hiện tại hoàn tất trước khi chuyển phiên.", "info", 2500);
             return;
         }
@@ -1595,7 +1629,7 @@ document.addEventListener("DOMContentLoaded", () => {
             stopVoiceRecording();
             clearComposerStatus();
             setBusy(false);
-            chatMessages.innerHTML = "";
+            clearChatMessages();
 
             let msgs = [];
             if (Array.isArray(detail.messages)) {
@@ -1610,7 +1644,7 @@ document.addEventListener("DOMContentLoaded", () => {
             } else {
                 exitWelcomeState();
                 for (const msg of msgs) {
-                    if (!msg || !msg.content) {
+                    if (!msg || (!msg.content && !msg.visualization)) {
                         continue;
                     }
                     if (msg.role === "user") {
@@ -3834,6 +3868,8 @@ document.addEventListener("DOMContentLoaded", () => {
             bubbleEl.className = "bubble";
             bubbleEl.innerHTML = parseMarkdown(content, citationByIndex);
 
+            if (meta?.audit_status === "PASS") appendVisualization(bubbleEl, meta.visualization);
+
             if (citationList.length > 0) {
                 bubbleEl.addEventListener("click", (event) => {
                     const btn = event.target.closest(".inline-citation-btn");
@@ -4287,7 +4323,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         renderPlan(data.plan, isPassDone);
         finishProgressForStatus(data && data.audit_status, data && data.status, data && data.answer);
-        appendMessage("bot", data.answer || "Không nhận được phản hồi từ hệ thống.", data);
+        appendMessage("bot", data.answer || (data.visualization ? "" : "Không nhận được phản hồi từ hệ thống."), data);
         fetchSessions();
     }
 
@@ -4476,6 +4512,7 @@ document.addEventListener("DOMContentLoaded", () => {
             citations: finalDoneMeta.citations,
             sources: finalDoneMeta.sources,
             images: finalDoneMeta.images,
+            visualization: finalDoneMeta.visualization,
             trace_id: finalDoneMeta.trace_id,
             turn_id: finalDoneMeta.turn_id,
             audit_status: finalDoneMeta.audit_status,
@@ -5236,7 +5273,7 @@ document.addEventListener("DOMContentLoaded", () => {
     fetchSessions();
     (async () => {
         if (storedSessionBeforeLoad) {
-            const restored = await switchToSession(currentSessionId);
+            const restored = await switchToSession(currentSessionId, { restoring: true });
             if (!restored) {
                 await recoverInteraction(null, true);
             }

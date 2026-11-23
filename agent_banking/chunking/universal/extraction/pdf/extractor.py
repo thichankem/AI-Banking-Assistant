@@ -21,10 +21,15 @@ _DOC_ID_HEX_LEN = _PUB_RULES["document_id_hex_length"]
 _PREFIX_HEX_LEN = _PUB_RULES["prefix_hash_length"]
 
 
+class PartialOCRNotImproved(Exception):
+    """A maintenance read did not improve on the published page coverage."""
+
+
 class PdfExtractor:
     def __init__(self, asset_dir, cache, vision_client=None, review_client=None,
                  dpi=_PIPELINE["dpi"], max_pages=_PIPELINE["max_pdf_pages"],
-                 max_page_pixels=_PIPELINE["max_page_pixels"], use_decision=True, *, search_language="vi", workers=1):
+                 max_page_pixels=_PIPELINE["max_page_pixels"], use_decision=True, *, search_language="vi", workers=1,
+                 review_incomplete=False, previous_partial_pages=0):
         if isinstance(dpi, bool) or not isinstance(dpi, int) or not _MIN_DPI <= dpi <= _MAX_DPI or isinstance(max_pages, bool) or not isinstance(max_pages, int) or max_pages < 1:
             raise ValueError("PDF limits require " + str(_MIN_DPI) + ".." + str(_MAX_DPI) + " DPI and positive max_pages")
         if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
@@ -41,6 +46,8 @@ class PdfExtractor:
         self.use_decision = use_decision
         self.search_language = search_language
         self.workers = workers
+        self.review_incomplete = review_incomplete
+        self.previous_partial_pages = previous_partial_pages
 
     def extract(self, source, source_name):
         import pymupdf
@@ -107,6 +114,8 @@ class PdfExtractor:
                 "ocr_failed_pages": len(failed_pages),
                 "ocr_failed_page_numbers": [error.pdf_page_number for error in failed_pages],
             }
+            if self.previous_partial_pages and (failed_pages or ocr_statistics["ocr_partial_pages"] >= self.previous_partial_pages):
+                raise PartialOCRNotImproved
             if failed_pages and not ir["blocks"]:
                 failed_pages[0].pdf_ocr_statistics = ocr_statistics
                 raise failed_pages[0]
@@ -154,7 +163,7 @@ class PdfExtractor:
     def _read_rendered_page(self, pixels, width, height, sha, page_index, rotation):
         try:
             reader = PdfVisualReviewer(self.asset_dir, self.cache, self.vision_client, self.review_client, self.use_decision)
-            layout = reader.read(pixels, [], width, height)
+            layout = reader.read(pixels, [], width, height, review_incomplete=self.review_incomplete)
             return page_index, sha, rotation, layout, None
         except CloudOCRUnavailable as error:
             error.pdf_render_sha256 = sha

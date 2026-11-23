@@ -9,19 +9,19 @@ parameters_schema:
       - tra_soat_giao_dich
       - gian_lan_lua_dao
       default: tra_soat_giao_dich
-      description: Phân loại sự cố ngân hàng
+      description: Banking incident classification
     user_contact:
       type: string
       default: KHACH_HANG_HOTLINE
-      description: Số điện thoại hoặc thông tin liên hệ của khách hàng
+      description: Customer phone number or contact information
     card_number:
       type: string
       default: ''
-      description: Số thẻ hoặc số tài khoản bị sự cố
+      description: Card number or account number involved in the incident
     details:
       type: string
       default: Tiếp nhận từ trợ lý AI.
-      description: Mô tả chi tiết sự việc, địa điểm, thời gian
+      description: Detailed description of the incident, location, and time
     urgency:
       type: string
       enum:
@@ -29,7 +29,7 @@ parameters_schema:
       - HIGH
       - CRITICAL
       default: HIGH
-      description: Mức độ khẩn cấp của sự cố
+      description: Urgency level of the incident
 output_schema:
   type: object
   properties:

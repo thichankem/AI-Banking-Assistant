@@ -1,8 +1,8 @@
 name: analyze_banking_query
-title: Phân tích truy vấn ngân hàng
-description: Chuẩn hóa câu hỏi, mở rộng từ viết tắt ngân hàng đã biết, báo nghĩa có
-  thể nhầm và trích từ khóa, số tiền, tham chiếu văn bản. Các trường trả về là dữ
-  liệu từ câu hỏi và gợi ý tìm kiếm. RAG đã tự chuẩn hóa khi gọi tra cứu.
+title: Banking Query Analysis
+description: Normalize inquiries, expand known banking abbreviations, flag potentially ambiguous meanings,
+  and extract keywords, amounts, and document references. Returned fields provide data from the inquiry
+  and search suggestions. RAG normalizes automatically during search.
 inputSchema:
   $schema: https://json-schema.org/draft/2020-12/schema
   type: object
@@ -11,7 +11,7 @@ inputSchema:
       type: string
       minLength: 1
       maxLength: 500
-      description: Câu hỏi hoặc cụm từ ngân hàng cần phân tích.
+      description: Banking inquiry or phrase to analyze.
   required:
   - query
   additionalProperties: false

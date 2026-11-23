@@ -1,6 +1,6 @@
 name: check_complain_count
-title: Kiểm Soát Tần Suất Phàn Nàn
-description: Tính số lượt phàn nàn tiếp theo và cho biết đã tới ngưỡng đề xuất chuyển tư vấn viên.
+title: Complaint Frequency Control
+description: Compute the next complaint count and determine if the threshold for proposing transfer to a human advisor is reached.
 inputSchema:
   $schema: https://json-schema.org/draft/2020-12/schema
   type: object
@@ -8,7 +8,7 @@ inputSchema:
     complain_count:
       type: integer
       default: 0
-      description: Số lượt phàn nàn trong phiên
+      description: Number of complaints in the session
   additionalProperties: false
 outputSchema:
   $schema: https://json-schema.org/draft/2020-12/schema

@@ -1,17 +1,16 @@
 name: calculate_savings_profit
-title: Tính Lãi Tiền Gửi Tiết Kiệm
-description: Ước tính lãi và tổng tiền đáo hạn theo lãi suất mẫu. Kết quả là mô phỏng.
+title: Calculate Savings Deposit Interest
+description: Estimate interest and total amount at maturity based on sample interest rates. Results are simulated.
 inputSchema:
   $schema: https://json-schema.org/draft/2020-12/schema
   type: object
   properties:
     amount_vnd:
       type: number
-      description: 'Số tiền gửi tiết kiệm bằng VNĐ (Ví dụ: 100000000 là 100 triệu
-        VNĐ)'
+      description: 'Savings deposit amount in VND (e.g., 100000000 is 100 million VND)'
     term_months:
       type: integer
-      description: 'Kỳ hạn gửi tiết kiệm tính theo tháng (Ví dụ: 1, 3, 6, 12, 24 tháng)'
+      description: 'Savings deposit term in months (e.g., 1, 3, 6, 12, 24 months)'
   required:
   - amount_vnd
   - term_months

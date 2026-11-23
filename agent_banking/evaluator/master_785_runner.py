@@ -21,6 +21,7 @@ import os
 import sys
 import time
 import json
+import math
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -82,41 +83,22 @@ def save_cache(cache_data, cache_file):
 
 
 def parse_judge_output(content):
-    clean_c = content.strip()
-    start_idx = clean_c.find("{")
-    end_idx = clean_c.rfind("}")
-    if start_idx != -1:
-        if end_idx != -1:
-            json_str = clean_c[start_idx:end_idx + 1]
-            try:
-                data = json.loads(json_str)
-                acc = float(data.get("accuracy", 0.0))
-                faith = float(data.get("faithfulness", 0.0))
-                comp = float(data.get("completeness", 0.0))
-                overall = float(data.get("overall_score", 0.0))
-                if overall == 0.0:
-                    overall = round(
-                        (acc * float(_J785["accuracy_weight"]))
-                        + (faith * float(_J785["faithfulness_weight"]))
-                        + (comp * float(_J785["completeness_weight"])),
-                        1,
-                    )
-                verdict = str(data.get("verdict", "FAIL")).upper()
-                if "PASS" in verdict or overall >= float(_J785["pass_threshold"]):
-                    verdict = "PASS"
-                else:
-                    verdict = "FAIL"
-                feedback = str(data.get("feedback", ""))
-                return {
-                    "accuracy": acc,
-                    "faithfulness": faith,
-                    "completeness": comp,
-                    "overall_score": overall,
-                    "verdict": verdict,
-                    "feedback": feedback
-                }
-            except Exception:
-                pass
+    try:
+        data = json.loads(content[content.index("{"):content.rindex("}") + 1])
+        scores = {}
+        for name in ("accuracy", "faithfulness", "completeness"):
+            raw = data[name]
+            if type(raw) not in (float, int, str):
+                raise ValueError("Invalid judge score type")
+            score = float(raw)
+            if not math.isfinite(score) or not 0 <= score <= 100:
+                raise ValueError("Invalid judge score range")
+            scores[name] = score
+        overall = round(sum(score * float(_J785[name + "_weight"]) for name, score in scores.items()), 1)
+        return {**scores, "overall_score": overall, "verdict": "PASS" if overall >= float(_J785["pass_threshold"]) else "FAIL",
+                "feedback": str(data.get("feedback", ""))}
+    except (AttributeError, KeyError, TypeError, ValueError):
+        pass
     return {
         "accuracy": 0.0,
         "faithfulness": 0.0,

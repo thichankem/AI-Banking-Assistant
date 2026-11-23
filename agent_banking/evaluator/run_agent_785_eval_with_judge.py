@@ -27,6 +27,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 from agent_banking.core.chat import FallbackChatClient
 from agent_banking.agent_pipeline import BankingAgentPipeline
+from agent_banking.evaluator.master_785_runner import parse_judge_output
 from agent_banking.evaluator.config.settings import (
     EvaluatorConfig,
     get_evaluator_messages,
@@ -74,52 +75,6 @@ def save_cache(cache_data, cache_file):
         os.replace(temp_file, cache_file)
     else:
         os.rename(temp_file, cache_file)
-
-
-def parse_judge_output(content):
-    clean_c = content.strip()
-    start_idx = clean_c.find("{")
-    end_idx = clean_c.rfind("}")
-    if start_idx != -1:
-        if end_idx != -1:
-            json_str = clean_c[start_idx:end_idx + 1]
-            try:
-                data = json.loads(json_str)
-                acc = float(data.get("accuracy", 0.0))
-                faith = float(data.get("faithfulness", 0.0))
-                comp = float(data.get("completeness", 0.0))
-                overall = float(data.get("overall_score", 0.0))
-                if overall == 0.0:
-                    overall = round(
-                        (acc * float(_J785["accuracy_weight"]))
-                        + (faith * float(_J785["faithfulness_weight"]))
-                        + (comp * float(_J785["completeness_weight"])),
-                        1,
-                    )
-                verdict = str(data.get("verdict", "FAIL")).upper()
-                if "PASS" in verdict:
-                    verdict = "PASS"
-                else:
-                    verdict = "FAIL"
-                feedback = str(data.get("feedback", ""))
-                return {
-                    "accuracy": acc,
-                    "faithfulness": faith,
-                    "completeness": comp,
-                    "overall_score": overall,
-                    "verdict": verdict,
-                    "feedback": feedback
-                }
-            except Exception:
-                pass
-    return {
-        "accuracy": 0.0,
-        "faithfulness": 0.0,
-        "completeness": 0.0,
-        "overall_score": 0.0,
-        "verdict": "FAIL",
-        "feedback": _FEEDBACK["judge_parse_error"]
-    }
 
 
 def call_llm_judge(client, question, reference_answer, must_include_list, agent_answer):

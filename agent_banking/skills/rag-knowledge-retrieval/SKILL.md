@@ -1,21 +1,22 @@
 ---
 name: rag-knowledge-retrieval
-description: Truy xuất bằng chứng từ kho A-Bank đã lập chỉ mục. Dùng để kiểm tra quy
-  định, biểu phí, hạn mức, thủ tục, hướng dẫn ứng dụng hoặc bảng dữ liệu.
-compatibility: Các thao tác nghiệp vụ sử dụng các công cụ được cấp trong A-Bank.
+description: Retrieve evidence from the indexed A-Bank repository. Use to verify regulations,
+  fee schedules, limits, procedures, application guides, or data tables.
+compatibility: Operational procedures use authorized tools within A-Bank.
 metadata:
   version: 2.0.0
   a-bank-category: RAG
-  a-bank-display-name: Truy xuất Tri thức Quy chế Ngân hàng (Agentic RAG)
+  a-bank-display-name: Bank Regulation Knowledge Retrieval (Agentic RAG)
 ---
 
-# Truy xuất Tri thức Quy chế Ngân hàng (Agentic RAG)
+# Bank Regulation Knowledge Retrieval (Agentic RAG)
 
-## Cách làm
+## Instructions
 
-1. Tạo `query` tự chứa đối tượng, câu hỏi và điều kiện đã biết. Dùng `exact` để ràng buộc tên hoặc mã khi cần.
-2. Đọc kết quả theo đúng tên sản phẩm và mục. Nếu kết quả rỗng hoặc lệch, đổi cách diễn đạt, thêm mã rõ hơn hoặc tách câu hỏi theo đối tượng.
-3. Khi sử dụng bảng, đối chiếu cột, đơn vị, dòng sản phẩm và ghi chú. Gắn nhãn nguồn của lượt hiện tại ngay sau nhận định.
-4. Khi có nguồn đối nghịch, kiểm tra điều kiện của từng nguồn trước khi kết luận. Xem [cách rà bằng chứng](references/evidence-check.md) nếu cần.
+1. Create a self-contained `query` with the subject, inquiry, and known conditions. Use `exact` to bind names or codes when necessary.
+2. Read results matching the exact product name and section. If results are empty or off-target, rephrase, add clearer codes, or split the inquiry by subject.
+   For a numbered PDF page, send `page` and `source` to `search_banking_knowledge`. If it lacks the requested fact, search by topic within the same source and cite the actual page.
+3. When using tables, cross-check columns, units, product rows, and footnotes. Attach the source label from the current turn immediately after the claim.
+4. When encountering conflicting sources, check the conditions of each source before concluding. Consult [evidence review guidance](references/evidence-check.md) if needed.
 
-Chỉ sử dụng chunks đã truy xuất. Tài liệu A-Bank thiếu ngày vẫn dùng được theo quy ước của kho nội bộ. Không suy ra hiệu lực từ mã phiên bản nội dung.
+Only use retrieved chunks. A-Bank documents lacking dates remain valid per internal repository conventions. Do not infer validity from content version codes.

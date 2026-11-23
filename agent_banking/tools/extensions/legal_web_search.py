@@ -30,12 +30,15 @@ _LEGAL_TERMS = (
     "law", "decree", "circular", "legislation",
 )
 _DOCUMENT_CODE = re.compile(
-    r"\b\d{1,6}\s*/\s*(?:\d{4}\s*/\s*)?[A-ZĐ]{1,8}(?:\s*-\s*[A-ZĐ0-9]{1,10})*\b", re.I,
+    r"\b\d{1,6}\s*/\s*(?:\d{4}\s*/\s*)?[A-ZĐ][A-ZĐ0-9]{0,10}(?:\s*-\s*[A-ZĐ0-9]{1,10})*\b", re.I,
 )
 _DOCUMENT_PATH = re.compile(r"/van-ban/(?:[\w-]+/)?[\w-]+-(\d+)\.aspx", re.I)
 _PRIVATE_NUMBER = re.compile(r"\d(?:[ .()-]*\d){8,}")
 _PRIVATE_CODE = re.compile(r"\b(?:otp|pin|cvv|ma xac thuc) \d{3,}\b")
 _ARTICLE = re.compile(r"\bdieu \d{1,3}[a-z]?\b")
+_ARTICLE_HEADING = re.compile(r"(?im)^\s{0,8}[#* ]*Điều\s+(\d{1,3}[a-z]?)\s*\.")
+_ARTICLE_EXCERPT_LIMIT = 6000
+MAX_SEARCHES_PER_TURN = 2
 
 
 def provider_key(provider: str) -> str:
@@ -88,13 +91,14 @@ class _NoRedirects(HTTPRedirectHandler):
 
 
 def _provider_results(provider: str, query: str, key: str) -> list:
+    include_articles = provider == "tavily" and bool(_ARTICLE.search(search_key(query)))
     if provider == "tavily":
         request = Request("https://api.tavily.com/search", headers={
             "Authorization": f"Bearer {key}", "Content-Type": "application/json",
         }, data=json.dumps({
             "query": query, "include_domains": [DOMAIN], "search_depth": "basic",
-            "auto_parameters": False, "max_results": _RESULT_COUNT, "country": "vietnam",
-            "language": "vi", "include_answer": False, "include_raw_content": False,
+            "auto_parameters": False, "max_results": 4 if include_articles else _RESULT_COUNT, "country": "vietnam",
+            "language": "vi", "include_answer": False, "include_raw_content": "markdown" if include_articles else False,
         }).encode("utf-8"))
     else:
         params = urlencode({
@@ -106,7 +110,7 @@ def _provider_results(provider: str, query: str, key: str) -> list:
             "X-Subscription-Token": key, "Accept": "application/json",
         })
     with build_opener(_NoRedirects()).open(request, timeout=6) as response:
-        payload = json.loads(response.read(1_000_000))
+        payload = json.loads(response.read(6_000_000 if include_articles else 1_000_000))
     if not isinstance(payload, dict):
         raise ValueError("Invalid search response")
     if provider == "brave":
@@ -139,8 +143,30 @@ def _clean_text(value, limit: int) -> str:
     return " ".join(unescape(value).split())[:limit].strip()
 
 
+def _article_passages(value, articles):
+    if not isinstance(value, str) or not articles:
+        return []
+    clean = unescape(value).replace("**", "")
+    headings = list(_ARTICLE_HEADING.finditer(clean))
+    passages = {}
+    for index, heading in enumerate(headings):
+        article = "dieu " + heading[1].casefold()
+        if article not in articles:
+            continue
+        end = headings[index + 1].start() if index + 1 < len(headings) else len(clean)
+        fragment = clean[heading.start():end].strip().lstrip("# ")
+        # Ignore the table of contents and require body text after the heading.
+        if len(fragment.splitlines()) < 2 or len(fragment) < 100:
+            continue
+        bounded = "\n".join(line.strip() for line in fragment.splitlines() if line.strip())[:_ARTICLE_EXCERPT_LIMIT]
+        if len(bounded) > len(passages.get(article, "")):
+            passages[article] = bounded
+    return [(article, passages[article]) for article in sorted(passages)]
+
+
 def _documents(provider: str, rows: list, query: str) -> list[dict]:
     expected_codes = {search_key(match.group()) for match in _DOCUMENT_CODE.finditer(query)}
+    articles = set(_ARTICLE.findall(search_key(query)))
     documents = []
     seen = set()
     scan = get_indirect_injection_guardrail().scan_text
@@ -161,21 +187,25 @@ def _documents(provider: str, rows: list, query: str) -> list[dict]:
             if isinstance(row.get("extra_snippets"), list):
                 snippets.extend(row["extra_snippets"][:5])
         excerpts = dict.fromkeys(filter(None, (_clean_text(snippet, 1600) for snippet in snippets)))
-        content = "\n\n".join(excerpts)[:2500].strip()
-        if len(content) < 40 or not scan(title + "\n" + content)["is_safe"]:
-            continue
         if expected_codes:
             document_text = " " + search_key(title + " " + unquote(urlsplit(url).path)) + " "
             if not any(f" {code} " in document_text for code in expected_codes):
                 continue
-        seen.add(document_id)
-        documents.append({
-            "chunk_id": "tvpl-" + sha256((document_id + "\n" + content).encode("utf-8")).hexdigest()[:24],
-            "source": url, "content": content, "chunk_type": "text",
-            "business_metadata": {
-                "document_name": title, "source_url": url, "category": "Đoạn trích tìm kiếm web",
-            },
-        })
+        passages = _article_passages(row.get("raw_content"), articles)
+        if not passages:
+            passages = [("", "\n\n".join(excerpts)[:2500].strip())]
+        for article, content in passages:
+            if len(content) < 40 or not scan(title + "\n" + content)["is_safe"]:
+                continue
+            seen.add(document_id)
+            documents.append({
+                "chunk_id": "tvpl-" + sha256((document_id + "\n" + content).encode("utf-8")).hexdigest()[:24],
+                "source": url, "content": content, "chunk_type": "text",
+                "business_metadata": {
+                    "document_name": title, "source_url": url, "category": "Đoạn trích tìm kiếm web",
+                    **({"legal_article": article} if article else {}),
+                },
+            })
     return documents
 
 
@@ -223,12 +253,14 @@ def search_legal_web(query: str) -> dict:
         if status == "ok":
             ranked = []
             for doc in outcome["documents"]:
-                hits = articles.intersection(_ARTICLE.findall(search_key(doc["content"])))
-                ranked.append((doc, hits))
-            top = sorted(ranked, key=lambda item: len(item[1]), reverse=True)[:4]
-            coverage = len(set().union(*(hits for _, hits in top)))
+                article = doc["business_metadata"].get("legal_article")
+                headings = {"dieu " + match[1].casefold() for match in _ARTICLE_HEADING.finditer(doc["content"])}
+                hits = articles.intersection({article} if article else headings)
+                ranked.append((doc, hits, bool(article)))
+            top = sorted(ranked, key=lambda item: (len(item[1]), item[2]), reverse=True)[:4]
+            coverage = len(set().union(*(hits for _, hits, _ in top)))
             if coverage > best_coverage:
-                best = {**outcome, "documents": [doc for doc, _ in top]}
+                best = {**outcome, "documents": [doc for doc, _, _ in top]}
                 best_coverage = coverage
             if coverage < len(articles):
                 status = "incomplete_article_evidence"
@@ -236,5 +268,7 @@ def search_legal_web(query: str) -> dict:
         if status in {"ok", "invalid_legal_query"}:
             break
     if best is not None:
+        if best_coverage < len(articles):
+            best["status"] = "incomplete_article_evidence"
         return {**best, "attempts": attempts}
     return {"status": attempts[-1]["status"], "provider": "", "documents": [], "attempts": attempts}

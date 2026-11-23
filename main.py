@@ -586,6 +586,7 @@ async def _emit_graph_sse_events(step_stream, session_id: str, stream_started: f
     citations = []
     sources = []
     images = []
+    visualization = None
     final_metadata = {}
 
     try:
@@ -609,6 +610,7 @@ async def _emit_graph_sse_events(step_stream, session_id: str, stream_started: f
                     citations = node_state["citations"]
                     sources = node_state["sources"]
                     images = node_state.get("images", [])
+                    visualization = node_state.get("visualization")
                     _schedule_pdf_prewarm(citations)
                     final_metadata = {
                         key: node_state[key] for key in _FINAL_METADATA_KEYS
@@ -641,7 +643,9 @@ async def _emit_graph_sse_events(step_stream, session_id: str, stream_started: f
                 yield f"data: {data_str}\n\n"
                 await asyncio.sleep(_STREAM_STEP_DELAY)
 
-        words = final_response_text.split(" ")
+        words = []
+        if final_response_text:
+            words = final_response_text.split(" ")
         for word in words:
             token_payload = {
                 "event_type": "token",
@@ -665,6 +669,7 @@ async def _emit_graph_sse_events(step_stream, session_id: str, stream_started: f
             "citations": citations,
             "sources": sources,
             "images": images,
+            "visualization": visualization,
             "full_answer": final_response_text,
             **final_metadata
         }

@@ -1978,6 +1978,9 @@ class BankingTracer:
             self.is_langsmith_active = False
             logger.debug(_ls_msg("missing_api_key"))
             return
+        if "LANGSMITH_AGENT_ENVIRONMENT" in os.environ:
+            if not os.environ.get("LANGSMITH_AGENT_ID"):
+                os.environ.pop("LANGSMITH_AGENT_ENVIRONMENT", None)
         try:
             self.client = Client(
                 api_url=self.endpoint,

@@ -3,19 +3,19 @@ parameters_schema:
   properties:
     transaction_amount:
       type: number
-      description: Số tiền giao dịch đơn lẻ (VND)
+      description: Single transaction amount (VND)
       default: 0.0
     daily_accumulated_amount:
       type: number
-      description: Tổng số tiền đã giao dịch tích lũy trong ngày (VND)
+      description: Total cumulative transaction amount in the day (VND)
       default: 0.0
     is_new_device:
       type: boolean
-      description: Giao dịch lần đầu tiên trên thiết bị mới
+      description: First-time transaction on a new device
       default: false
     has_cccd_chip_nfc:
       type: boolean
-      description: Khách hàng đã xác thực CCCD gắn chip qua NFC
+      description: Customer has verified chip-embedded citizen identity card (CCCD gắn chip) via NFC
       default: true
   required:
   - transaction_amount

@@ -309,6 +309,92 @@ benchmark_summary.json
 visual_audit_report.json
 
 # ==============================================================================
+# Evaluator Results, Evaluation Outputs, Caches & Metrics
+# ==============================================================================
+eval_results/
+**/eval_results/
+**/eval_results/**
+evaluator_results/
+**/evaluator_results/
+**/evaluator_results/**
+eval_outputs/
+**/eval_outputs/
+**/eval_outputs/**
+eval_785*/
+**/eval_785*/
+**/eval_785*/**
+evaluator/outputs/
+**/evaluator/outputs/
+**/evaluator/outputs/**
+evaluator/results/
+**/evaluator/results/
+**/evaluator/results/**
+evaluator/reports/
+**/evaluator/reports/
+**/evaluator/reports/**
+evaluator/cache/
+**/evaluator/cache/
+evaluator/caches/
+**/evaluator/caches/
+harness_results/
+**/harness_results/
+**/harness_results/**
+harness_runs/
+**/harness_runs/
+**/harness_runs/**
+
+# Evaluator Output Files, Caches, Scores & Reports
+*agent_answers*.json
+*agent_answers*.jsonl
+*agent_eval_scores*.json
+*agent_eval_scores*.jsonl
+*eval_scores*.json
+*eval_scores*.jsonl
+*eval_cache*.json
+*answers_cache*.json
+*scores_cache*.json
+*judge_results*.json
+*judge_results*.jsonl
+*judge_scores*.json
+*judge_scores*.jsonl
+*harness_snapshot*.json
+*harness_metrics*.json
+*harness_summary*.json
+*harness_results*.json
+*harness_results*.jsonl
+*knowledge_inventory*.json
+*build_results*.json
+*build_results*.jsonl
+*source_alignment*.json
+*reference_alignment*.json
+*.regraded.checkpoint.json
+*.regraded.json
+*retrieval_sweep*.json
+*retrieval_sweep*.jsonl
+*retrieval_sweep*.log
+*re_evaluate*.json
+*re_evaluate*.jsonl
+*re_evaluate*.xlsx
+*benchmark_report*.json
+*golden_master*.xlsx
+*evaluation_llm*.xlsx
+*eval_llm*.xlsx
+*master_785*.xlsx
+*_eval_scores.json
+*_eval_results.json
+*_eval_results.jsonl
+*_eval.json
+*_eval.jsonl
+*.eval.json
+*.eval.jsonl
+*eval_report*.json
+*eval_summary*.json
+*evaluator_summary*.json
+final_audit_report.json
+audit_report.json
+*_audit_report.json
+
+# ==============================================================================
 # Databases, Traces, Vector DB & Runtime Caches
 # ==============================================================================
 *.db
@@ -371,6 +457,8 @@ problem.md
 *.docx
 *.doc
 *.pdf
+!docs/báo cáo tiến độ/*.pdf
+!docs/báo cáo tiến độ/*.docx
 *.pptx
 *.ppt
 *.xlsx
@@ -392,7 +480,9 @@ problem.md
 # ==============================================================================
 # Documentation and notebooks are kept locally, excluded from GitHub
 # ==============================================================================
-docs/
+docs/*
+!docs/báo cáo tiến độ/
+!docs/báo cáo tiến độ/**
 doc/
 *.md
 !agent_banking/chunking/README.md
@@ -436,6 +526,7 @@ unittests/
 tests/
 **/tests/
 **/tests/**
+*tests*/
 regression_test/
 **/regression_test/
 **/regression_test/**
@@ -448,16 +539,6 @@ test*.py
 *_test.py
 *_tests.py
 run_*tests.py
-!/agent_banking/chunking/tests/
-!/agent_banking/chunking/tests/test_*.py
-!/agent_banking/agent/tests/
-!/agent_banking/agent/tests/test_deep_agent.py
-!/agent_banking/agent/tests/test_interactions.py
-!/agent_banking/agent/tests/test_harness_quality.py
-!/agent_banking/agent/tests/test_legal_web_search.py
-!/agent_banking/agent/tests/test_model_routing.py
-!/agent_banking/agent/tests/test_langsmith_migration.py
-!/agent_banking/agent/tests/test_tuning_regressions.py
 audit_*.py
 *_audit.py
 verify_upgrade.py

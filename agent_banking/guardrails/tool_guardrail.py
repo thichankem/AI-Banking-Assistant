@@ -418,6 +418,15 @@ class BankingToolGuardrail:
                 }
 
         if registered_readonly:
+            if name_lower == "present_visualization" and isinstance(params, dict):
+                artifact = params.get("artifact")
+                if isinstance(artifact, dict) and artifact.get("engine") == "mermaid" and isinstance(artifact.get("source"), str):
+                    # Mermaid arrows contain SQL-like punctuation. Its dedicated schema
+                    # validates the complete DSL before the tool returns it.
+                    guarded = self._guard_readonly({**params, "artifact": {**artifact, "source": ""}})
+                    if guarded["is_safe"]:
+                        guarded["sanitized_params"]["artifact"]["source"] = artifact["source"]
+                    return guarded
             return self._guard_readonly(params)
 
         # 2. Route by tool family

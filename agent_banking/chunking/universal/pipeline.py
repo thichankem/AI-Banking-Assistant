@@ -86,7 +86,8 @@ class UniversalDocxChunker:
                  max_page_pixels=_PIPELINE["max_page_pixels"],
                  max_chunk_size=None, min_section_size=None, config=None,
                  min_chunk_tokens=_PIPELINE["min_chunk_tokens"],
-                 search_language=None, ocr_docx_images=_PIPELINE["ocr_docx_images"], excel_metadata=None):
+                 search_language=None, ocr_docx_images=_PIPELINE["ocr_docx_images"], excel_metadata=None,
+                 review_incomplete_pdf=False, previous_partial_pdf_pages=0):
         if max_chunk_chars is None and max_chunk_size is not None:
             max_chunk_chars = max_chunk_size
         if min_section_size is not None and min_section_chars == 0:
@@ -127,7 +128,8 @@ class UniversalDocxChunker:
             self.pdf_extractor = PdfExtractor(
                 asset_dir or MODULE / _PIPELINE["asset_dir_relpath"], self.cache, vision_client, review_vision_client,
                 dpi, max_pdf_pages, max_page_pixels, use_decision,
-                search_language=search_language, workers=ocr_workers,
+                search_language=search_language, workers=ocr_workers, review_incomplete=review_incomplete_pdf,
+                previous_partial_pages=previous_partial_pdf_pages,
             )
             self.planner = ChunkPlanner(
                 target_chunk_tokens, max_chunk_tokens, max_chunk_words, table_rows_per_chunk, tokenizer,

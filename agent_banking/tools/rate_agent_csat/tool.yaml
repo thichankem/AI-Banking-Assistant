@@ -1,23 +1,23 @@
 name: rate_agent_csat
-title: Đánh Giá Mức Độ Hài Lòng CSAT
-description: Mô phỏng phản hồi khi khách đánh giá độ hài lòng từ 1 đến 5 sao.
+title: Rate Customer Satisfaction (CSAT)
+description: Simulate response when customer rates satisfaction from 1 to 5 stars.
 inputSchema:
   $schema: https://json-schema.org/draft/2020-12/schema
   type: object
   properties:
     rating_score:
       type: integer
-      description: Điểm đánh giá từ 1 đến 5
+      description: Rating score from 1 to 5
       minimum: 1
       maximum: 5
     user_message:
       type: string
       default: ''
-      description: Ý kiến đóng góp thêm của khách hàng
+      description: Additional feedback or comments from the customer
     channel:
       type: string
       default: web
-      description: Kênh tương tác của khách hàng
+      description: Customer interaction channel
   required:
   - rating_score
   additionalProperties: false

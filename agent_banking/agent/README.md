@@ -28,6 +28,46 @@ Agent có thể yêu cầu một tệp Markdown bằng đường dẫn tương �
 đó. Hướng dẫn đã nạp được giữ trong ngữ cảnh của lượt, kể cả khi lượt đang tạm
 dừng. Bản mới của `SKILL.md` và cấu hình binding có hiệu lực từ lượt mới.
 
+## Biểu đồ và sơ đồ trong web chat
+
+Chạy các lệnh sau từ thư mục gốc dự án với Node.js 22.12 trở lên trước khi chạy FastAPI
+hoặc đóng gói bản phát hành. Triển khai toàn bộ `static/visualizations/` cùng thư mục `static/`.
+
+```powershell
+npm.cmd --prefix frontend/visualizations ci
+npm.cmd --prefix frontend/visualizations run build
+```
+
+Ví dụ, hỏi “Vẽ biểu đồ so sánh doanh số giả lập tháng 1 là 12, tháng 2 là 18 và tháng 3 là 15”
+rồi tiếp tục “Đổi sang biểu đồ đường, giữ nguyên số liệu”. Agent có thể tham chiếu hai hình gần nhất
+trong cùng phiên. Mỗi lần chỉnh sửa tạo một phiên bản mới trong lịch sử chat.
+
+Agent có thể chủ động gọi `present_visualization` khi hình ảnh hoặc tương tác giúp
+khách hiểu thông tin và so sánh lựa chọn. API đồng bộ, sự kiện SSE `done` và lịch sử
+trả cấu hình đã kiểm duyệt trong `visualization`. Web chat dựng phần trực quan ngay
+cùng câu trả lời và trích dẫn.
+
+Với `schema_version: 1`, `engine` và `kind` xác định cách render, còn `id` và `revision`
+đánh dấu phiên bản trong phiên chat. ECharts nhận trực tiếp `x_name`, `x`, `series` và
+`config`. Mermaid nhận `source` và `theme`. Cây `layout` trong tệp quyết định cách dựng
+giao diện. Agent tự đặt tiêu đề và nhóm, lồng hàng/cột/lưới và bố trí ô nhập, kết quả,
+công thức, biểu đồ hoặc bảng dữ liệu. Nếu dùng CSP khi triển khai, cho phép tải
+module cùng origin và `blob:` trong `img-src`.
+
+### Bảng tính tương tác
+
+Thử hỏi “Tạo bảng tính khoản vay trả góp đều 650 triệu VND, lãi suất giả định
+9,5%/năm, kỳ hạn 16 năm. Cho phép chỉnh cả ba biến và hiện công thức, tổng gốc lãi”.
+Agent có thể chọn các trường, khoảng kéo, bước kéo, đơn vị và phép tính theo yêu cầu.
+Ô nhập số cho phép nhập chính xác trong khoảng đã chọn và nhận cả dấu phẩy lẫn dấu chấm
+thập phân. Các kết quả phụ thuộc cập nhật
+ngay trên trình duyệt. Các số chỉnh trong bảng chỉ tồn tại trong trang đang mở.
+
+Cấu hình dùng `engine: simulator` và `kind: calculator` với `inputs`,
+`calculations` và `assumptions`. Backend kiểm tra các tham chiếu và chạy thử công thức tại
+giá trị mặc định. Trình duyệt dùng các phép tính được tích hợp sẵn. Agent có thể sửa cấu
+hình từ lời nhắn tiếp theo và lưu cấu hình mới vào lịch sử phiên.
+
 ## Thêm tool
 
 Định nghĩa công khai dùng cấu trúc [MCP Tool](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)

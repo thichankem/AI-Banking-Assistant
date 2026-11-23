@@ -4,6 +4,8 @@ Chat adapter with ordered fallback and bounded retries.
 Complies with 0% Regex Law, Zero Ternary Law.
 """
 
+from contextvars import ContextVar
+
 from agent_banking.core.cloud_rate_limit import acquire_cloud_slot
 from agent_banking.core.config.settings import CoreConfig, get_core_messages
 from agent_banking.core.fallback import run_fallback
@@ -16,6 +18,7 @@ _DEFAULT_RETRY_DELAYS = tuple(_CHAT_CFG["retry_delays"])
 _SDK_MAX_RETRIES = int(_CHAT_CFG["openai_sdk_max_retries"])
 _VALID_FINISH_REASONS = tuple([None] + list(_CHAT_CFG["valid_finish_reasons"]))
 _MESSAGES = get_core_messages("chat", "core_messages.yaml", "CORE_CHAT_MESSAGES")
+CHAT_TRACE_METADATA = ContextVar("chat_trace_metadata", default=None)
 
 
 class FallbackChatClient:
@@ -71,9 +74,7 @@ class FallbackChatClient:
         if _candidate is not None:
             return call(_candidate)
 
-        trace_meta = getattr(self, "_pending_trace_meta", None)
-        if hasattr(self, "_pending_trace_meta"):
-            self._pending_trace_meta = None
+        trace_meta = CHAT_TRACE_METADATA.get()
         if not isinstance(trace_meta, dict):
             trace_meta = {}
 

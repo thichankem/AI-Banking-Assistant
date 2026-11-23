@@ -1,0 +1,7 @@
+category: PRESENTATION
+handler:
+  module: agent_banking.tools.extensions.present_visualization
+  function: present_visualization
+policy:
+  access: read_only
+  workers: []

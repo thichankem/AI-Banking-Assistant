@@ -1,22 +1,21 @@
 name: calculate_loan_amortization
-title: Tính Lịch Trả Nợ Vay Dư Nợ Giảm Dần
-description: Tính toán chi tiết lịch trả nợ vay ngân hàng A-Bank theo phương pháp
-  dư nợ giảm dần từng tháng, bao gồm số tiền trả tháng đầu, tiền gốc, tiền lãi và
-  tổng số tiền phải trả.
+title: Calculate Declining Balance Loan Amortization Schedule
+description: Detailed calculation of A-Bank loan repayment schedule under the monthly
+  declining balance method, including first-month payment, principal, interest, and
+  total payable amount.
 inputSchema:
   $schema: https://json-schema.org/draft/2020-12/schema
   type: object
   properties:
     principal_vnd:
       type: number
-      description: 'Số tiền vay gốc bằng VNĐ (Ví dụ: 500000000 là 500 triệu VNĐ)'
+      description: 'Loan principal amount in VND (e.g., 500000000 is 500 million VND)'
     annual_rate_percent:
       type: number
-      description: 'Lãi suất vay tính theo năm tính bằng phần trăm (Ví dụ: 7.5 là
-        7.5%/năm)'
+      description: 'Annual loan interest rate in percent (e.g., 7.5 is 7.5%/year)'
     term_months:
       type: integer
-      description: 'Kỳ hạn vay tính bằng tháng (Ví dụ: 12, 24, 60 tháng)'
+      description: 'Loan term in months (e.g., 12, 24, 60 months)'
   required:
   - principal_vnd
   - annual_rate_percent

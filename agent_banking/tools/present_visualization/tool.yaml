@@ -1,0 +1,19 @@
+name: present_visualization
+title: Display an interactive visualization in the conversation
+description: Present a helpful customer-facing chart, diagram or interactive calculator with an AI-authored layout and grounded data. Use when it clarifies an answer or helps the customer compare scenarios, including when a visual was not explicitly requested.
+inputSchema:
+  type: object
+  properties:
+    artifact: {type: object}
+  required: [artifact]
+  additionalProperties: false
+outputSchema:
+  type: object
+  properties:
+    artifact: {type: object}
+  required: [artifact]
+  additionalProperties: false
+annotations:
+  readOnlyHint: true
+  destructiveHint: false
+  openWorldHint: false

@@ -3,14 +3,14 @@ parameters_schema:
   properties:
     query:
       type: string
-      description: Câu tìm kiếm tự chứa chủ đề, đối tượng và điều kiện còn áp dụng.
-        Với câu nối tiếp, dùng đối tượng xác định được từ ngữ cảnh của phiên.
+      description: Self-contained search query with topic, subject, and applicable conditions.
+        For follow-up questions, use the subject determined from session context.
     top_k:
       type: integer
       default: 3
       minimum: 1
       maximum: 6
-      description: Số lượng đoạn văn bản chính xác nhất sau Rerank
+      description: Number of most accurate text chunks after Rerank
     exact:
       type: string
       minLength: 2
@@ -20,7 +20,7 @@ parameters_schema:
       default: 30
       minimum: 1
       maximum: 80
-      description: Số ứng viên ban đầu thu thập từ Hybrid Retrieval
+      description: Initial number of candidate passages collected from Hybrid Retrieval
   required:
   - query
 output_schema:

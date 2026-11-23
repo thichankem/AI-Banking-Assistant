@@ -417,6 +417,8 @@ class BankingAgentPipeline:
         else:
             state["session_memory"] = memory
         state["chat_history"] = history
+        if previous.get("recent_visualizations"):
+            state["recent_visualizations"] = previous["recent_visualizations"]
 
     def chat(
         self,
@@ -859,6 +861,7 @@ class BankingAgentPipeline:
             "citations": citations,
             "sources": sources,
             "images": final_state.get("images", []),
+            "visualization": final_state.get("visualization"),
             "intent": intent,
             "retry_count": retries,
             "audit_status": audit_stat,
@@ -996,6 +999,7 @@ class BankingAgentPipeline:
                         for key in _OUTPUT_GUARDRAIL_KEYS:
                             public[key] = node_state[key]
                         public["intent"] = node_state.get("intent")
+                        public["visualization"] = node_state.get("visualization")
                         public["error_category"] = node_state.get("error_category")
                         public["review_outcomes"] = node_state["reviews"]
                         public["verification"] = node_state.get("verification", {})
@@ -1009,6 +1013,7 @@ class BankingAgentPipeline:
                             "citations": public.get("citations", []),
                             "sources": public.get("sources", []),
                             "images": public.get("images", []),
+                            "visualization": public["visualization"],
                             "intent": public.get("intent") or "RAG_SEARCH",
                             "audit_status": public.get("audit_status") or "PASS",
                             "plan": list(node_state.get("plan") or public.get("plan") or []),
@@ -2071,10 +2076,13 @@ class BankingAgentPipeline:
                     plan_json TEXT NOT NULL DEFAULT '[]',
                     dag_json TEXT NOT NULL DEFAULT '{}',
                     interaction_json TEXT NOT NULL DEFAULT '{}',
+                    visualization_json TEXT NOT NULL DEFAULT 'null',
                     created_at TEXT NOT NULL
                 )
                 """
             )
+            if "visualization_json" not in {row[1] for row in conn.execute("PRAGMA table_info(session_turns)")}:
+                conn.execute("ALTER TABLE session_turns ADD COLUMN visualization_json TEXT NOT NULL DEFAULT 'null'")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_session_turns_sid ON session_turns(session_id)"
             )
@@ -2239,7 +2247,7 @@ class BankingAgentPipeline:
         if "</think>" in text:
             text = text.split("</think>", 1)[1].strip()
         lines = [line.strip() for line in text.splitlines() if line.strip()]
-        if not lines:
+        if len(lines) != 1:
             return ""
         candidate = lines[0]
         for label_prefix in ("Tiêu đề:", "tiêu đề:", "Title:", "title:", "Tóm tắt:", "tóm tắt:"):
@@ -2250,7 +2258,10 @@ class BankingAgentPipeline:
         while candidate and candidate[-1] in "\"'`*»”’].!?,:;":
             candidate = candidate[:-1].strip()
         candidate = " ".join(candidate.split()).strip()
-        if not candidate:
+        if (
+            not candidate or len(candidate) > 58
+            or candidate.casefold().startswith(("we need ", "we should ", "chúng ta cần ", "câu hỏi khách hàng:"))
+        ):
             return ""
         if hasattr(self, "runtime") and hasattr(self.runtime, "guard_artifact"):
             guarded = self.runtime.guard_artifact(candidate)
@@ -2478,6 +2489,9 @@ class BankingAgentPipeline:
                     msgs[-1]["citations"] = list(root.get("citations") or [])
                     msgs[-1]["sources"] = list(root.get("sources") or [])
                     msgs[-1]["images"] = list(root.get("images") or [])
+                    msgs[-1]["visualization"] = root.get("visualization")
+                    if (root.get("visualization") or {}).get("filename"):
+                        msgs[-1]["content"] = ""
                     msgs[-1]["audit_status"] = str(root.get("audit_status") or "PASS")
                     msgs[-1]["intent"] = str(root.get("intent") or "")
                 else:
@@ -2490,6 +2504,7 @@ class BankingAgentPipeline:
                             "citations": list(root.get("citations") or []),
                             "sources": list(root.get("sources") or []),
                             "images": list(root.get("images") or []),
+                            "visualization": root.get("visualization"),
                             "audit_status": str(root.get("audit_status") or "PASS"),
                             "intent": str(root.get("intent") or ""),
                         })
@@ -3722,6 +3737,7 @@ class BankingAgentPipeline:
         citations_val = list(result_payload.get("citations") or [])
         sources_val = list(result_payload.get("sources") or [])
         images_val = list(result_payload.get("images") or [])
+        visualization = result_payload.get("visualization") if audit_val == "PASS" else None
         plan_val = list(result_payload.get("plan") or [])
         dag_val = result_payload.get("dag_telemetry")
         if not isinstance(dag_val, dict):
@@ -3776,6 +3792,7 @@ class BankingAgentPipeline:
                     "citations": citations_val,
                     "sources": sources_val,
                     "images": images_val,
+                    "visualization": visualization,
                     "plan": plan_val,
                     "dag_telemetry": dag_val,
                     "interaction": interaction_obj,
@@ -3868,9 +3885,9 @@ class BankingAgentPipeline:
                 INSERT INTO session_turns (
                     session_id, user_query, assistant_answer, status, audit_status, intent,
                     trace_id, turn_id, latency_ms, citations_json, sources_json, images_json,
-                    plan_json, dag_json, interaction_json, created_at
+                    plan_json, dag_json, interaction_json, created_at, visualization_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
@@ -3889,6 +3906,7 @@ class BankingAgentPipeline:
                     json.dumps(dag_val, ensure_ascii=False),
                     json.dumps(interaction_obj, ensure_ascii=False),
                     now_iso,
+                    json.dumps(visualization, ensure_ascii=False),
                 ),
             )
             db_conn.commit()
@@ -4170,7 +4188,7 @@ class BankingAgentPipeline:
                     """
                     SELECT user_query, assistant_answer, status, audit_status, intent,
                            trace_id, turn_id, latency_ms, citations_json, sources_json,
-                           images_json, plan_json, dag_json, interaction_json, created_at
+                           images_json, plan_json, dag_json, interaction_json, created_at, visualization_json
                     FROM session_turns
                     WHERE session_id = ?
                     ORDER BY id ASC
@@ -4212,6 +4230,7 @@ class BankingAgentPipeline:
                     "dag_telemetry": _parse_json(tr[12], {}),
                     "interaction": _parse_json(tr[13], {}),
                     "created_at": str(tr[14] or ""),
+                    "visualization": _parse_json(tr[15], None),
                 })
 
         snapshot = None
@@ -4249,13 +4268,14 @@ class BankingAgentPipeline:
                 if t.get("user_query"):
                     messages.append({"role": "user", "content": t["user_query"]})
                 is_pending_turn = is_last and pending_interaction is not None and t.get("status") == "awaiting_input"
-                if not is_pending_turn and t.get("assistant_answer"):
+                if not is_pending_turn and (t.get("assistant_answer") or t.get("visualization")):
                     messages.append({
                         "role": "assistant",
                         "content": t["assistant_answer"],
                         "citations": list(t.get("citations") or []),
                         "sources": list(t.get("sources") or []),
                         "images": list(t.get("images") or []),
+                        "visualization": t.get("visualization"),
                         "trace_id": t.get("trace_id") or "",
                         "turn_id": t.get("turn_id") or "",
                         "audit_status": t.get("audit_status") or "PASS",
