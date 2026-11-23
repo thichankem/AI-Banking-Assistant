@@ -454,6 +454,7 @@ run_*tests.py
 !/agent_banking/agent/tests/test_deep_agent.py
 !/agent_banking/agent/tests/test_interactions.py
 !/agent_banking/agent/tests/test_harness_quality.py
+!/agent_banking/agent/tests/test_legal_web_search.py
 !/agent_banking/agent/tests/test_model_routing.py
 !/agent_banking/agent/tests/test_langsmith_migration.py
 !/agent_banking/agent/tests/test_tuning_regressions.py

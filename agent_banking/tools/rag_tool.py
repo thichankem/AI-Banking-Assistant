@@ -15,6 +15,7 @@ from agent_banking.chunking.universal.planning.schema import payload_index_key
 from agent_banking.core.search_text import is_procedure_query, search_key
 from agent_banking.tools.config.prompts import RAG_TOOL_DESCRIPTION, TOOL_TEMPLATES
 from agent_banking.tools.config.settings import get_tool_runtime_config
+from agent_banking.tools.excel_rows import lookup_excel_rows
 from agent_banking.tracing.tracer import trace_span
 
 _RAG_CFG = get_tool_runtime_config()["rag_tool"]
@@ -82,7 +83,7 @@ def _extract_item_pages(raw: dict) -> list:
 
 
 def _summarize_rag_items(items, limit=15):
-    """Build compact score and snippet previews of retrieved or reranked candidates for tracing."""
+    """Build compact score, full bounded content, and snippet previews for tracing."""
     if not isinstance(items, list):
         return []
     summary = []
@@ -92,9 +93,10 @@ def _summarize_rag_items(items, limit=15):
         raw = item.get("chunk", item)
         if not isinstance(raw, dict):
             raw = {}
-        snippet = str(raw.get("content") or raw.get("original_text") or raw.get("text") or "").strip()
-        if len(snippet) > 240:
-            snippet = snippet[:237] + "..."
+        full_text = str(raw.get("content") or raw.get("original_text") or raw.get("text") or "").strip()
+        snippet = full_text
+        if len(snippet) > 600:
+            snippet = snippet[:597] + "..."
         summary.append({
             "rank": idx + 1,
             "chunk_id": str(raw.get("chunk_id") or item.get("chunk_id") or ""),
@@ -110,7 +112,9 @@ def _summarize_rag_items(items, limit=15):
             "rerank_score": item.get("rerank_score"),
             "rerank_method": item.get("rerank_method"),
             "page_numbers": _extract_item_pages(raw),
+            "char_count": len(full_text),
             "snippet": snippet,
+            "content": full_text[:4000],
         })
     return summary
 
@@ -417,13 +421,19 @@ class BankingRAGTool:
         return ordered
 
     def execute(self, query: str, top_k: int | None = None, exact: str = "", candidate_k: int | None = None,
-                source: str = "", offset: int | None = None) -> dict:
+                source: str = "", offset: int | None = None, excel: dict | None = None) -> dict:
         """
         Execute banking knowledge retrieval via Hybrid Retrieval & Reranker.
         """
         if top_k is None:
             top_k = int(_RAG_CFG["default_top_k"])
         start_t = time.perf_counter()
+        if excel is not None:
+            scope = getattr(self.pipeline.config, "KNOWLEDGE_PUBLICATION_SCOPE", "")
+            corpus = getattr(self.pipeline.vector_store, "_bm25_corpus", ())
+            result = lookup_excel_rows(corpus, excel, scope=scope, source=source, limit=top_k, offset=offset or 0)
+            result["latency_ms"] = (time.perf_counter() - start_t) * 1000
+            return result
         clean_query = query.strip()
 
         if not clean_query:
@@ -641,7 +651,15 @@ class BankingRAGTool:
             if source:
                 sources.add(source)
 
-            if breadcrumb:
+            excel_citation = business_metadata.get("citation", {})
+            excel_location = {}
+            if isinstance(excel_citation, dict) and excel_citation.get("sheet_name"):
+                excel_location = {"sheet_name": excel_citation["sheet_name"],
+                                  "cell_ranges": excel_citation.get("cell_ranges", [])}
+                ranges = ", ".join(excel_location["cell_ranges"])
+                label = excel_location["sheet_name"] + ("!" + ranges if ranges else "")
+                cite_label = f"[{doc_name} · {label}]"
+            elif breadcrumb:
                 cite_label = f"[{breadcrumb}]"
             elif section_title:
                 cite_label = f"[{section_title}]"
@@ -657,7 +675,8 @@ class BankingRAGTool:
                 "section_title": section_title,
                 "chunk_id": chunk_id,
                 "chunk_type": chunk_type,
-                "relevance_score": round(score, score_precision)
+                "relevance_score": round(score, score_precision),
+                **excel_location,
             })
 
             docs.append({

@@ -181,6 +181,8 @@ def _ancestor_window(planner, chunk, parent):
     cursor = parent
     while cursor.get("parent_id"):
         ancestor_id = cursor["parent_id"]
+        if planner.ir.get("format") == "xlsx" and not planner.parents[ancestor_id]["parent_id"]:
+            break
         content, word_starts = _subtree_content(planner, ancestor_id)
         anchor = child_content
         start = content.find(anchor)

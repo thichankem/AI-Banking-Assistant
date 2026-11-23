@@ -227,9 +227,11 @@ def test_registry_rejects_bad_frontmatter_and_pins_discovery(tmp_path):
     assert registry.instructions(registry.snapshot()["valid-skill"])["instructions"] == "Body changed"
 
 
-def test_tool_catalog_projects_standard_contracts_and_runs_all_builtins():
+def test_tool_catalog_projects_standard_contracts_and_runs_all_builtins(monkeypatch):
     from agent_banking.tools.tool_registry import BankingToolRegistry
 
+    for key in ("TAVILY_API_KEY", "BRAVE_SEARCH_API_KEY", "BRAVE_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
     candidate = {"chunk": {"chunk_id": "fixture", "source": "A-Bank.docx", "content": "Tài liệu mẫu."}}
     rag = SimpleNamespace(parse_query=parse_banking_query,
                           retriever=SimpleNamespace(retrieve=lambda **kwargs: [candidate]),

@@ -1,4 +1,4 @@
-"""Grounded PDF/DOCX ingestion, cloud semantics and exact passage budgets."""
+"""Grounded document ingestion, cloud semantics and exact passage budgets."""
 import hashlib
 import json
 import os
@@ -9,6 +9,7 @@ from pathlib import Path
 from agent_banking.chunking.config.settings import ChunkingConfig, get_config_section
 from .models.response_cache import PageVisionCache
 from .extraction.docx.extractor import DocxExtractor
+from .extraction.xlsx.extractor import XlsxExtractor, validate_excel_metadata
 from .planning.planner import ChunkPlanner
 from .extraction.sources import (
     discover_documents as discover_documents,
@@ -85,7 +86,7 @@ class UniversalDocxChunker:
                  max_page_pixels=_PIPELINE["max_page_pixels"],
                  max_chunk_size=None, min_section_size=None, config=None,
                  min_chunk_tokens=_PIPELINE["min_chunk_tokens"],
-                 search_language=None, ocr_docx_images=_PIPELINE["ocr_docx_images"]):
+                 search_language=None, ocr_docx_images=_PIPELINE["ocr_docx_images"], excel_metadata=None):
         if max_chunk_chars is None and max_chunk_size is not None:
             max_chunk_chars = max_chunk_size
         if min_section_size is not None and min_section_chars == 0:
@@ -94,6 +95,7 @@ class UniversalDocxChunker:
         if search_language is None:
             search_language = getattr(config, "CHUNK_SEARCH_LANGUAGE", ChunkingConfig.CHUNK_SEARCH_LANGUAGE)
         self.ocr_docx_images = ocr_docx_images
+        self.excel_metadata = validate_excel_metadata(excel_metadata)
         self.dpi = dpi
         self.max_chunk_words = max_chunk_words
         if type(workers) is not int or workers < 1:
@@ -137,6 +139,10 @@ class UniversalDocxChunker:
                 search_language=search_language, ocr_images=ocr_docx_images,
                 vision_client=vision_client, review_client=review_vision_client, max_image_pixels=max_page_pixels,
             )
+            self.xlsx_extractor = XlsxExtractor(
+                self.pdf_extractor.asset_dir, self.cache, vision_client, review_vision_client, max_page_pixels,
+                use_llm=use_llm, use_decision=use_decision, workers=self.workers,
+            )
             source_root = Path(__file__).resolve().parent
             excluded_parts = set(_PIPELINE["code_snapshot_excluded_parts"])
             excluded_files = set(_PIPELINE["code_snapshot_excluded_files"])
@@ -159,6 +165,8 @@ class UniversalDocxChunker:
     def _extract_ir(self, source, name, fmt):
         if fmt == "pdf":
             return self.pdf_extractor.extract(source, name)
+        if fmt == "xlsx":
+            return self.xlsx_extractor.extract(source, name, self.excel_metadata.get(name, {}))
         return self.extractor.extract(source, name)
 
     def chunk_document(self, docx_path=None, docx_bytes=None, source_name=None, expected_format=None):
@@ -195,6 +203,9 @@ class UniversalDocxChunker:
     def chunk_pdf(self, pdf_path=None, pdf_bytes=None, source_name=None):
         return self.chunk_document(docx_path=pdf_path, docx_bytes=pdf_bytes, source_name=source_name, expected_format="pdf")
 
+    def chunk_xlsx(self, xlsx_path=None, xlsx_bytes=None, source_name=None):
+        return self.chunk_document(docx_path=xlsx_path, docx_bytes=xlsx_bytes, source_name=source_name, expected_format="xlsx")
+
     def _process_ir(self, ir):
         from .text.language import classify_text_blocks
 
@@ -204,16 +215,18 @@ class UniversalDocxChunker:
         classify_text_blocks(ir["blocks"], search_language=ir["search_language"])
         if any(warning.get("requires_review") for warning in ir["warnings"]):
             raise RuntimeError("Unsupported or unresolved source content; publication refused: " + json.dumps(ir["warnings"]))
-        enricher = ModelEnricher(self.cache, workers=self.workers, use_llm=self.use_llm, use_decision=self.use_decision)
-        ir = enricher.enrich(ir)
-        if self.semantic and self.use_llm:
-            from .planning.semantic_boundaries import SemanticBoundaryScorer
-            SemanticBoundaryScorer(self.cache, self.planner.budget, self.workers).annotate(ir)
+        excel = ir.get("format") == "xlsx"
+        if not excel:
+            enricher = ModelEnricher(self.cache, workers=self.workers, use_llm=self.use_llm, use_decision=self.use_decision)
+            ir = enricher.enrich(ir)
+            if self.semantic and self.use_llm:
+                from .planning.semantic_boundaries import SemanticBoundaryScorer
+                SemanticBoundaryScorer(self.cache, self.planner.budget, self.workers).annotate(ir)
         chunks, artifact = self.planner.plan(ir)
         has_searchable_content = any(
             chunk["business_metadata"]["retrieval"].get("role") != "attachment_only" for chunk in chunks
         )
-        if self.use_decision and has_searchable_content:
+        if not excel and self.use_decision and has_searchable_content:
             ir["deterministic_coverage"] = artifact["quality"].copy()
             enricher.review(ir)
         decision_review = ir.get("decision_review", {})
@@ -223,7 +236,10 @@ class UniversalDocxChunker:
         ready = all(block["image"].get("status") in RESOLVED_IMAGE_STATUSES
                     for block in ir["blocks"] if block["type"] == "image")
         statistics = ir.get("statistics", {})
-        ready = ready and self.use_llm and self.semantic
+        ready = ready and (excel or self.use_llm and self.semantic)
+        if excel:
+            artifact["quality"].update(statistics)
+            artifact["quality"]["excel_issues_detail"] = ir["excel_issues"]
         if decision_route == "REPAIR_EXTRACTION" and decision_review.get("status") != "advisory":
             ready = False
         artifact["quality"]["empty_searchable_content"] = not has_searchable_content

@@ -244,7 +244,7 @@ class BankingRAGPipeline:
         filenames=None
     ):
         """
-        Ingestion & Dual-Indexing phase from documents (.docx / .pdf):
+        Ingestion & Dual-Indexing phase from source documents:
         1. Layout-aware chunking via Breadcrumbs (DLA Chunker).
         2. Parallel dual indexing into Dense Vector Store and Okapi BM25.
         """
@@ -265,12 +265,16 @@ class BankingRAGPipeline:
             target_exts = extensions
         else:
             target_exts = list(_DEFAULT_EXTENSIONS)
+            if configured_input and target_dir.is_relative_to(Path(configured_input).resolve()):
+                target_exts.append(".xlsx")
 
         # Layout-Aware DLA Chunking
         t0 = time.time()
         if filenames:
             if isinstance(filenames, (str, Path)):
                 filenames = [filenames]
+            if not extensions and ".xlsx" not in target_exts and any(Path(name).suffix.lower() == ".xlsx" for name in filenames):
+                target_exts.append(".xlsx")
             print(f" -> [Ingestion] Chunking {len(filenames)} specified files...")
             available = {}
             for path in discover_documents(target_dir, target_exts):
@@ -290,7 +294,7 @@ class BankingRAGPipeline:
             for path, source in selected.items():
                 chunks.extend(self.dla_chunker.chunk_file(path, source_name=source))
         else:
-            print(" -> [Ingestion] Chunking via Layout-Aware Chunker (DOCX/PDF)...")
+            print(" -> [Ingestion] Chunking via Layout-Aware Chunker...")
             chunks = self.dla_chunker.chunk_directory(
                 target_dir,
                 extensions=target_exts,

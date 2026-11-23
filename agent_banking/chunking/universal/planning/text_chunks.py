@@ -6,6 +6,7 @@ from agent_banking.chunking.config.settings import get_config_section
 from .partitioning import atoms_for, optimal_partition
 from .source_spans import find_sentence_gap_ends, find_word_starts, has_visible_text
 from ..text.boundaries import safe_boundaries
+from ..text.language import project_search_text
 
 _TEXT_CFG = get_config_section("planning")["text_chunks"]
 _ATOM_BOUNDARY_SCORE = _TEXT_CFG["atom_boundary_score"]
@@ -17,6 +18,56 @@ _EMPTY_TEXT_PENALTY = _TEXT_CFG["empty_text_penalty"]
 _SHORT_CHUNK_PENALTY = _TEXT_CFG["short_chunk_penalty"]
 _FIRST_START_MARGIN = _TEXT_CFG["first_start_margin"]
 _RETRIEVAL_CACHE_MAXSIZE = _TEXT_CFG["retrieval_cache_maxsize"]
+
+
+def split_excel_text(budget, text, fits):
+    """Prefer whole sentences, then split oversized sentences at source offsets."""
+    stops = sorted(set([*find_sentence_gap_ends(text, use_decision_for_dots=False), len(text)]))
+    start = previous = 0
+    for end in stops:
+        if fits(text[start:end]):
+            previous = end
+            continue
+        if previous > start:
+            yield start, previous, text[start:previous]
+        start = previous
+        if not fits(text[start:end]):
+            sentence = text[start:end]
+            for left, right, part in budget.split(sentence, fits, align_words=True,
+                                                  boundaries=safe_boundaries(sentence, protect_markup=False),
+                                                  allow_oversized=True):
+                yield start + left, start + right, part
+            start = end
+        previous = end
+    if start < previous:
+        yield start, previous, text[start:previous]
+
+
+def emit_excel_answer(planner, block, parent_id):
+    question = block["excel_question"]
+    retrieval = planner._retrieval(parent_id, [])
+    prefix = question["text"] + "\n\n"
+    if planner._measure(prefix + "X", retrieval) is None:
+        prefix = planner.budget.shorten(question["text"], max(1, planner.budget.maximum // 4)) + "\n\n"
+    if planner._measure(prefix + "X", retrieval) is None:
+        prefix = ""
+    for number, (start, end, part) in enumerate(split_excel_text(
+            planner.budget, block["text"], lambda text: planner._measure(prefix + text, retrieval) is not None), 1):
+        content = prefix + part
+        chunk = planner._prototype("text", content, parent_id, [block["id"]], retrieval=retrieval)
+        metadata = chunk["business_metadata"]
+        provenance = metadata["provenance"]
+        provenance["locations"].insert(0, {**block["provenance"], "cell_range": question["cell_range"]})
+        provenance["source_spans"] = [{"block_id": block["id"], "start": start, "end": end,
+                                        "chunk_start": len(prefix), "chunk_end": len(content)}]
+        metadata["excel_faq_part"] = number
+        if planner.search_language == "vi":
+            projection = project_search_text(content, search_language="vi")
+            metadata["retrieval"]["embedding_content"] = projection
+            if not has_visible_text(projection):
+                metadata["retrieval"]["role"] = "attachment_only"
+        planner._bound_passage(chunk)
+        planner._emit(chunk)
 
 
 def flush_text(planner, blocks, parent_id):
@@ -43,7 +94,8 @@ def flush_text(planner, blocks, parent_id):
             if point in boundary_set and aligned:
                 candidates[point] = _ATOM_BOUNDARY_SCORE
         candidates[end] = max(candidates.get(end, 0.0), _BLOCK_END_SCORE)
-        needs_dot_decision = planner.use_decision and len(block["text"].split()) > _DOT_DECISION_MIN_WORDS
+        needs_dot_decision = (planner.use_decision and planner.ir.get("format") != "xlsx"
+                              and len(block["text"].split()) > _DOT_DECISION_MIN_WORDS)
         for gap_end in find_sentence_gap_ends(block["text"], use_decision_for_dots=needs_dot_decision,
                                               cache=planner.decision_cache, ir=planner.ir):
             gap_point = start + gap_end

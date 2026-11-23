@@ -17,6 +17,7 @@ from agent_banking.core.chat import FallbackChatClient
 from agent_banking.core.models import auto_routing_enabled
 from agent_banking.guardrails.rag_guardrails import BankingGuardrailManager
 from agent_banking.skills.skill_registry import SkillRegistry, mapped_arguments, resolve_skill
+from agent_banking.tools.extensions.legal_web_search import TOOL_NAME as LEGAL_WEB_SEARCH_TOOL
 from agent_banking.tools.tool_registry import BankingToolRegistry, ONCE_PER_TURN, is_extension, tool_contract, tool_input_schema
 from agent_banking.tracing.tracer import trace_span
 
@@ -368,6 +369,11 @@ class BankingReActNodes:
             if not context_for:
                 anchors.add((source, record.get("chunk_id")))
             reference = {"label": f"[Nguồn {entry['index']}]", "text": entry["context"]}
+            if meta.get("excel_table_id"):
+                reference["excel_table_id"] = meta["excel_table_id"]
+                table = (record.get("table_data") or {}).get("excel") if isinstance(record.get("table_data"), dict) else None
+                if table:
+                    reference["excel_columns"] = table["columns"]
             if type(record.get("source_offset")) is int:
                 reference["source_offset"] = record["source_offset"]
             references.append(reference)
@@ -375,6 +381,9 @@ class BankingReActNodes:
                   "new_evidence": len(evidence) - previous_count}
         if isinstance(data.get("retrieval_quality"), dict):
             result["retrieval_quality"] = data["retrieval_quality"]
+        if data.get("excel_match_count") is not None or str(data.get("status", "")).startswith("excel_"):
+            result.update({key: data[key] for key in ("status", "excel_columns", "excel_units", "excel_match_count", "next_offset")
+                           if key in data})
         return result
 
     def act(self, state: dict) -> dict:
@@ -446,7 +455,8 @@ class BankingReActNodes:
         searches = state.get("search_count", 0)
         if not error:
             attempts.append(key)
-            retrieval = tool_name == "search_banking_knowledge"
+            web_search = tool_name == LEGAL_WEB_SEARCH_TOOL
+            retrieval = web_search or tool_name == "search_banking_knowledge"
             if kind == "skill" and definition["execution"]["type"] == "rag_pipeline":
                 retrieval = True
             execution = self.tools.execute_tool
@@ -473,6 +483,9 @@ class BankingReActNodes:
                     elapsed += result.get("latency_ms", 0.0)
                     retried = True
                 data = result.get("data")
+                web_details = {}
+                if web_search and isinstance(data, dict):
+                    web_details = {key: data[key] for key in ("provider", "attempts") if key in data}
                 if result.get("status") == "SUCCESS" and isinstance(data, dict) and str(data.get("status", "")).lower() not in ("failed", "error"):
                     observation = {"kind": kind, "name": name, "status": "SUCCESS"}
                     simulated = tool_name in SIMULATED_TOOLS or data.get("simulation") is True
@@ -482,6 +495,7 @@ class BankingReActNodes:
                     if retrieval:
                         observation["retrieval"] = True
                         data = self._observe_retrieval({**data, "query": params.get("query", "")}, evidence)
+                        data.update(web_details)
                         searches += 1
                         intent = "RAG_SEARCH"
                     elif intent != "RAG_SEARCH":
@@ -534,6 +548,7 @@ class BankingReActNodes:
                     documents_count=docs_count,
                     output_keys=out_keys,
                     output_preview=out_preview,
+                    **web_details,
                 )
 
             if retried:
@@ -545,7 +560,8 @@ class BankingReActNodes:
             calls.append({
                 "kind": kind, "tool": name, "status": observation["status"],
                 "latency_ms": elapsed,
-                "simulation": observation.get("simulation", False)
+                "simulation": observation.get("simulation", False),
+                **web_details,
             })
             if retried:
                 calls[-1]["retried"] = True

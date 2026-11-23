@@ -78,6 +78,7 @@ class QwenVisionClient:
             raise ValueError("Vision max_tokens must be a positive integer")
         self.backoff_factor = backoff_factor
         self.max_tokens = max_tokens
+        self.disable_thinking = bool(primary.disable_thinking)
 
     def identity(self):
         return {"model": self.model, "module": self.model_module, "max_tokens": self.max_tokens,
@@ -147,10 +148,58 @@ class QwenVisionClient:
             image_url["detail"] = self.image_detail
         return {"type": "image_url", "image_url": image_url}
 
-    def ask(self, image_data, prompt=VISION_DEFAULT_ASK, max_tokens=_VISION_CFG["default_ask_max_tokens"],
-            temperature=_VISION_CFG["default_ask_temperature"], stream=False):
+    def _post_ask_payload(self, payload, stream, fallback_min_tokens=2048):
+        """Send a single vision chat payload with bounded transient retry and thinking-kwarg fallback."""
+        import time
+        import urllib.error
         import urllib.request
-        from .text_client import apply_chat_profile, read_response
+        from .text_client import read_response
+
+        attempts_used = 0
+        max_attempts = 2
+        fallback_used = False
+        while attempts_used < max_attempts:
+            req = urllib.request.Request(
+                self.base_url + "/chat/completions",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json", "Authorization": "Bearer " + self.api_key},
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    return read_response(resp, streaming=stream)
+            except urllib.error.HTTPError as exc:
+                if exc.code in (400, 422) and "chat_template_kwargs" in payload and not fallback_used:
+                    fallback_used = True
+                    payload.pop("chat_template_kwargs", None)
+                    token_param = self.endpoint.token_parameter
+                    current_limit = int(payload.get(token_param, fallback_min_tokens) or fallback_min_tokens)
+                    bumped = max(current_limit, fallback_min_tokens)
+                    if self.endpoint.max_output_tokens:
+                        bumped = min(bumped, self.endpoint.max_output_tokens)
+                    payload[token_param] = bumped
+                    continue
+                attempts_used += 1
+                if exc.code in (429, 500, 502, 503, 504) and attempts_used < max_attempts:
+                    time.sleep(0.5)
+                    continue
+                raise
+            except (urllib.error.URLError, TimeoutError):
+                attempts_used += 1
+                if attempts_used < max_attempts:
+                    time.sleep(0.5)
+                    continue
+                raise
+        return {}
+
+    def ask(self, image_data, prompt=VISION_DEFAULT_ASK, max_tokens=_VISION_CFG["default_ask_max_tokens"],
+            temperature=_VISION_CFG["default_ask_temperature"], stream=False, disable_thinking=None):
+        """Send an image and question to the configured vision endpoint and return the extracted text."""
+        from .text_client import apply_chat_profile
+
+        if disable_thinking is None:
+            use_disable_thinking = bool(getattr(self, "disable_thinking", False))
+        else:
+            use_disable_thinking = bool(disable_thinking)
 
         image_part = self._image_part(image_data)
         payload = {
@@ -169,20 +218,23 @@ class QwenVisionClient:
             "stream": stream,
         }
         apply_chat_profile(payload, self.endpoint, max_tokens, structured=False)
-        req = urllib.request.Request(
-            self.base_url + "/chat/completions",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json", "Authorization": "Bearer " + self.api_key},
-        )
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-            data = read_response(resp, streaming=stream)
+        if use_disable_thinking:
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
+
+        data = self._post_ask_payload(payload, stream=stream)
         choices = data.get("choices", [])
         if choices:
             message = choices[0].get("message", {})
-            content = message.get("content")
-            if not content:
-                content = message.get("reasoning_content", "")
-            return content
+            raw_content = message.get("content")
+            if raw_content is not None:
+                cleaned = str(raw_content).strip()
+                if cleaned:
+                    return cleaned
+            reasoning = message.get("reasoning_content")
+            if reasoning is not None:
+                cleaned_reasoning = str(reasoning).strip()
+                if cleaned_reasoning:
+                    return cleaned_reasoning
         return ""
 
     def _build_payload(self, image_bytes, instructions=None):

@@ -21,7 +21,7 @@ from .source_spans import (
     section_region,
 )
 from .table_chunks import plan_table
-from .text_chunks import flush_text
+from .text_chunks import emit_excel_answer, flush_text
 from .schema import build_universal_chunk, infer_business_metadata, link_chunk_sequence
 from .table_rendering import (
     escape_html as escape_html,
@@ -70,6 +70,13 @@ def _page_citation(chunk):
     citation = {"file_name": document_source_name(chunk["source"])}
     if pages:
         citation["page_numbers"] = sorted(pages)
+    sheets = dict.fromkeys(location["sheet_name"] for location in locations if location.get("sheet_name"))
+    if sheets:
+        if len(sheets) != 1:
+            raise AssertionError("Excel chunk contains evidence from multiple sheets")
+        citation["sheet_name"] = next(iter(sheets))
+        citation["cell_ranges"] = list(dict.fromkeys(location["cell_range"] for location in locations
+                                                      if location.get("cell_range")))
     metadata["citation"] = citation
 
 
@@ -117,6 +124,10 @@ class ChunkPlanner:
         self.base_metadata = infer_business_metadata(ir["source"])
         self.base_metadata.update({"schema_version": _PIPELINE["schema_version"], "document_id": ir["document_id"],
                                    "document_version": ir["document_version"]})
+        excel = ir.get("format") == "xlsx"
+        if excel:
+            self.base_metadata["excel_revision"] = {key: ir["excel_revision"][key] for key in (
+                "document_key", "business_version", "effective_from", "effective_date_status")}
         self.block_map = {block["id"]: block for block in ir["blocks"]}
         ir["search_language"] = self.search_language
         classify_text_blocks(ir["blocks"], search_language=self.search_language)
@@ -125,7 +136,7 @@ class ChunkPlanner:
         self.caption_targets = defaultdict(set)
         from ..enrichment.decisions.engine import decide_prompt_pairs
         self.dependent_pairs = set()
-        if self.use_decision:
+        if self.use_decision and not excel:
             candidates = []
             for block in ir["blocks"]:
                 if block.get("foreign_language") or block.get("foreign_spans"):
@@ -206,7 +217,10 @@ class ChunkPlanner:
                     pending.append(item)
             self.parents[current]["block_ids"].append(block["id"])
             block["section_id"] = current
-            if block.get("foreign_language"):
+            if block.get("excel_question"):
+                flush_text(self, pending, current)
+                emit_excel_answer(self, block, current)
+            elif block.get("foreign_language"):
                 self._keep_foreign(block, 0, len(block["text"]), block["foreign_language"])
             elif block.get("foreign_spans"):
                 pending.extend(self._mixed_language_parts(block))
@@ -215,7 +229,7 @@ class ChunkPlanner:
             elif block["type"] == "table":
                 self._flush_conflicting_captions(pending, current, block["id"])
                 pending_words = sum(len(item["text"].split()) for item in pending)
-                if pending and (pending_words < self.min_words or all(item["type"] in ("heading", "caption") for item in pending)):
+                if not excel and pending and (pending_words < self.min_words or all(item["type"] in ("heading", "caption") for item in pending)):
                     plan_table(self, block, current, lead_in_blocks=pending)
                 else:
                     flush_text(self, pending, current)
@@ -260,8 +274,18 @@ class ChunkPlanner:
             )
         link_chunk_sequence(self.chunks)
         quality = validate_coverage(self)
+        excel_linked_assets = set()
         for chunk in self.chunks:
             _page_citation(chunk)
+            if excel:
+                for location in chunk["business_metadata"]["provenance"]["locations"]:
+                    digest = location.get("asset_sha256")
+                    if digest and digest in ir_assets and not any(image.get("sha256") == digest for image in chunk["images"]):
+                        chunk["images"].append({**ir_assets[digest], "asset_id": digest, "match_strength": "direct",
+                                                "display_caption": location.get("cell_range") or location["sheet_name"]})
+                        excel_linked_assets.add(digest)
+        if excel:
+            quality["linked_assets"] = len(excel_linked_assets)
         return self.chunks, {"parents": self.parents, "document": ir, "quality": quality}
 
     def _caption_conflicts(self, block, target):

@@ -38,9 +38,14 @@ def table_fragment_data(block, rows, row_start):
     header_count = table["header_row_count"]
     header_grid = table["grid"][:header_count]
     row_end = row_start + len(rows)
-    header_cells = [cell for cell in table["cells"] if cell["row"] < header_count]
-    cells = [cell for cell in table["cells"] if header_count <= cell["row"] < row_end
-             and cell["row"] + cell.get("row_span", 1) > row_start]
+    offsets = table.get("excel_cell_offsets")
+    if offsets is not None:
+        header_cells = table["cells"][:offsets[header_count]]
+        cells = table["cells"][offsets[row_start]:offsets[row_end]]
+    else:
+        header_cells = [cell for cell in table["cells"] if cell["row"] < header_count]
+        cells = [cell for cell in table["cells"] if header_count <= cell["row"] < row_end
+                 and cell["row"] + cell.get("row_span", 1) > row_start]
     data = {"table_id": table["table_id"], "title": title, "headers": headers, "rows": rows,
             "row_start": row_start, "row_end": row_end, "header_row_count": header_count,
             "header_grid": header_grid, "header_cells": header_cells, "cells": cells,
@@ -53,6 +58,9 @@ def table_fragment_data(block, rows, row_start):
         source_rows = row_provenance[:header_count]
     if source_rows:
         data["row_provenance"] = source_rows
+    if "excel" in table:
+        info = table["excel"]
+        data["excel"] = {**info, "rows": info["rows"][row_start - header_count:row_end - header_count]}
     for key in ("parent_cell", "title_source_block_id", "header_occurrences"):
         if table.get(key):
             data[key] = table[key]

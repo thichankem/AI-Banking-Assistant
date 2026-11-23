@@ -1,19 +1,45 @@
-# Chunking PDF và DOCX
+# Chunking PDF, DOCX và Excel
 
 ## Cấu trúc mã nguồn
 
 | Vị trí trong `universal/` | Trách nhiệm |
 | --- | --- |
 | `pipeline.py`, `fingerprint.py` | Điều phối xử lý tài liệu và tính fingerprint cho cache |
-| `extraction/docx/`, `extraction/pdf/` | Đọc nội dung, bố cục, bảng và tọa độ nguồn theo định dạng |
+| `extraction/docx/`, `extraction/pdf/`, `extraction/xlsx/` | Đọc nội dung, bố cục, bảng và tọa độ nguồn theo định dạng |
 | `enrichment/`, `enrichment/decisions/` | Bổ sung bằng chứng, kiểm tra cấu trúc và quyết định về heading, bảng, ảnh |
 | `planning/` | Lập chunk, dựng bảng, ghép ngữ cảnh và kiểm tra độ phủ |
 | `text/` | Nhận diện ngôn ngữ, tìm biên Unicode và tính ngân sách token |
 | `models/` | Gọi model văn bản, vision và lưu cache phản hồi |
 
-Điểm vào Python cho PDF và DOCX là `agent_banking.chunking.universal.pipeline.UniversalDocumentChunker`. Lệnh CLI chạy qua `python -m agent_banking.chunking.run_chunking`.
+Điểm vào Python là `agent_banking.chunking.universal.pipeline.UniversalDocumentChunker`. Lệnh CLI chạy qua `python -m agent_banking.chunking.run_chunking`.
 
 Phần OCR và các bước cần model dùng API cloud đã cấu hình. Python đọc cấu trúc DOCX, render PDF, tổ chức kết quả và xuất chunk cùng thông tin nguồn.
+
+## Excel
+
+Đặt file `.xlsx` vào thư mục input. CLI tự nhận định dạng và đọc dữ liệu từ các sheet hiển thị. Kết quả trích dẫn dùng tên sheet và vùng ô A1. Ô chứa công thức và kết quả đã lưu của ô đó được bỏ qua. Manifest ghi số ô đã bỏ qua và các đối tượng đọc thiếu theo vị trí.
+
+Mọi ảnh nhúng đọc được trên sheet được xử lý qua model OCR Cloud đã cấu hình. Pipeline dùng lại kết quả OCR từ cache, gọi Vision Review khi cần và thử lại OCR chưa hoàn tất trong lượt nạp sau. Text và Decision được dùng khi bố cục bảng hoặc cặp hỏi đáp chưa rõ.
+
+Khi quản lý nhiều bản của cùng biểu phí, giữ các file phiên bản dưới đường dẫn riêng rồi khai báo mã tài liệu và ngày hiệu lực trong một file JSON. Khóa JSON là đường dẫn nguồn tương đối như trong manifest.
+
+```json
+{
+  "bieu-phi-v2.xlsx": {
+    "document_key": "BP-01",
+    "business_version": "2",
+    "effective_from": "2025-07-01"
+  }
+}
+```
+
+```powershell
+python -m agent_banking.chunking.run_chunking --input "<thu_muc_input>" --output "<thu_muc_output>" --excel-metadata "<revisions.json>"
+```
+
+Khi file JSON được bỏ qua, hệ thống đọc các nhãn như `Mã tài liệu`, `Phiên bản` và `Ngày hiệu lực` trong workbook. Ngày thiếu hoặc có nhiều giá trị khác nhau được giữ ở trạng thái chưa xác định. Các phiên bản nên giữ cùng tên Excel Table hoặc cùng vị trí bắt đầu bảng trên sheet để tra cứu theo cùng một ID bảng.
+
+Trong `search_banking_knowledge`, dùng tìm kiếm thông thường để lấy `business_metadata.excel_table_id`. Tra theo hàng bằng tham số `excel`, ví dụ `{"table_id":"<id>","as_of":"2025-07-01","filters":[{"column":"Phí VND","op":"gte","value":100000,"unit":"VND"}]}`. Điều kiện được kiểm tra trên cùng một hàng của bản có hiệu lực. Giá trị phần trăm dùng điểm phần trăm, ví dụ `2.5` cho `2,5%`.
 
 ## PDF scan, ảnh và chú thích
 

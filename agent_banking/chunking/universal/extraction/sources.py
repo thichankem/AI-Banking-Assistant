@@ -1,14 +1,16 @@
-"""Resolve PDF/DOCX inputs and directory-relative document identities."""
+"""Resolve supported inputs and directory-relative document identities."""
 
 import hashlib
+from io import BytesIO
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import unicodedata
+from zipfile import BadZipFile, ZipFile
 
 from agent_banking.chunking.config.settings import get_rules
 
 _SRC_RULES = get_rules("sources")
-SUPPORTED_EXTENSIONS = set(_SRC_RULES["supported_extensions"])
-UNSUPPORTED_DOCUMENT_EXTENSIONS = set(_SRC_RULES["unsupported_document_extensions"])
+SUPPORTED_EXTENSIONS = set(_SRC_RULES["supported_extensions"]) | {".xlsx"}
+UNSUPPORTED_DOCUMENT_EXTENSIONS = set(_SRC_RULES["unsupported_document_extensions"]) - SUPPORTED_EXTENSIONS
 _MAX_LISTED_UNSUPPORTED = _SRC_RULES["max_listed_unsupported"]
 _IN_MEMORY_HASH_LEN = _SRC_RULES["in_memory_hash_len"]
 
@@ -59,7 +61,7 @@ def legacy_source_resolver(current_sources):
     return resolve
 
 
-def discover_documents(directory, extensions=None, *, reject_unsupported=False):
+def discover_documents(directory, extensions=None, *, reject_unsupported=False, excluded_paths=()):
     directory = Path(directory)
     if extensions is None:
         extensions = SUPPORTED_EXTENSIONS
@@ -71,6 +73,8 @@ def discover_documents(directory, extensions=None, *, reject_unsupported=False):
     for path in sorted(directory.rglob("*")):
         if path.name.startswith("~$") or not path.is_file():
             continue
+        if excluded_paths and path.resolve() in excluded_paths:
+            continue
         extension = path.suffix.lower()
         if extension in allowed:
             files.append(path)
@@ -80,7 +84,7 @@ def discover_documents(directory, extensions=None, *, reject_unsupported=False):
         listing = "\n".join(unsupported[:_MAX_LISTED_UNSUPPORTED])
         if len(unsupported) > _MAX_LISTED_UNSUPPORTED:
             listing += f"\n... and {len(unsupported) - _MAX_LISTED_UNSUPPORTED} more"
-        raise ValueError("Unsupported documents found. This input accepts PDF and DOCX:\n" + listing)
+        raise ValueError("Unsupported documents found. This input accepts PDF, DOCX and XLSX:\n" + listing)
     groups = {}
     for path in files:
         stem = unicodedata.normalize("NFC", path.stem).casefold()
@@ -119,8 +123,9 @@ def _path_document_name(path, source_root):
 
 
 def resolve_document_source(source=None, source_bytes=None, source_name=None, expected_format=None, *, source_root=None):
-    if expected_format is not None and expected_format not in ("docx", "pdf"):
-        raise ValueError("expected_format must be docx or pdf")
+    if expected_format is not None and (not isinstance(expected_format, str)
+                                        or "." + expected_format not in SUPPORTED_EXTENSIONS):
+        raise ValueError("expected_format must be docx, pdf or xlsx")
     if isinstance(source, (bytes, bytearray)):
         if source_bytes is not None:
             raise ValueError("Provide a single document byte stream")
@@ -152,6 +157,17 @@ def resolve_document_source(source=None, source_bytes=None, source_name=None, ex
                 fmt = "pdf"
             else:
                 fmt = "docx"
+                if source_bytes.startswith(b"PK"):
+                    try:
+                        with ZipFile(BytesIO(source_bytes)) as archive:
+                            types = archive.getinfo("[Content_Types].xml")
+                            if (types.file_size <= 64 * 1024 and
+                                    b"spreadsheetml.sheet.main+xml" in archive.read(types)):
+                                fmt = "xlsx"
+                    except (BadZipFile, KeyError):
+                        pass
+        if fmt == "xlsx" and name and Path(name).suffix.lower() in {".xls", ".xlsb", ".xlsm"}:
+            raise ValueError("The XLSX adapter requires an .xlsx source name")
         if name is None:
             name = "in_memory_" + hashlib.sha256(source_bytes).hexdigest()[:_IN_MEMORY_HASH_LEN] + "." + fmt
         return bytes(source_bytes), name, fmt

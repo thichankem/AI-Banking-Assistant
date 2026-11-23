@@ -1680,9 +1680,14 @@ class BankingTracer:
         self._trace_store = {}
         self._active_runs = {}
         self._pre_turn_spans = {}
+        self._persistent_backend = None
 
         if self.enabled and self.langsmith_tracing:
             self._init_langsmith()
+
+    def set_persistent_backend(self, backend):
+        """Attach a SQLite/memory backend used to persist completed debug traces across restarts."""
+        self._persistent_backend = backend
 
     def current_trace_id(self):
         """Return the active ContextVar trace_id when inside a LangSmithTraceRun."""
@@ -1735,7 +1740,7 @@ class BankingTracer:
             self._active_runs.pop(str(trace_id), None)
 
     def record_completed_trace(self, record):
-        """Store a sanitized completed trace in the bounded FIFO in-memory buffer."""
+        """Store a sanitized completed trace in the bounded FIFO in-memory buffer and persistent store."""
         if not isinstance(record, dict):
             return
         trace_id = str(record.get("trace_id") or "").strip()
@@ -1749,6 +1754,12 @@ class BankingTracer:
             while len(self._trace_store) > self._max_stored_traces:
                 oldest_key = next(iter(self._trace_store))
                 self._trace_store.pop(oldest_key, None)
+        backend = self._persistent_backend
+        if backend is not None and hasattr(backend, "save_debug_trace_record"):
+            try:
+                backend.save_debug_trace_record(safe_record)
+            except Exception as exc:
+                logger.debug("Persist trace error (%s)", type(exc).__name__)
 
     def _load_disk_traces_fallback(self, limit=50):
         """Read recent sanitized traces from local JSONL export when present on disk."""
@@ -1801,14 +1812,54 @@ class BankingTracer:
             active_items.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
 
         completed_items = []
+        mem_matching_ids = set()
         for raw_rec in completed_records:
             tid = str(raw_rec.get("trace_id") or "")
             if tid in active_ids:
                 continue
             if target_ref is not None and raw_rec.get("session_ref") != target_ref:
                 continue
+            if tid:
+                mem_matching_ids.add(tid)
             enriched_rec = _enrich_trace_for_debug(raw_rec)
             completed_items.append(_build_trace_list_item(enriched_rec))
+
+        persisted_total = 0
+        backend = self._persistent_backend
+        if backend is not None and hasattr(backend, "list_persisted_debug_traces"):
+            try:
+                persisted_records = backend.list_persisted_debug_traces(
+                    session_ref=target_ref,
+                    session_id=session_id,
+                    scope=scope,
+                    limit=max(limit, 100),
+                )
+            except Exception as exc:
+                logger.debug("List persisted traces error (%s)", type(exc).__name__)
+                persisted_records = []
+            if isinstance(persisted_records, list):
+                for prec in persisted_records:
+                    if not isinstance(prec, dict):
+                        continue
+                    tid = str(prec.get("trace_id") or "")
+                    if not tid or tid in known_ids or tid in active_ids:
+                        continue
+                    if target_ref is not None and prec.get("session_ref") != target_ref:
+                        continue
+                    known_ids.add(tid)
+                    enriched_prec = _enrich_trace_for_debug(_sanitize_value(prec))
+                    completed_items.append(_build_trace_list_item(enriched_prec))
+            if hasattr(backend, "count_persisted_debug_traces"):
+                try:
+                    persisted_total = int(
+                        backend.count_persisted_debug_traces(
+                            session_ref=target_ref,
+                            session_id=session_id,
+                            scope=scope,
+                        ) or 0
+                    )
+                except Exception:
+                    persisted_total = 0
 
         if len(completed_items) < limit:
             disk_records = self._load_disk_traces_fallback(limit=max(limit, 50))
@@ -1824,10 +1875,12 @@ class BankingTracer:
                 if len(completed_items) >= limit:
                     break
 
+        completed_items.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
         combined = active_items + completed_items
+        total_stored_val = max(len(combined), persisted_total + len(active_items))
         return {
             "active_count": len(active_items),
-            "total_stored": len(combined),
+            "total_stored": total_stored_val,
             "total_in_memory": mem_total,
             "session_ref": target_ref,
             "traces": combined[:limit],
@@ -1853,29 +1906,55 @@ class BankingTracer:
         if completed_rec is not None:
             return _enrich_trace_for_debug(completed_rec)
 
+        backend = self._persistent_backend
+        if backend is not None and hasattr(backend, "get_persisted_debug_trace"):
+            try:
+                persisted_rec = backend.get_persisted_debug_trace(key)
+                if isinstance(persisted_rec, dict):
+                    return _enrich_trace_for_debug(_sanitize_value(persisted_rec))
+            except Exception as exc:
+                logger.debug("Load persisted trace error (%s)", type(exc).__name__)
+
         for disk_rec in self._load_disk_traces_fallback(limit=200):
             if str(disk_rec.get("trace_id") or "") == key:
                 return _enrich_trace_for_debug(disk_rec)
         return None
 
     def clear_debug_traces(self, *, session_id=None, scope="all"):
-        """Clear completed in-memory traces matching scope (all or current session)."""
+        """Clear completed in-memory and persisted traces matching scope (all or current session)."""
         target_ref = None
         if scope == "session" and session_id:
             target_ref = fingerprint(session_id)
 
+        deleted_mem_ids = set()
         with self._store_lock:
             if target_ref is None:
-                cleared = len(self._trace_store)
+                deleted_mem_ids = {str(tid) for tid in self._trace_store.keys()}
                 self._trace_store.clear()
-                return cleared
-            to_delete = [
-                tid for tid, rec in self._trace_store.items()
-                if rec.get("session_ref") == target_ref
-            ]
-            for tid in to_delete:
-                self._trace_store.pop(tid, None)
-            return len(to_delete)
+            else:
+                to_delete = [
+                    tid for tid, rec in self._trace_store.items()
+                    if rec.get("session_ref") == target_ref
+                ]
+                for tid in to_delete:
+                    deleted_mem_ids.add(str(tid))
+                    self._trace_store.pop(tid, None)
+
+        extra_persisted_cleared = 0
+        backend = self._persistent_backend
+        if backend is not None and hasattr(backend, "clear_persisted_debug_traces"):
+            try:
+                extra_persisted_cleared = int(
+                    backend.clear_persisted_debug_traces(
+                        session_ref=target_ref,
+                        session_id=session_id,
+                        exclude_trace_ids=deleted_mem_ids,
+                    ) or 0
+                )
+            except Exception as exc:
+                logger.debug("Clear persisted traces error (%s)", type(exc).__name__)
+
+        return len(deleted_mem_ids) + extra_persisted_cleared
 
     def _resolve_langsmith_flag(self):
         env_flag = os.getenv("LANGSMITH_TRACING")

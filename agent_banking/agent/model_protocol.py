@@ -105,7 +105,7 @@ SCHEMAS = {
 REVIEW_SCHEMA = object_schema(
     {"verdict": {"enum": ["approve", "revise"]}, "feedback": {"type": "string", "maxLength": _REVIEW_FEEDBACK_MAX_CHARS},
      "coverage": {"type": "array", "items": COVERAGE, "minItems": 1, "maxItems": 16},
-     "claims": {"type": "array", "items": CLAIM, "maxItems": 20},
+     "claims": {"type": "array", "items": CLAIM, "maxItems": 40},
      "issues": {"type": "array", "items": REVIEW_ISSUE, "maxItems": 4}},
     ["verdict", "feedback", "coverage", "claims"]
 )

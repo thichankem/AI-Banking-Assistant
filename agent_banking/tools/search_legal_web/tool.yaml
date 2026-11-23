@@ -1,0 +1,54 @@
+name: search_legal_web
+title: Tra cứu văn bản trên Thư Viện Pháp Luật
+description: >-
+  Tra văn bản pháp luật công khai của Việt Nam trên Thư Viện Pháp Luật, ví dụ luật,
+  nghị định, thông tư, quyết định, văn bản hợp nhất và cập nhật sửa đổi. Dùng khi khách
+  hỏi quy định pháp luật, yêu cầu tra web hoặc cần đối chiếu hiệu lực của văn bản.
+  Dùng search_banking_knowledge cho biểu phí, sản phẩm và quy trình nội bộ A-Bank.
+  Gửi từ khóa công khai ngắn gọn, bỏ thông tin khách hàng, dữ liệu nội bộ và lịch sử chat.
+  Dùng một truy vấn tập trung cho mỗi văn bản hoặc vấn đề. Kết quả là đoạn trích tìm kiếm.
+  Trích dẫn nguồn cho từng kết luận. Chỉ nói văn bản đang có hiệu lực hoặc nêu chính xác
+  điều khoản khi đoạn trích đủ căn cứ. Nếu thiếu căn cứ, nêu phần cần đối chiếu ở link nguồn.
+inputSchema:
+  type: object
+  properties:
+    query:
+      type: string
+      minLength: 3
+      maxLength: 300
+      description: >-
+        Tên hoặc số hiệu văn bản và từ khóa chung của điều khoản, chẳng hạn Thông tư
+        17/2024/TT-NHNN mở tài khoản thanh toán. Không nhập URL, email, số điện thoại,
+        số tài khoản, tên khách hàng, OTP hoặc nội dung tài liệu nội bộ.
+  required: [query]
+  additionalProperties: false
+outputSchema:
+  type: object
+  properties:
+    status: {type: string}
+    provider: {enum: [tavily, brave, ""]}
+    attempts:
+      type: array
+      maxItems: 2
+      items:
+        type: object
+        properties:
+          provider: {enum: [tavily, brave]}
+          status: {type: string}
+        required: [provider, status]
+    documents:
+      type: array
+      maxItems: 4
+      items:
+        type: object
+        properties:
+          chunk_id: {type: string}
+          source: {type: string}
+          content: {type: string}
+          business_metadata: {type: object}
+        required: [chunk_id, source, content, business_metadata]
+  required: [status, provider, attempts, documents]
+annotations:
+  readOnlyHint: true
+  destructiveHint: false
+  openWorldHint: true

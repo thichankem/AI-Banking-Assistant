@@ -1,4 +1,4 @@
-"""Run versioned PDF/DOCX ingestion and publish verified snapshots."""
+"""Run versioned document ingestion and publish verified snapshots."""
 
 import json
 from pathlib import Path
@@ -33,6 +33,7 @@ from agent_banking.chunking.publication_io import (
 )
 from agent_banking.chunking.universal.extraction.pdf.page_review import CloudOCRUnavailable
 from agent_banking.chunking.universal.extraction.sources import discover_documents, document_source_root
+from agent_banking.chunking.universal.extraction.xlsx.package import InvalidWorkbook
 from agent_banking.chunking.universal.pipeline import LayoutAwareChunker
 
 _PIPELINE = get_config_section("pipeline")
@@ -98,7 +99,7 @@ def run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=No
 
 def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=None, *,
                        require_ready=None, clean_output=False,
-                       retry_delays=None, **chunker_options):
+                       retry_delays=None, excel_metadata_path=None, **chunker_options):
     if retry_delays is None:
         retry_delays = _DEFAULT_RETRY_DELAYS
     module = Path(__file__).resolve().parent
@@ -107,7 +108,14 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
     if not incoming.is_dir():
         raise FileNotFoundError("Input directory not found: " + str(incoming))
     source_root = document_source_root(incoming, getattr(chunker_options.get("config"), "CHUNKING_INPUT_DIR", module / _DEFAULT_INPUT_SUBDIR))
-    discovered = discover_documents(incoming, reject_unsupported=True)
+    excluded_paths = set()
+    if excel_metadata_path is not None:
+        if "excel_metadata" in chunker_options:
+            raise ValueError("Specify either Excel metadata or an Excel metadata file")
+        metadata_path = Path(excel_metadata_path).resolve()
+        excluded_paths.add(metadata_path)
+        chunker_options["excel_metadata"] = json.loads(metadata_path.read_text(encoding="utf-8-sig"))
+    discovered = discover_documents(incoming, reject_unsupported=True, excluded_paths=excluded_paths)
     files = {path.relative_to(source_root).as_posix(): path for path in discovered}
     active_sources = set(files)
     output.mkdir(parents=True, exist_ok=True)
@@ -140,6 +148,8 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
         fingerprint = chunker.fingerprint()
         if require_ready is None:
             require_ready = True
+        permanent_failures = set()
+
         def process(source, path, attempt):
             beginning = time.perf_counter()
             try:
@@ -149,6 +159,9 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
                     cached = None
                 else:
                     cached = _read_cached(output, record, source, digest, fingerprint)
+                if cached is not None and any(image.get("status") in {"partial", "ocr_unavailable"}
+                                              for image in cached[1]["document"].get("excel_ocr", ())):
+                    cached = None
                 if cached is not None:
                     chunks, artifact = cached
                     status = "SKIPPED_ALREADY_PROCESSED"
@@ -186,12 +199,17 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
             except Exception as error:
                 if isinstance(error, CloudOCRUnavailable):
                     cloud_failures.add(source)
+                if isinstance(error, InvalidWorkbook):
+                    permanent_failures.add(source)
                 errors[source] = {"file_name": path.name, "rel_path": source, "input_rel_path": path.relative_to(incoming).as_posix(),
                                   "status": "FAILED", "attempts": attempt,
                                   "error_type": type(error).__name__, "error": str(error), "chunk_count": 0}
                 ocr_statistics = getattr(error, "pdf_ocr_statistics", None)
                 if ocr_statistics is not None:
                     errors[source]["quality"] = ocr_statistics
+                excel_issues = getattr(error, "excel_issues", None)
+                if excel_issues is not None:
+                    errors[source]["quality"] = {"excel_issues": len(excel_issues), "excel_issues_detail": excel_issues}
                 page = getattr(error, "pdf_page_number", None)
                 location = ""
                 if page is not None:
@@ -205,7 +223,7 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
         for source, path in files.items():
             process(source, path, 1)
         for attempt, delay in enumerate(retry_delays, 2):
-            retry_sources = errors.keys() - cloud_failures
+            retry_sources = errors.keys() - cloud_failures - permanent_failures
             if not retry_sources:
                 break
             report(f"Retrying {len(retry_sources)} failed document(s) in {delay}s (attempt {attempt})")
@@ -232,7 +250,8 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
                     "index_ready": (not files or bool(completed))
                     and all(record["quality"]["index_ready"] for _, record in completed.values()),
                     "records": manifests}
-        for metric in _QUALITY_METRICS:
+        for metric in (*_QUALITY_METRICS, "excel_formula_cells_skipped", "excel_sheets", "excel_tables",
+                       "excel_ocr_images", "excel_ocr_unresolved", "excel_issues"):
             manifest[metric] = sum(item.get("quality", {}).get(metric, 0) for item in manifests)
         atomic_json(state_path, {"schema_version": _SCHEMA_VERSION, "records": records})
         if errors and not completed:
@@ -267,6 +286,7 @@ def main():
                         help="Deprecated compatibility option. Standalone images are ignored in both modes.")
     parser.add_argument("--check-models", action="store_true", help="Probe configured cloud endpoints without processing documents")
     parser.add_argument("--ocr-docx-images", action="store_true", help="Transcribe embedded DOCX raster images via cloud vision")
+    parser.add_argument("--excel-metadata", type=Path, help="JSON file mapping XLSX source paths to revision metadata")
     parser.add_argument("--search-language", choices=["vi", "all"], default=None,
                         help="Retain all source languages for search (default) or opt into Vietnamese-only search")
     parser.add_argument("--input", type=Path, default=None, help="Input directory")
@@ -282,7 +302,7 @@ def main():
 
     module_dir = Path(__file__).resolve().parent
     in_dir = args.input or module_dir / _DEFAULT_INPUT_SUBDIR
-    options = {"ocr_docx_images": args.ocr_docx_images}
+    options = {"ocr_docx_images": args.ocr_docx_images, "excel_metadata_path": args.excel_metadata}
     if args.search_language is not None:
         options["search_language"] = args.search_language
     run_auto_chunking(

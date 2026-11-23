@@ -217,3 +217,25 @@ $env:AUTO_MODEL_ROUTING="true"
 Tắt router bằng `AUTO_MODEL_ROUTING=false` và khởi động lại tiến trình để quay về danh sách model cũ. Embedding giữ cùng model và vector space 1024 chiều theo cấu hình hiện tại.
 
 Hướng dẫn xây lại kho tài liệu, đo truy xuất và kiểm thử chất lượng agent theo bộ 785 câu nằm trong [TUNING.md](TUNING.md).
+
+### Tra cứu văn bản pháp luật trên web
+
+`search_legal_web` tra các trang `/van-ban/` trên `thuvienphapluat.vn` và tạo trích dẫn có liên kết tới văn bản. Dùng từ khóa pháp luật công khai, ví dụ `Thông tư 17/2024/TT-NHNN mở tài khoản thanh toán`. Lượt chat dùng đoạn trích tìm kiếm làm căn cứ. Khi đoạn trích thiếu nội dung điều khoản hoặc thông tin hiệu lực, agent hướng người dùng tới văn bản để đối chiếu.
+
+Điền khóa vào `.env` ở thư mục gốc repo rồi khởi động lại app. Tool xuất hiện khi có ít nhất một khóa. Thứ tự mặc định là Brave rồi Tavily. Đặt `LEGAL_WEB_SEARCH_PRIMARY=tavily` để đảo thứ tự. Agent tra API dự phòng khi API chính báo lỗi, hết hạn mức, thiếu văn bản phù hợp hoặc đoạn trích chưa nhắc tới số điều được hỏi.
+
+```dotenv
+TAVILY_API_KEY=
+BRAVE_SEARCH_API_KEY=
+LEGAL_WEB_SEARCH_PRIMARY=brave
+```
+
+Mỗi API có tối đa 1.000 lượt thử gọi từ dự án trong một tháng theo giờ Việt Nam. Bộ đếm lưu cục bộ trong SQLite và dùng chung giữa các tiến trình chạy cùng checkout. Tavily dùng `basic` để mỗi lượt tìm kiếm dùng một credit. Có thể giảm trần cục bộ bằng `LEGAL_WEB_SEARCH_TAVILY_MONTHLY_LIMIT` hoặc `LEGAL_WEB_SEARCH_BRAVE_MONTHLY_LIMIT` khi cùng khóa được dùng ở nơi khác.
+
+Từ thư mục gốc repo, chạy phép so sánh với 7 truy vấn pháp lý công khai giống nhau cho cả hai API.
+
+```powershell
+.\.venv\Scripts\python.exe -m agent_banking.evaluator.legal_web_search_eval
+```
+
+Báo cáo xếp theo số truy vấn tìm đúng văn bản trong 4 kết quả đầu, số cụm từ cần có trong đoạn trích, thứ hạng trung bình nghịch đảo và độ trễ trung vị. Các lượt đánh giá dùng cùng hạn mức với agent.

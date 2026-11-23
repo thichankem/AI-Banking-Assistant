@@ -37,7 +37,8 @@ def build_document(path, output, ocr_docx_images=False):
         if (folder / "chunking_manifest.json").exists():
             chunks, manifest = load_published_chunks(folder, return_manifest=True)
             record = manifest["records"][0]
-            usable = not record.get("quality", {}).get("ocr_failed_pages", 0)
+            quality = record.get("quality", {})
+            usable = not (quality.get("ocr_failed_pages", 0) or quality.get("excel_ocr_unresolved", 0))
             if ocr_docx_images:
                 previous = json.loads((folder / record["artifact_file"]).read_text(encoding="utf-8"))
                 usable = usable and not unavailable_images(previous["document"])
@@ -74,7 +75,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--workers", type=int, default=int(_KB_CFG["default_workers"]))
     parser.add_argument("--names", nargs="*")
-    parser.add_argument("--extensions", nargs="*", default=list(_KB_CFG["default_extensions"]))
+    parser.add_argument("--extensions", nargs="*", default=[*_KB_CFG["default_extensions"], ".xlsx"])
     parser.add_argument("--ocr-docx-images", action="store_true")
     args = parser.parse_args()
     from agent_banking.core.settings import Config

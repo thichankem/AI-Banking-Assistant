@@ -26,6 +26,7 @@ def chunker_fingerprint(chunker, pipeline_version):
                                  "boundary": semantic_boundaries.BOUNDARY_PROMPT},
                      "semantic": chunker.semantic, "image_mode": chunker.image_mode,
                      "ocr_docx_images": chunker.ocr_docx_images,
+                     "excel_metadata": getattr(chunker, "excel_metadata", {}),
                      "search_language": chunker.planner.search_language,
                      "dpi": chunker.dpi, "max_pdf_pages": chunker.pdf_extractor.max_pages,
                      "max_page_pixels": chunker.pdf_extractor.max_page_pixels,

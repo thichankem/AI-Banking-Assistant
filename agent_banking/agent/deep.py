@@ -898,6 +898,79 @@ def _format_citation_excerpt(chunk: dict, max_chars: int = 4000) -> str:
     return text
 
 
+def _extract_file_type(source: str, business_metadata: dict) -> str:
+    """Resolve normalized file extension type (pdf, docx, xlsx) without leading dot."""
+    clean_src = str(source or "").strip().lower()
+    for ext in ("pdf", "docx", "xlsx"):
+        if clean_src.endswith("." + ext):
+            return ext
+    if isinstance(business_metadata, dict):
+        meta_ft = str(business_metadata.get("file_type") or "").strip().lower()
+        if meta_ft.startswith("."):
+            meta_ft = meta_ft[1:]
+        if meta_ft in ("pdf", "docx", "xlsx"):
+            return meta_ft
+    return ""
+
+
+def _extract_citation_provenance(business_metadata: dict) -> dict:
+    """Extract compact, frontend-safe location anchors from chunk business_metadata."""
+    if not isinstance(business_metadata, dict):
+        return {}
+    prov = business_metadata.get("provenance")
+    if not isinstance(prov, dict):
+        prov = {}
+
+    allowed_loc_keys = (
+        "part",
+        "xpath",
+        "region",
+        "parent_cell",
+        "sheet_name",
+        "cell_range",
+        "source_row",
+        "page_number",
+        "page_index",
+        "page_asset_sha256",
+    )
+    compact_locs = []
+    raw_locs = prov.get("locations")
+    if isinstance(raw_locs, list):
+        for loc in raw_locs[:24]:
+            if not isinstance(loc, dict):
+                continue
+            cleaned = {}
+            for k in allowed_loc_keys:
+                if k in loc and loc[k] is not None and loc[k] != "":
+                    cleaned[k] = loc[k]
+            if cleaned:
+                compact_locs.append(cleaned)
+
+    compact_spans = []
+    raw_spans = prov.get("source_spans")
+    if isinstance(raw_spans, list):
+        for sp in raw_spans[:12]:
+            if not isinstance(sp, dict):
+                continue
+            sp_entry = {}
+            for k in ("start", "end", "chunk_start", "chunk_end"):
+                if type(sp.get(k)) is int:
+                    sp_entry[k] = sp[k]
+            if sp_entry:
+                compact_spans.append(sp_entry)
+
+    out = {}
+    if prov.get("method"):
+        out["method"] = str(prov["method"])
+    if compact_locs:
+        out["locations"] = compact_locs
+    if compact_spans:
+        out["source_spans"] = compact_spans
+    if business_metadata.get("excel_table_id"):
+        out["excel_table_id"] = str(business_metadata["excel_table_id"])
+    return out
+
+
 def _enrich_citations(citations: list, retrieved_chunks: list, cited_images: list, status: str) -> list:
     """Attach source document metadata, page numbers, original excerpt, and images to citations."""
     if status == "BLOCKED" or not citations:
@@ -946,10 +1019,20 @@ def _enrich_citations(citations: list, retrieved_chunks: list, cited_images: lis
         enriched_item = dict(item)
         pages = _extract_page_numbers(meta)
         enriched_item["document_name"] = _extract_document_name(src, meta)
+        enriched_item["file_type"] = _extract_file_type(src, meta)
+        if meta.get("source_url"):
+            enriched_item["source_url"] = meta["source_url"]
         enriched_item["page_numbers"] = pages
+        excel_citation = meta.get("citation")
+        if isinstance(excel_citation, dict) and excel_citation.get("sheet_name"):
+            enriched_item["sheet_name"] = excel_citation["sheet_name"]
+            enriched_item["cell_ranges"] = excel_citation.get("cell_ranges", [])
         enriched_item["pdf_url"] = _build_pdf_url(src, pages)
         enriched_item["chunk_type"] = chunk_type
         enriched_item["excerpt"] = _format_citation_excerpt(chunk)
+        prov_summary = _extract_citation_provenance(meta)
+        if prov_summary:
+            enriched_item["provenance"] = prov_summary
         chunk_imgs = _extract_chunk_images(item, chunk)
         if chunk_imgs:
             enriched_item["images"] = chunk_imgs

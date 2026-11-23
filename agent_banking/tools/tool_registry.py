@@ -18,6 +18,7 @@ from agent_banking.guardrails.tool_guardrail import (
 )
 from agent_banking.tools.config.prompts import TOOL_TEMPLATES, get_tool_prompt_override
 from agent_banking.tools.config.settings import get_tool_runtime_config, get_tool_runtime_override
+from agent_banking.tools.extensions.legal_web_search import PROVIDERS, TOOL_NAME as LEGAL_WEB_SEARCH_TOOL, provider_key
 
 _TYPE_CONVERTERS = {"float": float, "int": int, "str": str, "bool": bool}
 
@@ -179,6 +180,8 @@ class BankingToolRegistry:
                 continue
             if not (directory / "tool.yaml").exists():
                 continue
+            if uses_default and directory.name == LEGAL_WEB_SEARCH_TOOL and not any(provider_key(name) for name in PROVIDERS):
+                continue
             try:
                 public = load_yaml(read_resource(directory, "tool.yaml"))
                 local = load_yaml(read_resource(directory, "runtime.yaml"))
@@ -265,9 +268,10 @@ class BankingToolRegistry:
         if handler == RAG_HANDLER:
             from agent_banking.tools.rag_tool import BankingRAGTool
 
+            excel = {"excel": params["excel"]} if "excel" in params else {}
             return BankingRAGTool(pipeline_instance=self.pipeline_instance).execute(
                 query=params.get("query", ""), top_k=params.get("top_k", DEFAULT_RAG_TOP_K),
-                exact=params.get("exact", ""), source=params.get("source", ""), offset=params.get("offset")
+                exact=params.get("exact", ""), source=params.get("source", ""), offset=params.get("offset"), **excel,
             )
         if not is_extension(spec):
             return getattr(import_module(BANKING_MODULE), handler["function"])(**params)

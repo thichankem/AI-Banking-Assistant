@@ -315,3 +315,59 @@ def test_api_multi_select_resume_via_http(tmp_path, monkeypatch):
             assert calls[1]["human_replies"][0]["response"] == "3 tháng; 12 tháng"
     finally:
         pipeline.graph.checkpointer.conn.close()
+
+
+def test_api_resume_stream_emits_progress_tokens_and_done(tmp_path, monkeypatch):
+    multi_clarify = {
+        "kind": "clarify",
+        "question": "Chọn các kỳ hạn muốn đối chiếu?",
+        "options": ["3 tháng", "6 tháng", "12 tháng"],
+        "multi_select": True,
+    }
+    pipeline, _ = make_pipeline(monkeypatch, tmp_path / "api_resume_stream.sqlite", [
+        multi_clarify,
+        {"kind": "final", "answer": "Đã đối chiếu 3 tháng và 12 tháng."},
+        REVIEW,
+    ])
+    app = load_app(monkeypatch, pipeline)
+    try:
+        with TestClient(app) as client:
+            paused = client.post("/api/agent/chat", json={"session_id": "api-rs", "message": "Tính lãi"}).json()
+            assert paused["status"] == "awaiting_input"
+            interaction_id = paused["interaction"]["id"]
+
+            bad_resp = client.post("/api/agent/resume/stream", json={
+                "session_id": "api-rs",
+                "interaction_id": interaction_id,
+                "choice_ids": ["option_1", "cancel"],
+            })
+            assert bad_resp.status_code == 200
+            bad_events = [
+                json.loads(line[6:])
+                for line in bad_resp.text.splitlines()
+                if line.startswith("data: ")
+            ]
+            assert any(evt.get("event_type") == "error" and evt.get("status_code") == 422 for evt in bad_events)
+
+            ok_resp = client.post("/api/agent/resume/stream", json={
+                "session_id": "api-rs",
+                "interaction_id": interaction_id,
+                "choice_ids": ["option_1", "option_3"],
+            })
+            assert ok_resp.status_code == 200
+            events = [
+                json.loads(line[6:])
+                for line in ok_resp.text.splitlines()
+                if line.startswith("data: ")
+            ]
+            event_types = [evt.get("event_type") for evt in events]
+            assert "node_progress" in event_types
+            assert "token" in event_types
+            assert event_types[-1] == "done"
+            done_evt = events[-1]
+            assert done_evt["status"] == "completed"
+            assert done_evt["audit_status"] == "PASS"
+            assert done_evt["full_answer"] == "Đã đối chiếu 3 tháng và 12 tháng."
+            assert done_evt.get("dag_telemetry") is not None
+    finally:
+        pipeline.graph.checkpointer.conn.close()

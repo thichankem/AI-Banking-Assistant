@@ -91,7 +91,8 @@ class PdfVisualReviewer:
         self.use_decision = bool(use_decision)
 
     @trace_stage("document.vision")
-    def read(self, pixels, native, width, height, region_depth=0, *, allow_ocr_additions=False, attempt_budget=None):
+    def read(self, pixels, native, width, height, region_depth=0, *, allow_ocr_additions=False, attempt_budget=None,
+             review_incomplete=False):
         from ...models.text_client import CloudAttempts
         from ...models.vision_client import DocumentVisionClient, QwenVisionClient, VisionPageOverflow
         from agent_banking.core.fallback import ModelFallbackError
@@ -115,6 +116,8 @@ class PdfVisualReviewer:
             "clients": [_client_identity(client) for client in clients],
             "models": [chain_fingerprint(role) for role in ("chunking.vision", "chunking.vision_review")],
         }
+        if review_incomplete:
+            identity["review_incomplete"] = True
         key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
         cached = self.cache.get(key)
         if isinstance(cached, dict):
@@ -181,7 +184,7 @@ class PdfVisualReviewer:
                     failures.append(type(error).__name__)
                     repair = True
                     can_crop = True
-                    if routed and index == 0 and len(clients) > 1:
+                    if (routed or review_incomplete) and index == 0 and len(clients) > 1:
                         break
                     continue
                 except (RuntimeError, OSError) as error:
@@ -197,18 +200,19 @@ class PdfVisualReviewer:
                 evidence["model"] = (layout.get("api") or {}).get("model") or getattr(client, "model", "unknown")
                 evidence["scope"] = "cloud_single_reading"
                 if (_SCHEMA_ISSUES.intersection(evidence["issues"])
-                        or routed and (evidence["incomplete"] or layout["uncertainties"])):
+                        or (routed or review_incomplete) and (evidence["incomplete"] or layout["uncertainties"])):
                     if partial is None:
                         partial = layout
                     repair = True
-                    if routed and index == 0 and len(clients) > 1:
+                    if (routed or review_incomplete) and index == 0 and len(clients) > 1:
                         break
                     continue
                 return self._finish(key, layout, width, height, failures, initial_budget - attempt_budget.remaining)
         if partial is not None:
             return self._finish(key, partial, width, height, failures, initial_budget - attempt_budget.remaining)
         if can_crop and attempt_budget.remaining and region_depth < _MAX_CROP_DEPTH:
-            layout = self._overflow_regions(pixels, width, height, region_depth, failures, attempt_budget)
+            layout = self._overflow_regions(pixels, width, height, region_depth, failures, attempt_budget,
+                                            review_incomplete=review_incomplete)
             return self._finish(key, layout, width, height, failures, initial_budget - attempt_budget.remaining)
         raise CloudOCRUnavailable("Cloud OCR returned no usable page content (" + ", ".join(failures) + ")")
 
@@ -219,7 +223,7 @@ class PdfVisualReviewer:
             self.cache.put(key, layout, width, height)
         return deepcopy(layout)
 
-    def _overflow_regions(self, pixels, width, height, depth, failures, attempt_budget):
+    def _overflow_regions(self, pixels, width, height, depth, failures, attempt_budget, *, review_incomplete=False):
         from PIL import Image
 
         observations = []
@@ -243,7 +247,7 @@ class PdfVisualReviewer:
                     image.crop(tuple(box)).save(stream, "PNG")
                     try:
                         crop = self.read(stream.getvalue(), [], right - left, bottom - top, depth + 1,
-                                         attempt_budget=attempt_budget)
+                                         attempt_budget=attempt_budget, review_incomplete=review_incomplete)
                     except CloudOCRUnavailable as error:
                         entry["error"] = str(error)
                         incomplete = True

@@ -196,6 +196,11 @@ def _format_retrieved_doc_context(doc, max_chars=None, query="") -> str:
         header_parts.append(breadcrumb)
     if section_title and section_title not in breadcrumb:
         header_parts.append(section_title)
+    citation = meta.get("citation")
+    if isinstance(citation, dict) and citation.get("sheet_name"):
+        ranges = ", ".join(citation.get("cell_ranges", []))
+        if ranges:
+            header_parts.append(f"{citation['sheet_name']}!{ranges}")
     prov = meta.get("provenance")
     if isinstance(prov, dict):
         locs = prov.get("locations")

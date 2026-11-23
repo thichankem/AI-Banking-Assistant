@@ -1,0 +1,8 @@
+category: KNOWLEDGE
+handler:
+  module: agent_banking.tools.extensions.legal_web_search
+  function: search_legal_web
+policy:
+  access: read_only
+  workers:
+  - policy_research

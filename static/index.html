@@ -4,96 +4,140 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trợ lý AI A-Bank</title>
-    <link rel="stylesheet" href="/static/style.css?v=persona1">
+    <link rel="stylesheet" href="/static/style.css?v=vip4">
 </head>
 <body>
     <div class="chat-container is-empty" id="chatContainer">
-        <!-- HEADER -->
-        <header class="chat-header">
-            <div class="header-left">
-                <h2>Trợ lý AI A-Bank</h2>
-            </div>
-            <div class="header-right">
-                <button type="button" id="debugTraceBtn" class="btn-debug" title="Mở bảng Debug &amp; Tracing chi tiết (Ctrl+Shift+D)">
-                    <span class="debug-live-dot" id="debugLiveDot" hidden></span>
-                    <span>Debug Trace</span>
-                    <span class="debug-count-badge" id="debugTraceCount">0</span>
-                </button>
-                <button type="button" id="clearChatBtn" class="btn-reset">
-                    Làm mới phiên
-                </button>
-            </div>
-        </header>
-
-        <div class="stepper-container" id="nodeStepper" style="display: none;">
-            <div class="stepper-header">
-                <span class="stepper-title">Deep Agent</span>
-                <span class="stepper-current-desc" id="stepperDesc" role="status"></span>
-            </div>
-            <ol id="agentPlan" class="agent-plan" aria-label="Kế hoạch của agent"></ol>
-            <ul id="agentActions" class="agent-actions" aria-label="Hành động của agent"></ul>
-        </div>
-
-        <!-- CHAT MESSAGES -->
-        <main class="chat-messages" id="chatMessages"></main>
-
-        <div class="welcome-hero" id="welcomeHero">
-            <h1 class="welcome-heading">Tôi có thể giúp gì cho Quý khách?</h1>
-        </div>
-
-        <!-- CHAT INPUT -->
-        <div class="chat-composer" id="chatComposer">
-            <div id="composerStatusBanner" class="composer-status-banner" role="status" aria-live="polite" hidden></div>
-            <div id="attachmentPreviewBar" class="attachment-preview-bar" aria-label="Ảnh đính kèm chờ gửi" hidden></div>
-            <form class="chat-input-area" id="chatForm" novalidate>
-                <label for="imageUploadInput" class="visually-hidden">Tải ảnh đính kèm</label>
-                <input
-                    type="file"
-                    id="imageUploadInput"
-                    name="attachments"
-                    accept="image/png,image/jpeg,image/webp,image/gif"
-                    multiple
-                    class="visually-hidden"
-                >
-                <button
-                    type="button"
-                    id="attachImageBtn"
-                    class="btn-composer-icon"
-                    aria-label="Đính kèm hình ảnh"
-                    title="Đính kèm hình ảnh (tối đa 3 ảnh, hoặc dán Ctrl+V)"
-                >
-                    <svg class="composer-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                        <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                        <polyline points="21 15 16 10 5 21"></polyline>
+        <!-- MULTI-SESSION SIDEBAR (SQLITE CHECKPOINTER) -->
+        <aside id="sessionSidebar" class="session-sidebar" aria-label="Lịch sử hội thoại">
+            <div class="session-sidebar-header">
+                <div class="session-sidebar-title-wrap">
+                    <span class="session-sidebar-title">Lịch sử tư vấn</span>
+                    <span id="sessionCountBadge" class="session-count-badge">0</span>
+                </div>
+                <button type="button" id="newSessionBtn" class="btn-new-session" title="Tạo cuộc hội thoại mới">
+                    <svg class="session-btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
                     </svg>
+                    <span>Mới</span>
                 </button>
-                <label for="userInput" class="visually-hidden">Nội dung câu hỏi</label>
+            </div>
+
+            <search class="session-search-box">
+                <label for="sessionSearchInput" class="visually-hidden">Tìm kiếm lịch sử hội thoại</label>
                 <input
-                    type="text"
-                    id="userInput"
-                    name="message"
-                    placeholder="Hỏi về biểu phí, mở thẻ, đính kèm ảnh lỗi hoặc nói bằng giọng nói..."
-                    autocomplete="off"
-                    enterkeyhint="send"
+                    type="search"
+                    id="sessionSearchInput"
+                    class="session-search-input"
+                    placeholder="Tìm tiêu đề hoặc nội dung..."
+                    aria-label="Tìm kiếm lịch sử hội thoại"
                 >
-                <button
-                    type="button"
-                    id="voiceInputBtn"
-                    class="btn-composer-icon"
-                    aria-label="Nhập bằng giọng nói"
-                    aria-pressed="false"
-                    title="Nhập bằng giọng nói tiếng Việt"
-                >
-                    <svg class="composer-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                        <line x1="12" y1="19" x2="12" y2="23"></line>
-                        <line x1="8" y1="23" x2="16" y2="23"></line>
-                    </svg>
-                </button>
-                <button type="submit" id="sendBtn">Gửi</button>
-            </form>
+            </search>
+
+            <div id="sessionList" class="session-list" role="list" aria-label="Danh sách các phiên hội thoại"></div>
+        </aside>
+
+        <!-- WORKSPACE -->
+        <div class="chat-workspace">
+            <!-- HEADER -->
+            <header class="chat-header">
+                <div class="header-left">
+                    <button
+                        type="button"
+                        id="sidebarToggleBtn"
+                        class="btn-sidebar-toggle"
+                        aria-label="Đóng mở thanh lịch sử hội thoại"
+                        aria-controls="sessionSidebar"
+                        aria-expanded="true"
+                        title="Đóng/mở Lịch sử hội thoại"
+                    >
+                        <svg class="composer-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                            <line x1="9" y1="3" x2="9" y2="21"></line>
+                        </svg>
+                    </button>
+                    <h2>Trợ lý AI A-Bank</h2>
+                </div>
+                <div class="header-right">
+                    <button type="button" id="debugTraceBtn" class="btn-debug" title="Mở bảng Debug &amp; Tracing chi tiết (Ctrl+Shift+D)">
+                        <span class="debug-live-dot" id="debugLiveDot" hidden></span>
+                        <span>Debug Trace</span>
+                        <span class="debug-count-badge" id="debugTraceCount">0</span>
+                    </button>
+                </div>
+            </header>
+
+            <div class="stepper-container" id="nodeStepper" style="display: none;">
+                <div class="stepper-header">
+                    <span class="stepper-title">Trạng thái xử lý</span>
+                    <span class="stepper-current-desc" id="stepperDesc" role="status"></span>
+                </div>
+                <ol id="agentPlan" class="agent-plan" aria-label="Kế hoạch của agent"></ol>
+                <ul id="agentActions" class="agent-actions" aria-label="Hành động của agent"></ul>
+            </div>
+
+            <!-- CHAT MESSAGES -->
+            <main class="chat-messages" id="chatMessages"></main>
+
+            <div class="welcome-hero" id="welcomeHero">
+                <h1 class="welcome-heading">Tôi có thể giúp gì cho Quý khách?</h1>
+            </div>
+
+            <!-- CHAT INPUT -->
+            <div class="chat-composer" id="chatComposer">
+                <div id="composerStatusBanner" class="composer-status-banner" role="status" aria-live="polite" hidden></div>
+                <div id="attachmentPreviewBar" class="attachment-preview-bar" aria-label="Ảnh đính kèm chờ gửi" hidden></div>
+                <form class="chat-input-area" id="chatForm" novalidate>
+                    <label for="imageUploadInput" class="visually-hidden">Tải ảnh đính kèm</label>
+                    <input
+                        type="file"
+                        id="imageUploadInput"
+                        name="attachments"
+                        accept="image/png,image/jpeg,image/webp,image/gif"
+                        multiple
+                        class="visually-hidden"
+                    >
+                    <button
+                        type="button"
+                        id="attachImageBtn"
+                        class="btn-composer-icon"
+                        aria-label="Đính kèm hình ảnh"
+                        title="Đính kèm hình ảnh (tối đa 3 ảnh, hoặc dán Ctrl+V)"
+                    >
+                        <svg class="composer-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                            <polyline points="21 15 16 10 5 21"></polyline>
+                        </svg>
+                    </button>
+                    <label for="userInput" class="visually-hidden">Nội dung câu hỏi</label>
+                    <input
+                        type="text"
+                        id="userInput"
+                        name="message"
+                        placeholder="Hỏi về biểu phí, mở thẻ, đính kèm ảnh lỗi hoặc nói bằng giọng nói..."
+                        autocomplete="off"
+                        enterkeyhint="send"
+                    >
+                    <button
+                        type="button"
+                        id="voiceInputBtn"
+                        class="btn-composer-icon"
+                        aria-label="Nhập bằng giọng nói"
+                        aria-pressed="false"
+                        title="Nhập bằng giọng nói tiếng Việt"
+                    >
+                        <svg class="composer-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                            <line x1="12" y1="19" x2="12" y2="23"></line>
+                            <line x1="8" y1="23" x2="16" y2="23"></line>
+                        </svg>
+                    </button>
+                    <button type="submit" id="sendBtn">Gửi</button>
+                </form>
+            </div>
         </div>
     </div>
 
@@ -143,6 +187,19 @@
                     </div>
 
                     <div id="debugTraceDetail" class="debug-trace-detail" hidden>
+                        <div class="debug-live-dag-panel" id="debugLiveDagPanel">
+                            <div class="stepper-header">
+                                <span class="stepper-title">LangGraph StateGraph</span>
+                                <div id="dagTelemetryBar" class="dag-telemetry-bar" aria-label="Thông số Telemetry">
+                                    <span id="dagLatencyBadge" class="dag-telemetry-pill" title="Tổng độ trễ thực thi">0 ms</span>
+                                    <span id="dagModelBadge" class="dag-telemetry-pill dag-pill-model" title="Model &amp; Profile được chọn">STANDARD</span>
+                                    <span id="dagTokenBadge" class="dag-telemetry-pill dag-pill-tokens" title="Ước tính lượng token tiêu thụ">0 tok</span>
+                                    <span id="dagAuditBadge" class="dag-telemetry-pill dag-pill-audit" title="Trạng thái kiểm toán">READY</span>
+                                </div>
+                            </div>
+                            <div id="dagGraphTrack" class="dag-graph-track" role="toolbar" aria-label="Sơ đồ luồng LangGraph thời gian thực"></div>
+                            <div id="dagNodeInspector" class="dag-node-inspector" hidden></div>
+                        </div>
                         <div id="debugKpiStrip" class="debug-kpi-strip"></div>
                         <div id="debugIdentityBar" class="debug-identity-bar"></div>
 
@@ -181,7 +238,53 @@
         </div>
     </dialog>
 
-    <script src="/static/debug.js?v=debug1"></script>
-    <script src="/static/app.js?v=persona1"></script>
+    <dialog id="citationViewerDialog" class="citation-viewer-dialog" closedby="any" aria-labelledby="citationViewerTitle">
+        <div class="citation-viewer-shell">
+            <header class="citation-viewer-header">
+                <div class="citation-viewer-header-left">
+                    <span id="citationViewerBadge" class="citation-drawer-badge"></span>
+                    <span id="citationViewerType" class="citation-drawer-type"></span>
+                    <span id="citationViewerFileKind" class="citation-file-kind-pill" hidden></span>
+                    <h3 id="citationViewerTitle" class="citation-viewer-title">Chi tiết tài liệu trích dẫn</h3>
+                </div>
+                <div class="citation-viewer-header-actions">
+                    <button type="button" id="citationToggleEvidenceBtn" class="citation-header-btn" aria-pressed="false" title="Mở rộng toàn khung đọc tài liệu">Mở rộng tài liệu</button>
+                    <button type="button" id="citationPrevBtn" class="citation-drawer-nav-btn" title="Nguồn trước">←</button>
+                    <button type="button" id="citationNextBtn" class="citation-drawer-nav-btn" title="Nguồn tiếp theo">→</button>
+                    <form method="dialog" class="citation-close-form">
+                        <button type="submit" value="close" class="citation-drawer-close" aria-label="Đóng trình xem tài liệu">×</button>
+                    </form>
+                </div>
+            </header>
+
+            <div id="citationViewerTabs" class="citation-viewer-tabs" role="tablist" focusgroup="tablist nomemory" aria-label="Danh sách nguồn trích dẫn" hidden></div>
+
+            <div id="citationViewerWorkspace" class="citation-viewer-workspace">
+                <aside id="citationEvidencePane" class="citation-evidence-pane" aria-label="Đoạn trích dẫn và bằng chứng">
+                    <div id="citationMetaBox" class="citation-drawer-meta"></div>
+                    <div id="citationBodyBox" class="citation-drawer-body">
+                        <div class="citation-drawer-body-header">
+                            <span>Đoạn trong Chunk</span>
+                            <button type="button" id="citationCopyBtn" class="citation-copy-btn">Sao chép</button>
+                        </div>
+                        <div id="citationExcerptEl" class="citation-drawer-excerpt"></div>
+                    </div>
+                    <div id="citationImagesBox" class="citation-drawer-images" hidden></div>
+                </aside>
+
+                <section id="citationDocPane" class="citation-doc-pane" aria-label="Trình đọc tài liệu gốc">
+                    <div id="citationDocToolbar" class="citation-doc-toolbar"></div>
+                    <div id="citationDocStatus" class="citation-doc-status" role="status" aria-live="polite" hidden></div>
+                    <div class="citation-doc-body-split">
+                        <nav id="citationDocOutline" class="citation-doc-outline" aria-label="Mục lục tài liệu" hidden></nav>
+                        <div id="citationDocViewport" class="citation-doc-viewport" tabindex="0"></div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </dialog>
+
+    <script src="/static/debug.js?v=vip5"></script>
+    <script src="/static/app.js?v=vip5"></script>
 </body>
 </html>

@@ -986,12 +986,15 @@
             if (it.section_title || it.breadcrumb) {
                 docCell.appendChild(el("div", "debug-td-sub", it.section_title || it.breadcrumb));
             }
-            if (it.snippet) {
+            const chunkText = String(it.content || it.snippet || it.excerpt || it.excerpt_preview || "").trim();
+            if (chunkText) {
+                const openFirstThree = i < 3;
+                const charLabel = String(it.char_count || chunkText.length) + " ký tự";
                 docCell.appendChild(
                     buildAccordionItem(
-                        "Đoạn trích (" + (it.chunk_id || "chunk") + ")",
-                        el("div", "debug-snippet-text", it.snippet),
-                        false
+                        "Nội dung chunk (" + (it.chunk_id || "chunk") + " · " + charLabel + ")",
+                        el("div", "debug-snippet-text", chunkText),
+                        openFirstThree
                     )
                 );
             }
@@ -1096,14 +1099,111 @@
         if (Array.isArray(snap.retrieved_chunks)) {
             finalChunks = snap.retrieved_chunks;
         }
+        if (finalChunks.length === 0) {
+            for (const rr of rerankers) {
+                const rra = rr.attributes || {};
+                if (Array.isArray(rra.reranked_preview) && rra.reranked_preview.length > 0) {
+                    finalChunks = rra.reranked_preview;
+                    break;
+                }
+            }
+        }
+        if (finalChunks.length === 0) {
+            for (const rt of retrievals) {
+                const rta = rt.attributes || {};
+                if (Array.isArray(rta.candidates_preview) && rta.candidates_preview.length > 0) {
+                    finalChunks = rta.candidates_preview;
+                    break;
+                }
+            }
+        }
 
         if (parsers.length === 0 && retrievals.length === 0 && rerankers.length === 0 && embeddings.length === 0 && finalChunks.length === 0) {
-            panel.appendChild(el("div", "debug-muted-note", "Turn này không thực hiện bước truy xuất RAG nào."));
+            const turnIntent = String(snap.intent || (detail.summary && detail.summary.intent) || "");
+            let emptyText = "Turn này không thực hiện bước truy xuất RAG nào";
+            if (turnIntent) {
+                emptyText = emptyText + " (Intent: " + turnIntent + ").";
+            } else {
+                emptyText = emptyText + ".";
+            }
+            emptyText = emptyText + " Hãy chọn một trace có trạng thái RAG_SEARCH ở danh sách bên trái để xem nội dung các chunk đã truy xuất.";
+            panel.appendChild(el("div", "debug-muted-note", emptyText));
             return;
         }
 
+        if (finalChunks.length > 0) {
+            const evHeadingRow = el("div", "debug-section-header-row");
+            evHeadingRow.appendChild(
+                el("h4", "debug-section-heading", "1. Nội dung Chunks trả về từ RAG (" + finalChunks.length + " chunks)")
+            );
+            const acc = el("div", "debug-accordion-group");
+            let allExpanded = false;
+            const toggleAllBtn = el("button", "debug-mini-btn", "Mở rộng tất cả");
+            toggleAllBtn.type = "button";
+            toggleAllBtn.addEventListener("click", () => {
+                allExpanded = !allExpanded;
+                for (const detItem of acc.querySelectorAll("details.debug-accordion-item")) {
+                    detItem.open = allExpanded;
+                }
+                if (allExpanded) {
+                    toggleAllBtn.textContent = "Thu gọn tất cả";
+                } else {
+                    toggleAllBtn.textContent = "Mở rộng tất cả";
+                }
+            });
+            evHeadingRow.appendChild(toggleAllBtn);
+            panel.appendChild(evHeadingRow);
+
+            for (let idx = 0; idx < finalChunks.length; idx++) {
+                const ch = finalChunks[idx];
+                const docName = String(ch.source || "—").split("\\").join("/").split("/").pop();
+                let rankNum = idx + 1;
+                if (ch.index !== undefined && ch.index !== null) {
+                    rankNum = ch.index;
+                } else if (ch.rank !== undefined && ch.rank !== null) {
+                    rankNum = ch.rank;
+                }
+                let title = "[" + rankNum + "] " + docName;
+                if (ch.section_title) {
+                    title += " · " + ch.section_title;
+                }
+                if (Array.isArray(ch.page_numbers) && ch.page_numbers.length > 0) {
+                    title += " (Tr. " + ch.page_numbers.join(", ") + ")";
+                }
+                const body = el("div", "debug-chunk-body");
+                const metaBar = el("div", "debug-chunk-meta-bar");
+                metaBar.append(
+                    el("span", "debug-mono-chip", "ID: " + (ch.chunk_id || "—")),
+                    el("span", "debug-pill debug-pill-info", String(ch.chunk_type || "text"))
+                );
+                if (Array.isArray(ch.page_numbers) && ch.page_numbers.length > 0) {
+                    metaBar.appendChild(el("span", "debug-pill debug-pill-muted", "Trang " + ch.page_numbers.join(", ")));
+                }
+                const chunkContentText = String(ch.content || ch.snippet || ch.excerpt || ch.excerpt_preview || "").trim();
+                const charsLen = Number(ch.char_count || chunkContentText.length || 0);
+                metaBar.appendChild(el("span", "debug-mono-chip", charsLen + " ký tự"));
+                body.appendChild(metaBar);
+
+                if (ch.source || ch.breadcrumb) {
+                    body.appendChild(buildKeyValueTable([
+                        ["Source", ch.source],
+                        ["Breadcrumb", ch.breadcrumb]
+                    ]));
+                }
+                const contentPre = el("pre", "debug-chunk-content-pre");
+                if (chunkContentText) {
+                    contentPre.textContent = chunkContentText;
+                } else {
+                    contentPre.textContent = "— Không có nội dung văn bản —";
+                }
+                body.appendChild(contentPre);
+                acc.appendChild(buildAccordionItem(title, body, idx < 5));
+            }
+            panel.appendChild(acc);
+        }
+
         if (parsers.length > 0) {
-            panel.appendChild(el("h4", "debug-section-heading", "1. Query Parser & Chuẩn hóa truy vấn (" + parsers.length + ")"));
+            panel.appendChild(el("h4", "debug-section-heading", "2. Query Parser & Chuẩn hóa truy vấn (" + parsers.length + ")"));
             for (const p of parsers) {
                 const a = p.attributes || {};
                 const card = el("div", "debug-detail-card");
@@ -1131,7 +1231,7 @@
         }
 
         if (retrievals.length > 0) {
-            panel.appendChild(el("h4", "debug-section-heading", "2. Hybrid Retrieval — Dense Vector + BM25 + RRF (" + retrievals.length + ")"));
+            panel.appendChild(el("h4", "debug-section-heading", "3. Hybrid Retrieval — Dense Vector + BM25 + RRF (" + retrievals.length + ")"));
             for (const r of retrievals) {
                 const a = r.attributes || {};
                 const card = el("div", "debug-detail-card");
@@ -1172,7 +1272,7 @@
         }
 
         if (rerankers.length > 0) {
-            panel.appendChild(el("h4", "debug-section-heading", "3. Cross-Encoder Reranker (" + rerankers.length + ")"));
+            panel.appendChild(el("h4", "debug-section-heading", "4. Cross-Encoder Reranker (" + rerankers.length + ")"));
             for (const rr of rerankers) {
                 const a = rr.attributes || {};
                 const card = el("div", "debug-detail-card");
@@ -1193,38 +1293,411 @@
         }
 
         if (embeddings.length > 0) {
-            panel.appendChild(el("h4", "debug-section-heading", "4. Dense Embeddings (" + embeddings.length + ")"));
+            panel.appendChild(el("h4", "debug-section-heading", "5. Dense Embeddings (" + embeddings.length + ")"));
             for (const em of embeddings) {
                 const card = el("div", "debug-detail-card");
                 card.appendChild(buildKeyValueTable(Object.entries(em.attributes || {})));
                 panel.appendChild(card);
             }
         }
+    }
 
-        if (finalChunks.length > 0) {
-            panel.appendChild(el("h4", "debug-section-heading", "5. Evidence Chunks cuối cùng đưa vào Agent (" + finalChunks.length + ")"));
-            const acc = el("div", "debug-accordion-group");
-            for (const ch of finalChunks) {
-                const docName = String(ch.source || "—").split("\\").join("/").split("/").pop();
-                let title = "[" + ch.index + "] " + docName;
-                if (ch.section_title) {
-                    title += " · " + ch.section_title;
-                }
-                if (Array.isArray(ch.page_numbers) && ch.page_numbers.length > 0) {
-                    title += " (Tr. " + ch.page_numbers.join(", ") + ")";
-                }
-                const body = el("div", "");
-                body.appendChild(buildKeyValueTable([
-                    ["Chunk ID", ch.chunk_id],
-                    ["Source", ch.source],
-                    ["Breadcrumb", ch.breadcrumb],
-                    ["Type", ch.chunk_type],
-                    ["Excerpt", ch.excerpt_preview]
-                ]));
-                acc.appendChild(buildAccordionItem(title, body, false));
-            }
-            panel.appendChild(acc);
+    const DEBUG_DAG_STAGE_DEFS = [
+        { id: "input_guardrail", label: "Input Guardrail" },
+        { id: "coordinator", label: "Coordinator" },
+        { id: "workers_tools", label: "Parallel Workers / Tools" },
+        { id: "answer_review", label: "Answer Review" },
+        { id: "output_guardrail", label: "Output Guardrail" }
+    ];
+
+    function debugDagStatusClass(statusVal) {
+        const lower = String(statusVal || "IDLE").toLowerCase();
+        if (lower === "running") {
+            return "is-running";
         }
+        if (lower === "pass" || lower === "success" || lower === "completed" || lower === "passed") {
+            return "is-pass";
+        }
+        if (lower === "retry") {
+            return "is-retry";
+        }
+        if (lower === "awaiting_input" || lower === "needs_input" || lower === "suspended") {
+            return "is-awaiting";
+        }
+        if (lower === "error" || lower === "fail" || lower === "failed") {
+            return "is-error";
+        }
+        if (lower === "blocked" || lower === "canceled") {
+            return "is-blocked";
+        }
+        return "is-idle";
+    }
+
+    function debugDagProfileShort(profileVal) {
+        const upper = String(profileVal || "DETERMINISTIC").toUpperCase();
+        if (upper === "DEEP") {
+            return "DEEP";
+        }
+        if (upper === "STANDARD") {
+            return "STD";
+        }
+        return "RULE";
+    }
+
+    function resolveDebugDagTelemetry(detail, snap, graphNodes) {
+        if (snap && snap.dag_telemetry && typeof snap.dag_telemetry === "object" && snap.dag_telemetry.stages) {
+            return snap.dag_telemetry;
+        }
+        const stages = {};
+        for (const def of DEBUG_DAG_STAGE_DEFS) {
+            stages[def.id] = {
+                stage_id: def.id,
+                label: def.label,
+                status: "IDLE",
+                executed: false,
+                call_count: 0,
+                latency_ms: 0,
+                model: "",
+                profile: "DETERMINISTIC",
+                tokens: { input_tokens: 0, output_tokens: 0, total_tokens: 0, estimated: false },
+                nodes: [],
+                input_summary: {},
+                output_summary: {},
+                executions: []
+            };
+        }
+
+        const nodeToStage = {
+            "graph.input_guardrail": "input_guardrail",
+            "graph.context_prepare": "input_guardrail",
+            "graph.deep_decide": "coordinator",
+            "graph.plan_update": "coordinator",
+            "graph.memory_update": "coordinator",
+            "graph.react_action": "workers_tools",
+            "graph.subagent": "workers_tools",
+            "graph.skill_inspect": "workers_tools",
+            "graph.prepare_interaction": "workers_tools",
+            "graph.await_interaction": "workers_tools",
+            "graph.answer_review": "answer_review",
+            "graph.output_guardrail": "output_guardrail"
+        };
+
+        for (const gn of graphNodes) {
+            const sid = nodeToStage[gn.name];
+            if (!sid || !stages[sid]) {
+                continue;
+            }
+            const st = stages[sid];
+            st.executed = true;
+            st.call_count = st.call_count + 1;
+            st.latency_ms = Number((st.latency_ms + Number(gn.duration_ms || 0)).toFixed(2));
+            st.nodes.push(gn.name);
+            const attrs = gn.attributes || {};
+            if (attrs.audit_status) {
+                st.status = String(attrs.audit_status);
+            } else if (gn.status === "error") {
+                st.status = "ERROR";
+            } else if (gn.status === "suspended") {
+                st.status = "AWAITING_INPUT";
+            } else {
+                st.status = "PASS";
+            }
+            st.output_summary = attrs;
+        }
+
+        const summary = detail.summary || {};
+        const tok = summary.token_usage || {};
+        let resolvedModel = "";
+        if (Array.isArray(summary.models_used) && summary.models_used.length > 0) {
+            resolvedModel = summary.models_used[0];
+        }
+        return {
+            total_latency_ms: Number(detail.duration_ms || 0),
+            active_model: resolvedModel,
+            active_profile: "STANDARD",
+            token_usage: {
+                input_tokens: Number(tok.input_tokens || 0),
+                output_tokens: Number(tok.output_tokens || 0),
+                total_tokens: Number(tok.total_tokens || 0),
+                estimated: false
+            },
+            audit_status: String(snap.audit_status || summary.audit_status || "PASS"),
+            retry_loops: Number(snap.hallucination_retries || 0),
+            stages: stages
+        };
+    }
+
+    function renderDagIntoContainer(dag, track, inspector, selectedState) {
+        if (!track || !inspector) {
+            return;
+        }
+        function renderInspectorBox(stageId) {
+            if (!stageId || !dag.stages || !dag.stages[stageId]) {
+                inspector.hidden = true;
+                inspector.replaceChildren();
+                return;
+            }
+            const st = dag.stages[stageId];
+            inspector.hidden = false;
+            inspector.replaceChildren();
+
+            const hdr = el("div", "dag-inspector-header");
+            const titleGroup = el("div", "dag-inspector-title");
+            titleGroup.append(
+                el("span", "", st.label || stageId),
+                el("span", "dag-node-status", String(st.status || "IDLE"))
+            );
+            const profUpper = String(st.profile || "DETERMINISTIC").toUpperCase();
+            const profChip = el("span", "dag-node-profile", profUpper);
+            if (profUpper === "DEEP") {
+                profChip.classList.add("is-deep");
+            } else if (profUpper === "DETERMINISTIC") {
+                profChip.classList.add("is-rule");
+            }
+            titleGroup.appendChild(profChip);
+
+            const closeBtn = document.createElement("button");
+            closeBtn.type = "button";
+            closeBtn.className = "dag-inspector-close";
+            closeBtn.textContent = "×";
+            closeBtn.setAttribute("aria-label", "Đóng chi tiết node");
+            closeBtn.addEventListener("click", () => {
+                selectedState.id = null;
+                renderTrackCards();
+                renderInspectorBox(null);
+            });
+            hdr.append(titleGroup, closeBtn);
+            inspector.appendChild(hdr);
+
+            const stTok = st.tokens || {};
+            let tokMode = "Thực tế";
+            if (stTok.estimated) {
+                tokMode = "Ước tính";
+            }
+            let stModel = "deterministic-engine";
+            if (st.model) {
+                stModel = st.model;
+            }
+            const stats = el("div", "dag-inspector-stats");
+            stats.append(
+                el("span", "dag-inspector-stat", "Độ trễ: " + formatShortMs(Number(st.latency_ms || 0))),
+                el("span", "dag-inspector-stat", "Model: " + stModel),
+                el("span", "dag-inspector-stat", "Profile: " + profUpper),
+                el("span", "dag-inspector-stat", "Tokens (" + tokMode + "): " + Number(stTok.total_tokens || 0) + " (In " + Number(stTok.input_tokens || 0) + " / Out " + Number(stTok.output_tokens || 0) + ")"),
+                el("span", "dag-inspector-stat", "Lượt chạy: " + Number(st.call_count || 0))
+            );
+            inspector.appendChild(stats);
+
+            const ioGrid = el("div", "dag-io-grid");
+            const inBox = el("div", "dag-io-box");
+            inBox.append(
+                el("div", "dag-io-label", "Input Summary"),
+                el("pre", "dag-io-pre", JSON.stringify(st.input_summary || {}, null, 2))
+            );
+            const outBox = el("div", "dag-io-box");
+            const outObj = { ...(st.output_summary || {}) };
+            if (Array.isArray(st.executions) && st.executions.length > 1) {
+                outObj.executions = st.executions;
+            }
+            outBox.append(
+                el("div", "dag-io-label", "Output Summary"),
+                el("pre", "dag-io-pre", JSON.stringify(outObj, null, 2))
+            );
+            ioGrid.append(inBox, outBox);
+            inspector.appendChild(ioGrid);
+        }
+
+        function renderTrackCards() {
+            track.replaceChildren();
+            for (let idx = 0; idx < DEBUG_DAG_STAGE_DEFS.length; idx++) {
+                const def = DEBUG_DAG_STAGE_DEFS[idx];
+                const st = (dag.stages && dag.stages[def.id]) || {
+                    stage_id: def.id,
+                    label: def.label,
+                    status: "IDLE",
+                    executed: false,
+                    latency_ms: 0,
+                    profile: "DETERMINISTIC",
+                    tokens: { total_tokens: 0 }
+                };
+
+                const card = document.createElement("button");
+                card.type = "button";
+                card.className = "dag-node-card " + debugDagStatusClass(st.status);
+                if (selectedState.id === def.id) {
+                    card.classList.add("is-selected");
+                }
+
+                const topRow = el("div", "dag-node-top");
+                topRow.append(
+                    el("span", "dag-node-dot"),
+                    el("span", "dag-node-title", def.label),
+                    el("span", "dag-node-status", String(st.status || "IDLE"))
+                );
+
+                const metaRow = el("div", "dag-node-meta");
+                let latTxt = "—";
+                if (st.executed) {
+                    latTxt = formatShortMs(Number(st.latency_ms || 0));
+                }
+                const tokVal = Number((st.tokens && st.tokens.total_tokens) || 0);
+                let tokTxt = "";
+                if (tokVal > 0) {
+                    tokTxt = tokVal + "t";
+                }
+                const profUpper = String(st.profile || "DETERMINISTIC").toUpperCase();
+                const profChip = el("span", "dag-node-profile", debugDagProfileShort(profUpper));
+                if (profUpper === "DEEP") {
+                    profChip.classList.add("is-deep");
+                } else if (profUpper === "DETERMINISTIC") {
+                    profChip.classList.add("is-rule");
+                }
+                metaRow.append(el("span", "", latTxt), el("span", "", tokTxt), profChip);
+
+                card.append(topRow, metaRow);
+                card.addEventListener("click", () => {
+                    if (selectedState.id === def.id) {
+                        selectedState.id = null;
+                    } else {
+                        selectedState.id = def.id;
+                    }
+                    renderTrackCards();
+                    renderInspectorBox(selectedState.id);
+                });
+                track.appendChild(card);
+
+                if (idx < DEBUG_DAG_STAGE_DEFS.length - 1) {
+                    const conn = el("div", "dag-node-connector", "→");
+                    const nextDef = DEBUG_DAG_STAGE_DEFS[idx + 1];
+                    const nextSt = dag.stages && dag.stages[nextDef.id];
+                    if (def.id === "workers_tools" && (Number(dag.retry_loops || 0) > 0 || (nextSt && nextSt.status === "RETRY"))) {
+                        conn.classList.add("is-retry");
+                        conn.textContent = "⇄";
+                    } else if (st.executed || (nextSt && nextSt.executed)) {
+                        conn.classList.add("is-active");
+                    }
+                    track.appendChild(conn);
+                }
+            }
+        }
+
+        renderTrackCards();
+        renderInspectorBox(selectedState.id);
+    }
+
+    function buildDebugDagVisualizer(detail, snap, graphNodes) {
+        const dag = resolveDebugDagTelemetry(detail, snap, graphNodes);
+        const section = el("div", "debug-dag-section");
+
+        const summaryRow = el("div", "debug-section-summary");
+        const tok = dag.token_usage || {};
+        let modelText = "—";
+        if (dag.active_model) {
+            modelText = dag.active_model;
+        }
+        let tokLabel = String(Number(tok.total_tokens || 0)) + " tok";
+        if (tok.estimated && Number(tok.total_tokens || 0) > 0) {
+            tokLabel = "~" + tokLabel;
+        }
+        summaryRow.append(
+            el("span", "debug-summary-chip", "Latency: " + formatShortMs(Number(dag.total_latency_ms || 0))),
+            el("span", "debug-summary-chip", "Profile: " + String(dag.active_profile || "STANDARD")),
+            el("span", "debug-summary-chip", "Model: " + modelText),
+            el("span", "debug-summary-chip", "Tokens: " + tokLabel),
+            el("span", "debug-summary-chip", "Retry Loops: " + String(dag.retry_loops || 0))
+        );
+        section.appendChild(summaryRow);
+
+        const track = el("div", "dag-graph-track");
+        const inspector = el("div", "dag-node-inspector");
+        inspector.hidden = true;
+        renderDagIntoContainer(dag, track, inspector, { id: null });
+        section.append(track, inspector);
+        return section;
+    }
+
+    function renderHeaderDagVisualizer(detail) {
+        if (!detail) {
+            if (dom.dagLatencyBadge) {
+                dom.dagLatencyBadge.textContent = "0 ms";
+            }
+            if (dom.dagModelBadge) {
+                dom.dagModelBadge.textContent = "STANDARD";
+                dom.dagModelBadge.className = "dag-telemetry-pill dag-pill-model";
+            }
+            if (dom.dagTokenBadge) {
+                dom.dagTokenBadge.textContent = "0 tok";
+            }
+            if (dom.dagAuditBadge) {
+                dom.dagAuditBadge.textContent = "READY";
+                dom.dagAuditBadge.className = "dag-telemetry-pill dag-pill-audit";
+            }
+            if (dom.dagGraphTrack) {
+                dom.dagGraphTrack.replaceChildren();
+            }
+            if (dom.dagNodeInspector) {
+                dom.dagNodeInspector.hidden = true;
+                dom.dagNodeInspector.replaceChildren();
+            }
+            return;
+        }
+
+        const snap = detail.turn_snapshot || {};
+        let graphNodes = [];
+        if (Array.isArray(detail.graph_nodes)) {
+            graphNodes = detail.graph_nodes;
+        }
+        const dag = resolveDebugDagTelemetry(detail, snap, graphNodes);
+
+        if (dom.dagLatencyBadge) {
+            dom.dagLatencyBadge.textContent = formatShortMs(Number(dag.total_latency_ms || 0));
+        }
+        if (dom.dagModelBadge) {
+            const prof = String(dag.active_profile || "STANDARD").toUpperCase();
+            let modelText = prof;
+            if (dag.active_model && dag.active_model !== "deterministic-engine") {
+                let shortModel = String(dag.active_model);
+                if (shortModel.indexOf("/") >= 0) {
+                    shortModel = shortModel.split("/").pop();
+                }
+                if (shortModel.length > 22) {
+                    shortModel = shortModel.slice(0, 19) + "...";
+                }
+                modelText = prof + " · " + shortModel;
+            }
+            dom.dagModelBadge.textContent = modelText;
+            dom.dagModelBadge.className = "dag-telemetry-pill dag-pill-model";
+            if (prof === "DEEP") {
+                dom.dagModelBadge.classList.add("is-deep");
+            } else if (prof === "STANDARD") {
+                dom.dagModelBadge.classList.add("is-standard");
+            }
+        }
+        if (dom.dagTokenBadge) {
+            const tok = dag.token_usage || {};
+            const totalTok = Number(tok.total_tokens || 0);
+            let prefix = "";
+            if (tok.estimated && totalTok > 0) {
+                prefix = "~";
+            }
+            dom.dagTokenBadge.textContent = prefix + totalTok + " tok";
+        }
+        if (dom.dagAuditBadge) {
+            const auditText = String(dag.audit_status || "READY").toUpperCase();
+            dom.dagAuditBadge.textContent = auditText;
+            dom.dagAuditBadge.className = "dag-telemetry-pill dag-pill-audit";
+            if (auditText === "PASS" || auditText === "COMPLETED") {
+                dom.dagAuditBadge.classList.add("is-pass");
+            } else if (auditText === "RETRY" || auditText === "AWAITING_INPUT" || auditText === "NEEDS_INPUT") {
+                dom.dagAuditBadge.classList.add("is-retry");
+            } else if (auditText === "RUNNING") {
+                dom.dagAuditBadge.classList.add("is-running");
+            } else if (auditText === "ERROR" || auditText === "FAIL" || auditText === "BLOCKED") {
+                dom.dagAuditBadge.classList.add("is-error");
+            }
+        }
+
+        renderDagIntoContainer(dag, dom.dagGraphTrack, dom.dagNodeInspector, { id: null });
     }
 
     function renderAgentTab(detail) {
@@ -1507,6 +1980,7 @@
             dom.emptyState.hidden = false;
             dom.detailContainer.hidden = true;
             syncActionButtons(null);
+            renderHeaderDagVisualizer(null);
             return;
         }
 
@@ -1514,6 +1988,7 @@
         dom.detailContainer.hidden = false;
         syncActionButtons(detail);
 
+        renderHeaderDagVisualizer(detail);
         renderKpiAndIdentity(detail);
         renderWaterfallTab(detail);
         renderLlmTab(detail);
@@ -1922,6 +2397,13 @@
         dom.panelAgentInner = document.getElementById("debugPanelAgentInner");
         dom.panelConfigInner = document.getElementById("debugPanelConfigInner");
         dom.panelJsonInner = document.getElementById("debugPanelJsonInner");
+        dom.dagTelemetryBar = document.getElementById("dagTelemetryBar");
+        dom.dagLatencyBadge = document.getElementById("dagLatencyBadge");
+        dom.dagModelBadge = document.getElementById("dagModelBadge");
+        dom.dagTokenBadge = document.getElementById("dagTokenBadge");
+        dom.dagAuditBadge = document.getElementById("dagAuditBadge");
+        dom.dagGraphTrack = document.getElementById("dagGraphTrack");
+        dom.dagNodeInspector = document.getElementById("dagNodeInspector");
 
         syncScopeButtons();
         syncHeaderIndicators();
