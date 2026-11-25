@@ -24,7 +24,9 @@ from .embedding.embedder import BankingEmbedder
 from .vector_db.qdrant_store import (
     QdrantBankingStore, QdrantVectorStore, mark_publication_chunks, publication_scope,
 )
+from .core.llm_rag_cache import rag_llm_available
 from .tools.extensions.banking_query import ParsedQuery, parse_banking_query
+from .tools.extensions.llm_query_planner import LLMQueryPlanner
 from .retrieval.hybrid_retriever import HybridRetriever
 from .reranking.rag_reranker import BankingReranker
 from .tracing.tracer import BankingTracer
@@ -115,6 +117,9 @@ class BankingRAGPipeline:
         self.reranker = BankingReranker(
             model_name=self.config.RERANKER_MODEL
         )
+
+        use_live_planner = (not use_memory) and rag_llm_available("chunking.text")
+        self.llm_query_planner = LLMQueryPlanner(use_llm=use_live_planner)
 
         self.tracer = BankingTracer(config=self.config)
 
@@ -312,6 +317,15 @@ class BankingRAGPipeline:
         Normalize domain acronyms (eKYC, TKTT, Smart OTP, Digibank) and extract keywords.
         """
         return parse_banking_query(query)
+
+    def plan_query(self, query):
+        """
+        Analyze and expand banking query using configured cloud LLM with SQLite WAL cache.
+        """
+        planner = getattr(self, "llm_query_planner", None)
+        if planner is None:
+            return {"rewritten_query": str(query or ""), "sub_queries": [], "dense_weight": 0.5, "method": "none"}
+        return planner.plan(query)
 
     def retrieve_candidates(
         self,

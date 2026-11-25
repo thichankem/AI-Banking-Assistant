@@ -1060,11 +1060,23 @@ class BankingGuardrailManager:
                     sanitized = sanitized[:s_idx]
                     break
 
-        # 2. Filter out System Prompt leak markers
+        # 2. Filter out System Prompt leak markers & echoed malicious SQLi/XSS payloads
         for sig in PROMPT_LEAK_SIGNATURES:
             if sig.lower() in sanitized.lower():
                 flags.append(f"SYSTEM_PROMPT_LEAK_{sig}")
                 sanitized = sanitized.replace(sig, "")
+
+        echoed_attack_markers = (
+            "DROP TABLE", "drop table",
+            "UNION SELECT", "union select",
+            "OR '1'='1'", "or '1'='1'",
+            "password_hash",
+            "<script>", "</script>",
+        )
+        for atk in echoed_attack_markers:
+            if atk in sanitized:
+                flags.append("SANITIZED_ATTACK_ECHO")
+                sanitized = sanitized.replace(atk, "[noi_dung_khong_an_toan]")
 
         # 3. Remove preliminary analytical monologue before greeting
         for greeting in greeting_prefixes:

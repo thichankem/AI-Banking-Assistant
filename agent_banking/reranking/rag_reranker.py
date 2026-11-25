@@ -20,7 +20,9 @@ import sqlite3
 import urllib.request
 import math
 from pathlib import Path
+from agent_banking.chunking.universal.enrichment.contextual_enricher import strip_ui_noise_for_context
 from agent_banking.core.environment import ROOT_DIR
+from agent_banking.core.llm_rag_cache import call_rag_llm_json, rag_llm_available
 from agent_banking.core.models import get_model_chain, model_primary
 from agent_banking.core.fallback import run_fallback
 from agent_banking.reranking.config.models import MODELS
@@ -39,7 +41,9 @@ class BankingReranker:
         rerank_url=None,
         base_url=None,
         cache_db_path=None,
-        cache_enabled=None
+        cache_enabled=None,
+        use_llm_selector=None,
+        llm_client=None,
     ):
         try:
             primary = model_primary("reranking")
@@ -88,6 +92,8 @@ class BankingReranker:
         self._cache_initialized = False
         self.last_cache_hits = 0
         self.last_cache_misses = 0
+        self.use_llm_selector = use_llm_selector
+        self.llm_client = llm_client
 
     def _ensure_cache_initialized(self):
         if not self.cache_enabled or self._cache_initialized:
@@ -286,36 +292,6 @@ class BankingReranker:
                         bonus += max(app_cue_bonus, 0.05)
                     else:
                         bonus += app_cue_bonus
-            if any(m in padded_q for m in (" lan dau ", " kich hoat tam thoi ", " kich hoat ung dung ")):
-                if " kich hoat " in padded_src and " lan dau " in padded_src:
-                    bonus += 0.065
-                elif " cap lai mat khau " in padded_src or " khoi phuc " in padded_src:
-                    bonus -= 0.045
-            if " tiet kiem truc tuyen " in padded_q and " tiet kiem truc tuyen " in padded_src:
-                bonus += 0.055
-            if " cam co so tiet kiem " in padded_q and " cam co so tiet kiem " in padded_src:
-                if " tat toan " not in padded_q and " mo khoan vay " in padded_src:
-                    bonus += 0.05
-                elif " tat toan " in padded_q and " tat toan " in padded_src:
-                    bonus += 0.05
-            if (" a pay " in padded_q or " apay " in padded_q) and " a pay " in padded_src:
-                bonus += 0.07
-            if (" chung khoan " in padded_q or " trai phieu " in padded_q) and " chung khoan " in padded_src:
-                bonus += 0.065
-            if (" a points " in padded_q or " tich luy diem " in padded_q) and " diem tich luy " in padded_src:
-                bonus += 0.065
-            if (" ten dang nhap " in padded_q and " doi ten dang nhap " in padded_src):
-                bonus += 0.065
-            if (" ma pin " in padded_q or " cvv " in padded_q):
-                if " virtual card " in padded_src or " the " in padded_src:
-                    bonus += 0.065
-                elif " cap lai mat khau " in padded_src or " khoi phuc " in padded_src:
-                    bonus -= 0.04
-            if any(m in padded_q for m in (" cai dat the ", " bat tat ", " trang thai hoat dong cua the ", " the ao ", " cvv ")):
-                if (" the ao " in padded_q or " cvv " in padded_q) and (" virtual card " in padded_src or " the ao " in padded_src):
-                    bonus += 0.075
-                elif " cai dat the " in padded_q and " quan ly the " in padded_src:
-                    bonus += 0.075
 
         for yr in years:
             if yr in q_tokens:
@@ -384,33 +360,12 @@ class BankingReranker:
             " chiu khoan phi ", " chiu phi ", " thu phi ", " tinh phi ", " chi phi ",
             " phi dich vu ", " phi giu ho ", " giu ho tai san ", " phi sec ", " phi ngan quy ",
             " phi tai san bao dam ", " phi giai chap ", " muc phi giai chap ", " niem phong ",
-            " dormant ", " khong hoat dong ", " thong bao mat ", " chuyen quyen so huu ",
-            " thu xep tin dung ", " bieu phi dich vu ",
+            " dormant ", " khong hoat dong ",
         )
         explicit_nv_or_tier = any(m in padded_q for m in (" nv ", " goi bach kim ", " goi uu tien ", " goi thinh vuong ", " phan hang "))
         if any(fc in padded_q for fc in fee_cues) and not explicit_nv_or_tier:
             if src_path_low.endswith(".xlsx") and ("8. biểu phí dịch vụ/" in src_path_low or src_key.startswith("bp ")):
                 bonus += 0.08
-                if (" sec " in padded_q or " nho thu " in padded_q) and src_key.startswith("bp 05"):
-                    bonus += 0.05
-                elif any(m in padded_q for m in (" ngan quy ", " giu ho ", " kiem dem ", " doi tien ", " rach nat ", " niem phong ", " xe chuyen dung ")) and src_key.startswith("bp 06"):
-                    bonus += 0.05
-                elif (" tien mat " in padded_q) and (src_key.startswith("bp 03") or src_key.startswith("bp 01")):
-                    bonus += 0.04
-                elif (" tiet kiem " in padded_q or " tai tuc " in padded_q) and src_key.startswith("bp 04"):
-                    bonus += 0.05
-                elif any(m in padded_q for m in (" sao ke ", " xac nhan so du ", " theo yeu cau ")) and src_key.startswith("bp 07"):
-                    bonus += 0.04
-                elif any(m in padded_q for m in (" quoc te ", " kieu hoi ", " swift ", " nuoc ngoai ")) and (src_key.startswith("bp 08") or src_key.startswith("bp 02")):
-                    bonus += 0.04
-                elif any(m in padded_q for m in (" tai san bao dam ", " the chap ", " giai chap ")) and src_key.startswith("bp 09"):
-                    bonus += 0.05
-                elif any(m in padded_q for m in (
-                    " thu xep tin dung ", " thong bao mat ", " chuyen nhuong ", " chuyen quyen so huu ",
-                    " giay to co gia ", " chung chi tien gui ", " ky phieu ", " bao thanh toan ",
-                    " sao luc ", " cam ket rut von ", " thua ke ",
-                )) and src_key.startswith("bp 10"):
-                    bonus += 0.055
 
         network_cues = (" chi nhanh ", " phong giao dich ", " atm ", " cdm ", " mang luoi ", " diem giao dich ")
         if any(nc in padded_q for nc in network_cues):
@@ -483,6 +438,10 @@ class BankingReranker:
             text = raw_text.strip()
             if text.startswith(RerankingConfig.RERANK_CONTEXT_PREFIX_MARKER):
                 return text
+            if chunk.get("chunk_type") != "table" and not chunk.get("table_data"):
+                cleaned_ui = strip_ui_noise_for_context(text)
+                if cleaned_ui:
+                    text = cleaned_ui
             bc = chunk.get("breadcrumb", "")
             if not isinstance(bc, str):
                 bc = str(bc)
@@ -628,6 +587,186 @@ class BankingReranker:
             tail = " ".join(raw_content.split())[-80:].casefold()
             return (src_id, snippet, tail)
         return (src_id, snippet)
+
+    def _should_use_llm_selector(self) -> bool:
+        if self.use_llm_selector is False:
+            return False
+        if self.llm_client is not None:
+            return True
+        url_low = str(self.rerank_url or "").casefold()
+        if not url_low or ".invalid" in url_low or "://mock" in url_low or "://localhost" in url_low:
+            if self.use_llm_selector is not True:
+                return False
+        return rag_llm_available("chunking.text")
+
+    @staticmethod
+    def _extract_selected_indices(parsed: dict, pool_len: int, max_items: int) -> list:
+        """Parse integer/string indices or r1..rN keys from LLM listwise response (0% Regex)."""
+        if not isinstance(parsed, dict):
+            return []
+        raw_vals = []
+        sel = parsed.get("selected")
+        if isinstance(sel, list):
+            for entry in sel:
+                if isinstance(entry, str) and "," in entry:
+                    for sub in entry.split(","):
+                        raw_vals.append(sub)
+                else:
+                    raw_vals.append(entry)
+        elif isinstance(sel, str):
+            for sub in sel.split(","):
+                raw_vals.append(sub)
+        elif sel is not None:
+            raw_vals.append(sel)
+        if not raw_vals:
+            for k_idx in range(1, max_items + 2):
+                rk = f"r{k_idx}"
+                if rk in parsed and parsed[rk] is not None:
+                    raw_vals.append(parsed[rk])
+        indices = []
+        seen = set()
+        for val in raw_vals:
+            if type(val) is int:
+                iv = val
+            elif isinstance(val, str):
+                s = val.strip(" []()")
+                if not s.isdigit():
+                    continue
+                iv = int(s)
+            else:
+                continue
+            if 0 <= iv < pool_len and iv not in seen:
+                seen.add(iv)
+                indices.append(iv)
+                if len(indices) >= max_items:
+                    break
+        return indices
+
+    @staticmethod
+    def _build_diverse_llm_pool(ordered: list, pool_limit: int = 24, max_per_source: int = 2) -> list:
+        """Build a 2-pass source-diverse pool so distinct docs lower in CE rank remain visible to LLM."""
+        selected = []
+        picked_ids = set()
+        src_counts = {}
+        scan_slice = ordered[:45]
+        # Pass 1: maximize unique documents first (1 chunk per distinct source across CE Top-45)
+        for idx, item in enumerate(scan_slice):
+            raw_c = item.get("chunk", item)
+            src_id = ""
+            if isinstance(raw_c, dict):
+                src_id = str(raw_c.get("source") or "").replace("\\", "/").casefold()
+            if not src_id or src_id not in src_counts:
+                selected.append(item)
+                picked_ids.add(idx)
+                if src_id:
+                    src_counts[src_id] = 1
+                if len(selected) >= pool_limit:
+                    return selected
+        # Pass 2: fill up to max_per_source per document
+        for idx, item in enumerate(scan_slice):
+            if idx in picked_ids:
+                continue
+            raw_c = item.get("chunk", item)
+            src_id = ""
+            if isinstance(raw_c, dict):
+                src_id = str(raw_c.get("source") or "").replace("\\", "/").casefold()
+            cnt = src_counts.get(src_id, 0)
+            if not src_id or cnt < max_per_source:
+                selected.append(item)
+                picked_ids.add(idx)
+                if src_id:
+                    src_counts[src_id] = cnt + 1
+                if len(selected) >= pool_limit:
+                    return selected
+        # Pass 3: top up from remaining candidates if pool still under limit
+        for idx, item in enumerate(scan_slice):
+            if idx not in picked_ids:
+                selected.append(item)
+                if len(selected) >= pool_limit:
+                    break
+        return selected
+
+    def _llm_listwise_select(self, query_text, ordered, top_k, fallback_chosen):
+        """Model-First LLM Listwise selector over source-diverse Cross-Encoder pool (WAL cached)."""
+        if not ordered or top_k <= 1 or len(ordered) < 2:
+            return fallback_chosen
+        if not self._should_use_llm_selector():
+            return fallback_chosen
+
+        pool = self._build_diverse_llm_pool(ordered, pool_limit=max(top_k * 4, 24), max_per_source=2)
+        candidate_lines = []
+        pool_ids = []
+        for idx, item in enumerate(pool):
+            chunk = item.get("chunk", item)
+            if not isinstance(chunk, dict):
+                chunk = {"content": str(item)}
+            cid = str(chunk.get("chunk_id") or f"p_{idx}")
+            pool_ids.append(cid)
+            src = str(chunk.get("source") or "").replace("\\", "/").rsplit("/", 1)[-1]
+            meta = chunk.get("business_metadata")
+            if not isinstance(meta, dict):
+                meta = {}
+            dom = str(meta.get("domain") or "")
+            sec = str(chunk.get("section_title") or "")
+            ret = meta.get("retrieval")
+            sit = ""
+            if isinstance(ret, dict):
+                sit = strip_ui_noise_for_context(str(ret.get("situated_context") or "")).strip()
+            body = strip_ui_noise_for_context(str(chunk.get("content") or ""))
+            if not body:
+                body = str(chunk.get("content") or "")
+            score_val = round(float(item.get("relevance_score", 0.0)), 3)
+            line = (
+                f"[{idx}] source={src} | domain={dom} | section={sec[:60]} | ce={score_val}\n"
+                f"  context: {sit[:220]}\n"
+                f"  text: {body[:460]}"
+            )
+            candidate_lines.append(line)
+
+        seed_key = f"{top_k}:{query_text}|" + ",".join(pool_ids)
+        system_prompt = (
+            "Ban la bo tai xep hang danh sach (Listwise Reranker) cho he thong RAG ngan hang A-Bank. "
+            "Tu danh sach ung vien [0..N-1], hay chon ra toi da " + str(top_k) + " doan phu hop nhat de tra loi cau hoi. "
+            "Nguyen tac: "
+            "(1) Uu tien tai lieu chuyen biet khop dung tinh nang/san pham; "
+            "(2) Khi cau hoi hoi ve thao tac, tinh nang, loi hoac xu ly su co tren ung dung A-Bank Digital / A-Bank Plus, "
+            "neu trong danh sach co tai lieu huong dan app (domain=ngan_hang_so, file HDSD) phu hop voi nghiep vu/tinh nang do thi BAT BUOC chon it nhat 1-2 doan HDSD dung chu de vao top ket qua (ngay ca khi diem ce thap hon tai lieu .docx chung), ket hop voi tai lieu quy dinh/xu ly su co (NV, THE, VH, PL); "
+            "(3) Neu hoi bieu phi hoac mang luoi -> uu tien file BP/ML co con so/ma phi cu the; "
+            "(4) Khong chon lap nhieu doan chung chung neu da co tai lieu chuyen biet dung trong danh sach. "
+            "Tra ve DUY NHAT JSON dang {\"selected\": [i1, i2, ...]} (chi so nguyen 0.." + str(len(pool) - 1) + "), khong giai thich."
+        )
+        user_prompt = f"Cau hoi: {query_text}\n\nCac ung vien:\n" + "\n".join(candidate_lines)
+        parsed = call_rag_llm_json(
+            namespace="rag_listwise_reranker_v3",
+            seed_key=seed_key,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_tokens=800,
+            temperature=0.0,
+            chat_client=self.llm_client,
+            validator=lambda d: bool(BankingReranker._extract_selected_indices(d, len(pool), top_k)),
+        )
+        chosen_indices = self._extract_selected_indices(parsed, len(pool), top_k)
+        if not chosen_indices:
+            return fallback_chosen
+
+        result = []
+        picked_ids = set()
+        for rank_idx, idx_val in enumerate(chosen_indices, start=1):
+            item_copy = dict(pool[idx_val])
+            item_copy["llm_listwise_rank"] = rank_idx
+            result.append(item_copy)
+            raw_c = item_copy.get("chunk", item_copy)
+            picked_ids.add(str(raw_c.get("chunk_id") or id(raw_c)))
+        for fb_item in fallback_chosen:
+            if len(result) >= top_k:
+                break
+            raw_c = fb_item.get("chunk", fb_item)
+            cid = str(raw_c.get("chunk_id") or id(raw_c))
+            if cid not in picked_ids:
+                picked_ids.add(cid)
+                result.append(fb_item)
+        return result[:top_k]
 
     def _fallback_local_rerank(self, query, candidates, top_k=RerankingConfig.RERANK_TOP_K):
         """
@@ -892,49 +1031,11 @@ class BankingReranker:
                             selected.extend(deferred[:top_k - len(selected)])
                             if len(selected) < top_k:
                                 selected.extend(dup_deferred[:top_k - len(selected)])
-                        if len(selected) >= 4 and self._has_digital_or_app_cue(query_text):
-                            if not any(self._is_hdsd_item(it) for it in selected):
-                                best_hdsd = None
-                                for cand_item in ordered[:12]:
-                                    if self._is_hdsd_item(cand_item) and float(cand_item.get("relevance_score", 0.0)) >= 0.28:
-                                        best_hdsd = cand_item
-                                        break
-                                if best_hdsd is not None:
-                                    last_score = float(selected[-1].get("relevance_score", 0.0))
-                                    hdsd_score = float(best_hdsd.get("relevance_score", 0.0))
-                                    last_chunk = selected[-1].get("chunk", selected[-1])
-                                    last_src = ""
-                                    if isinstance(last_chunk, dict):
-                                        last_src = str(last_chunk.get("source") or "").replace("\\", "/").casefold()
-                                    if (last_src and source_counts.get(last_src, 0) >= 2) or (hdsd_score >= 0.35 and hdsd_score + 0.15 >= last_score):
-                                        selected[-1] = best_hdsd
-                            else:
-                                from agent_banking.core.search_text import search_key as _sk
-                                qk_card = " " + _sk(query_text) + " "
-                                if any(cm in qk_card for cm in (" ma pin ", " the ao ", " cai dat the ", " cvv ")):
-                                    has_card_hdsd = False
-                                    bad_hdsd_idx = -1
-                                    for s_idx, s_it in enumerate(selected):
-                                        sc = s_it.get("chunk", s_it)
-                                        s_name = ""
-                                        if isinstance(sc, dict):
-                                            s_name = _sk(str(sc.get("source") or "").replace("\\", "/").rsplit("/", 1)[-1])
-                                        if s_name.startswith("hdsd "):
-                                            if " the " in s_name or " virtual card " in s_name:
-                                                has_card_hdsd = True
-                                            elif " cap lai mat khau " in s_name or " ten dang nhap " in s_name:
-                                                bad_hdsd_idx = s_idx
-                                    if not has_card_hdsd and bad_hdsd_idx >= 0:
-                                        for cand_item in ordered[:10]:
-                                            if self._is_hdsd_item(cand_item) and float(cand_item.get("relevance_score", 0.0)) >= 0.32:
-                                                c_chunk = cand_item.get("chunk", cand_item)
-                                                c_name = _sk(str(c_chunk.get("source") or "").replace("\\", "/").rsplit("/", 1)[-1])
-                                                if " the " in c_name or " virtual card " in c_name:
-                                                    selected[bad_hdsd_idx] = cand_item
-                                                    break
                         chosen = selected
                     else:
                         chosen = ordered[:top_k]
+
+                    chosen = self._llm_listwise_select(query_text, ordered, top_k, fallback_chosen=chosen)
                     final_results = []
                     for rank, item in enumerate(chosen, start=1):
                         item["rerank_rank"] = rank

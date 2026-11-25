@@ -206,7 +206,7 @@ def _source_stem(value):
     return name
 
 
-def _merge_subquery_candidates(primary_items, sub_batches, limit):
+def _merge_subquery_candidates(primary_items, sub_batches, limit, secondary_weight: float = 0.70):
     """Fuse multi-subquery hybrid pools using weighted RRF without extra rerank calls."""
     if not sub_batches:
         return primary_items
@@ -222,13 +222,17 @@ def _merge_subquery_candidates(primary_items, sub_batches, limit):
             base_rrf = 1.0 / (60.0 + rank)
         entry["_fusion_score"] = float(base_rrf) + (0.015 / (60.0 + rank))
         merged[key] = entry
-    for batch in sub_batches:
+    for batch_info in sub_batches:
+        if isinstance(batch_info, tuple) and len(batch_info) == 2:
+            batch, b_weight = batch_info
+        else:
+            batch, b_weight = batch_info, secondary_weight
         for rank, item in enumerate(batch, start=1):
             raw = item.get("chunk", item)
             if not isinstance(raw, dict):
                 continue
             key = (str(raw.get("source") or ""), payload_index_key(raw))
-            add_score = 0.70 / (60.0 + rank)
+            add_score = b_weight / (60.0 + rank)
             if key in merged:
                 merged[key]["_fusion_score"] = merged[key]["_fusion_score"] + add_score
             else:
@@ -924,7 +928,36 @@ class BankingRAGTool:
                 source_filter=source,
             )
 
-        # 2. Hybrid Retrieval (Dense Vector + BM25 Okapi)
+        # 2. Model-First Query Plan (when pipeline provides LLMQueryPlanner) + Hybrid Retrieval
+        llm_plan = None
+        if not reading and not source and not exact and hasattr(self.pipeline, "plan_query"):
+            try:
+                llm_plan = self.pipeline.plan_query(clean_query)
+            except Exception:
+                llm_plan = None
+        if isinstance(llm_plan, dict) and llm_plan.get("method") == "llm_model":
+            rewritten = str(llm_plan.get("rewritten_query") or "").strip()
+            sem_terms = [str(t).strip() for t in (llm_plan.get("semantic_terms") or ()) if str(t).strip()]
+            exp_base = str(getattr(parsed_q, "expanded_query", "") or clean_query)
+            extra_dense = []
+            if rewritten and rewritten.casefold() not in exp_base.casefold():
+                extra_dense.append(rewritten)
+            if sem_terms:
+                extra_dense.append(" ".join(sem_terms))
+            if extra_dense:
+                parsed_q.expanded_query = (exp_base + " " + " ".join(extra_dense)).strip()
+            if sem_terms:
+                extra_kws = self.pipeline.parse_query(" ".join(sem_terms)).keywords
+                cur_kws = list(getattr(parsed_q, "keywords", []) or [])
+                for ek in extra_kws:
+                    if ek not in cur_kws:
+                        cur_kws.append(ek)
+                parsed_q.keywords = cur_kws
+                existing_kw_str = str(getattr(parsed_q, "keywords_str", "") or "").strip()
+                add_tokens = [ek for ek in extra_kws if f" {ek} " not in f" {existing_kw_str} "]
+                if add_tokens:
+                    parsed_q.keywords_str = (existing_kw_str + " " + " ".join(add_tokens)).strip()
+
         candidate_count = candidate_k or self.pipeline.config.HYBRID_CANDIDATE_K
         top_candidates = max(candidate_count, top_k)
         exact_min_k = int(_RAG_CFG["exact_candidate_min_k"])
@@ -982,10 +1015,30 @@ class BankingRAGTool:
                 source_status = "page_not_found"
         allowed = {(chunk["source"], payload_index_key(chunk)) for chunk in source_chunks}
 
-        def search(query):
-            items = self.pipeline.retriever.retrieve(
-                query=query, top_k=top_candidates, candidate_k=candidate_count, filter_dict=filters,
+        def _retrieve_with_weight(query, eff_top, eff_cand, fdict, d_weight=None):
+            if d_weight is not None:
+                try:
+                    return self.pipeline.retriever.retrieve(
+                        query=query,
+                        top_k=eff_top,
+                        candidate_k=eff_cand,
+                        filter_dict=fdict,
+                        dense_weight=d_weight,
+                    )
+                except TypeError:
+                    pass
+            return self.pipeline.retriever.retrieve(
+                query=query,
+                top_k=eff_top,
+                candidate_k=eff_cand,
+                filter_dict=fdict,
             )
+
+        def search(query):
+            d_weight = None
+            if isinstance(llm_plan, dict) and llm_plan.get("method") == "llm_model":
+                d_weight = llm_plan.get("dense_weight")
+            items = _retrieve_with_weight(query, top_candidates, candidate_count, filters, d_weight=d_weight)
             if not source:
                 return items
             selected = []
@@ -1006,22 +1059,35 @@ class BankingRAGTool:
             else:
                 candidates = search(parsed_q)
                 if not source and not exact and candidates:
-                    sub_queries = decompose_subqueries(clean_query)
+                    sub_queries = []
+                    if isinstance(llm_plan, dict) and llm_plan.get("method") == "llm_model":
+                        sub_queries = list(llm_plan.get("sub_queries") or [])
+                    if not sub_queries:
+                        sub_queries = decompose_subqueries(clean_query)
+                    sub_batches = []
                     if sub_queries:
                         sub_k = min(24, candidate_count)
-                        sub_batches = []
                         for sq in sub_queries:
                             sq_parsed = self.pipeline.parse_query(sq)
-                            sq_items = self.pipeline.retriever.retrieve(
-                                query=sq_parsed,
-                                top_k=sub_k,
-                                candidate_k=sub_k,
-                                filter_dict=filters,
-                            )
+                            sq_items = _retrieve_with_weight(sq_parsed, sub_k, sub_k, filters)
                             if sq_items:
                                 sub_batches.append(sq_items)
-                        if sub_batches:
-                            candidates = _merge_subquery_candidates(candidates, sub_batches, top_candidates)
+                    if isinstance(llm_plan, dict) and llm_plan.get("method") == "llm_model":
+                        track_domains = []
+                        if llm_plan.get("needs_app_guide"):
+                            track_domains.append(("ngan_hang_so", 12))
+                        if llm_plan.get("needs_fee_schedule"):
+                            track_domains.append(("bieu_phi_dich_vu", 10))
+                        if llm_plan.get("needs_network_lookup"):
+                            track_domains.append(("mang_luoi_hoat_dong", 10))
+                        for dom_name, dom_k in track_domains:
+                            dom_filter = dict(filters)
+                            dom_filter["business_metadata.domain"] = dom_name
+                            dom_items = _retrieve_with_weight(parsed_q, dom_k, dom_k, dom_filter)
+                            if dom_items:
+                                sub_batches.append((dom_items[:8], 0.35))
+                    if sub_batches:
+                        candidates = _merge_subquery_candidates(candidates, sub_batches, top_candidates)
             relaxed = any(item.get("retrieval_meta", {}).get("fallback_unfiltered") for item in candidates)
             if exact:
                 candidates = [item for item in candidates if matches_exact(item, exact)]

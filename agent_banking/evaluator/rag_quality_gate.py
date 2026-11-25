@@ -229,18 +229,47 @@ def main():
                 if c_sp:
                     exp_codes.add(c_sp)
             from agent_banking.tools.extensions.banking_query import decompose_subqueries
+            from agent_banking.tools.rag_tool import _merge_subquery_candidates
             q = case["question"]
             parsed = pipeline.parse_query(q)
-            cands = pipeline.retriever.retrieve(parsed, top_k=45, candidate_k=45, filter_dict={})
-            sub_qs = decompose_subqueries(q)
+            plan = pipeline.plan_query(q)
+            d_weight = None
+            if isinstance(plan, dict) and plan.get("method") == "llm_model":
+                rewritten = str(plan.get("rewritten_query") or "").strip()
+                sem_terms = [str(t).strip() for t in (plan.get("semantic_terms") or ()) if str(t).strip()]
+                if rewritten:
+                    parsed.expanded_query = (str(parsed.expanded_query or q) + " " + rewritten + " " + " ".join(sem_terms)).strip()
+                if sem_terms:
+                    extra_kws = pipeline.parse_query(" ".join(sem_terms)).keywords
+                    parsed.keywords_str = (str(parsed.keywords_str or "") + " " + " ".join(extra_kws)).strip()
+                d_weight = plan.get("dense_weight")
+            cands = pipeline.retriever.retrieve(parsed, top_k=45, candidate_k=45, filter_dict={}, dense_weight=d_weight)
+            sub_qs = []
+            if isinstance(plan, dict) and plan.get("method") == "llm_model":
+                sub_qs = list(plan.get("sub_queries") or [])
+            if not sub_qs:
+                sub_qs = decompose_subqueries(q)
+            batches = []
             if sub_qs:
-                from agent_banking.tools.rag_tool import _merge_subquery_candidates
-                batches = []
                 for sq in sub_qs:
                     sp = pipeline.parse_query(sq)
                     sb = pipeline.retriever.retrieve(sp, top_k=24, candidate_k=24, filter_dict={})
                     if sb:
                         batches.append(sb)
+            if isinstance(plan, dict) and plan.get("method") == "llm_model":
+                if plan.get("needs_app_guide"):
+                    ab = pipeline.retriever.retrieve(parsed, top_k=12, candidate_k=12, filter_dict={"business_metadata.domain": "ngan_hang_so"})
+                    if ab:
+                        batches.append((ab[:8], 0.30))
+                if plan.get("needs_fee_schedule"):
+                    fb = pipeline.retriever.retrieve(parsed, top_k=14, candidate_k=14, filter_dict={"business_metadata.domain": "bieu_phi_dich_vu"})
+                    if fb:
+                        batches.append((fb[:8], 0.35))
+                if plan.get("needs_network_lookup"):
+                    nb = pipeline.retriever.retrieve(parsed, top_k=12, candidate_k=12, filter_dict={"business_metadata.domain": "mang_luoi_hoat_dong"})
+                    if nb:
+                        batches.append((nb[:8], 0.35))
+            if batches:
                 cands = _merge_subquery_candidates(cands, batches, 45)
             pool_sources = [c.get("chunk", c).get("source", "") for c in cands]
             hit45 = any(_matches_target(s, exp_names, exp_codes) for s in pool_sources)

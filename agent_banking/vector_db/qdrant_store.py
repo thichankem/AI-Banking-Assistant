@@ -106,7 +106,7 @@ def _set_publication_revision(payload, vector):
     metadata["publication_revision"] = "publication:" + hashlib.sha256(encoded + stored_vector).hexdigest()
 
 
-_BM25_DISK_CACHE_VERSION = "v4"
+_BM25_DISK_CACHE_VERSION = "v5"
 _SLIM_TABLE_SKIP_KEYS = frozenset(("html", "cells", "header_cells", "source_cells", "row_provenance", "cell_span"))
 _SLIM_BM_SKIP_KEYS = frozenset(("quality", "document_version"))
 
@@ -1053,14 +1053,15 @@ class QdrantBankingStore:
                     breadcrumb_text = label_prefix
             table_text = self._extract_table_text(chunk.get("table_data"))
             retrieval = meta.get("retrieval", {})
+            sit_ctx = ""
+            if isinstance(retrieval, dict):
+                sit_ctx = str(retrieval.get("situated_context") or "").strip()
             if isinstance(retrieval, dict) and "embedding_content" in retrieval:
                 content_text = retrieval["embedding_content"]
                 if chunk.get("chunk_type") == "table":
                     table_text = ""
-            elif isinstance(retrieval, dict):
-                sit_ctx = str(retrieval.get("situated_context") or "").strip()
-                if sit_ctx and sit_ctx.casefold() not in str(content_text).casefold():
-                    content_text = sit_ctx + "\n" + str(content_text)
+            if sit_ctx and sit_ctx.casefold() not in str(content_text).casefold():
+                content_text = sit_ctx + "\n" + str(content_text)
             raw_content = str(chunk.get("content") or "")
             parent_text = str(chunk.get("parent_content") or "")
             if len(raw_content) < 350 and len(parent_text) > len(raw_content) + 40:

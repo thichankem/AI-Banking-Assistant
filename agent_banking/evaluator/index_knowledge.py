@@ -75,6 +75,7 @@ def main():
     from agent_banking.core.settings import Config
     from agent_banking.pipeline import BankingRAGPipeline
     from agent_banking.chunking.run_chunking import load_published_chunks
+    from agent_banking.chunking.universal.enrichment.contextual_enricher import enrich_chunks_contextual
     from agent_banking.vector_db.qdrant_store import mark_publication_chunks, publication_scope
     from agent_banking.chunking.universal.extraction.sources import discover_documents
     from agent_banking.chunking.publication_io import file_hash
@@ -106,6 +107,7 @@ def main():
                 image_failures.append(metadata["records"][0]["rel_path"])
             chunks = annotate_page_quality(chunks, artifact["document"])
             chunks = refresh_legacy_domain_metadata(chunks)
+            chunks = enrich_chunks_contextual(chunks)
             chunks = [chunk for chunk in chunks
                       if chunk.get("business_metadata", {}).get("retrieval", {}).get("role") != _EXCLUDED_ROLE]
             scope = publication_scope(folder)

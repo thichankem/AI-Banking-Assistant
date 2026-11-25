@@ -249,7 +249,8 @@ class HybridRetriever:
         top_k=None,
         candidate_k=None,
         filter_dict=None,
-        breadcrumb_boost=None
+        breadcrumb_boost=None,
+        dense_weight=None,
     ):
         """
         Execute Hybrid Retrieval and fuse rankings using Reciprocal Rank Fusion (RRF k=60).
@@ -532,12 +533,21 @@ class HybridRetriever:
 
         # Compute RRF scores with dual-channel consensus boost:
         # RRF(d) = (w_dense / (k + rank_dense)) + (w_bm25 / (k + rank_bm25))
+        eff_dense_w = self.dense_weight
+        eff_bm25_w = self.bm25_weight
+        if dense_weight is not None:
+            eff_dense_w = float(dense_weight)
+            if eff_dense_w < 0.25:
+                eff_dense_w = 0.25
+            if eff_dense_w > 0.80:
+                eff_dense_w = 0.80
+            eff_bm25_w = 1.0 - eff_dense_w
         for item in candidates.values():
             rrf = 0.0
             if item["dense_rank"] is not None:
-                rrf += self.dense_weight / (self.rrf_k + item["dense_rank"])
+                rrf += eff_dense_w / (self.rrf_k + item["dense_rank"])
             if item["bm25_rank"] is not None:
-                rrf += self.bm25_weight / (self.rrf_k + item["bm25_rank"])
+                rrf += eff_bm25_w / (self.rrf_k + item["bm25_rank"])
             if (
                 item["dense_rank"] is not None
                 and item["bm25_rank"] is not None
@@ -608,8 +618,8 @@ class HybridRetriever:
                     "dense_latency_ms": round(t_dense_duration, lat_decimals),
                     "bm25_latency_ms": round(t_bm25_duration, lat_decimals),
                     "rrf_k": self.rrf_k,
-                    "dense_weight": self.dense_weight,
-                    "bm25_weight": self.bm25_weight,
+                    "dense_weight": round(eff_dense_w, 3),
+                    "bm25_weight": round(eff_bm25_w, 3),
                     "dense_query_used": dense_query_text,
                     "bm25_query_used": bm25_query_text,
                     "raw_query": raw_query_text,
