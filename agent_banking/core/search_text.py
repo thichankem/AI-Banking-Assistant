@@ -22,3 +22,12 @@ def search_key(value: str) -> str:
 def is_procedure_query(value: str) -> bool:
     key = " " + search_key(value) + " "
     return any(phrase in key for phrase in _PROCEDURE_PHRASES)
+
+
+def leading_step_number(value: str) -> int | None:
+    """Read the numbered step in a guide heading, including a common OCR variant."""
+    parts = search_key(value).split()
+    if len(parts) >= 2 and parts[0] in ("buoc", "bdoc") and parts[1].isascii() and parts[1].isdecimal():
+        if 1 <= len(parts[1]) <= 2 and int(parts[1]) > 0:
+            return int(parts[1])
+    return None

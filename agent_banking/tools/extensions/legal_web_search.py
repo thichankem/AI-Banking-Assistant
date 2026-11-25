@@ -6,7 +6,6 @@ from hashlib import sha256
 from html import unescape
 import json
 import os
-import re
 import sqlite3
 from urllib.error import HTTPError
 from urllib.parse import quote, unquote, urlencode, urlsplit
@@ -29,16 +28,195 @@ _LEGAL_TERMS = (
     "quyet dinh", "van ban hop nhat", "van ban phap ly", "van ban phap quy", "phap luat",
     "law", "decree", "circular", "legislation",
 )
-_DOCUMENT_CODE = re.compile(
-    r"\b\d{1,6}\s*/\s*(?:\d{4}\s*/\s*)?[A-ZĐ][A-ZĐ0-9]{0,10}(?:\s*-\s*[A-ZĐ0-9]{1,10})*\b", re.I,
-)
-_DOCUMENT_PATH = re.compile(r"/van-ban/(?:[\w-]+/)?[\w-]+-(\d+)\.aspx", re.I)
-_PRIVATE_NUMBER = re.compile(r"\d(?:[ .()-]*\d){8,}")
-_PRIVATE_CODE = re.compile(r"\b(?:otp|pin|cvv|ma xac thuc) \d{3,}\b")
-_ARTICLE = re.compile(r"\bdieu \d{1,3}[a-z]?\b")
-_ARTICLE_HEADING = re.compile(r"(?im)^\s{0,8}[#* ]*Điều\s+(\d{1,3}[a-z]?)\s*\.")
 _ARTICLE_EXCERPT_LIMIT = 6000
 MAX_SEARCHES_PER_TURN = 2
+
+
+def _is_word_char(ch: str) -> bool:
+    return ch.isalnum() or ch == "_"
+
+
+def _is_code_letter(ch: str) -> bool:
+    upper = ch.upper()
+    return ("A" <= upper <= "Z") or ch in ("Đ", "đ")
+
+
+def _is_code_alnum(ch: str) -> bool:
+    return _is_code_letter(ch) or ("0" <= ch <= "9")
+
+
+def _extract_document_codes(text: str) -> list[str]:
+    if not isinstance(text, str) or "/" not in text:
+        return []
+    codes = []
+    n = len(text)
+    idx = 0
+    while idx < n:
+        if ("0" <= text[idx] <= "9") and (idx == 0 or not _is_word_char(text[idx - 1])):
+            d_end = idx
+            while d_end < n and ("0" <= text[d_end] <= "9"):
+                d_end += 1
+            if 1 <= (d_end - idx) <= 6 and (d_end == n or not _is_word_char(text[d_end])):
+                pos = d_end
+                while pos < n and text[pos].isspace():
+                    pos += 1
+                if pos < n and text[pos] == "/":
+                    pos += 1
+                    while pos < n and text[pos].isspace():
+                        pos += 1
+                    year_end = pos
+                    while year_end < n and ("0" <= text[year_end] <= "9"):
+                        year_end += 1
+                    if (year_end - pos) == 4 and (year_end == n or not _is_word_char(text[year_end])):
+                        after_year = year_end
+                        while after_year < n and text[after_year].isspace():
+                            after_year += 1
+                        if after_year < n and text[after_year] == "/":
+                            after_slash = after_year + 1
+                            while after_slash < n and text[after_slash].isspace():
+                                after_slash += 1
+                            pos = after_slash
+                    tok_end = pos
+                    while tok_end < n and _is_word_char(text[tok_end]):
+                        tok_end += 1
+                    first_seg = text[pos:tok_end]
+                    if 1 <= len(first_seg) <= 11 and _is_code_letter(first_seg[0]) and all(_is_code_alnum(c) for c in first_seg):
+                        match_end = tok_end
+                        scan_pos = tok_end
+                        while scan_pos < n:
+                            ws_pos = scan_pos
+                            while ws_pos < n and text[ws_pos].isspace():
+                                ws_pos += 1
+                            if ws_pos >= n or text[ws_pos] != "-":
+                                break
+                            sub_start = ws_pos + 1
+                            while sub_start < n and text[sub_start].isspace():
+                                sub_start += 1
+                            sub_end = sub_start
+                            while sub_end < n and _is_word_char(text[sub_end]):
+                                sub_end += 1
+                            sub_seg = text[sub_start:sub_end]
+                            if 1 <= len(sub_seg) <= 10 and all(_is_code_alnum(c) for c in sub_seg):
+                                match_end = sub_end
+                                scan_pos = sub_end
+                            else:
+                                break
+                        codes.append(text[idx:match_end])
+                        idx = match_end
+                        continue
+            idx = d_end
+            continue
+        idx += 1
+    return codes
+
+
+def _is_valid_document_path(path: str) -> bool:
+    if not isinstance(path, str):
+        return False
+    lower = path.lower()
+    if not lower.startswith("/van-ban/") or not lower.endswith(".aspx"):
+        return False
+    body = path[9:-5]
+    if not body:
+        return False
+    parts = body.split("/")
+    if len(parts) == 2:
+        category, slug_and_id = parts[0], parts[1]
+        if not category or not all(ch.isalnum() or ch in "_-" for ch in category):
+            return False
+    elif len(parts) == 1:
+        slug_and_id = parts[0]
+    else:
+        return False
+    if "-" not in slug_and_id:
+        return False
+    slug, doc_id = slug_and_id.rsplit("-", 1)
+    if not slug or not all(ch.isalnum() or ch in "_-" for ch in slug):
+        return False
+    if not doc_id or not all("0" <= ch <= "9" for ch in doc_id):
+        return False
+    return True
+
+
+def _has_private_number(text: str) -> bool:
+    digit_run = 0
+    for ch in text:
+        if ch.isdigit():
+            digit_run += 1
+            if digit_run >= 9:
+                return True
+        elif ch in " .()-":
+            continue
+        else:
+            digit_run = 0
+    return False
+
+
+def _has_private_code(folded_key: str) -> bool:
+    words = folded_key.split()
+    for idx, word in enumerate(words):
+        if word in ("otp", "pin", "cvv") and idx + 1 < len(words):
+            nxt = words[idx + 1]
+            if len(nxt) >= 3 and nxt.isdigit():
+                return True
+        if word == "ma" and idx + 3 < len(words):
+            if words[idx + 1] == "xac" and words[idx + 2] == "thuc":
+                nxt = words[idx + 3]
+                if len(nxt) >= 3 and nxt.isdigit():
+                    return True
+    return False
+
+
+def _extract_articles(folded_key: str) -> list[str]:
+    words = folded_key.split()
+    found = []
+    for idx, word in enumerate(words):
+        if word == "dieu" and idx + 1 < len(words):
+            tok = words[idx + 1]
+            if 1 <= len(tok) <= 3 and tok.isdigit():
+                found.append("dieu " + tok)
+            elif 2 <= len(tok) <= 4 and tok[:-1].isdigit() and ("a" <= tok[-1] <= "z"):
+                found.append("dieu " + tok)
+    return found
+
+
+def _find_article_headings(text: str) -> list[tuple[int, str]]:
+    if not isinstance(text, str) or not text:
+        return []
+    headings = []
+    offset = 0
+    for raw_line in text.splitlines(keepends=True):
+        line_start = offset
+        offset += len(raw_line)
+        line = raw_line.rstrip("\r\n")
+        idx = 0
+        ws_count = 0
+        while idx < len(line) and ws_count < 8 and line[idx].isspace():
+            idx += 1
+            ws_count += 1
+        while idx < len(line) and line[idx] in "#* ":
+            idx += 1
+        if line[idx:idx + 4].casefold() != "điều":
+            continue
+        idx += 4
+        if idx >= len(line) or not line[idx].isspace():
+            continue
+        while idx < len(line) and line[idx].isspace():
+            idx += 1
+        num_start = idx
+        while idx < len(line) and ("0" <= line[idx] <= "9"):
+            idx += 1
+        digit_len = idx - num_start
+        if digit_len < 1 or digit_len > 3:
+            continue
+        if idx < len(line) and ("a" <= line[idx].lower() <= "z"):
+            idx += 1
+        article_num = line[num_start:idx]
+        while idx < len(line) and line[idx].isspace():
+            idx += 1
+        if idx < len(line) and line[idx] == ".":
+            headings.append((line_start, article_num))
+    return headings
 
 
 def provider_key(provider: str) -> str:
@@ -47,20 +225,43 @@ def provider_key(provider: str) -> str:
     return os.getenv("BRAVE_SEARCH_API_KEY", "").strip() or os.getenv("BRAVE_API_KEY", "").strip()
 
 
+_TVPL_BOILERPLATE_MARKERS = (
+    "bạn hãy nhập mật khẩu đang sử dụng",
+    "nhập mật khẩu mới 2 lần",
+    "bạn hãy nhập e-mail đã sử dụng",
+    "để đăng ký thành viên",
+)
+
+
+def _strip_benign_quotes(query: str) -> str:
+    cleaned = query
+    for ch in ('"', "'", "“", "”", "‘", "’"):
+        if ch in cleaned:
+            cleaned = cleaned.replace(ch, " ")
+    return " ".join(cleaned.split())
+
+
+def _is_tvpl_boilerplate(text: str) -> bool:
+    low = text.casefold()
+    return any(marker in low for marker in _TVPL_BOILERPLATE_MARKERS)
+
+
 def _query_is_public_legal(query: str) -> bool:
+    query = _strip_benign_quotes(query)
     if not 3 <= len(query) <= 300:
         return False
     # A query cannot supply a URL, an engine operator, an email or a long account/ID number.
     if any(not (ch.isalnum() or ch in " -/.,()") for ch in query):
         return False
-    if _PRIVATE_NUMBER.search(query) or "www." in query.casefold() or "//" in query:
+    if _has_private_number(query) or "www." in query.casefold() or "//" in query:
         return False
     if {"AND", "OR", "NOT"}.intersection(query.split()):
         return False
-    key = " " + search_key(query) + " "
-    if _PRIVATE_CODE.search(key):
+    folded = search_key(query)
+    key = " " + folded + " "
+    if _has_private_code(folded):
         return False
-    return bool(_DOCUMENT_CODE.search(query)) or any(f" {term} " in key for term in _LEGAL_TERMS)
+    return bool(_extract_document_codes(query)) or any(f" {term} " in key for term in _LEGAL_TERMS)
 
 
 def _reserve_request(provider: str) -> bool:
@@ -91,14 +292,20 @@ class _NoRedirects(HTTPRedirectHandler):
 
 
 def _provider_results(provider: str, query: str, key: str) -> list:
-    include_articles = provider == "tavily" and bool(_ARTICLE.search(search_key(query)))
+    include_articles = provider == "tavily" and bool(_extract_articles(search_key(query)))
     if provider == "tavily":
+        if include_articles:
+            max_results = 4
+            raw_content_mode = "markdown"
+        else:
+            max_results = _RESULT_COUNT
+            raw_content_mode = False
         request = Request("https://api.tavily.com/search", headers={
             "Authorization": f"Bearer {key}", "Content-Type": "application/json",
         }, data=json.dumps({
             "query": query, "include_domains": [DOMAIN], "search_depth": "basic",
-            "auto_parameters": False, "max_results": 4 if include_articles else _RESULT_COUNT, "country": "vietnam",
-            "language": "vi", "include_answer": False, "include_raw_content": "markdown" if include_articles else False,
+            "auto_parameters": False, "max_results": max_results, "country": "vietnam",
+            "language": "vi", "include_answer": False, "include_raw_content": raw_content_mode,
         }).encode("utf-8"))
     else:
         params = urlencode({
@@ -109,8 +316,12 @@ def _provider_results(provider: str, query: str, key: str) -> list:
         request = Request(f"https://api.search.brave.com/res/v1/web/search?{params}", headers={
             "X-Subscription-Token": key, "Accept": "application/json",
         })
+    if include_articles:
+        read_limit = 6_000_000
+    else:
+        read_limit = 1_000_000
     with build_opener(_NoRedirects()).open(request, timeout=6) as response:
-        payload = json.loads(response.read(6_000_000 if include_articles else 1_000_000))
+        payload = json.loads(response.read(read_limit))
     if not isinstance(payload, dict):
         raise ValueError("Invalid search response")
     if provider == "brave":
@@ -132,7 +343,7 @@ def legal_document_url(raw_url: str) -> str:
     except ValueError:
         return ""
     path = unquote(parsed.path)
-    if parsed.scheme != "https" or parsed.netloc.lower() not in _HOSTS or not _DOCUMENT_PATH.fullmatch(path):
+    if parsed.scheme != "https" or parsed.netloc.lower() not in _HOSTS or not _is_valid_document_path(path):
         return ""
     return f"https://{DOMAIN}{quote(path, safe='/-_.')}"
 
@@ -147,14 +358,17 @@ def _article_passages(value, articles):
     if not isinstance(value, str) or not articles:
         return []
     clean = unescape(value).replace("**", "")
-    headings = list(_ARTICLE_HEADING.finditer(clean))
+    headings = _find_article_headings(clean)
     passages = {}
-    for index, heading in enumerate(headings):
-        article = "dieu " + heading[1].casefold()
+    for index, (start_pos, article_num) in enumerate(headings):
+        article = "dieu " + article_num.casefold()
         if article not in articles:
             continue
-        end = headings[index + 1].start() if index + 1 < len(headings) else len(clean)
-        fragment = clean[heading.start():end].strip().lstrip("# ")
+        if index + 1 < len(headings):
+            end = headings[index + 1][0]
+        else:
+            end = len(clean)
+        fragment = clean[start_pos:end].strip().lstrip("# ")
         # Ignore the table of contents and require body text after the heading.
         if len(fragment.splitlines()) < 2 or len(fragment) < 100:
             continue
@@ -165,8 +379,8 @@ def _article_passages(value, articles):
 
 
 def _documents(provider: str, rows: list, query: str) -> list[dict]:
-    expected_codes = {search_key(match.group()) for match in _DOCUMENT_CODE.finditer(query)}
-    articles = set(_ARTICLE.findall(search_key(query)))
+    expected_codes = {search_key(code) for code in _extract_document_codes(query)}
+    articles = set(_extract_articles(search_key(query)))
     documents = []
     seen = set()
     scan = get_indirect_injection_guardrail().scan_text
@@ -186,25 +400,38 @@ def _documents(provider: str, rows: list, query: str) -> list[dict]:
             snippets = [row.get("description")]
             if isinstance(row.get("extra_snippets"), list):
                 snippets.extend(row["extra_snippets"][:5])
-        excerpts = dict.fromkeys(filter(None, (_clean_text(snippet, 1600) for snippet in snippets)))
+        excerpts = []
+        seen_excerpts = set()
+        for snippet in snippets:
+            cleaned = _clean_text(snippet, 1600)
+            if not cleaned or _is_tvpl_boilerplate(cleaned):
+                continue
+            if cleaned not in seen_excerpts:
+                seen_excerpts.add(cleaned)
+                excerpts.append(cleaned)
         if expected_codes:
             document_text = " " + search_key(title + " " + unquote(urlsplit(url).path)) + " "
             if not any(f" {code} " in document_text for code in expected_codes):
                 continue
         passages = _article_passages(row.get("raw_content"), articles)
         if not passages:
-            passages = [("", "\n\n".join(excerpts)[:2500].strip())]
+            merged_excerpt = "\n\n".join(excerpts)[:3500].strip()
+            passages = [("", merged_excerpt)]
         for article, content in passages:
             if len(content) < 40 or not scan(title + "\n" + content)["is_safe"]:
                 continue
             seen.add(document_id)
+            biz_meta = {
+                "document_name": title,
+                "source_url": url,
+                "category": "Đoạn trích tìm kiếm web",
+            }
+            if article:
+                biz_meta["legal_article"] = article
             documents.append({
                 "chunk_id": "tvpl-" + sha256((document_id + "\n" + content).encode("utf-8")).hexdigest()[:24],
                 "source": url, "content": content, "chunk_type": "text",
-                "business_metadata": {
-                    "document_name": title, "source_url": url, "category": "Đoạn trích tìm kiếm web",
-                    **({"legal_article": article} if article else {}),
-                },
+                "business_metadata": biz_meta,
             })
     return documents
 
@@ -213,7 +440,7 @@ def search_provider(provider: str, query: str) -> dict:
     """Run one provider only, using the same validation and quota as the agent."""
     if provider not in PROVIDERS:
         raise ValueError("Unknown legal search provider")
-    query = " ".join(query.split())
+    query = _strip_benign_quotes(" ".join(query.split()))
     outcome = {"provider": provider, "documents": []}
     if not _query_is_public_legal(query):
         return {**outcome, "status": "invalid_legal_query"}
@@ -243,7 +470,7 @@ def search_legal_web(query: str) -> dict:
     providers = PROVIDERS
     if os.getenv("LEGAL_WEB_SEARCH_PRIMARY", "").strip().lower() == "tavily":
         providers = ("tavily", "brave")
-    articles = set(_ARTICLE.findall(search_key(query)))
+    articles = set(_extract_articles(search_key(query)))
     attempts = []
     best = None
     best_coverage = -1
@@ -254,8 +481,12 @@ def search_legal_web(query: str) -> dict:
             ranked = []
             for doc in outcome["documents"]:
                 article = doc["business_metadata"].get("legal_article")
-                headings = {"dieu " + match[1].casefold() for match in _ARTICLE_HEADING.finditer(doc["content"])}
-                hits = articles.intersection({article} if article else headings)
+                headings = {"dieu " + num.casefold() for _, num in _find_article_headings(doc["content"])}
+                if article:
+                    candidate_articles = {article}
+                else:
+                    candidate_articles = headings
+                hits = articles.intersection(candidate_articles)
                 ranked.append((doc, hits, bool(article)))
             top = sorted(ranked, key=lambda item: (len(item[1]), item[2]), reverse=True)[:4]
             coverage = len(set().union(*(hits for _, hits, _ in top)))

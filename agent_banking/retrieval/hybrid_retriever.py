@@ -382,8 +382,12 @@ class HybridRetriever:
 
         if active_filter is None:
             if suggested_filters is not None and isinstance(suggested_filters, dict):
-                if len(suggested_filters) > 0:
-                    active_filter = dict(suggested_filters)
+                safe_suggested = {}
+                for sf_key, sf_val in suggested_filters.items():
+                    if sf_key != "chunk_type":
+                        safe_suggested[sf_key] = sf_val
+                if len(safe_suggested) > 0:
+                    active_filter = safe_suggested
 
         norm_filter = self._normalize_filter_dict(active_filter)
 
@@ -526,7 +530,7 @@ class HybridRetriever:
                 candidates[index_key]["bm25_rank"] = rank
                 candidates[index_key]["bm25_score"] = float(score)
 
-        # Compute RRF scores:
+        # Compute RRF scores with dual-channel consensus boost:
         # RRF(d) = (w_dense / (k + rank_dense)) + (w_bm25 / (k + rank_bm25))
         for item in candidates.values():
             rrf = 0.0
@@ -534,6 +538,13 @@ class HybridRetriever:
                 rrf += self.dense_weight / (self.rrf_k + item["dense_rank"])
             if item["bm25_rank"] is not None:
                 rrf += self.bm25_weight / (self.rrf_k + item["bm25_rank"])
+            if (
+                item["dense_rank"] is not None
+                and item["bm25_rank"] is not None
+                and item["dense_rank"] <= 10
+                and item["bm25_rank"] <= 10
+            ):
+                rrf += 0.0025
             item["rrf_score"] = rrf
 
         # Sort candidates descending by RRF score
@@ -544,7 +555,7 @@ class HybridRetriever:
         diversify_max = RetrievalConfig.RETRIEVAL_DIVERSIFY_MAX_PER_SOURCE
         if not has_source_filter and effective_top_k >= diversify_min:
             effective_diversify_max = diversify_max
-            if effective_top_k > diversify_min:
+            if effective_top_k > 10:
                 scaled_cap = effective_top_k // 4
                 if scaled_cap > effective_diversify_max:
                     effective_diversify_max = scaled_cap

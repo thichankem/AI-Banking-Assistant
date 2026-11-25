@@ -68,16 +68,9 @@ class BankingRAGPipeline:
         print(_MESSAGES["init_banner"])
         print("=" * 70)
 
-        # 1. Initialize DLA Chunker (Canonical document chunking)
-        print("[1/4] Initializing Layout-Aware Document Chunker...")
-        self.dla_chunker = DLAChunker(
-            target_chunk_tokens=int(getattr(self.config, "CHUNK_SIZE_TOKENS", _DEFAULT_CHUNK_SIZE_TOKENS)),
-            max_chunk_tokens=int(getattr(self.config, "CHUNK_MAX_TOKENS", _DEFAULT_CHUNK_MAX_TOKENS)),
-            min_chunk_tokens=int(getattr(self.config, "CHUNK_MIN_TOKENS", _DEFAULT_CHUNK_MIN_TOKENS)),
-            search_language=getattr(self.config, "CHUNK_SEARCH_LANGUAGE", _DEFAULT_CHUNK_SEARCH_LANGUAGE),
-            config=self.config
-        )
-        self.chunker = self.dla_chunker
+        # 1. Initialize DLA Chunker lazily (avoids ~1.65s cold startup when only querying)
+        print("[1/4] Layout-Aware Document Chunker registered (lazy-init on ingest)...")
+        self._dla_chunker = None
 
         # 2. Initialize Dense Embedding Model (integrated SQLite Cache)
         print(f"[2/4] Initializing Dense Embedding Model ({self.config.EMBEDDING_MODEL_1024})...")
@@ -367,9 +360,33 @@ class BankingRAGPipeline:
         )
         return top_reranked
 
+    @property
+    def dla_chunker(self):
+        if self._dla_chunker is None:
+            self._dla_chunker = DLAChunker(
+                target_chunk_tokens=int(getattr(self.config, "CHUNK_SIZE_TOKENS", _DEFAULT_CHUNK_SIZE_TOKENS)),
+                max_chunk_tokens=int(getattr(self.config, "CHUNK_MAX_TOKENS", _DEFAULT_CHUNK_MAX_TOKENS)),
+                min_chunk_tokens=int(getattr(self.config, "CHUNK_MIN_TOKENS", _DEFAULT_CHUNK_MIN_TOKENS)),
+                search_language=getattr(self.config, "CHUNK_SEARCH_LANGUAGE", _DEFAULT_CHUNK_SEARCH_LANGUAGE),
+                config=self.config
+            )
+        return self._dla_chunker
+
+    @dla_chunker.setter
+    def dla_chunker(self, value):
+        self._dla_chunker = value
+
+    @property
+    def chunker(self):
+        return self.dla_chunker
+
+    @chunker.setter
+    def chunker(self, value):
+        self._dla_chunker = value
+
     def close(self):
         """Release connection resources."""
-        if hasattr(self, "dla_chunker") and hasattr(self.dla_chunker, "close"):
-            self.dla_chunker.close()
+        if getattr(self, "_dla_chunker", None) is not None and hasattr(self._dla_chunker, "close"):
+            self._dla_chunker.close()
         if hasattr(self.vector_store, "close"):
             self.vector_store.close()

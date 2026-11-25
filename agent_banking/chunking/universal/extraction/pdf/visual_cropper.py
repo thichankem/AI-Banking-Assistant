@@ -12,6 +12,7 @@ import numpy as np
 from PIL import Image
 
 from agent_banking.chunking.publication_io import atomic_bytes
+from agent_banking.core.search_text import leading_step_number
 
 _MIN_PAGE_DIMENSION = 400
 _MAX_CROPS_PER_PAGE = 4
@@ -443,15 +444,11 @@ def _match_page_crops(chunk, page_crops, page_steps, doc_label):
     app_crops = [crop for crop in page_crops if crop.get("region_type") in ("app_step", "slide_visual")]
     if app_crops:
         step_crops = [crop for crop in app_crops if crop.get("region_type") == "app_step"]
-        if len(step_crops) > 1:
-            chunk_text = str(chunk.get("section_title") or "") + "\n" + str(chunk.get("content") or "")
-            chunk_steps = extract_step_numbers_from_text(chunk_text)
-            if len(chunk_steps) == 1 and page_steps and len(page_steps) == len(step_crops):
-                target_step = chunk_steps[0]
-                if target_step in page_steps:
-                    pos = page_steps.index(target_step)
-                    return [_build_cropped_entry(step_crops[pos], doc_label, "direct")]
-        return [_build_cropped_entry(crop, doc_label, "direct") for crop in app_crops]
+        step = leading_step_number(str(chunk.get("section_title") or ""))
+        if page_steps and step in page_steps and len(page_steps) == len(step_crops):
+            crop = step_crops[page_steps.index(step)]
+            return [{**_build_cropped_entry(crop, doc_label, "direct"), "step_number": step}]
+        return [_build_cropped_entry(crop, doc_label, "page_context") for crop in app_crops]
 
     chunk_type = str(chunk.get("chunk_type") or "text")
     combined_lower = (str(chunk.get("section_title") or "") + " " + str(chunk.get("content") or "")).lower()

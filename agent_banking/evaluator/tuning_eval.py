@@ -140,6 +140,7 @@ def main():
     code_paths.extend(name for name in (
         "tools/extensions/legal_web_search.py", "tools/search_legal_web/tool.yaml", "reranking/rag_reranker.py",
         "tools/config/settings/query_rules.yaml", "tools/tool_registry.py",
+        "agent/config/conversation_policy.py",
         "agent/config/prompts/deep/base.md", "agent/config/prompts/deep/coordinator.md",
         "agent/config/prompts/deep/review.md", "agent/config/prompts/deep/partial_recovery.md",
         "agent/config/prompts/messages.yaml", "evaluator/config/prompts/master_785_judge.md",

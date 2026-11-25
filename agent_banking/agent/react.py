@@ -120,6 +120,42 @@ def _normalize_citation_markers(answer: str) -> str:
     return norm_answer
 
 
+def _strip_invalid_citation_markers(text: str, evidence_count: int) -> str:
+    if not text:
+        return ""
+    norm = _normalize_citation_markers(text)
+    if "[Nguồn " not in norm:
+        return norm
+    chunks = norm.split("[Nguồn ")
+    result_parts = [chunks[0]]
+    for tail in chunks[1:]:
+        label, closing, rest = tail.partition("]")
+        if not closing:
+            result_parts.append("[Nguồn " + tail)
+            continue
+        parts = [p.strip() for p in label.replace(";", ",").split(",") if p.strip()]
+        valid_numbers = []
+        for p in parts:
+            tok = p
+            if tok.startswith("Nguồn "):
+                tok = tok[len("Nguồn "):].strip()
+            if " " in tok:
+                tok = tok.split()[0].rstrip(":,-")
+            if tok.isascii() and tok.isdecimal():
+                num = int(tok)
+                if 1 <= num <= evidence_count:
+                    valid_numbers.append(str(num))
+        if valid_numbers:
+            result_parts.append(f"[Nguồn {', '.join(valid_numbers)}]" + rest)
+        else:
+            result_parts.append(rest)
+    result = "".join(result_parts)
+    while "  " in result:
+        result = result.replace("  ", " ")
+    result = result.replace(" .", ".").replace(" ,", ",")
+    return result.strip()
+
+
 def _reference_numbers(answer: str, evidence_count: int) -> set[int]:
     references = set()
     norm_answer = _normalize_citation_markers(answer)
@@ -376,7 +412,11 @@ class BankingReActNodes:
             reference = {"label": f"[Nguồn {entry['index']}]", "text": entry["context"]}
             if meta.get("excel_table_id"):
                 reference["excel_table_id"] = meta["excel_table_id"]
-                table = (record.get("table_data") or {}).get("excel") if isinstance(record.get("table_data"), dict) else None
+                raw_td = record.get("table_data")
+                if isinstance(raw_td, dict):
+                    table = raw_td.get("excel")
+                else:
+                    table = None
                 if table:
                     reference["excel_columns"] = table["columns"]
             if type(record.get("source_offset")) is int:
@@ -384,10 +424,49 @@ class BankingReActNodes:
             references.append(reference)
         result = {"documents": references, "blocked_count": blocked_count,
                   "new_evidence": len(evidence) - previous_count}
+        if (
+            not references
+            and data.get("status") == "no_results"
+            and data.get("excel_match_count") == 0
+            and data.get("excel_checked_source")
+            and len(evidence) < MAX_EVIDENCE
+        ):
+            chk_src = str(data["excel_checked_source"])
+            chk_sheet = str(data.get("excel_checked_sheet") or "")
+            total_rows = int(data.get("excel_total_rows") or 0)
+            sheet_lbl = ""
+            if chk_sheet:
+                sheet_lbl = f" | Sheet {chk_sheet}"
+            verify_ctx = (
+                f"[Nguồn dữ liệu]: {chk_src}{sheet_lbl}\n"
+                f"[Kết quả tra cứu Excel có cấu trúc]: Đã kiểm tra toàn bộ {total_rows} dòng dữ liệu trong bảng "
+                "theo điều kiện truy vấn. Số dòng khớp: 0 (không tồn tại bản ghi thỏa mãn điều kiện)."
+            )
+            verify_id = (chk_src, f"excel-zero:{chk_sheet}:{total_rows}", "", verify_ctx)
+            entry = next((item for item in evidence if tuple(item["identity"]) == verify_id), None)
+            if entry is None:
+                entry = {
+                    "identity": verify_id,
+                    "chunk": {
+                        "chunk_id": f"excel-zero-{chk_sheet}",
+                        "source": chk_src,
+                        "chunk_type": "table",
+                        "section_title": chk_sheet,
+                        "breadcrumb": chk_sheet,
+                        "content": verify_ctx,
+                        "business_metadata": {"document_name": chk_src},
+                    },
+                    "context": verify_ctx,
+                    "index": len(evidence) + 1,
+                    "source": chk_src,
+                }
+                evidence.append(entry)
+            references.append({"label": f"[Nguồn {entry['index']}]", "text": entry["context"]})
+            result["new_evidence"] = len(evidence) - previous_count
         if isinstance(data.get("retrieval_quality"), dict):
             result["retrieval_quality"] = data["retrieval_quality"]
         if data.get("excel_match_count") is not None or str(data.get("status", "")).startswith("excel_"):
-            result.update({key: data[key] for key in ("status", "excel_columns", "excel_units", "excel_match_count", "next_offset")
+            result.update({key: data[key] for key in ("status", "excel_columns", "excel_units", "excel_match_count", "excel_summary", "next_offset")
                            if key in data})
         return result
 

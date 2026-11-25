@@ -363,12 +363,24 @@ class BaseSkill:
             default_top_k = int(_RAG_CFG["default_top_k"])
             context_max_chars = int(_RAG_CFG["context_max_chars"])
             result = BankingRAGTool(pipeline_instance=self.pipeline, config=self.config).execute(
-                params.get("query", ""), top_k=params.get("top_k", default_top_k), candidate_k=params.get("candidate_k"),
-                exact=params.get("exact", "")
+                params.get("query", ""),
+                top_k=params.get("top_k", default_top_k),
+                candidate_k=params.get("candidate_k"),
+                exact=params.get("exact", ""),
+                source=params.get("source", ""),
+                offset=params.get("offset"),
+                excel=params.get("excel"),
+                page=params.get("page"),
             )
             documents = result["documents"]
-            previews = [_format_retrieved_doc_context(chunk, max_chars=context_max_chars) for chunk in documents]
-            return {**result, "chunks": documents, "query_used": result.get("query", ""),
+            related_docs = result.get("related_documents") or []
+            query_used = result.get("query", "")
+            all_docs = [*documents, *related_docs]
+            previews = [
+                _format_retrieved_doc_context(chunk, max_chars=context_max_chars, query=query_used)
+                for chunk in all_docs
+            ]
+            return {**result, "chunks": documents, "query_used": query_used,
                     "formatted_context": "\n\n---\n\n".join(preview for preview in previews if preview)}
 
         # 5. Document Grader & Hallucination Audit Execution

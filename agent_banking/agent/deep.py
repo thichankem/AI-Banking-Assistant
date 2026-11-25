@@ -2,11 +2,19 @@
 
 import json
 from unicodedata import normalize
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from uuid import uuid4
 
 from langgraph.types import interrupt
 
+from agent_banking.agent.config.conversation_policy import (
+    ANSWER_SCOPE,
+    COORDINATION_POLICY,
+    REVIEW_SCOPE,
+    SUMMARY_INSTRUCTION,
+    SUMMARY_MAX_POINTS,
+    SUMMARY_MAX_WORDS,
+)
 from agent_banking.agent.config.response_profiles import (
     FORMAT_PROFILES,
     PERSONA_PROFILES,
@@ -42,10 +50,11 @@ from agent_banking.agent.react import (
     MAX_EVIDENCE,
     _normalize_citation_markers,
     _reference_numbers,
+    _strip_invalid_citation_markers,
     legal_searches_remaining,
 )
 from agent_banking.core.fallback import ModelFallbackError, is_temporary_error
-from agent_banking.core.search_text import search_key
+from agent_banking.core.search_text import leading_step_number, search_key
 from agent_banking.skills.skill_registry import resolve_skill
 from agent_banking.tools.extensions.banking_query import parse_banking_query
 from agent_banking.tools.extensions.legal_web_search import TOOL_NAME as LEGAL_WEB_SEARCH_TOOL
@@ -312,6 +321,31 @@ def _requests_restricted_field(text: str) -> bool:
     return any(f" {field} " in normalized for field in RESTRICTED_CARD_FIELDS)
 
 
+def _requests_brief_summary(state: dict) -> bool:
+    replies = (reply["response"] for reply in state["human_replies"])
+    request = " " + search_key(" ".join((state["user_query"], *replies))) + " "
+    full_detail = (" khong tom tat ", " khong can tom tat ", " dung tom tat ",
+                   " day du ", " toan bo ", " tat ca ", " full ", " do not summarize ")
+    if any(phrase in request for phrase in full_detail):
+        return False
+    if not any(phrase in request for phrase in (" tom tat ", " tom gon ", " summarize ", " summarise ")):
+        return False
+    size_units = {"tu", "chu", "dong", "y", "buoc", "words", "lines", "points", "steps"}
+    words = request.split()
+    return not any(count.isdecimal() and unit in size_units for count, unit in zip(words, words[1:]))
+
+
+def _fits_brief_summary(draft: str) -> bool:
+    if len(draft.split()) > SUMMARY_MAX_WORDS:
+        return False
+    line_starts = (line.lstrip().split(" ", 1)[0] for line in draft.splitlines())
+    list_items = sum(
+        start in ("-", "*", "+") or (start[-1:] in (".", ")") and start[:-1].isdigit())
+        for start in line_starts
+    )
+    return list_items <= SUMMARY_MAX_POINTS
+
+
 _SUPPORT_LINE_MARKERS = (
     "hotline",
     "tong dai",
@@ -335,6 +369,10 @@ _ACTION_STEP_MARKERS = (
     "dang nhap",
     "mo ung dung",
     "tai ung dung",
+    "man hinh",
+    "thao tac",
+    "truy cap",
+    "gat nut",
 )
 _APP_VISUAL_REGION_TYPES = ("app_step", "slide_visual")
 
@@ -431,7 +469,7 @@ def _normalize_image_entry(img: dict, citation: dict, doc_name: str):
         or doc_name
     ).strip()
 
-    return {
+    entry = {
         "asset_id": asset_id,
         "url": "/api/assets/" + asset_id,
         "citation_label": str(citation.get("label") or ""),
@@ -446,6 +484,21 @@ def _normalize_image_entry(img: dict, citation: dict, doc_name: str):
         "width": int(img.get("width") or 0),
         "height": int(img.get("height") or 0),
     }
+    step = img.get("step_number")
+    if type(step) is int and step > 0:
+        entry["step_number"] = step
+    source = entry["source"]
+    bbox = img.get("bbox")
+    if (page_number and source.lower().endswith(".pdf")
+            and isinstance(bbox, (list, tuple)) and len(bbox) == 4
+            and all(type(coordinate) in (int, float) for coordinate in bbox)
+            and 0 <= bbox[0] < bbox[2] <= 1 and 0 <= bbox[1] < bbox[3] <= 1):
+        entry["detail_url"] = "/api/documents/pdf/region?" + urlencode({
+            "source": source,
+            "page": page_number,
+            "bbox": ",".join(map(str, bbox)),
+        })
+    return entry
 
 
 def _extract_chunk_images(citation: dict, chunk: dict) -> list:
@@ -479,77 +532,66 @@ def _extract_chunk_images(citation: dict, chunk: dict) -> list:
     return [pair[2] for pair in items]
 
 
-def _line_contains_citation(line: str, label: str, cit_index) -> bool:
-    if not line:
-        return False
-    if label and label in line:
-        return True
+def _line_citation_position(line: str, label: str, cit_index) -> int | None:
     if type(cit_index) is not int or cit_index <= 0:
-        return False
+        if label and (offset := line.find(label)) >= 0:
+            return offset
+        return None
     target = str(cit_index)
     cursor = 0
-    while cursor < len(line):
-        open_idx = line.find("[", cursor)
-        if open_idx < 0:
-            break
+    while (open_idx := line.find("[", cursor)) >= 0:
         close_idx = line.find("]", open_idx + 1)
         if close_idx < 0:
             break
         inner = line[open_idx + 1:close_idx]
-        lower_inner = inner.lower()
-        if "nguồn" in lower_inner or "nguon" in lower_inner:
-            normalized = inner.replace(";", ",")
-            for part in normalized.split(","):
-                token = part.strip()
-                lower_token = token.lower()
-                if lower_token.startswith("nguồn"):
-                    token = token[5:].strip()
-                elif lower_token.startswith("nguon"):
-                    token = token[5:].strip()
-                if " " in token:
-                    token = token.split(" ")[0].strip()
-                if token == target:
-                    return True
+        if label and line[open_idx:close_idx + 1] == label:
+            return open_idx
+        folded = inner.casefold()
+        if folded.startswith(("nguồn", "nguon", "source")):
+            part_offset = open_idx + 1
+            for part in inner.replace(";", ",").split(","):
+                token = part.strip().casefold()
+                for prefix in ("nguồn", "nguon", "source"):
+                    token = token.removeprefix(prefix)
+                token = token.lstrip(" :")
+                if token and token.split()[0] == target:
+                    return part_offset
+                part_offset += len(part) + 1
         cursor = close_idx + 1
-    return False
+    return None
 
 
-def _citation_answer_stats(citation: dict, answer_text: str) -> tuple:
+def _citation_answer_context(citation: dict, answer_text: str) -> tuple:
     if not answer_text:
-        return (999999999, False)
+        return ((0, 0), False, False)
     label = str(citation.get("label") or "")
     cit_index = citation.get("index")
-    first_pos = 999999999
-    matched_lines = []
-    offset = 0
-    for line in answer_text.splitlines():
-        if _line_contains_citation(line, label, cit_index):
-            if first_pos == 999999999:
-                first_pos = offset
-            matched_lines.append(line)
-        offset += len(line) + 1
+    first_pos = None
+    support_only = True
+    shows_action = False
+    for pos, line in enumerate(answer_text.splitlines()):
+        offset = _line_citation_position(line, label, cit_index)
+        if offset is None:
+            continue
+        if first_pos is None:
+            first_pos = (pos, offset)
+        key = " " + search_key(line) + " "
+        action = any(marker in key for marker in _ACTION_STEP_MARKERS)
+        shows_action = shows_action or action
+        support_only = support_only and not action and any(marker in key for marker in _SUPPORT_LINE_MARKERS)
+    return (first_pos, support_only, shows_action)
 
-    if not matched_lines:
-        return (first_pos, False)
 
-    all_support_only = True
-    for line in matched_lines:
-        line_key = " " + search_key(line) + " "
-        has_support = False
-        for marker in _SUPPORT_LINE_MARKERS:
-            if marker in line_key:
-                has_support = True
-                break
-        has_action = False
-        for marker in _ACTION_STEP_MARKERS:
-            if marker in line_key:
-                has_action = True
-                break
-        if not has_support or has_action:
-            all_support_only = False
-            break
+def _image_source_key(source) -> str:
+    return str(source or "").replace("\\", "/").strip().casefold()
 
-    return (first_pos, all_support_only)
+
+def _image_workflow(chunk: dict) -> tuple:
+    parts = str(chunk.get("breadcrumb") or "").split(" > ")
+    for index, part in enumerate(parts):
+        if leading_step_number(part) is not None:
+            return tuple(parts[:index])
+    return ()
 
 
 def _resolve_cited_images(
@@ -559,7 +601,7 @@ def _resolve_cited_images(
     max_images: int | None = None,
     answer_text: str = "",
 ) -> list:
-    """Collect deduplicated visual assets from cited chunks in canonical step/page order."""
+    """Show answer-linked illustrations, with each workflow in document reading order."""
     if status == "BLOCKED" or not citations or not retrieved_chunks:
         return []
     by_chunk_id = {}
@@ -567,25 +609,32 @@ def _resolve_cited_images(
     for chunk in retrieved_chunks:
         if not isinstance(chunk, dict):
             continue
-        cid = str(chunk.get("chunk_id") or "")
-        if cid and cid not in by_chunk_id:
-            by_chunk_id[cid] = chunk
-        src = str(chunk.get("source") or "")
-        sec = str(chunk.get("section_title") or "")
-        if src and (src, sec) not in by_source_section:
-            by_source_section[(src, sec)] = chunk
+        chunk_id = str(chunk.get("chunk_id") or "")
+        if chunk_id:
+            by_chunk_id.setdefault(chunk_id, chunk)
+        source_key = _image_source_key(chunk.get("source"))
+        section = str(chunk.get("section_title") or "")
+        if source_key:
+            by_source_section.setdefault((source_key, section), []).append(chunk)
 
-    cit_records = []
+    best_by_asset = {}
     for cit_pos, citation in enumerate(citations):
         if not isinstance(citation, dict):
             continue
-        cid = str(citation.get("chunk_id") or "")
-        src = str(citation.get("source") or "")
-        sec = str(citation.get("section_title") or "")
-        chunk = by_chunk_id.get(cid)
-        if chunk is None and src:
-            chunk = by_source_section.get((src, sec))
+        first_pos, support_only, shows_action = _citation_answer_context(citation, answer_text)
+        if first_pos is None:
+            continue
+        source_key = _image_source_key(citation.get("source"))
+        section = str(citation.get("section_title") or "")
+        chunk = by_chunk_id.get(str(citation.get("chunk_id") or ""))
+        if chunk is None and source_key:
+            matches = by_source_section.get((source_key, section), [])
+            if len(matches) == 1:
+                chunk = matches[0]
         if chunk is None:
+            continue
+        chunk_source = _image_source_key(chunk.get("source"))
+        if source_key and chunk_source and source_key != chunk_source:
             continue
         raw_images = chunk.get("images")
         if not isinstance(raw_images, list) or not raw_images:
@@ -594,210 +643,69 @@ def _resolve_cited_images(
         meta = chunk.get("business_metadata")
         if not isinstance(meta, dict):
             meta = {}
-        effective_src = str(src or chunk.get("source") or "")
-        doc_name = _extract_document_name(effective_src, meta)
-        doc_key = str(effective_src or doc_name).replace("\\", "/").strip().lower()
-        first_pos, is_support_only = _citation_answer_stats(citation, answer_text)
-
-        cit_idx_raw = citation.get("index")
-        if type(cit_idx_raw) is int:
-            cit_idx = cit_idx_raw
-        else:
-            cit_idx = cit_pos + 1
-
-        valid_items = []
-        has_app_visual = False
-        app_pages = []
-        seen_app_pages = set()
+        source = str(citation.get("source") or chunk.get("source") or "")
+        doc_name = _extract_document_name(source, meta)
+        source_key = _image_source_key(source or doc_name)
+        section = str(chunk.get("section_title") or section)
+        step = leading_step_number(section)
+        workflow = _image_workflow(chunk)
+        source_pages = set(_extract_page_numbers(meta))
+        items = []
+        app_frames = {}
         for raw_img in raw_images:
-            entry = _normalize_image_entry(raw_img, citation, doc_name)
+            entry = _normalize_image_entry(raw_img, {**citation, "source": source}, doc_name)
             if entry is None:
                 continue
-            order_key = _image_order_key(raw_img)
-            is_direct = raw_img.get("match_strength") == "direct"
-            valid_items.append((entry, order_key, is_direct))
-            if entry["region_type"] in _APP_VISUAL_REGION_TYPES:
-                has_app_visual = True
-                p_num = entry.get("page_number")
-                if type(p_num) is int and p_num > 0 and p_num not in seen_app_pages:
-                    seen_app_pages.add(p_num)
-                    app_pages.append(p_num)
+            is_app = entry["region_type"] in _APP_VISUAL_REGION_TYPES
+            page = entry["page_number"]
+            if is_app and page:
+                app_frames.setdefault(page, set()).add(entry["asset_id"])
+            items.append((raw_img, entry, is_app))
 
-        if not valid_items:
-            continue
-
-        cit_records.append({
-            "cit_idx": cit_idx,
-            "doc_key": doc_key,
-            "first_pos": first_pos,
-            "is_support_only": is_support_only,
-            "has_app_visual": has_app_visual,
-            "app_pages": app_pages,
-            "chunk_img_count": len(valid_items),
-            "items": valid_items,
-            "drop_app": False,
-        })
-
-    if not cit_records:
-        return []
-
-    # Filter A: ignore app/slide visuals attached only to Hotline/CSKH support citations
-    has_non_support_app = False
-    for rec in cit_records:
-        if rec["has_app_visual"] and not rec["is_support_only"]:
-            has_non_support_app = True
-            break
-    if has_non_support_app:
-        for rec in cit_records:
-            if rec["has_app_visual"] and rec["is_support_only"]:
-                rec["drop_app"] = True
-
-    # Filter B: drop isolated cross-document HDSD stray when a dominant HDSD doc has >=60% & >=2 citations
-    app_doc_counts = {}
-    total_app_cits = 0
-    for rec in cit_records:
-        if rec["has_app_visual"] and not rec["drop_app"]:
-            dk = rec["doc_key"]
-            app_doc_counts[dk] = app_doc_counts.get(dk, 0) + 1
-            total_app_cits += 1
-
-    has_dominant_app_doc = False
-    for dk, cnt in app_doc_counts.items():
-        if cnt >= 2 and cnt * 5 >= total_app_cits * 3:
-            has_dominant_app_doc = True
-            break
-    if has_dominant_app_doc:
-        for rec in cit_records:
-            if rec["has_app_visual"] and not rec["drop_app"]:
-                if app_doc_counts.get(rec["doc_key"], 0) == 1:
-                    rec["drop_app"] = True
-
-    # Filter C: within an HDSD doc (>=4 app citations), drop isolated distant whole-page dumps
-    by_app_doc = {}
-    for rec in cit_records:
-        if rec["has_app_visual"] and not rec["drop_app"]:
-            by_app_doc.setdefault(rec["doc_key"], []).append(rec)
-
-    for dk, doc_recs in by_app_doc.items():
-        if len(doc_recs) < 4:
-            continue
-        page_cit_counts = {}
-        for rec in doc_recs:
-            for p_num in rec["app_pages"]:
-                page_cit_counts[p_num] = page_cit_counts.get(p_num, 0) + 1
-
-        to_drop = []
-        for rec in doc_recs:
-            if rec["chunk_img_count"] < 3 or len(rec["app_pages"]) != 1:
+        for raw_img, entry, is_app in items:
+            if raw_img.get("match_strength") == "page_context":
                 continue
-            p_num = rec["app_pages"][0]
-            if page_cit_counts.get(p_num, 0) != 1:
+            page = entry["page_number"]
+            if page and source_pages and page not in source_pages:
                 continue
-            is_distant = True
-            has_other_page = False
-            for other_p in page_cit_counts:
-                if other_p == p_num:
+            if is_app:
+                if support_only or (answer_text and not shows_action and step is None):
                     continue
-                has_other_page = True
-                if abs(p_num - other_p) < 2:
-                    is_distant = False
-                    break
-            if has_other_page and is_distant:
-                to_drop.append(rec)
-
-        if to_drop and len(to_drop) < len(doc_recs):
-            for rec in to_drop:
-                rec["drop_app"] = True
-
-    # Deduplicate by asset_id preferring direct match and most specific (fewest images) chunk
-    best_by_asset = {}
-    for rec in cit_records:
-        drop_app = rec["drop_app"]
-        for entry, order_key, is_direct in rec["items"]:
-            if drop_app and entry["region_type"] in _APP_VISUAL_REGION_TYPES:
-                continue
+                frame_step = entry.get("step_number")
+                if frame_step is not None and step is not None and frame_step != step:
+                    continue
+                count = len(app_frames.get(page, ()))
+                region_count = entry["region_count"]
+                # Legacy whole-page and cross-page attachments were also marked direct.
+                if frame_step is None:
+                    if len(app_frames) > 1 or (count > 1 and (region_count is None or count >= region_count)):
+                        continue
+                if step is not None and frame_step is None and count <= 1:
+                    entry["step_number"] = step
+            direct = raw_img.get("match_strength") == "direct"
+            if is_app:
+                app_workflow = workflow
+            else:
+                app_workflow = ()
+            group = (source_key, app_workflow)
+            preference = (not direct, -bool(entry.get("step_number")), len(items), first_pos, cit_pos)
             asset_id = entry["asset_id"]
-            direct_rank = 1
-            if is_direct:
-                direct_rank = 0
-            spec_key = (direct_rank, rec["chunk_img_count"], rec["first_pos"], rec["cit_idx"])
-            candidate = (spec_key, rec["doc_key"], order_key, rec["first_pos"], rec["cit_idx"], entry)
-            existing = best_by_asset.get(asset_id)
-            if existing is None or spec_key < existing[0]:
-                best_by_asset[asset_id] = candidate
+            previous = best_by_asset.get(asset_id)
+            if previous is None or preference < previous[0]:
+                best_by_asset[asset_id] = (preference, group, _image_order_key(raw_img), entry, is_app)
 
     surviving = list(best_by_asset.values())
-    if not surviving:
-        return []
+    group_positions = {}
+    for preference, group, _, _, _ in surviving:
+        position = preference[-2:]
+        group_positions[group] = min(position, group_positions.get(group, position))
 
-    has_any_app_visual = False
-    doc_stats = {}
-    for item in surviving:
-        doc_key = item[1]
-        first_pos = item[3]
-        cit_idx = item[4]
-        entry = item[5]
-        is_app = entry["region_type"] in _APP_VISUAL_REGION_TYPES
-        if is_app:
-            has_any_app_visual = True
-        stat = doc_stats.get(doc_key)
-        if stat is None:
-            doc_stats[doc_key] = {
-                "has_app": is_app,
-                "cit_indices": {cit_idx},
-                "min_first_pos": first_pos,
-                "min_cit_idx": cit_idx,
-            }
-        else:
-            if is_app:
-                stat["has_app"] = True
-            stat["cit_indices"].add(cit_idx)
-            if first_pos < stat["min_first_pos"]:
-                stat["min_first_pos"] = first_pos
-            if cit_idx < stat["min_cit_idx"]:
-                stat["min_cit_idx"] = cit_idx
-
-    doc_keys = list(doc_stats.keys())
-    if has_any_app_visual:
-        def _app_doc_sort_key(dk):
-            st = doc_stats[dk]
-            app_pri = 1
-            if st["has_app"]:
-                app_pri = 0
-            return (app_pri, -len(st["cit_indices"]), st["min_first_pos"], st["min_cit_idx"])
-        doc_keys.sort(key=_app_doc_sort_key)
-    else:
-        def _non_app_doc_sort_key(dk):
-            st = doc_stats[dk]
-            return (st["min_first_pos"], st["min_cit_idx"])
-        doc_keys.sort(key=_non_app_doc_sort_key)
-
-    doc_rank = {}
-    for rank_idx, dk in enumerate(doc_keys):
-        doc_rank[dk] = rank_idx
-
-    surviving.sort(
-        key=lambda item: (
-            doc_rank[item[1]],
-            item[2][0],
-            item[2][1],
-            item[2][2],
-            item[2][3],
-            item[3],
-            item[4],
-        )
-    )
-
-    if max_images is not None:
-        limit = max_images
-    elif has_any_app_visual:
-        limit = 16
-    else:
-        limit = 8
-
-    if limit <= 0:
-        return []
-    return [item[5] for item in surviving[:limit]]
+    surviving.sort(key=lambda item: (group_positions[item[1]], item[1], item[2], item[0][-2:], item[3]["asset_id"]))
+    if max_images is None:
+        max_images = 8
+        if any(item[4] for item in surviving):
+            max_images = 16
+    return [item[3] for item in surviving[:max(0, max_images)]]
 
 
 def _extract_page_numbers(business_metadata: dict) -> list:
@@ -1071,10 +979,11 @@ class BankingDeepAgent(BankingReActNodes):
         guarded.update(plan=[], plan_revision=0, delegations=[], reviews=[], compactions_this_turn=0,
                        active_skills={})
         guarded.update(interaction=None, human_replies=[], accepted_interaction_id=None,
-                       approved_scope=None, confirmation_required=False)
+                       approved_scope=None, confirmation_required=False, follow_up_questions=[])
         guarded["session_memory"] = memory_view(guarded)
         guarded["memory_at_start"] = guarded["session_memory"]
         guarded["history_at_start"] = guarded.get("chat_history", [])
+        guarded["prior_unresolved_interactions"] = int(guarded.get("prior_unresolved_interactions") or 0)
         return guarded
 
     def prepare_context(self, state: dict) -> dict:
@@ -1132,10 +1041,14 @@ class BankingDeepAgent(BankingReActNodes):
             "available_evidence": evidence,
             "remaining_actions": max(0, MAX_ACTIONS - len(turn["observations"])),
             "remaining_delegations": max(0, MAX_DELEGATIONS - len(state["delegations"])),
-            "remaining_interactions": max(0, MAX_INTERACTIONS - len(state["human_replies"])),
+            "remaining_interactions": max(
+                0,
+                MAX_INTERACTIONS - len(state["human_replies"]) - int(state.get("prior_unresolved_interactions") or 0),
+            ),
             "human_replies": state["human_replies"],
             "approved_scope": state["approved_scope"],
             "confirmation_required": state["confirmation_required"],
+            "brief_summary_requested": _requests_brief_summary(state),
         }
 
     def decide(self, state: dict) -> dict:
@@ -1144,6 +1057,8 @@ class BankingDeepAgent(BankingReActNodes):
         allowed = ["final"]
         system = BASE_PROMPT
         prepared = state.get("prepared_visualization")
+        if data["remaining_interactions"] and not prepared:
+            allowed += ["clarify", "confirm"]
         if data["remaining_actions"] and not prepared:
             allowed += ["plan", "remember", "forget"]
             if not state["confirmation_required"]:
@@ -1152,8 +1067,6 @@ class BankingDeepAgent(BankingReActNodes):
                     allowed += ["skill", "inspect_skill"]
                 if data["remaining_delegations"]:
                     allowed.append("delegate")
-            if data["remaining_interactions"]:
-                allowed += ["clarify", "confirm"]
             if state["compactions_this_turn"] < MAX_COMPACT_PER_TURN and len(data["history"]) > RECENT_MESSAGES:
                 allowed.append("compact")
             catalog = self.catalog_view(state["capabilities"])
@@ -1167,10 +1080,11 @@ class BankingDeepAgent(BankingReActNodes):
                 system += "\n" + _COORDINATOR_SKILL_HINT
             if PRESENT_VISUALIZATION_TOOL in catalog["tool"] and "tool" in allowed:
                 system += (
-                    "\nConsider a visual even when the customer did not ask for one. Activate interactive-simulator "
-                    "when adjustable assumptions help the customer compare outcomes, or visualization when supported "
-                    "data, trade-offs or steps are clearer in a chart or diagram. Choose based on the request. "
-                    "For an explicit request to draw or edit a visual, call the tool when the required data is available. "
+                    "\nWhen the customer requests a diagram, flowchart, chart, or visual comparison (e.g. 'sơ đồ', 'biểu đồ', 'chart', 'diagram'), "
+                    "or when a visual materially helps explain the requested information: "
+                    "do NOT respond with final or plain text tables alone. "
+                    "First activate the appropriate skill from the catalog using action 'skill' (e.g. kind 'skill' with name 'visualization' for charts and diagrams, "
+                    "or 'interactive-simulator' for adjustable calculators) to load its visual schema, then present the visual in the next step. "
                     "For current rates or trends use verified evidence. Label illustrations as hypothetical."
                 )
         persona = PERSONA_PROFILES.get(state.get("persona"), PERSONA_PROFILES.get(_DEFAULT_PERSONA, {}))
@@ -1218,7 +1132,10 @@ class BankingDeepAgent(BankingReActNodes):
             available_skills = state["capabilities"]["skill"]
             artifacts = []
             for item in recent_visualizations(recent):
-                skill = SIMULATOR_SKILL if item["engine"] == "simulator" else VISUALIZATION_SKILL
+                if item["engine"] == "simulator":
+                    skill = SIMULATOR_SKILL
+                else:
+                    skill = VISUALIZATION_SKILL
                 if skill in active_skills:
                     artifacts.append(item)
                 elif skill in available_skills:
@@ -1254,8 +1171,16 @@ class BankingDeepAgent(BankingReActNodes):
             else:
                 break
 
-        if num_searches >= 3 or (num_searches >= 2 and zero_evidence_streak >= 2):
-            system += "\nLƯU Ý: Đã thực hiện tra cứu tài liệu đủ số lượt. Hãy tổng hợp toàn bộ căn cứ và trích dẫn hiện có để đưa ra câu trả lời cuối cùng bằng action final ngay bây giờ. Không tiếp tục tra cứu thêm."
+        search_limit_reached = num_searches >= 4 or zero_evidence_streak >= 2
+        if search_limit_reached:
+            system += (
+                "\nThe internal document search budget is exhausted. Use clarify if available and a detail "
+                "from the customer is still required. Otherwise answer the verified portion in scope and note "
+                "any gaps. Do not call search_banking_knowledge again."
+            )
+        system += "\n\n" + ANSWER_SCOPE + "\n\n" + COORDINATION_POLICY
+        if data["brief_summary_requested"]:
+            system += "\n" + SUMMARY_INSTRUCTION
 
         try:
             decision = self.model.decide(system, data, allowed, max_tokens=_DECIDE_MAX_TOKENS, deep_reason=deep_reason)
@@ -1265,7 +1190,7 @@ class BankingDeepAgent(BankingReActNodes):
                 category = "model_contract"
             elif is_temporary_error(error):
                 category = "provider_temporary"
-            decision = self.recover_decision(data, category, state["confirmation_required"])
+            decision = self.recover_decision(data, state["confirmation_required"])
             if decision is None:
                 return {
                     **state, "audit_status": "ERROR", "final_answer": FALLBACK_ANSWER,
@@ -1273,6 +1198,11 @@ class BankingDeepAgent(BankingReActNodes):
                     "execution_steps": state["execution_steps"] + ["deep_decide: model_error"]
                 }
             state = {**state, "execution_steps": state["execution_steps"] + ["deep_decide: recovered_contract"]}
+        if (search_limit_reached and decision["kind"] == "tool"
+                and decision["name"].strip() == "search_banking_knowledge"):
+            decision = self.recover_decision(data, state["confirmation_required"], can_clarify="clarify" in allowed)
+            if decision is None:
+                return {**state, "audit_status": "ERROR", "final_answer": FALLBACK_ANSWER}
         if (decision["kind"] == "final" and not decision.get("insufficient_evidence") and "tool" in allowed
                 and not state.get("presentation_arguments_requested")
                 and self._explicit_chart_request(state["user_query"], recent)):
@@ -1291,7 +1221,10 @@ class BankingDeepAgent(BankingReActNodes):
             name = decision["name"].strip().lstrip(":").strip()
             if name == "export_visualization_json" and set(arguments) <= {"filename", "artifact"}:
                 name = PRESENT_VISUALIZATION_TOOL
-                arguments = {"artifact": artifact} if artifact is not None else {}
+                if artifact is not None:
+                    arguments = {"artifact": artifact}
+                else:
+                    arguments = {}
             if (name not in registered and set(arguments) == {"artifact"}
                     and isinstance(artifact, dict) and PRESENT_VISUALIZATION_TOOL in registered):
                 engine = artifact.get("engine")
@@ -1328,12 +1261,6 @@ class BankingDeepAgent(BankingReActNodes):
             texts = [decision.get("question", decision.get("proposal", "")), *decision.get("options", [])]
             if any(not text or "REDACTED]" in text.upper() or _requests_restricted_field(text) for text in texts):
                 return self._unsafe_interaction(state)
-        if decision.get("kind") == "tool":
-            if decision.get("name") == "search_banking_knowledge":
-                if num_searches >= 4 or (num_searches >= 2 and zero_evidence_streak >= 2):
-                    recovered = self.recover_decision(data, "search_cap", state["confirmation_required"])
-                    if recovered is not None:
-                        decision = recovered
         return {
             **state, "react_turn": {**state["react_turn"], "decision": decision},
             "execution_steps": state["execution_steps"] + ["deep_decide: " + decision["kind"]]
@@ -1342,11 +1269,20 @@ class BankingDeepAgent(BankingReActNodes):
     @staticmethod
     def _explicit_chart_request(query, recent):
         text = search_key(query) + " "
-        if text.startswith(("ve bieu do ", "tao bieu do ", "draw a chart ", "plot a chart ")):
-            return True
-        return text.startswith(("doi sang bieu do ", "chuyen sang bieu do ", "change it to a chart ")) and any(
-            item["visualization"]["engine"] == "echarts" for item in recent
+        visual_tokens = (
+            "so do", "bieu do", "chart", "diagram", "flowchart", "mindmap",
+            "ve bieu do", "tao bieu do", "ve so do", "tao so do", "show so do",
+            "cho xem so do", "xem so do", "hien thi so do", "do thi"
         )
+        for token in visual_tokens:
+            if token in text:
+                return True
+        has_echarts = any(item["visualization"]["engine"] == "echarts" for item in recent)
+        if has_echarts:
+            for switch_token in ("doi sang", "chuyen sang", "change it to", "switch to"):
+                if switch_token in text:
+                    return True
+        return False
 
     @staticmethod
     def _valid_presentation_arguments(arguments, recent):
@@ -1402,7 +1338,7 @@ class BankingDeepAgent(BankingReActNodes):
         except ModelFallbackError:
             return {}
 
-    def recover_decision(self, data: dict, category: str, confirmation_required: bool) -> dict | None:
+    def recover_decision(self, data: dict, confirmation_required: bool, *, can_clarify=False) -> dict | None:
         if confirmation_required:
             return None
         has_success = False
@@ -1412,30 +1348,19 @@ class BankingDeepAgent(BankingReActNodes):
                     if "data" in item:
                         has_success = True
                         break
-        if not has_success:
+        if not has_success and not can_clarify:
             return None
-        instruction = BASE_PROMPT + "\n" + _RECOVER_PROMPT
+        instruction = "\n\n".join((BASE_PROMPT, _RECOVER_PROMPT, ANSWER_SCOPE))
+        if data["brief_summary_requested"]:
+            instruction += "\n" + SUMMARY_INSTRUCTION
+        allowed = ["final"]
+        if can_clarify:
+            allowed.append("clarify")
+            instruction += "\nA clarify action is also allowed if a missing detail changes the answer.\n" + COORDINATION_POLICY
         try:
-            return self.model.decide(instruction, data, ["final"], max_tokens=_RECOVER_MAX_TOKENS)
+            return self.model.decide(instruction, data, allowed, max_tokens=_RECOVER_MAX_TOKENS)
         except ModelFallbackError:
-            pass
-        evidence = data.get("available_evidence", [])
-        if evidence:
-            primary_text = str(evidence[0].get("text") or "").strip()
-            if primary_text:
-                label = evidence[0].get("label", "[Nguồn 1]")
-                clean_lines = []
-                for line in primary_text.splitlines():
-                    s_line = line.strip()
-                    if s_line:
-                        if not s_line.startswith("["):
-                            clean_lines.append(s_line)
-                snippet = " ".join(clean_lines[:4])
-                if len(snippet) > 300:
-                    snippet = snippet[:300] + "..."
-                ans = "Dựa trên tài liệu tra cứu (" + label + "): " + snippet
-                return {"kind": "final", "answer": ans}
-        return None
+            return None
 
     def _record(self, state: dict, observation: dict) -> dict:
         turn = state["react_turn"]
@@ -1565,9 +1490,15 @@ class BankingDeepAgent(BankingReActNodes):
         if mode == "clarify" and decision.get("multi_select") is True:
             multi_select = True
         signature = [mode, " ".join(message.casefold().split()), scope]
-        if len(state["human_replies"]) >= MAX_INTERACTIONS or any(
+        used_interactions = len(state["human_replies"]) + int(state.get("prior_unresolved_interactions") or 0)
+        if used_interactions >= MAX_INTERACTIONS or any(
             reply["signature"] == signature for reply in state["human_replies"]
         ):
+            if mode == "clarify":
+                message = (
+                    f"Đã qua tối đa {MAX_INTERACTIONS} lượt làm rõ nên hệ thống xin dừng hỏi thêm. "
+                    "Quý khách vui lòng bổ sung trực tiếp các tham số cụ thể (như số tiền, kỳ hạn, sản phẩm hoặc nhu cầu) để tôi tư vấn tiếp."
+                )
             return self._interaction_stop(state, _DEEP_MESSAGES.get("interaction_exhausted_prefix", "") + message)
         if mode == "confirm":
             options = [
@@ -1869,9 +1800,12 @@ class BankingDeepAgent(BankingReActNodes):
 
     def _review_feedback(self, verdict, draft, evidence):
         feedback = self.guard_artifact(verdict["feedback"])
+        scope_feedback = self.guard_artifact(verdict.get("scope_issue", ""))
         labels = {item["label"] for item in evidence}
         line_count = len(draft.splitlines())
         items = []
+        if scope_feedback:
+            items.append(scope_feedback)
         if feedback:
             items.append(feedback)
         for issue in verdict.get("issues", []):
@@ -1898,7 +1832,9 @@ class BankingDeepAgent(BankingReActNodes):
         data = self._decide_input(result)
         data["review_feedback"] = result["audit_feedback"]
         data["previous_draft"] = result["draft_answer"]
-        instruction = BASE_PROMPT + "\n" + _PARTIAL_RECOVERY_PROMPT
+        instruction = "\n\n".join((BASE_PROMPT, _PARTIAL_RECOVERY_PROMPT, ANSWER_SCOPE))
+        if data["brief_summary_requested"]:
+            instruction += "\n" + SUMMARY_INSTRUCTION
         try:
             decision = self.model.decide(instruction, data, ["final"], max_tokens=_PARTIAL_RECOVERY_MAX_TOKENS,
                                          deep_reason="review_revision")
@@ -1911,6 +1847,23 @@ class BankingDeepAgent(BankingReActNodes):
             return limited
         return {**result, "reviews": limited["reviews"], "execution_steps": limited["execution_steps"]}
 
+    def _screen_follow_up_questions(self, questions: list[str], query: str) -> list[str]:
+        seen = {search_key(query)}
+        screened = []
+        for question in questions:
+            question = " ".join(question.split())
+            key = search_key(question)
+            if not key or key in seen or not question.endswith("?") or _requests_restricted_field(question):
+                continue
+            if self.guard_artifact(question) != question:
+                continue
+            output = self.guardrails.guard_output(question)
+            if not output.is_safe or output.flags or output.sanitized_answer != question:
+                continue
+            seen.add(key)
+            screened.append(question)
+        return screened
+
     def _review_draft(self, state: dict, *, partial=False) -> dict:
         turn = state["react_turn"]
         decision = turn["decision"]
@@ -1919,15 +1872,45 @@ class BankingDeepAgent(BankingReActNodes):
         draft = output.sanitized_answer
         if not output.is_safe or not draft or output.flags:
             return self._retry_review(state, "", _DEEP_MESSAGES.get("review_draft_blocked", ""), "blocked")
+        if _requests_brief_summary(state) and not _fits_brief_summary(draft):
+            return self._retry_review(state, draft, SUMMARY_INSTRUCTION, "revise")
         try:
             citations = self.validate_citations({**decision, "answer": draft}, turn["evidence"])
             if partial and not citations:
                 raise ValueError("Partial answer requires grounded citations")
         except ValueError as error:
             annotate_span(citation_validation_error=str(error))
-            return self._retry_review(
-                state, draft, _DEEP_MESSAGES.get("review_citation_failed_prefix", "") + str(error), "citation_failed"
-            )
+            err_msg = str(error)
+            evidence_count = len(turn["evidence"])
+            citations = None
+            if state["hallucination_retries"] and (
+                "Unknown citation marker" in err_msg or "Invalid citation marker" in err_msg
+            ):
+                cleaned_draft = _strip_invalid_citation_markers(draft, evidence_count)
+                try:
+                    cleaned_citations = self.validate_citations(
+                        {**decision, "answer": cleaned_draft}, turn["evidence"]
+                    )
+                except ValueError:
+                    pass
+                else:
+                    if cleaned_draft and (cleaned_citations or not partial):
+                        draft = cleaned_draft
+                        citations = cleaned_citations
+            if citations is None:
+                if evidence_count == 0:
+                    feedback = (
+                        "Lượt hiện tại chưa có tài liệu nào trong available_evidence (danh sách rỗng). "
+                        "Tuyệt đối KHÔNG sử dụng nhãn [Nguồn N] từ các lượt cũ trong lịch sử trò chuyện. "
+                        "Hãy gọi công cụ search_banking_knowledge để tìm kiếm tài liệu dẫn chứng, "
+                        "hoặc nếu trả lời trực tiếp mà không cần trích dẫn thì BẮT BUỘC phải xóa bỏ toàn bộ nhãn [Nguồn ...]."
+                    )
+                else:
+                    feedback = (
+                        _DEEP_MESSAGES.get("review_citation_failed_prefix", "")
+                        + f"{err_msg}. Các nhãn [Nguồn N] hợp lệ của lượt hiện tại chỉ từ [Nguồn 1] đến [Nguồn {evidence_count}]."
+                    )
+                return self._retry_review(state, draft, feedback, "citation_failed")
 
         evidence = _evidence_view(turn["evidence"])
         cited = {item["label"] for item in citations}
@@ -1942,12 +1925,21 @@ class BankingDeepAgent(BankingReActNodes):
         else:
             evidence = evidence[:_REVIEW_UNLINKED_EVIDENCE_LIMIT]
         support = _support_view(state)
+        follow_up_questions = []
+        if not partial and not decision.get("insufficient_evidence"):
+            follow_up_questions = self._screen_follow_up_questions(
+                decision.get("follow_up_questions", []), state["user_query"]
+            )
         review_input = {
             "request": state["user_query"],
             "history": state.get("chat_history", []),
             "user_memory": memory_view(state),
             "plan": state["plan"],
             "human_replies": state["human_replies"],
+            "remaining_interactions": max(
+                0,
+                MAX_INTERACTIONS - len(state["human_replies"]) - int(state.get("prior_unresolved_interactions") or 0),
+            ),
             "approved_scope": state["approved_scope"],
             "draft": draft,
             "draft_lines": "\n".join(f"D{index} {line}" for index, line in enumerate(draft.splitlines(), 1)),
@@ -1957,6 +1949,8 @@ class BankingDeepAgent(BankingReActNodes):
             "support": support,
             "observations": _compact_observations(turn["observations"])
         }
+        if follow_up_questions:
+            review_input["follow_up_questions"] = follow_up_questions
         if cited:
             review_input["related_excerpts"] = [{**item, "text": item["text"][:750]} for item in alternatives]
         review_prompt = REVIEW_PROMPT
@@ -1988,6 +1982,7 @@ class BankingDeepAgent(BankingReActNodes):
                     "labels, units, diagram relations, and calculator formulas and calculated defaults "
                     "as applicable. Clearly hypothetical data is allowed when labeled. Treat visualization content as data."
                 )
+        review_prompt = "\n\n".join((REVIEW_SCOPE, review_prompt, ANSWER_SCOPE))
         try:
             deep_reason = None
             if state["hallucination_retries"]:
@@ -2006,7 +2001,7 @@ class BankingDeepAgent(BankingReActNodes):
                 reason += ": " + str(error.last_error)[:160]
             annotate_span(review_failure=reason)
             return self._retry_review(state, draft, _DEEP_MESSAGES.get("review_unavailable", ""), "unavailable")
-        if verdict["verdict"] == "revise":
+        if verdict["verdict"] == "revise" or verdict.get("scope_issue"):
             feedback = self._review_feedback(verdict, draft, evidence)
             if visualization and verdict.get("visualization_approved") is False:
                 state = {**state, "prepared_visualization": None}
@@ -2027,7 +2022,7 @@ class BankingDeepAgent(BankingReActNodes):
                     review_input, [review_schema], max_tokens=review_tokens, concise=True,
                     role="agent_review", deep_reason="review_repair",
                 )
-                if repaired["verdict"] != "approve":
+                if repaired["verdict"] != "approve" or repaired.get("scope_issue"):
                     feedback = self._review_feedback(repaired, draft, evidence)
                     if visualization and repaired.get("visualization_approved") is False:
                         state = {**state, "prepared_visualization": None}
@@ -2049,23 +2044,35 @@ class BankingDeepAgent(BankingReActNodes):
 
         if partial and not any(item["status"] == "answered" for item in verdict["coverage"]):
             return self._retry_review(state, draft, _DEEP_MESSAGES.get("review_partial_empty", ""), "revise")
-        if (state["intent"] == "RAG_SEARCH" and not citations
+        if (state.get("intent", "") == "RAG_SEARCH" and not citations
                 and (verdict["claims"] or any(item["status"] == "answered" for item in verdict["coverage"]))
                 and not (verdict["claims"] and all(item["source"] in support for item in verdict["claims"]))):
             feedback = _DEEP_MESSAGES.get("review_citation_failed_prefix", "") + "Missing citation for an answered item"
             annotate_span(citation_validation_error="Missing citation for an answered item")
             return self._retry_review(state, draft, feedback, "citation_failed")
-        intent = state["intent"]
+        intent = state.get("intent", "ROUTING")
         if intent == "ROUTING":
             intent = "CHIT_CHAT"
-        approved_visual = visualization if verdict.get("visualization_approved") is True else None
+        if verdict.get("visualization_approved") is True:
+            approved_visual = visualization
+        else:
+            approved_visual = None
+        limited_items = sum(item["status"] == "limited" for item in verdict["coverage"])
+        approved_questions = []
+        if not limited_items:
+            approved_indices = verdict.get("approved_follow_up_indices", [])
+            approved_questions = [
+                question for index, question in enumerate(follow_up_questions, 1) if index in approved_indices
+            ]
         return {
             **state, "intent": intent, "audit_status": "PASS", "final_answer": draft, "audit_feedback": "",
             "visualization_candidate": approved_visual,
+            "follow_up_questions": approved_questions,
             "citations": citations, "sources": list(dict.fromkeys(item["source"] for item in citations)),
             "verification": {"checked_claims": len(verdict["claims"]),
                              "covered_items": len(verdict["coverage"]),
-                             "limited_items": sum(item["status"] == "limited" for item in verdict["coverage"]),
+                             "limited_items": limited_items,
+                             "insufficient_evidence": bool(decision.get("insufficient_evidence")),
                              "partial_recovery": partial},
             "reviews": state["reviews"] + ["approve"], "execution_steps": state["execution_steps"] + ["review: approve"]
         }
@@ -2104,17 +2111,27 @@ class BankingDeepAgent(BankingReActNodes):
         retrieved = state.get("retrieved_chunks", [])
         cited_images = _resolve_cited_images(citations, retrieved, status, answer_text=answer)
         enriched_citations = _enrich_citations(citations, retrieved, cited_images, status)
-        candidate = state.get("visualization_candidate") if state["is_safe"] and status == "PASS" else None
+        if state["is_safe"] and status == "PASS":
+            candidate = state.get("visualization_candidate")
+        else:
+            candidate = None
         recent = state.get("recent_visualizations", [])
-        visual = candidate["visualization"] if candidate and answer == state["final_answer"] else None
+        if candidate and answer == state["final_answer"]:
+            visual = candidate["visualization"]
+        else:
+            visual = None
         if visual:
             recent = [candidate, *(item for item in recent if item["visualization"]["id"] != visual["id"])]
+        follow_up_questions = []
+        if state["is_safe"] and status == "PASS" and answer == state["final_answer"]:
+            follow_up_questions = state.get("follow_up_questions", [])
         result_state = {
             **state, "react_turn": {}, "audit_feedback": "", "draft_answer": "", "chat_history": history,
             "session_memory": memory, "audit_status": status, "final_answer": answer, "citations": enriched_citations,
             "sources": list(dict.fromkeys(item["source"] for item in enriched_citations)),
             "images": cited_images,
             "visualization": visual,
+            "follow_up_questions": follow_up_questions,
             "recent_visualizations": recent[:MAX_RECENT_VISUALIZATIONS],
             "human_replies": list(state.get("human_replies") or []),
             "output_guard": {"is_safe": result.is_safe, "flags": result.flags},

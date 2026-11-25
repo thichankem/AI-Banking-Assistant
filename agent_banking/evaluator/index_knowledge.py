@@ -11,6 +11,24 @@ _UNAVAILABLE_ISSUES = set(_KB_CFG["unavailable_image_issues"])
 _EXCLUDED_ROLE = str(_KB_CFG["excluded_retrieval_role"])
 
 
+def refresh_legacy_domain_metadata(chunks):
+    from agent_banking.chunking.universal.planning.schema import infer_business_metadata
+
+    refreshed = []
+    for chunk in chunks:
+        metadata = chunk.get("business_metadata")
+        if isinstance(metadata, dict) and metadata.get("domain") == "A_Bank":
+            inferred = infer_business_metadata(chunk.get("source"))
+            updated_meta = {
+                **metadata,
+                "domain": inferred["domain"],
+                "doc_type": inferred["doc_type"],
+            }
+            chunk = {**chunk, "business_metadata": updated_meta}
+        refreshed.append(chunk)
+    return refreshed
+
+
 def annotate_page_quality(chunks, document):
     uncertain = {review["page_index"] for review in document.get("page_reviews", [])
                  if review.get("incomplete") or review.get("content") == "unavailable"}
@@ -71,6 +89,7 @@ def main():
     verified = {}
     image_failures = []
     try:
+        verified_scopes = set()
         for manifest in sorted(args.publications.glob("*/chunking_manifest.json")):
             folder = manifest.parent
             chunks, metadata = load_published_chunks(folder, return_manifest=True)
@@ -86,9 +105,11 @@ def main():
             if unavailable_images(artifact["document"]):
                 image_failures.append(metadata["records"][0]["rel_path"])
             chunks = annotate_page_quality(chunks, artifact["document"])
+            chunks = refresh_legacy_domain_metadata(chunks)
             chunks = [chunk for chunk in chunks
                       if chunk.get("business_metadata", {}).get("retrieval", {}).get("role") != _EXCLUDED_ROLE]
             scope = publication_scope(folder)
+            verified_scopes.add(scope)
             chunks = mark_publication_chunks(chunks, scope)
             current = [chunk for chunk in pipeline.vector_store._bm25_corpus
                        if scope in chunk.get("business_metadata", {}).get("publication_scopes", [])]
@@ -117,6 +138,14 @@ def main():
                                          if scope in chunk.get("business_metadata", {}).get("publication_scopes", [])
                                          and chunk["chunk_id"] in expected and payload_index_key(chunk) in keys}
             pipeline.vector_store.prune_publication_scopes(active_by_scope)
+        if args.require_complete:
+            stale_scopes = {}
+            for chunk in pipeline.vector_store._bm25_corpus:
+                for owner in chunk.get("business_metadata", {}).get("publication_scopes", []):
+                    if owner not in verified_scopes:
+                        stale_scopes[owner] = set()
+            if stale_scopes:
+                pipeline.vector_store.prune_publication_scopes(stale_scopes)
         indexed_sources = {chunk["source"] for chunk in pipeline.vector_store._bm25_corpus}
         if args.require_complete and indexed_sources != expected_sources:
             raise ValueError("The resulting index does not contain exactly the current source corpus")

@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import PurePosixPath
 import posixpath
+import unicodedata
 from urllib.parse import unquote, urlsplit
 from zipfile import ZipFile
 
@@ -63,8 +64,9 @@ def attribute(node, name):
 def text_runs(node):
     if node is None:
         return ""
-    return "".join(part.text or "" for part in node.iter()
-                   if local_name(part) == "t" and local_name(part.getparent()) != "rPh")
+    raw_text = "".join(part.text or "" for part in node.iter()
+                       if local_name(part) == "t" and local_name(part.getparent()) != "rPh")
+    return unicodedata.normalize("NFC", raw_text)
 
 
 def address(value):
@@ -345,7 +347,8 @@ def parse_cell(node, shared, number_formats, date1904):
             kind = "datetime"
         cell = Cell(raw, kind, raw)
     elif cell_type != "n":
-        cell = Cell(raw, "text", raw)
+        norm_raw = unicodedata.normalize("NFC", raw)
+        cell = Cell(norm_raw, "text", norm_raw)
     else:
         try:
             number = Decimal(raw)

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trợ lý AI A-Bank</title>
-    <link rel="stylesheet" href="/static/style.css?v=vip9">
+    <link rel="stylesheet" href="/static/style.css?v=vip70">
 </head>
 <body>
     <div class="chat-container is-empty" id="chatContainer">
@@ -141,7 +141,7 @@
         </div>
     </div>
 
-    <dialog id="debugTraceDialog" class="debug-dialog" closedby="any" aria-labelledby="debugDialogTitle">
+    <dialog id="debugTraceDialog" class="debug-dialog is-fullscreen" closedby="any" aria-labelledby="debugDialogTitle">
         <div class="debug-dialog-shell">
             <header class="debug-dialog-header">
                 <div class="debug-dialog-title-group">
@@ -156,9 +156,10 @@
                     </div>
                     <button type="button" id="debugRefreshBtn" class="debug-header-btn">Làm mới</button>
                     <a id="debugLangSmithLink" class="debug-header-btn debug-header-link" target="_blank" rel="noopener noreferrer" hidden>Mở LangSmith ↗</a>
-                    <button type="button" id="debugCopyJsonBtn" class="debug-header-btn" disabled>Copy JSON</button>
-                    <button type="button" id="debugExportJsonBtn" class="debug-header-btn" disabled>Tải JSON</button>
+                    <button type="button" id="debugCopyJsonBtn" class="debug-header-btn" disabled>Copy Full JSON</button>
+                    <button type="button" id="debugExportJsonBtn" class="debug-header-btn" disabled>Tải JSON Full</button>
                     <button type="button" id="debugClearBtn" class="debug-header-btn debug-header-danger">Xóa trace</button>
+                    <button type="button" id="debugFullscreenBtn" class="debug-header-btn" aria-pressed="true" title="Chuyển đổi Toàn màn hình / Cửa sổ">⛶ Thu gọn</button>
                     <form method="dialog" class="debug-close-form">
                         <button type="submit" value="close" class="debug-close-btn" aria-label="Đóng bảng Debug">×</button>
                     </form>
@@ -188,15 +189,6 @@
 
                     <div id="debugTraceDetail" class="debug-trace-detail" hidden>
                         <div class="debug-live-dag-panel" id="debugLiveDagPanel">
-                            <div class="stepper-header">
-                                <span class="stepper-title">LangGraph StateGraph</span>
-                                <div id="dagTelemetryBar" class="dag-telemetry-bar" aria-label="Thông số Telemetry">
-                                    <span id="dagLatencyBadge" class="dag-telemetry-pill" title="Tổng độ trễ thực thi">0 ms</span>
-                                    <span id="dagModelBadge" class="dag-telemetry-pill dag-pill-model" title="Model &amp; Profile được chọn">STANDARD</span>
-                                    <span id="dagTokenBadge" class="dag-telemetry-pill dag-pill-tokens" title="Ước tính lượng token tiêu thụ">0 tok</span>
-                                    <span id="dagAuditBadge" class="dag-telemetry-pill dag-pill-audit" title="Trạng thái kiểm toán">READY</span>
-                                </div>
-                            </div>
                             <div id="dagGraphTrack" class="dag-graph-track" role="toolbar" aria-label="Sơ đồ luồng LangGraph thời gian thực"></div>
                             <div id="dagNodeInspector" class="dag-node-inspector" hidden></div>
                         </div>
@@ -284,7 +276,7 @@
         </div>
     </dialog>
 
-    <script src="/static/debug.js?v=vip5"></script>
-    <script src="/static/app.js?v=vip13"></script>
+    <script src="/static/debug.js?v=vip70"></script>
+    <script src="/static/app.js?v=vip70"></script>
 </body>
 </html>

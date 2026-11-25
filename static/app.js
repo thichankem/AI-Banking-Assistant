@@ -813,102 +813,11 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function renderDagGraph() {
-        const dlg = document.getElementById("debugTraceDialog");
-        if (dlg && dlg.open) {
-            return;
-        }
         if (!dagGraphTrack) {
             return;
         }
-        dagGraphTrack.replaceChildren();
-        for (let idx = 0; idx < DAG_STAGE_DEFS.length; idx++) {
-            const def = DAG_STAGE_DEFS[idx];
-            const st = dagUiState.stages[def.id] || createEmptyDagStage(def);
-
-            const card = document.createElement("button");
-            card.type = "button";
-            card.className = "dag-node-card " + dagCardStatusClass(st.status);
-            card.setAttribute("data-stage-id", def.id);
-            if (dagUiState.selectedStageId === def.id) {
-                card.classList.add("is-selected");
-                card.setAttribute("aria-pressed", "true");
-            } else {
-                card.setAttribute("aria-pressed", "false");
-            }
-
-            const topRow = document.createElement("div");
-            topRow.className = "dag-node-top";
-            const dot = document.createElement("span");
-            dot.className = "dag-node-dot";
-            const titleEl = document.createElement("span");
-            titleEl.className = "dag-node-title";
-            titleEl.textContent = def.label;
-            const statusEl = document.createElement("span");
-            statusEl.className = "dag-node-status";
-            statusEl.textContent = String(st.status || "IDLE");
-            topRow.append(dot, titleEl, statusEl);
-
-            const metaRow = document.createElement("div");
-            metaRow.className = "dag-node-meta";
-
-            const latEl = document.createElement("span");
-            if (st.executed) {
-                latEl.textContent = formatDagDuration(Number(st.latency_ms || 0));
-            } else {
-                latEl.textContent = "—";
-            }
-
-            const rightMeta = document.createElement("span");
-            const tokCount = Number((st.tokens && st.tokens.total_tokens) || 0);
-            if (tokCount > 0) {
-                rightMeta.textContent = tokCount + "t";
-            } else {
-                rightMeta.textContent = "";
-            }
-
-            const profEl = document.createElement("span");
-            const profUpper = String(st.profile || "DETERMINISTIC").toUpperCase();
-            profEl.className = "dag-node-profile";
-            if (profUpper === "DEEP") {
-                profEl.classList.add("is-deep");
-            } else if (profUpper === "DETERMINISTIC") {
-                profEl.classList.add("is-rule");
-            }
-            profEl.textContent = dagProfileShortLabel(profUpper);
-
-            metaRow.append(latEl, rightMeta, profEl);
-            card.append(topRow, metaRow);
-
-            card.addEventListener("click", () => {
-                if (dagUiState.selectedStageId === def.id) {
-                    dagUiState.selectedStageId = null;
-                } else {
-                    dagUiState.selectedStageId = def.id;
-                }
-                renderDagGraph();
-                renderDagInspector(dagUiState.selectedStageId);
-            });
-
-            dagGraphTrack.appendChild(card);
-
-            if (idx < DAG_STAGE_DEFS.length - 1) {
-                const conn = document.createElement("div");
-                conn.className = "dag-node-connector";
-                const nextDef = DAG_STAGE_DEFS[idx + 1];
-                const nextSt = dagUiState.stages[nextDef.id];
-                if (def.id === "workers_tools" && (dagUiState.retryLoops > 0 || (nextSt && nextSt.status === "RETRY"))) {
-                    conn.classList.add("is-retry");
-                    conn.textContent = "⇄";
-                    conn.title = "Audit RETRY Loop";
-                } else if (st.executed || (nextSt && nextSt.executed)) {
-                    conn.classList.add("is-active");
-                    conn.textContent = "→";
-                } else {
-                    conn.textContent = "→";
-                }
-                dagGraphTrack.appendChild(conn);
-            }
-        }
+        // Luồng LangGraph được quản lý toàn diện bởi ABankDebugInspector trong debug.js
+        return;
     }
 
     function resetDagState(isRunning = false, initialRunningStage = "input_guardrail") {
@@ -1653,6 +1562,9 @@ document.addEventListener("DOMContentLoaded", () => {
                         appendMessage("bot", msg.content, msg);
                     }
                 }
+                if (detail.status === "running") {
+                    clearFollowUpQuestions();
+                }
                 if (detail.dag_telemetry || (Array.isArray(detail.plan) && detail.plan.length > 0)) {
                     resetDagState(false);
                     let restoredTraceId = detail.latest_trace_id || "";
@@ -1745,6 +1657,9 @@ document.addEventListener("DOMContentLoaded", () => {
         if (item.document_name) {
             subParts.push(item.document_name);
         }
+        if (Number.isInteger(item.step_number)) {
+            subParts.push("Bước " + item.step_number);
+        }
         if (item.page_number) {
             subParts.push("Trang " + item.page_number);
         }
@@ -1752,6 +1667,21 @@ document.addEventListener("DOMContentLoaded", () => {
             subParts.push("Khung " + (item.region_index + 1) + "/" + item.region_count);
         }
         return subParts.join(" · ");
+    }
+
+    function setEvidenceImageSource(image, item, onSource) {
+        const fallback = item.url;
+        const preferred = item.detail_url || fallback;
+        image.onerror = null;
+        if (preferred !== fallback) {
+            image.onerror = () => {
+                image.onerror = null;
+                image.src = fallback;
+                onSource?.(fallback);
+            };
+        }
+        image.src = preferred;
+        onSource?.(preferred);
     }
 
     function attachDialogLightDismissFallback(dialogEl, onClose) {
@@ -1806,7 +1736,13 @@ document.addEventListener("DOMContentLoaded", () => {
         closeBtn.textContent = "×";
         closeBtn.setAttribute("aria-label", "Đóng ảnh phóng to");
 
-        topbar.append(counterEl, closeBtn);
+        const originalLink = document.createElement("a");
+        originalLink.className = "image-lightbox-original";
+        originalLink.textContent = "Mở ảnh đầy đủ";
+        originalLink.target = "_blank";
+        originalLink.rel = "noopener";
+
+        topbar.append(counterEl, originalLink, closeBtn);
 
         const stage = document.createElement("div");
         stage.className = "image-lightbox-stage";
@@ -1851,8 +1787,16 @@ document.addEventListener("DOMContentLoaded", () => {
             if (item.caption) {
                 imgAlt = item.caption;
             }
-            fullImg.src = item.url;
             fullImg.alt = imgAlt;
+            setEvidenceImageSource(fullImg, item, (source) => {
+                const isAsset = source.startsWith("/api/assets/") || source.startsWith("/api/documents/pdf/region?");
+                originalLink.hidden = !isAsset;
+                if (isAsset) {
+                    originalLink.href = source;
+                } else {
+                    originalLink.removeAttribute("href");
+                }
+            });
 
             if (total <= 1) {
                 counterEl.hidden = true;
@@ -1909,7 +1853,6 @@ document.addEventListener("DOMContentLoaded", () => {
             if (overlay.open) {
                 overlay.close();
             }
-            fullImg.src = "";
         }
 
         prevBtn.addEventListener("click", () => {
@@ -1920,7 +1863,8 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         closeBtn.addEventListener("click", closeLightbox);
         overlay.addEventListener("close", () => {
-            fullImg.src = "";
+            fullImg.onerror = null;
+            fullImg.removeAttribute("src");
         });
         attachDialogLightDismissFallback(overlay, closeLightbox);
         overlay.addEventListener("click", (event) => {
@@ -2020,13 +1964,14 @@ document.addEventListener("DOMContentLoaded", () => {
         thumbWrap.className = "evidence-image-thumb-wrap";
 
         const imgEl = document.createElement("img");
-        imgEl.src = firstItem.url;
         imgEl.loading = "lazy";
+        imgEl.decoding = "async";
         let imgAlt = "Hình ảnh minh họa";
         if (firstItem.caption) {
             imgAlt = firstItem.caption;
         }
         imgEl.alt = imgAlt;
+        setEvidenceImageSource(imgEl, firstItem);
         thumbWrap.appendChild(imgEl);
 
         if (total > 1) {
@@ -3800,7 +3745,31 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    function clearFollowUpQuestions() {
+        chatMessages.querySelector(".follow-up-questions")?.remove();
+    }
+
+    function appendFollowUpQuestions(message, questions) {
+        if (!Array.isArray(questions) || questions.length === 0) {
+            return;
+        }
+        const group = document.createElement("div");
+        group.className = "follow-up-questions";
+        group.setAttribute("role", "group");
+        group.setAttribute("aria-label", "Câu hỏi gợi ý");
+        for (const question of questions.slice(0, 2)) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = question;
+            button.disabled = busy || Boolean(pendingCard);
+            button.addEventListener("click", () => submitQuery(question, { preserveDraft: true }));
+            group.appendChild(button);
+        }
+        message.appendChild(group);
+    }
+
     function appendMessage(sender, content, meta = null) {
+        clearFollowUpQuestions();
         exitWelcomeState();
         const msgDiv = document.createElement("div");
         msgDiv.className = "message " + sender + "-message";
@@ -3896,6 +3865,9 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             msgDiv.appendChild(bubbleEl);
+            if (meta?.audit_status === "PASS" && !pendingCard) {
+                appendFollowUpQuestions(msgDiv, meta.follow_up_questions);
+            }
             if (content && meta && meta.audit_status !== "ERROR") {
                 const copyBtn = document.createElement("button");
                 copyBtn.type = "button";
@@ -3923,6 +3895,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const locked = busy || Boolean(pendingCard);
         userInput.disabled = locked;
         sendBtn.disabled = locked;
+        chatMessages.querySelectorAll(".follow-up-questions button").forEach(button => {
+            button.disabled = locked;
+        });
         if (attachImageBtn) {
             attachImageBtn.disabled = locked;
         }
@@ -3959,6 +3934,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function renderInteraction(data) {
+        clearFollowUpQuestions();
         const card = data.interaction;
         if (pendingCard && pendingCard.id === card.id) {
             return;
@@ -4513,6 +4489,7 @@ document.addEventListener("DOMContentLoaded", () => {
             sources: finalDoneMeta.sources,
             images: finalDoneMeta.images,
             visualization: finalDoneMeta.visualization,
+            follow_up_questions: finalDoneMeta.follow_up_questions,
             trace_id: finalDoneMeta.trace_id,
             turn_id: finalDoneMeta.turn_id,
             audit_status: finalDoneMeta.audit_status,
@@ -5061,19 +5038,22 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    async function submitQuery(queryText) {
+    async function submitQuery(queryText, { preserveDraft = false } = {}) {
         if (busy || pendingCard) {
             return;
         }
-        await activeImageReadPromise;
-        if (busy || pendingCard) {
-            return;
+        let attachmentsToSend = [];
+        if (!preserveDraft) {
+            await activeImageReadPromise;
+            if (busy || pendingCard) {
+                return;
+            }
+            attachmentsToSend = pendingAttachments.slice();
         }
         let cleanQuery = "";
         if (queryText) {
             cleanQuery = queryText.trim();
         }
-        const attachmentsToSend = pendingAttachments.slice();
         if (cleanQuery === "" && attachmentsToSend.length === 0) {
             return;
         }
@@ -5096,9 +5076,11 @@ document.addEventListener("DOMContentLoaded", () => {
         exitWelcomeState();
         appendMessage("user", userBubbleText, { userAttachments: attachmentsToSend });
         upsertOptimisticSessionInSidebar(userBubbleText, "running");
-        userInput.value = "";
-        pendingAttachments = [];
-        renderAttachmentPreviewBar();
+        if (!preserveDraft) {
+            userInput.value = "";
+            pendingAttachments = [];
+            renderAttachmentPreviewBar();
+        }
         setBusy(true);
 
         resetStepper();

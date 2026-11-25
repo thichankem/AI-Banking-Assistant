@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 import unicodedata
 
+from agent_banking.core.numeric_tokens import extract_canonical_numeric_tokens
 from agent_banking.tools.config.settings import get_query_rules
 
 _RULES = get_query_rules()
@@ -16,6 +17,7 @@ _LEGAL_RULES = _RULES["legal_extraction"]
 _AMOUNT_RULES = _RULES["financial_extraction"]
 _INTENT_RULES = _RULES["intent_classification"]
 _DEFAULT_INTENT = _INTENT_RULES["defaults"]
+_TERM_BRIDGES = list(_RULES.get("terminology_bridges", ()))
 
 
 @dataclass
@@ -550,7 +552,7 @@ class BankingQueryParser:
 
         text_nfc = unicodedata.normalize("NFC", normalized_query)
 
-        decimal_split_digits = set()
+        masked_chars = list(text_nfc)
         t_len = len(text_nfc)
         for i, ch in enumerate(text_nfc):
             if ch in (".", ",") and i > 0 and i + 1 < t_len:
@@ -558,19 +560,25 @@ class BankingQueryParser:
                     left_start = i - 1
                     while left_start > 0 and text_nfc[left_start - 1].isdigit():
                         left_start = left_start - 1
-                    left_val = text_nfc[left_start:i]
 
                     right_end = i + 1
                     while right_end + 1 < t_len and text_nfc[right_end + 1].isdigit():
                         right_end = right_end + 1
-                    right_val = text_nfc[i + 1:right_end + 1]
+                    right_len = right_end - i
 
-                    if len(right_val) <= 2:
-                        decimal_split_digits.add(left_val)
-                        decimal_split_digits.add(right_val)
+                    has_percent = False
+                    after_idx = right_end + 1
+                    while after_idx < t_len and text_nfc[after_idx] == " ":
+                        after_idx = after_idx + 1
+                    if after_idx < t_len and text_nfc[after_idx] == "%":
+                        has_percent = True
+
+                    if right_len <= 2 and (ch == "," or has_percent):
+                        for pos_idx in range(left_start, right_end + 1):
+                            masked_chars[pos_idx] = " "
 
         cleaned_chars = []
-        for c in text_nfc:
+        for c in masked_chars:
             if c.isalnum() or c.isspace():
                 cleaned_chars.append(c)
             else:
@@ -583,8 +591,6 @@ class BankingQueryParser:
         for w in words:
             if len(w) > 1 or w.isdigit():
                 if w not in VIETNAMESE_STOPWORDS:
-                    if w in decimal_split_digits and w.isdigit():
-                        continue
                     if w not in keywords:
                         keywords.append(w)
 
@@ -630,7 +636,35 @@ class BankingQueryParser:
 
         # 3. Extract BM25 keywords
         keywords = self.extract_keywords(normalized_query)
-        keywords_str = " ".join(keywords)
+        compound_codes = []
+        for raw_tok in clean_query.split():
+            trimmed = raw_tok.strip(_STRIP_PUNCT)
+            if ("-" in trimmed or "/" in trimmed) and _has_digit(trimmed):
+                if len(trimmed) <= 28 and trimmed not in compound_codes:
+                    compound_codes.append(trimmed)
+        keywords_parts = list(keywords)
+        for code_tok in compound_codes:
+            low_code = code_tok.lower()
+            if low_code not in keywords_parts:
+                keywords_parts.append(low_code)
+
+        lower_norm = normalized_query.lower()
+        bridge_expansions = []
+        for bridge in _TERM_BRIDGES:
+            triggers = bridge.get("triggers", ())
+            if any(trig in lower_norm or trig in clean_query.lower() for trig in triggers):
+                exp_text = str(bridge.get("expansion") or "").strip()
+                if exp_text and exp_text not in bridge_expansions:
+                    bridge_expansions.append(exp_text)
+                    for b_tok in exp_text.lower().split():
+                        b_clean = b_tok.strip(_STRIP_PUNCT)
+                        if len(b_clean) >= 2 and b_clean not in keywords_parts:
+                            keywords_parts.append(b_clean)
+
+        for num_tok in extract_canonical_numeric_tokens(clean_query, max_tokens=8):
+            if num_tok not in keywords_parts:
+                keywords_parts.append(num_tok)
+        keywords_str = " ".join(keywords_parts)
 
         # 4. Extract monetary amounts and mentioned banks
         financial_amounts = self.extract_financial_amounts(clean_query)
@@ -649,6 +683,9 @@ class BankingQueryParser:
             for ref in legal_refs:
                 if ref.lower() not in normalized_query.lower():
                     expanded_parts.append(ref)
+        for exp_text in bridge_expansions:
+            if exp_text.lower() not in normalized_query.lower():
+                expanded_parts.append(exp_text)
         combined_text = " ".join(expanded_parts).strip()
         if not combined_text.startswith(_DENSE_PREFIX):
             expanded_query = f"{_DENSE_PREFIX}{combined_text}"
@@ -670,6 +707,73 @@ class BankingQueryParser:
             suggested_filters=suggested_filters,
             expanded_query=expanded_query
         )
+
+
+def decompose_subqueries(clean_query: str) -> list:
+    """Deterministically decompose comparison or multi-clause banking queries into <= 2 focused sub-queries."""
+    if not clean_query:
+        return []
+    words = clean_query.split()
+    if len(words) < 10:
+        return []
+    work = " ".join(unicodedata.normalize("NFC", clean_query).split())
+    low = work.lower()
+
+    # 1. Comparison query: "So sánh <chủ đề> giữa <A> và <B>"
+    comp_markers = ("so sánh ", "khác nhau ")
+    if any(m in low for m in comp_markers) and " giữa " in low:
+        giua_idx = low.find(" giữa ")
+        topic = work[:giua_idx].strip()
+        for prefix in ("so sánh ", "sự khác nhau ", "điểm khác nhau "):
+            if topic.lower().startswith(prefix):
+                topic = topic[len(prefix):].strip()
+                break
+        rest = work[giua_idx + len(" giữa "):].strip(" ?.!:,")
+        for tail_split in (" tại ", " ở ", " trên ", " của "):
+            t_idx = rest.lower().find(tail_split)
+            if t_idx > 0 and len(rest[:t_idx].split()) >= 5:
+                rest = rest[:t_idx].strip()
+                break
+        va_idx = rest.lower().rfind(" và ")
+        if va_idx > 0:
+            side_a = rest[:va_idx].strip(" ,;:")
+            side_b = rest[va_idx + len(" và "):].strip(" ,;:")
+            if side_a.lower().startswith("là "):
+                side_a = side_a[3:].strip()
+            if side_b.lower().startswith("là "):
+                side_b = side_b[3:].strip()
+            if len(side_a.split()) >= 2 and len(side_b.split()) >= 2:
+                sub_1 = f"{topic} {side_a}".strip()
+                sub_2 = f"{topic} {side_b}".strip()
+                if sub_1.lower() != sub_2.lower():
+                    return [sub_1, sub_2]
+
+    # 2. Compound multi-clause banking queries
+    if len(words) >= 14:
+        splitters = (
+            " đồng thời ",
+            " bên cạnh đó ",
+            " ngoài ra ",
+            " và chịu chi phí ",
+            " và chịu khoản phí ",
+            " và chịu phí ",
+            " và mức phí ",
+            " và thời gian xử lý ",
+        )
+        for sp in splitters:
+            sp_idx = low.find(sp)
+            if sp_idx > 0:
+                left = work[:sp_idx].strip(" ,;.")
+                if sp.startswith(" và "):
+                    right = work[sp_idx + len(" và "):].strip(" ,;.?")
+                else:
+                    right = work[sp_idx + len(sp):].strip(" ,;.?")
+                if len(left.split()) >= 3 and len(right.split()) >= 3:
+                    subj_prefix = " ".join(left.split()[:6])
+                    if len(right.split()) < 7 and subj_prefix.lower() not in right.lower():
+                        right = f"{subj_prefix} {right}".strip()
+                    return [left, right]
+    return []
 
 
 _PARSER = BankingQueryParser()

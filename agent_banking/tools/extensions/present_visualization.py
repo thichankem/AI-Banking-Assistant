@@ -9,7 +9,9 @@ MAX_ARTIFACT_BYTES = 64 * 1024
 
 
 def _module(artifact):
-    return simulator if artifact.get("engine") == "simulator" else visualization
+    if artifact.get("engine") == "simulator":
+        return simulator
+    return visualization
 
 
 def present_visualization(artifact: dict) -> dict:
@@ -28,9 +30,8 @@ def present_visualization(artifact: dict) -> dict:
 
 def prepare_presentation(artifact, recent, guard):
     module = _module(artifact)
-    prepare = (
-        module.prepare_simulator
-        if module is simulator
-        else module.prepare_visualization
-    )
+    if module is simulator:
+        prepare = module.prepare_simulator
+    else:
+        prepare = module.prepare_visualization
     return prepare(artifact, recent, guard)

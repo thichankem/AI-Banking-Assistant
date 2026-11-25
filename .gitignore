@@ -523,6 +523,9 @@ unittests/
 **/unittests/
 **/unittests/**
 *unittests*
+test/
+**/test/
+**/test/**
 tests/
 **/tests/
 **/tests/**
@@ -539,6 +542,16 @@ test*.py
 *_test.py
 *_tests.py
 run_*tests.py
+conftest.py
+**/conftest.py
+*.test.js
+*.test.jsx
+*.test.ts
+*.test.tsx
+*.spec.js
+*.spec.jsx
+*.spec.ts
+*.spec.tsx
 audit_*.py
 *_audit.py
 verify_upgrade.py

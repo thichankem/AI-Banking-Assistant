@@ -52,6 +52,11 @@ inputSchema:
           type: string
           pattern: '^\d{4}-\d{2}-\d{2}$'
           description: Target date for lookup in YYYY-MM-DD format.
+        group_by:
+          type: array
+          maxItems: 4
+          description: Optional column names or letters to count/summarize matching Excel rows (e.g. Loại, Tỉnh/thành phố).
+          items: {type: string, minLength: 1, maxLength: 200}
         filters:
           type: array
           maxItems: 20
@@ -61,7 +66,7 @@ inputSchema:
             required: [column, op]
             properties:
               column: {type: string, minLength: 1, maxLength: 400}
-              op: {enum: [eq, ne, gt, gte, lt, lte, is_blank]}
+              op: {enum: [eq, ne, gt, gte, lt, lte, contains, is_blank]}
               value:
                 type: [string, number, boolean]
                 maxLength: 400

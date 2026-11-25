@@ -18,6 +18,7 @@ import hashlib
 import json
 import math
 import os
+import pickle
 import shutil
 import struct
 import uuid
@@ -25,6 +26,7 @@ import warnings
 from pathlib import Path
 
 from agent_banking.chunking.universal.planning.schema import VALID_CHUNK_TYPES, payload_index_key
+from agent_banking.core.numeric_tokens import extract_canonical_numeric_tokens
 from agent_banking.core.search_text import search_key
 from agent_banking.vector_db.config.settings import VectorDBConfig
 
@@ -104,6 +106,165 @@ def _set_publication_revision(payload, vector):
     metadata["publication_revision"] = "publication:" + hashlib.sha256(encoded + stored_vector).hexdigest()
 
 
+_BM25_DISK_CACHE_VERSION = "v4"
+_SLIM_TABLE_SKIP_KEYS = frozenset(("html", "cells", "header_cells", "source_cells", "row_provenance", "cell_span"))
+_SLIM_BM_SKIP_KEYS = frozenset(("quality", "document_version"))
+
+
+def _slim_runtime_chunk(chunk):
+    """Strip bulky unused geometry/markup fields from runtime BM25 cache copies while preserving 13-key schema."""
+    if not isinstance(chunk, dict):
+        return chunk
+    slim = dict(chunk)
+    td = slim.get("table_data")
+    if isinstance(td, dict) and (td.get("rows") or td.get("excel")):
+        slim_td = {}
+        for k, v in td.items():
+            if k not in _SLIM_TABLE_SKIP_KEYS:
+                slim_td[k] = v
+        slim["table_data"] = slim_td
+    bm = slim.get("business_metadata")
+    if isinstance(bm, dict):
+        slim_bm = {}
+        for bk, bv in bm.items():
+            if bk not in _SLIM_BM_SKIP_KEYS:
+                slim_bm[bk] = bv
+        ret = slim_bm.get("retrieval")
+        if isinstance(ret, dict) and "embedding_content" in ret:
+            slim_ret = {}
+            for rk, rv in ret.items():
+                if rk != "embedding_content":
+                    slim_ret[rk] = rv
+            slim_bm["retrieval"] = slim_ret
+        prov = slim_bm.get("provenance")
+        if isinstance(prov, dict):
+            compact_locs = []
+            locs = prov.get("locations")
+            if isinstance(locs, list):
+                for loc in locs:
+                    if isinstance(loc, dict):
+                        compact_loc = {}
+                        if "page_number" in loc:
+                            compact_loc["page_number"] = loc["page_number"]
+                        if "page_index" in loc:
+                            compact_loc["page_index"] = loc["page_index"]
+                        compact_locs.append(compact_loc)
+            slim_bm["provenance"] = {"locations": compact_locs}
+        slim["business_metadata"] = slim_bm
+    return slim
+_BM25_PHRASE_STOPWORDS = frozenset({
+    "la", "gi", "cua", "cho", "voi", "khi", "nao", "bao", "nhieu", "nhu", "the",
+    "co", "duoc", "khong", "va", "hay", "hoac", "tai", "trong", "ve", "tu", "den",
+    "sau", "truoc", "tren", "duoi", "cac", "nhung", "mot", "moi", "toi", "ban",
+    "quy", "khach", "hang", "ngan", "abank", "bank", "theo", "bang", "muc", "so",
+})
+_ROMAN_LEVELS = frozenset({"i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii"})
+
+
+def _classify_table_group_row(row):
+    """Classify a Markdown table row as (kind, depth, label) without regex or ternaries."""
+    if not isinstance(row, list) or len(row) < 3:
+        return None
+    cells = [str(c or "").replace("\r", " ").replace("\n", " ").strip() for c in row]
+    c0 = " ".join(cells[0].split())
+    c1 = " ".join(cells[1].split())
+    tail = cells[2:]
+    if not any(tail):
+        low0 = c0.casefold()
+        low1 = c1.casefold()
+        if low0.startswith(("lưu ý", "ghi chú")) or low1.startswith(("lưu ý", "ghi chú")):
+            note_txt = " ".join(part for part in (c0, c1) if part).strip()
+            if note_txt:
+                return ("note", 0, note_txt)
+            return None
+        if c0 and c1:
+            marker = c0.rstrip(".").strip()
+            low_m = marker.casefold()
+            if low_m in _ROMAN_LEVELS or low_m.startswith("phần "):
+                return ("header", 1, f"{marker}. {c1}")
+            if marker.isascii() and marker.isdecimal():
+                return ("header", 2, f"{marker}. {c1}")
+            if "." in marker:
+                parts = marker.split(".")
+                if all(p.isascii() and p.isdecimal() for p in parts if p):
+                    dot_depth = min(5, 1 + len(parts))
+                    return ("header", dot_depth, f"{marker}. {c1}")
+            if len(marker) == 1 and "a" <= low_m <= "z":
+                return ("header", 4, f"{marker}) {c1}")
+            if low_m.startswith("(") and low_m.endswith(")") and len(low_m) <= 5:
+                return ("header", 5, f"{marker} {c1}")
+            return ("header", 3, f"{marker}. {c1}")
+        if c0 and not c1 and len(c0) >= 6:
+            low_c0 = search_key(c0)
+            if not low_c0.startswith("luu y"):
+                return ("header", 1, c0)
+    return None
+
+
+def compute_corpus_table_paths(chunks):
+    """Build inherited section-group path and note maps across sequential table chunks."""
+    grouped = {}
+    for chunk in chunks:
+        if not isinstance(chunk, dict):
+            continue
+        td = chunk.get("table_data")
+        if not isinstance(td, dict):
+            continue
+        rows = td.get("rows")
+        if not isinstance(rows, list) or not rows:
+            continue
+        src = str(chunk.get("source") or "")
+        meta = chunk.get("business_metadata")
+        if not isinstance(meta, dict):
+            meta = {}
+        tbl_id = str(td.get("table_id") or meta.get("excel_table_id") or chunk.get("section_title") or "")
+        if not src or not tbl_id:
+            continue
+        r_start = td.get("row_start")
+        if type(r_start) is not int:
+            r_start = 0
+        grouped.setdefault((src, tbl_id), []).append((r_start, chunk))
+
+    paths_by_key = {}
+    notes_by_key = {}
+    for group_items in grouped.values():
+        group_items.sort(key=lambda pair: pair[0])
+        stack = {}
+        notes = []
+        chunk_entries = []
+        for _, chunk in group_items:
+            key = payload_index_key(chunk)
+            rows = chunk["table_data"]["rows"]
+            chunk_paths = []
+            for row in rows:
+                classified = _classify_table_group_row(row)
+                if classified is not None:
+                    kind, depth, label = classified
+                    if kind == "note":
+                        if label not in notes:
+                            notes.append(label)
+                    else:
+                        to_del = [lvl for lvl in stack if lvl >= depth]
+                        for lvl in to_del:
+                            del stack[lvl]
+                        stack[depth] = label
+                    continue
+                if stack:
+                    active_path = " > ".join(stack[lvl] for lvl in sorted(stack))
+                    if active_path and active_path not in chunk_paths:
+                        chunk_paths.append(active_path)
+            if chunk_paths:
+                paths_by_key[key] = " | ".join(chunk_paths[:2])
+            elif stack:
+                paths_by_key[key] = " > ".join(stack[lvl] for lvl in sorted(stack))
+            chunk_entries.append(key)
+        if notes:
+            joined_notes = " | ".join(notes[:3])
+            for key in chunk_entries:
+                notes_by_key[key] = joined_notes
+    return paths_by_key, notes_by_key
+
+
 class QdrantBankingStore:
     """
     Vector database & Hybrid Search store running locally.
@@ -157,6 +318,9 @@ class QdrantBankingStore:
         self._bm25_doc_norm = []
         self._bm25_avgdl = 0.0
         self._bm25_idf = {}
+        self._bm25_phrase_keys = []
+        self._bm25_table_paths = {}
+        self._bm25_table_notes = {}
         self.k1 = VectorDBConfig.VECTOR_DB_BM25_K1
         self.b = VectorDBConfig.VECTOR_DB_BM25_B
         self._bm25_breadcrumb_boost = VectorDBConfig.VECTOR_DB_BREADCRUMB_BOOST
@@ -255,8 +419,111 @@ class QdrantBankingStore:
         self._bm25_doc_norm = []
         self._bm25_avgdl = 0.0
         self._bm25_idf = {}
+        self._bm25_phrase_keys = []
+        self._bm25_table_paths = {}
+        self._bm25_table_notes = {}
+        self._remove_bm25_cache()
 
         return True
+
+    def _bm25_cache_file(self):
+        if self.use_memory or not self.storage_path:
+            return None
+        return Path(self.storage_path) / "bm25_runtime_cache.pkl"
+
+    def _remove_bm25_cache(self):
+        cache_path = self._bm25_cache_file()
+        if cache_path is not None and cache_path.is_file():
+            try:
+                cache_path.unlink()
+            except OSError:
+                pass
+
+    def _bm25_cache_signature(self, pts_count):
+        storage_dir = Path(self.storage_path)
+        sqlite_path = storage_dir / "collection" / self.collection_name / "storage.sqlite"
+        if sqlite_path.is_file():
+            st_sq = sqlite_path.stat()
+            sqlite_sig = (st_sq.st_mtime_ns, st_sq.st_size)
+        else:
+            sqlite_sig = (0, 0)
+        inv_path = storage_dir / "knowledge_inventory.json"
+        if inv_path.is_file():
+            st_inv = inv_path.stat()
+            inv_sig = (st_inv.st_mtime_ns, st_inv.st_size)
+        else:
+            inv_sig = (0, 0)
+        weights = tuple(sorted((str(k), float(v)) for k, v in VectorDBConfig.VECTOR_DB_BM25_FIELD_WEIGHTS.items()))
+        return (
+            _BM25_DISK_CACHE_VERSION,
+            self.collection_name,
+            int(pts_count),
+            round(float(self._bm25_breadcrumb_boost), 4),
+            round(float(self.k1), 4),
+            round(float(self.b), 4),
+            weights,
+            sqlite_sig,
+            inv_sig,
+        )
+
+    def _try_load_bm25_cache(self, pts_count):
+        cache_path = self._bm25_cache_file()
+        if cache_path is None or not cache_path.is_file():
+            return False
+        try:
+            with cache_path.open("rb") as fh:
+                payload = pickle.load(fh)
+            if not isinstance(payload, dict):
+                return False
+            expected_sig = self._bm25_cache_signature(pts_count)
+            if payload.get("signature") != expected_sig:
+                return False
+            corpus = payload.get("corpus")
+            if not isinstance(corpus, list) or len(corpus) != pts_count:
+                return False
+            self._bm25_corpus = corpus
+            self._bm25_inverted_index = payload["inverted_index"]
+            self._bm25_doc_len = payload["doc_len"]
+            self._bm25_doc_norm = payload["doc_norm"]
+            self._bm25_avgdl = float(payload["avgdl"])
+            self._bm25_idf = payload["idf"]
+            self._bm25_phrase_keys = payload["phrase_keys"]
+            self._bm25_table_paths = payload["table_paths"]
+            self._bm25_table_notes = payload.get("table_notes", {})
+            print(f"⚡ [Qdrant Store] Đã nạp nhanh BM25F cache từ đĩa ({len(corpus)} chunks)!")
+            return True
+        except Exception:
+            return False
+
+    def _save_bm25_cache(self):
+        cache_path = self._bm25_cache_file()
+        if cache_path is None or not self._bm25_corpus:
+            return
+        try:
+            pts_count = self.count()
+            if pts_count <= 0:
+                return
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = cache_path.with_name(cache_path.name + ".tmp")
+            with tmp_path.open("wb") as fh:
+                slim_corpus = [_slim_runtime_chunk(c) for c in self._bm25_corpus]
+                payload = {
+                    "signature": self._bm25_cache_signature(pts_count),
+                    "corpus": slim_corpus,
+                    "inverted_index": self._bm25_inverted_index,
+                    "doc_len": self._bm25_doc_len,
+                    "doc_norm": self._bm25_doc_norm,
+                    "avgdl": self._bm25_avgdl,
+                    "idf": self._bm25_idf,
+                    "phrase_keys": self._bm25_phrase_keys,
+                    "table_paths": self._bm25_table_paths,
+                    "table_notes": self._bm25_table_notes,
+                }
+                pickle.dump(payload, fh, protocol=pickle.HIGHEST_PROTOCOL)
+            tmp_path.replace(cache_path)
+            self._bm25_corpus = slim_corpus
+        except Exception as exc:
+            print(f"⚠️ [Qdrant Store] Không thể lưu BM25 cache: {exc}")
 
     def _create_payload_indexes(self):
         """Khởi tạo các chỉ mục Payload (Keyword index) phục vụ truy vấn có điều kiện cực nhanh."""
@@ -274,30 +541,37 @@ class QdrantBankingStore:
                     pass
 
     def _load_bm25_from_existing_store(self):
-        """Khôi phục lại chỉ mục BM25 từ các payload đã lưu trong Qdrant trên đĩa"""
+        """Khôi phục lại chỉ mục BM25 từ các payload đã lưu trong Qdrant trên đĩa (có phân trang đầy đủ)."""
         try:
             pts_count = self.count()
             if pts_count > 0:
-                limit_val = pts_count + VectorDBConfig.VECTOR_DB_SCROLL_LIMIT_BUFFER
-                min_limit = VectorDBConfig.VECTOR_DB_MIN_SCROLL_LIMIT
-                if limit_val < min_limit:
-                    limit_val = min_limit
-                records, _ = self.client.scroll(
-                    collection_name=self.collection_name,
-                    limit=limit_val,
-                    with_payload=True,
-                    with_vectors=False
-                )
+                if self._try_load_bm25_cache(pts_count):
+                    return
+                scroll_batch = VectorDBConfig.VECTOR_DB_SCROLL_BATCH_SIZE
+                if scroll_batch < 64:
+                    scroll_batch = 256
                 chunks = []
-                for r in records:
-                    if r.payload:
-                        chunks.append(r.payload)
+                offset = None
+                while True:
+                    records, offset = self.client.scroll(
+                        collection_name=self.collection_name,
+                        offset=offset,
+                        limit=scroll_batch,
+                        with_payload=True,
+                        with_vectors=False
+                    )
+                    for r in records:
+                        if r.payload:
+                            chunks.append(r.payload)
+                    if offset is None or not records:
+                        break
                 if chunks:
                     self._bm25_corpus = list(chunks)
                     self._build_bm25_index(self._bm25_corpus)
+                    self._save_bm25_cache()
                     print(f"📦 [Qdrant Store] Đã tự động khôi phục BM25 cho {len(chunks)} chunks từ kho lưu trữ đĩa!")
-        except Exception as e:
-            pass
+        except Exception as exc:
+            print(f"⚠️ [Qdrant Store] Cảnh báo khi khôi phục BM25 từ đĩa: {exc}")
 
     # -------------------------------------------------------------------------
     # 1. DATA INGESTION
@@ -380,6 +654,7 @@ class QdrantBankingStore:
                     corpus_id_to_idx[cid] = new_idx
 
         self._build_bm25_index(self._bm25_corpus)
+        self._save_bm25_cache()
         print(f"✅ [Qdrant Store] Đã nạp thành công {total_points} chunks vào Vector DB (Tổng BM25: {len(self._bm25_corpus)} chunks)!")
         return {payload_index_key(payload) for payload in new_payloads}
 
@@ -477,6 +752,7 @@ class QdrantBankingStore:
                 remaining.append(item)
         if len(remaining) != len(self._bm25_corpus):
             self._build_bm25_index(remaining)
+            self._save_bm25_cache()
         return len(obsolete)
 
     def prune_publication_scopes(self, active_by_scope):
@@ -535,6 +811,7 @@ class QdrantBankingStore:
                 remaining.append({**item, "business_metadata": metadata})
         if obsolete or shared:
             self._build_bm25_index(remaining)
+            self._save_bm25_cache()
         return len(obsolete)
 
     # -------------------------------------------------------------------------
@@ -542,18 +819,33 @@ class QdrantBankingStore:
     # -------------------------------------------------------------------------
     @staticmethod
     def _tokenize(text):
-        """Tách từ vựng chữ và số thuần túy (0% Regex Law)."""
+        """Tách từ vựng chữ và số thuần túy kèm biến thể nối gạch ngang (0% Regex Law)."""
         if not text:
             return []
+        raw_str = str(text)
         cleaned_chars = []
-        for ch in str(text).lower():
+        for ch in raw_str.lower():
             if ch.isalnum() or ch == "_":
                 cleaned_chars.append(ch)
             else:
                 cleaned_chars.append(" ")
         original = "".join(cleaned_chars).split()
-        folded = search_key(str(text)).split()
-        return original + ["~" + word for word in folded]
+        folded = search_key(raw_str).split()
+        tokens = original + ["~" + word for word in folded]
+        if "-" in raw_str:
+            for raw_tok in raw_str.split():
+                trimmed = raw_tok.strip(".,;:()[]{}\"'!?")
+                if "-" in trimmed:
+                    parts = [search_key(seg) for seg in trimmed.split("-") if seg]
+                    if len(parts) >= 2 and all(p and " " not in p for p in parts):
+                        joined = "~" + "".join(parts)
+                        if len(joined) <= 33 and joined not in tokens:
+                            tokens.append(joined)
+        num_tokens = extract_canonical_numeric_tokens(raw_str, max_tokens=24)
+        for num_tok in num_tokens:
+            if num_tok not in tokens:
+                tokens.append(num_tok)
+        return tokens
 
     @staticmethod
     def _flatten_table_value(value):
@@ -685,16 +977,31 @@ class QdrantBankingStore:
         self._bm25_doc_len = []
         self._bm25_doc_norm = []
         self._bm25_idf = {}
+        self._bm25_phrase_keys = []
 
         total_docs = len(chunks)
         if total_docs == 0:
             self._bm25_avgdl = 0.0
+            self._bm25_table_paths = {}
+            self._bm25_table_notes = {}
             return
+
+        self._bm25_table_paths, self._bm25_table_notes = compute_corpus_table_paths(self._bm25_corpus)
 
         for idx, chunk in enumerate(chunks):
             content_text = chunk.get("content") or ""
             section_title_text = chunk.get("section_title") or ""
             breadcrumb_text = chunk.get("breadcrumb") or ""
+            chunk_idx_key = payload_index_key(chunk)
+            inherited_path = self._bm25_table_paths.get(chunk_idx_key, "")
+            if inherited_path and inherited_path.casefold() not in breadcrumb_text.casefold():
+                if breadcrumb_text:
+                    breadcrumb_text = breadcrumb_text + " > " + inherited_path
+                else:
+                    breadcrumb_text = inherited_path
+            inherited_note = self._bm25_table_notes.get(chunk_idx_key, "")
+            if inherited_note and inherited_note.casefold() not in str(content_text).casefold():
+                content_text = str(content_text) + "\n" + inherited_note
             source_name = str(chunk.get("source") or "").replace("\\", "/").rsplit("/", 1)[-1]
             if "." in source_name:
                 source_stem = source_name.rsplit(".", 1)[0]
@@ -704,22 +1011,37 @@ class QdrantBankingStore:
             meta = chunk.get("business_metadata")
             if not isinstance(meta, dict):
                 meta = {}
+            if not doc_name:
+                doc_name = str(meta.get("document_name") or "").strip()
+            sheet_label = ""
+            page_nums = []
+            cit = meta.get("citation")
+            if isinstance(cit, dict):
+                sh_val = str(cit.get("sheet_name") or "").strip()
+                if sh_val:
+                    sheet_label = sh_val
+                raw_cit_pages = cit.get("page_numbers")
+                if isinstance(raw_cit_pages, list):
+                    for p_val in raw_cit_pages:
+                        if type(p_val) is int and p_val > 0 and p_val not in page_nums:
+                            page_nums.append(p_val)
             prov = meta.get("provenance")
-            page_label = ""
-            if isinstance(prov, dict):
+            if not page_nums and isinstance(prov, dict):
                 locs = prov.get("locations")
                 if isinstance(locs, list):
-                    page_nums = []
                     for loc in locs:
                         if isinstance(loc, dict):
                             p_val = loc.get("page_number")
+                            if type(p_val) is not int and type(loc.get("page_index")) is int and loc["page_index"] >= 0:
+                                p_val = loc["page_index"] + 1
                             if type(p_val) is int and p_val > 0 and p_val not in page_nums:
                                 page_nums.append(p_val)
-                    if page_nums:
-                        page_nums.sort()
-                        page_label = "Trang " + " ".join(str(p) for p in page_nums)
+            page_label = ""
+            if page_nums:
+                page_nums.sort()
+                page_label = "Trang " + " ".join(str(p) for p in page_nums)
             meta_labels = []
-            for label in (doc_name, source_stem, page_label):
+            for label in (doc_name, source_stem, sheet_label, page_label):
                 if label and label.casefold() not in breadcrumb_text.casefold():
                     if label not in meta_labels:
                         meta_labels.append(label)
@@ -731,10 +1053,14 @@ class QdrantBankingStore:
                     breadcrumb_text = label_prefix
             table_text = self._extract_table_text(chunk.get("table_data"))
             retrieval = meta.get("retrieval", {})
-            if "embedding_content" in retrieval:
+            if isinstance(retrieval, dict) and "embedding_content" in retrieval:
                 content_text = retrieval["embedding_content"]
                 if chunk.get("chunk_type") == "table":
                     table_text = ""
+            elif isinstance(retrieval, dict):
+                sit_ctx = str(retrieval.get("situated_context") or "").strip()
+                if sit_ctx and sit_ctx.casefold() not in str(content_text).casefold():
+                    content_text = sit_ctx + "\n" + str(content_text)
             raw_content = str(chunk.get("content") or "")
             parent_text = str(chunk.get("parent_content") or "")
             if len(raw_content) < 350 and len(parent_text) > len(raw_content) + 40:
@@ -746,6 +1072,8 @@ class QdrantBankingStore:
             bc_tokens = self._tokenize(breadcrumb_text)
             td_tokens = self._tokenize(table_text)
             img_tokens = self._tokenize(images_text)
+            phrase_src = breadcrumb_text + " " + section_title_text + " " + raw_content + " " + images_text
+            self._bm25_phrase_keys.append(" " + search_key(phrase_src[:3200]) + " ")
 
             weights = VectorDBConfig.VECTOR_DB_BM25_FIELD_WEIGHTS
             w_content = float(weights["content"])
@@ -974,6 +1302,47 @@ class QdrantBankingStore:
 
         if not scores:
             return []
+
+        # Apply phrase bigram & exact-code coherence boost on top candidates
+        if self._bm25_phrase_keys:
+            q_words = search_key(query_text).split()
+            q_bigrams = []
+            for wi in range(len(q_words) - 1):
+                w1 = q_words[wi]
+                w2 = q_words[wi + 1]
+                if w1 in _BM25_PHRASE_STOPWORDS and w2 in _BM25_PHRASE_STOPWORDS:
+                    continue
+                if len(w1) < 3 and len(w2) < 3 and not (w1.isdigit() or w2.isdigit()):
+                    continue
+                bg = w1 + " " + w2
+                if bg not in q_bigrams:
+                    q_bigrams.append(bg)
+            q_codes = []
+            for qw in q_words:
+                if len(qw) >= 4 and any(ch.isdigit() for ch in qw) and any(ch.isalpha() for ch in qw):
+                    if qw not in q_codes:
+                        q_codes.append(qw)
+            if q_bigrams or q_codes:
+                pool_limit = max(top_k * 4, 64)
+                top_pool = sorted(scores.keys(), key=lambda i: scores[i], reverse=True)[:pool_limit]
+                for doc_idx in top_pool:
+                    if doc_idx >= len(self._bm25_phrase_keys):
+                        continue
+                    pkey = self._bm25_phrase_keys[doc_idx]
+                    base_score = scores[doc_idx]
+                    if q_bigrams:
+                        bg_hits = 0
+                        for bg in q_bigrams:
+                            if (" " + bg + " ") in pkey:
+                                bg_hits += 1
+                        if bg_hits > 0:
+                            mult = min(0.35, bg_hits * 0.10)
+                            scores[doc_idx] += base_score * mult
+                    if q_codes:
+                        for code_tok in q_codes:
+                            if (" " + code_tok + " ") in pkey:
+                                scores[doc_idx] += 3.5
+                                break
 
         # Sort top-k highest scores
         sorted_indices = sorted(scores.keys(), key=lambda i: scores[i], reverse=True)[:top_k]

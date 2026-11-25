@@ -768,6 +768,8 @@ class BankingGuardrailManager:
         insurance_subjects = tuple(_domain_rules.get("medical_insurance_subjects") or [])
         coverage_markers = tuple(_domain_rules.get("medical_coverage_markers") or [])
         clinical_markers = tuple(_domain_rules.get("clinical_request_markers") or [])
+        remittance_subjects = tuple(_domain_rules.get("remittance_subjects") or [])
+        remittance_markers = tuple(_domain_rules.get("remittance_markers") or [])
 
         for phrase in OFF_TOPIC_DOMAINS:
             if phrase in text_lower:
@@ -775,8 +777,11 @@ class BankingGuardrailManager:
                     coverage_question = any(marker in text_lower for marker in insurance_subjects) and any(
                         marker in text_lower for marker in coverage_markers
                     )
+                    remittance_question = any(marker in text_lower for marker in remittance_subjects) and any(
+                        marker in text_lower for marker in remittance_markers
+                    )
                     clinical_request = any(marker in text_lower for marker in clinical_markers)
-                    if coverage_question and not clinical_request:
+                    if (coverage_question or remittance_question) and not clinical_request:
                         continue
                 return True, phrase
         return False, None

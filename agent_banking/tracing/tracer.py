@@ -685,6 +685,38 @@ def _enrich_trace_for_debug(raw_record):
 
         if s_name.startswith("graph."):
             graph_nodes.append(norm)
+        elif s_name in (
+            "input_guardrail", "context_prepare", "deep_decide",
+            "react_action", "skill_inspect", "plan_update",
+            "subagent", "memory_update", "answer_review",
+            "prepare_interaction", "await_interaction", "output_guardrail",
+        ):
+            graph_nodes.append(norm)
+
+    langgraph_execution_path = []
+    for idx, gn in enumerate(graph_nodes):
+        raw_name = gn["name"]
+        if raw_name.startswith("graph."):
+            clean_node = raw_name[6:]
+        else:
+            clean_node = raw_name
+        raw_attrs = gn.get("attributes")
+        if isinstance(raw_attrs, dict):
+            attrs = dict(raw_attrs)
+        else:
+            attrs = {}
+        node_status = str(gn.get("status") or "ok")
+        if attrs.get("audit_status"):
+            node_status = str(attrs.get("audit_status"))
+        langgraph_execution_path.append({
+            "step": idx + 1,
+            "node": clean_node,
+            "raw_name": raw_name,
+            "duration_ms": gn.get("duration_ms", 0.0),
+            "status": node_status,
+            "span_id": gn.get("span_id"),
+            "attributes": attrs,
+        })
 
     turn_snapshot = record.get("turn_snapshot")
     if not isinstance(turn_snapshot, dict):
@@ -773,6 +805,7 @@ def _enrich_trace_for_debug(raw_record):
         },
         "tool_calls": tool_calls,
         "graph_nodes": graph_nodes,
+        "langgraph_execution_path": langgraph_execution_path,
         "error_spans": error_spans,
         "turn_snapshot": turn_snapshot,
     }

@@ -446,6 +446,36 @@ body {
     font-size: 0.86rem;
 }
 
+.follow-up-questions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.follow-up-questions button {
+    max-width: 100%;
+    padding: 6px 10px;
+    border: 1px solid var(--border-control);
+    border-radius: 8px;
+    background: var(--bg-surface-elevated);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 0.85rem;
+    text-align: start;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+}
+
+.follow-up-questions button:hover:enabled {
+    background: var(--bg-surface-hover);
+}
+
+.follow-up-questions button:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
 .message-copy-btn {
     margin-top: 6px;
     padding: 5px 8px;
@@ -889,10 +919,6 @@ tr:last-child td {
     border-radius: 10px;
     border: 1px solid var(--border-subtle);
     background: var(--bg-bar);
-}
-
-.debug-live-dag-panel .stepper-header {
-    margin-bottom: 8px;
 }
 
 .stepper-title {
@@ -1579,6 +1605,13 @@ dialog.image-lightbox-overlay[open],
     visibility: hidden;
 }
 
+.image-lightbox-original {
+    color: var(--text-primary);
+    margin-left: auto;
+    font-size: 0.8rem;
+    text-underline-offset: 0.2em;
+}
+
 .image-lightbox-close {
     width: 32px;
     height: 32px;
@@ -1589,7 +1622,7 @@ dialog.image-lightbox-overlay[open],
     font-size: 1.2rem;
     line-height: 1;
     cursor: pointer;
-    margin-left: auto;
+    flex-shrink: 0;
 }
 
 .image-lightbox-close:hover {
@@ -2098,10 +2131,10 @@ dialog.image-lightbox-overlay[open],
 /* Native Modal Dialog */
 .debug-dialog {
     margin: auto;
-    width: min(1420px, 96vw);
-    height: min(92vh, 920px);
-    max-width: 96vw;
-    max-height: 92vh;
+    width: min(1560px, 98vw);
+    height: 96vh;
+    max-width: 98vw;
+    max-height: 96vh;
     background: var(--bg-app);
     color: var(--text-primary);
     border: 1px solid var(--border-default);
@@ -2109,6 +2142,17 @@ dialog.image-lightbox-overlay[open],
     box-shadow: 0 24px 70px rgba(0, 0, 0, 0.8);
     padding: 0;
     overflow: hidden;
+}
+
+.debug-dialog.is-fullscreen {
+    margin: 0;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    max-width: 100vw;
+    max-height: 100vh;
+    border-radius: 0;
+    border: none;
 }
 
 .debug-dialog[open] {
@@ -2132,6 +2176,8 @@ dialog.image-lightbox-overlay[open],
     width: 100%;
     height: 100%;
     min-height: 0;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .debug-dialog-header {
@@ -2275,8 +2321,9 @@ dialog.image-lightbox-overlay[open],
 .debug-workbench {
     flex: 1;
     min-height: 0;
+    min-width: 0;
     display: grid;
-    grid-template-columns: 320px 1fr;
+    grid-template-columns: 290px minmax(0, 1fr);
 }
 
 .debug-sidebar {
@@ -2474,8 +2521,29 @@ dialog.image-lightbox-overlay[open],
 .debug-trace-detail {
     flex: 1;
     min-height: 0;
+    min-width: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
     display: flex;
     flex-direction: column;
+    scroll-behavior: smooth;
+}
+
+.debug-live-dag-panel,
+.debug-kpi-strip,
+.debug-identity-bar,
+.debug-tablist,
+.debug-live-dag-panel .dag-node-inspector {
+    flex-shrink: 0;
+}
+
+.debug-live-dag-panel .dag-node-inspector {
+    max-width: 100%;
+    margin: 10px 0 0;
+}
+
+.debug-live-dag-panel .dag-io-pre {
+    max-height: 240px;
 }
 
 .debug-trace-detail[hidden],
@@ -2617,9 +2685,9 @@ dialog.image-lightbox-overlay[open],
 }
 
 .debug-tabpanels {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
+    flex: 0 0 auto;
+    min-height: 360px;
+    overflow: visible;
 }
 
 /* Keep padding inside .debug-panel-inner so hidden="until-found" renders no empty strip */
@@ -3211,9 +3279,9 @@ dialog.image-lightbox-overlay[open],
     overflow-y: auto;
 }
 
-@media (max-width: 960px) {
+@media (max-width: 760px) {
     .debug-workbench {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
         grid-template-rows: 220px 1fr;
     }
 
@@ -3937,12 +4005,53 @@ dialog.image-lightbox-overlay[open],
     padding: 7px 9px;
 }
 
+.dag-inspector-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.dag-io-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
 .dag-io-label {
-    font-size: 0.7rem;
+    font-size: 0.72rem;
     font-weight: 700;
     color: #7dd3fc;
-    margin-bottom: 4px;
     text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.dag-io-copy-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border-radius: 5px;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    background: rgba(15, 23, 42, 0.7);
+    color: #94a3b8;
+    cursor: pointer;
+    transition: border-color 0.14s, color 0.14s, background 0.14s;
+}
+
+.dag-io-copy-btn:hover {
+    border-color: #38bdf8;
+    color: #e0f2fe;
+    background: rgba(14, 165, 233, 0.2);
+}
+
+.dag-io-copy-btn.is-copied {
+    border-color: #22c55e;
+    color: #4ade80;
+    background: rgba(34, 197, 94, 0.16);
 }
 
 .dag-io-pre {
@@ -4832,6 +4941,393 @@ dialog::backdrop {
     .citation-doc-outline {
         display: none;
     }
+}
+
+/* ==========================================================================
+   Full LangGraph Flow Diagram
+   ========================================================================== */
+.langgraph-flow-container {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.langgraph-trail-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 12px;
+    background: rgba(15, 23, 42, 0.75);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+}
+
+.langgraph-trail-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.langgraph-trail-badge {
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    background: rgba(34, 197, 94, 0.16);
+    border: 1px solid rgba(34, 197, 94, 0.4);
+    color: #86efac;
+}
+
+.langgraph-trail-steps {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+.langgraph-trail-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-weight: 600;
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #e2e8f0;
+    cursor: pointer;
+    transition: transform 0.1s, border-color 0.12s;
+}
+
+.langgraph-trail-chip:hover {
+    transform: translateY(-1px);
+    border-color: #38bdf8;
+}
+
+.langgraph-trail-chip.is-pass {
+    background: rgba(34, 197, 94, 0.14);
+    border-color: rgba(34, 197, 94, 0.4);
+    color: #86efac;
+}
+
+.langgraph-trail-chip.is-retry {
+    background: rgba(251, 191, 36, 0.16);
+    border-color: rgba(251, 191, 36, 0.45);
+    color: #fde68a;
+}
+
+.langgraph-trail-chip.is-terminal {
+    background: #0f172a;
+    border-color: #475569;
+    color: #94a3b8;
+    cursor: default;
+}
+
+.langgraph-trail-arrow {
+    color: #64748b;
+    font-size: 0.75rem;
+    font-weight: bold;
+}
+
+.langgraph-grid-container {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(140px, 1fr));
+    gap: 8px;
+    width: 100%;
+}
+
+.langgraph-column {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: rgba(11, 15, 23, 0.65);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 8px;
+}
+
+.langgraph-col-header {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border-subtle);
+    letter-spacing: 0.03em;
+}
+
+.dag-node-card.is-executed {
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.12);
+}
+
+.dag-node-card.is-idle {
+    opacity: 0.45;
+    border-style: dashed;
+    filter: grayscale(0.6);
+}
+
+.dag-node-card.is-idle:hover {
+    opacity: 0.85;
+    filter: none;
+    border-style: solid;
+}
+
+.dag-node-role {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    line-height: 1.25;
+}
+
+.dag-node-step-tag {
+    display: inline-block;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 0.62rem;
+    font-weight: 700;
+    background: rgba(56, 189, 248, 0.2);
+    color: #7dd3fc;
+    border: 1px solid rgba(56, 189, 248, 0.35);
+}
+
+@media (max-width: 900px) {
+    .langgraph-grid-container {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* ==========================================================================
+   Full LangGraph SVG Interactive Flowchart Diagram
+   ========================================================================== */
+.debug-live-dag-panel,
+.langgraph-flow-container,
+.debug-live-dag-panel .dag-graph-track {
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.debug-live-dag-panel .dag-graph-track {
+    max-width: 100%;
+    display: block;
+    margin: 0;
+    overflow-x: hidden;
+}
+
+.langgraph-legend {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 0.71rem;
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+.lg-legend-item {
+    font-weight: 600;
+}
+
+.lg-legend-item.is-pass {
+    color: #4ade80;
+}
+
+.lg-legend-item.is-warn {
+    color: #fbbf24;
+}
+
+.lg-legend-item.is-idle {
+    color: #64748b;
+}
+
+.langgraph-svg-scroll {
+    width: 100%;
+    overflow-x: auto;
+    background: radial-gradient(circle at 50% 45%, rgba(15, 35, 58, 0.55) 0%, rgba(9, 13, 22, 0.92) 100%);
+    border: 1px solid rgba(51, 65, 85, 0.65);
+    border-radius: 10px;
+    padding: 8px;
+}
+
+.langgraph-svg-canvas {
+    width: 100%;
+    min-width: 500px;
+    max-height: 400px;
+    height: auto;
+    display: block;
+    user-select: none;
+}
+
+.lg-svg-zones,
+.lg-edges-idle,
+.lg-edges-active,
+.lg-edge-label {
+    pointer-events: none;
+}
+
+.lg-svg-node {
+    cursor: pointer;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.lg-svg-node.is-idle {
+    opacity: 0.68;
+}
+
+.lg-svg-node.is-idle:hover,
+.lg-svg-node.is-executed:hover {
+    opacity: 1;
+}
+
+.lg-svg-node:hover rect:first-child {
+    stroke: #38bdf8;
+}
+
+.lg-svg-edge-active-flow {
+    stroke-dasharray: 8 4;
+    animation: lgEdgeFlow 1.1s linear infinite;
+}
+
+@keyframes lgEdgeFlow {
+    from {
+        stroke-dashoffset: 24;
+    }
+    to {
+        stroke-dashoffset: 0;
+    }
+}
+
+/* ==========================================================================
+   Video-Style Trace Replay Bar & Transition Story Card
+   ========================================================================== */
+.lg-replay-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 7px 12px;
+    background: linear-gradient(90deg, rgba(14, 165, 233, 0.12) 0%, rgba(15, 23, 42, 0.9) 55%);
+    border: 1px solid rgba(56, 189, 248, 0.32);
+    border-radius: 8px;
+}
+
+.lg-replay-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+.lg-replay-btn {
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    background: rgba(15, 23, 42, 0.85);
+    color: #e2e8f0;
+    font-size: 0.74rem;
+    font-weight: 600;
+    padding: 5px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: border-color 0.14s, background 0.14s, color 0.14s;
+}
+
+.lg-replay-btn:hover {
+    border-color: #38bdf8;
+    color: #ffffff;
+    background: rgba(14, 165, 233, 0.22);
+}
+
+.lg-replay-btn.is-primary {
+    background: linear-gradient(135deg, #0284c7, #0d9488);
+    border-color: rgba(125, 211, 252, 0.55);
+    color: #ffffff;
+    font-weight: 700;
+}
+
+.lg-replay-btn.is-primary.is-playing {
+    background: linear-gradient(135deg, #d97706, #ea580c);
+    border-color: rgba(253, 230, 138, 0.6);
+}
+
+.lg-replay-btn.is-active {
+    border-color: #38bdf8;
+    background: rgba(56, 189, 248, 0.2);
+    color: #7dd3fc;
+}
+
+.lg-replay-scrubber-wrap {
+    flex: 1 1 200px;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.lg-replay-scrubber {
+    flex: 1 1 auto;
+    min-width: 60px;
+    width: 100%;
+    accent-color: #38bdf8;
+    cursor: pointer;
+    height: 5px;
+}
+
+.lg-replay-frame-pill {
+    flex-shrink: 0;
+    font-size: 0.72rem;
+    font-weight: 700;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    color: #7dd3fc;
+    background: rgba(2, 132, 199, 0.18);
+    border: 1px solid rgba(56, 189, 248, 0.38);
+    padding: 2px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.lg-replay-speeds {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    background: rgba(2, 6, 23, 0.65);
+    padding: 2px;
+    border-radius: 6px;
+    border: 1px solid var(--border-subtle);
+}
+
+.lg-replay-speed-btn {
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.lg-replay-speed-btn:hover {
+    color: var(--text-primary);
+}
+
+.lg-replay-speed-btn.is-active {
+    background: rgba(56, 189, 248, 0.24);
+    color: #e0f2fe;
+}
+
+.lg-svg-edge-current-flow {
+    stroke-dasharray: 9 4;
+    animation: lgEdgeFlow 0.55s linear infinite;
 }
 
 

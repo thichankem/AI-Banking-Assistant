@@ -55,6 +55,7 @@ from agent_banking.document_viewer import (
     read_docx_media,
     render_docx_preview,
     render_pdf_page_png,
+    render_pdf_region_png,
     render_xlsx_preview,
     search_pdf_document,
 )
@@ -587,6 +588,7 @@ async def _emit_graph_sse_events(step_stream, session_id: str, stream_started: f
     sources = []
     images = []
     visualization = None
+    follow_up_questions = []
     final_metadata = {}
 
     try:
@@ -611,6 +613,7 @@ async def _emit_graph_sse_events(step_stream, session_id: str, stream_started: f
                     sources = node_state["sources"]
                     images = node_state.get("images", [])
                     visualization = node_state.get("visualization")
+                    follow_up_questions = node_state.get("follow_up_questions", [])
                     _schedule_pdf_prewarm(citations)
                     final_metadata = {
                         key: node_state[key] for key in _FINAL_METADATA_KEYS
@@ -670,6 +673,7 @@ async def _emit_graph_sse_events(step_stream, session_id: str, stream_started: f
             "sources": sources,
             "images": images,
             "visualization": visualization,
+            "follow_up_questions": follow_up_questions,
             "full_answer": final_response_text,
             **final_metadata
         }
@@ -1419,6 +1423,26 @@ def get_source_pdf_page_image(source: str, page: int = 1, dpi: int = 144):
         png_bytes = render_pdf_page_png(target, page, dpi=dpi)
     except IndexError:
         raise HTTPException(status_code=404, detail="PDF page out of range") from None
+    return Response(
+        content=png_bytes,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@app.get("/api/documents/pdf/region")
+def get_source_pdf_region_image(source: str, page: int, bbox: str):
+    """Serve a high-resolution PNG of a cited PDF region."""
+    try:
+        if len(bbox) > 128:
+            raise ValueError("Invalid PDF region")
+        coordinates = tuple(float(value) for value in bbox.split(","))
+        target = _resolve_safe_document(source, (".pdf",))
+        png_bytes = render_pdf_region_png(target, page, coordinates)
+    except IndexError:
+        raise HTTPException(status_code=404, detail="PDF page out of range") from None
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid PDF region") from None
     return Response(
         content=png_bytes,
         media_type="image/png",

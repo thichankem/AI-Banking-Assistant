@@ -266,11 +266,26 @@ def project_region(sheet, region, points, cells, merges, bold, document_key, cla
     if region.kind == "inferred" and len(rows) > 2 and len(columns) > 1:
         first = rows[0]
         actual = [(first, column) for column in columns if visible(cells.get((first, column)))]
-        if len(actual) == 1 and cells[actual[0]].kind == "text" and any(
-                merge[:2] == actual[0] and merge.right >= columns[-1] for merge in relevant_merges):
-            title_cell = actual[0]
-            title = cells[title_cell].text
-            rows.pop(0)
+        if len(actual) == 1 and cells[actual[0]].kind == "text":
+            banner = None
+            for merge in relevant_merges:
+                if merge[:2] == actual[0] and merge.left < merge.right:
+                    extra_cells = False
+                    for r_chk in rows:
+                        if merge.top <= r_chk <= merge.bottom:
+                            for c_chk in columns:
+                                if (r_chk, c_chk) != actual[0] and visible(cells.get((r_chk, c_chk))):
+                                    extra_cells = True
+                                    break
+                        if extra_cells:
+                            break
+                    if not extra_cells:
+                        banner = merge
+                        break
+            if banner is not None and any(r_rem > banner.bottom for r_rem in rows):
+                title_cell = actual[0]
+                title = cells[title_cell].text
+                rows = [r_rem for r_rem in rows if r_rem > banner.bottom]
     if region.headers is None:
         header_count = _infer_headers(rows, columns, resolved, relevant_merges, bold)
     else:

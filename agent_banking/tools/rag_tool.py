@@ -9,15 +9,16 @@ into a standard tool for AI Agents:
 - Returns normalized payload for Context Grounding and Citation.
 """
 
-import re
 import time
 
 from agent_banking.chunking.universal.planning.schema import payload_index_key
 from agent_banking.core.search_text import is_procedure_query, search_key
 from agent_banking.tools.config.prompts import RAG_TOOL_DESCRIPTION, TOOL_TEMPLATES
 from agent_banking.tools.config.settings import get_tool_runtime_config
-from agent_banking.tools.excel_rows import lookup_excel_rows
+from agent_banking.tools.excel_rows import canonical_excel_text, lookup_excel_rows
+from agent_banking.tools.extensions.banking_query import decompose_subqueries
 from agent_banking.tracing.tracer import trace_span
+from agent_banking.vector_db.qdrant_store import compute_corpus_table_paths
 
 _RAG_CFG = get_tool_runtime_config()["rag_tool"]
 _HEADER_CFG = _RAG_CFG["guide_header"]
@@ -43,10 +44,152 @@ _DIAGRAM_CHUNK_MARKERS = (
     " hinh 1 ", " hinh 2 ", " hinh 3 ", " so do ",
     " quy trinh chuan ", " ma tran ",
 )
-_SOURCE_CODE = re.compile(r"^([a-z]{2,5})\s*0*(\d{1,3})\b")
-_STRUCTURAL_QUERY_TARGET = re.compile(r"\b(?:dieu|buoc|hinh|bang|phu luc) \d{1,3}[a-z]?\b")
-_QUERY_PAGE = re.compile(r"\b(?:trang|page)\s+(?:s[ốo]\s+)?([1-9]\d{0,3})\b", re.IGNORECASE)
 _WORKFLOW_DISCRIMINATORS = ("lan dau", "dinh ky", "sau khi kich hoat", "truoc han", "toan bo", "mot phan")
+_DIGITAL_RESERVE_CUES = (
+    " truc tuyen ", " online ", " a pay ", " apay ", " napas 247 ", " 24 7 ",
+    " a smart ", " virtual card ", " chung khoan ", " a digi ", " lan dau ",
+    " kich hoat tam thoi ",
+)
+_STRUCTURAL_UNITS = ("dieu", "buoc", "hinh", "bang")
+
+
+def _parse_source_code(text: str):
+    """Parse leading document code such as 'hdsd 38', 'hdsd 03', or 'hdsd38' without regex."""
+    if not text:
+        return None
+    parts = text.split()
+    if not parts:
+        return None
+    first = parts[0]
+    alpha_len = 0
+    while alpha_len < len(first) and "a" <= first[alpha_len] <= "z":
+        alpha_len += 1
+    if not 2 <= alpha_len <= 5:
+        return None
+    prefix = first[:alpha_len]
+    raw_digits = ""
+    if alpha_len == len(first):
+        if len(parts) < 2:
+            return None
+        second = parts[1]
+        if not second.isascii() or not second.isdecimal():
+            return None
+        raw_digits = second
+    else:
+        tail = first[alpha_len:]
+        if not tail.isascii() or not tail.isdecimal():
+            return None
+        raw_digits = tail
+    trimmed = raw_digits[:-1].lstrip("0") + raw_digits[-1]
+    if not 1 <= len(trimmed) <= 3:
+        return None
+    return (prefix, trimmed)
+
+
+def _is_structural_number_token(token: str) -> bool:
+    if not token or not token.isascii():
+        return False
+    digit_len = 0
+    while digit_len < len(token) and token[digit_len].isdigit():
+        digit_len += 1
+    if not 1 <= digit_len <= 3:
+        return False
+    rest = token[digit_len:]
+    if not rest:
+        return True
+    return len(rest) == 1 and "a" <= rest <= "z"
+
+
+def _extract_structural_targets(folded_key: str) -> set:
+    """Extract targets like 'dieu 6', 'buoc 2', 'phu luc 1a' from search_key text without regex."""
+    targets = set()
+    if not folded_key:
+        return targets
+    tokens = folded_key.split()
+    count = len(tokens)
+    for idx in range(count):
+        tok = tokens[idx]
+        if tok in _STRUCTURAL_UNITS and idx + 1 < count:
+            nxt = tokens[idx + 1]
+            if _is_structural_number_token(nxt):
+                targets.add(f"{tok} {nxt}")
+        elif tok == "phu" and idx + 2 < count and tokens[idx + 1] == "luc":
+            nxt = tokens[idx + 2]
+            if _is_structural_number_token(nxt):
+                targets.add(f"phu luc {nxt}")
+    return targets
+
+
+def _find_query_page_spans(text: str) -> list:
+    """Locate 'trang [số] N' or 'page N' spans (1 <= N <= 9999) without regex."""
+    if not text:
+        return []
+    tokens = []
+    n_chars = len(text)
+    cursor = 0
+    while cursor < n_chars:
+        while cursor < n_chars and text[cursor].isspace():
+            cursor += 1
+        if cursor >= n_chars:
+            break
+        start = cursor
+        while cursor < n_chars and not text[cursor].isspace():
+            cursor += 1
+        tokens.append((start, cursor, text[start:cursor]))
+
+    spans = []
+    idx = 0
+    n_toks = len(tokens)
+    punct = ",.;:!?()[]{}\"'"
+    while idx < n_toks:
+        s0, e0, w0 = tokens[idx]
+        lead0 = len(w0) - len(w0.lstrip(punct))
+        clean0 = w0.strip(punct).lower()
+        if clean0 in ("trang", "page") and idx + 1 < n_toks:
+            num_tok_idx = idx + 1
+            _, _, w1 = tokens[idx + 1]
+            clean1 = w1.strip(punct).lower()
+            if clean1 in ("số", "so") and idx + 2 < n_toks:
+                num_tok_idx = idx + 2
+            s_num, _, w_num = tokens[num_tok_idx]
+            trail_trimmed = w_num.rstrip(punct)
+            lead_trimmed = trail_trimmed.lstrip(punct)
+            if (
+                lead_trimmed
+                and lead_trimmed == trail_trimmed
+                and 1 <= len(lead_trimmed) <= 4
+                and lead_trimmed.isascii()
+                and lead_trimmed.isdecimal()
+                and lead_trimmed[0] != "0"
+            ):
+                span_start = s0 + lead0
+                span_end = s_num + len(trail_trimmed)
+                spans.append((span_start, span_end, lead_trimmed))
+                idx = num_tok_idx + 1
+                continue
+        idx += 1
+    return spans
+
+
+def _extract_query_pages(text: str) -> set:
+    pages = set()
+    for _, _, page_str in _find_query_page_spans(text):
+        pages.add(page_str)
+    return pages
+
+
+def _strip_query_page_mentions(text: str) -> str:
+    spans = _find_query_page_spans(text)
+    if not spans:
+        return text
+    parts = []
+    last = 0
+    for s_idx, e_idx, _ in spans:
+        parts.append(text[last:s_idx])
+        parts.append(" ")
+        last = e_idx
+    parts.append(text[last:])
+    return "".join(parts)
 
 
 class AmbiguousSource(ValueError):
@@ -63,16 +206,57 @@ def _source_stem(value):
     return name
 
 
+def _merge_subquery_candidates(primary_items, sub_batches, limit):
+    """Fuse multi-subquery hybrid pools using weighted RRF without extra rerank calls."""
+    if not sub_batches:
+        return primary_items
+    merged = {}
+    for rank, item in enumerate(primary_items, start=1):
+        raw = item.get("chunk", item)
+        if not isinstance(raw, dict):
+            continue
+        key = (str(raw.get("source") or ""), payload_index_key(raw))
+        entry = dict(item)
+        base_rrf = entry.get("rrf_score")
+        if not isinstance(base_rrf, (int, float)):
+            base_rrf = 1.0 / (60.0 + rank)
+        entry["_fusion_score"] = float(base_rrf) + (0.015 / (60.0 + rank))
+        merged[key] = entry
+    for batch in sub_batches:
+        for rank, item in enumerate(batch, start=1):
+            raw = item.get("chunk", item)
+            if not isinstance(raw, dict):
+                continue
+            key = (str(raw.get("source") or ""), payload_index_key(raw))
+            add_score = 0.70 / (60.0 + rank)
+            if key in merged:
+                merged[key]["_fusion_score"] = merged[key]["_fusion_score"] + add_score
+            else:
+                entry = dict(item)
+                entry["_fusion_score"] = add_score
+                merged[key] = entry
+    ranked_pool = sorted(merged.values(), key=lambda x: x.get("_fusion_score", 0.0), reverse=True)
+    for item in ranked_pool:
+        item.pop("_fusion_score", None)
+    return ranked_pool[:limit]
+
+
 def _reserve_query_targets(candidates, ranked, seen, query):
-    """Keep bounded, structurally aligned evidence that the reranker missed."""
+    """Keep bounded, structurally aligned and digital-channel evidence that the reranker missed."""
     query_key = search_key(query)
-    targets = set(_STRUCTURAL_QUERY_TARGET.findall(query_key))
-    workflow = {term for term in _WORKFLOW_DISCRIMINATORS if f" {term} " in f" {query_key} "}
-    if not targets and not workflow:
+    padded_q = f" {query_key} "
+    targets = _extract_structural_targets(query_key)
+    workflow = {term for term in _WORKFLOW_DISCRIMINATORS if f" {term} " in padded_q}
+    wants_digital_app = any(cue in padded_q for cue in _DIGITAL_RESERVE_CUES)
+    has_ranked_app = any(_app_guide(ch) for ch in ranked)
+    need_digital_slot = wants_digital_app and not has_ranked_app
+    if not targets and not workflow and not need_digital_slot:
         return []
+    q_words = {tok for tok in query_key.split() if (len(tok) >= 3 or tok.isdigit()) and tok not in _PIN_STOPWORDS}
     ranked_sources = {chunk.get("source") for chunk in ranked}
     chosen = []
-    for item in candidates[:15]:
+    digital_added = False
+    for item in candidates[:18]:
         if not isinstance(item, dict):
             continue
         chunk = item.get("chunk", item)
@@ -82,12 +266,19 @@ def _reserve_query_targets(candidates, ranked, seen, query):
             continue
         heading = search_key(str(chunk.get("section_title") or "") + " " + str(chunk.get("content") or "")[:180])
         title = search_key(_source_stem(source))
-        is_target = bool(targets.intersection(_STRUCTURAL_QUERY_TARGET.findall(heading)))
+        is_target = bool(targets.intersection(_extract_structural_targets(heading)))
         is_workflow = source not in ranked_sources and any(f" {term} " in f" {title} " for term in workflow)
-        if is_target or is_workflow:
+        is_digital_reserve = False
+        if need_digital_slot and not digital_added and _app_guide(chunk):
+            cand_words = set((title + " " + search_key(str(chunk.get("content") or "")[:320])).split())
+            if len(q_words.intersection(cand_words)) >= 2:
+                is_digital_reserve = True
+        if is_target or is_workflow or is_digital_reserve:
             chosen.append(item)
             seen.add(identity)
             ranked_sources.add(source)
+            if is_digital_reserve:
+                digital_added = True
             if len(chosen) == 2:
                 break
     return chosen
@@ -220,6 +411,9 @@ def _source_neighbors(anchor, ordered, positions, procedure):
     if app_steps:
         hop_limit = int(_NEIGHBOR_CFG["app_guide_hop_limit"])
         step_limit = int(_NEIGHBOR_CFG["app_guide_step_limit"])
+    separator = str(_RAG_CFG["breadcrumb_separator"])
+    section_prefix = section + separator
+    step_prefixes = tuple(_RAG_CFG["step_prefixes"])
     seen_texts = set()
     anchor_norm = " ".join(str(anchor.get("content") or "").split()).casefold()
     if anchor_norm:
@@ -246,8 +440,14 @@ def _source_neighbors(anchor, ordered, positions, procedure):
                 scopes = scopes.intersection(neighbor_scopes)
             previous = chunk
             current_section = _context_section(chunk, procedure)
-            if app_steps and (_guide_logo(chunk) or current_section == section and _guide_header(chunk)):
-                continue
+            if app_steps:
+                child_heading = current_section.removeprefix(section_prefix).split(separator, 1)[0]
+                nested_in_step = current_section.startswith(section_prefix) and search_key(child_heading).startswith(
+                    step_prefixes
+                )
+                # An illustrative child under a step should not end the workflow.
+                if nested_in_step or _guide_logo(chunk) or (current_section == section and _guide_header(chunk)):
+                    continue
             if current_section != section:
                 break
             chunk_norm = " ".join(str(chunk.get("content") or "").split()).casefold()
@@ -260,6 +460,181 @@ def _source_neighbors(anchor, ordered, positions, procedure):
             if logical_distance == step_limit:
                 break
     return sorted(found, key=lambda item: (item[0], item[1]))
+
+
+def _attach_table_hierarchy_view(items, table_paths, table_notes):
+    """Attach transient inherited table path and note metadata on shallow chunk copies."""
+    if not items or (not table_paths and not table_notes):
+        return items
+    enriched = []
+    for item in items:
+        if not isinstance(item, dict):
+            enriched.append(item)
+            continue
+        raw = item.get("chunk", item)
+        if not isinstance(raw, dict):
+            enriched.append(item)
+            continue
+        key = payload_index_key(raw)
+        path_val = ""
+        if table_paths:
+            path_val = str(table_paths.get(key) or "").strip()
+        note_val = ""
+        if table_notes:
+            note_val = str(table_notes.get(key) or "").strip()
+        if not path_val and not note_val:
+            enriched.append(item)
+            continue
+        meta = raw.get("business_metadata")
+        if isinstance(meta, dict):
+            meta_copy = dict(meta)
+        else:
+            meta_copy = {}
+        chunk_copy = dict(raw)
+        if path_val:
+            chunk_copy["_inherited_table_path"] = path_val
+            if not meta_copy.get("table_group_path"):
+                meta_copy["table_group_path"] = path_val
+        if note_val and not meta_copy.get("table_notes"):
+            meta_copy["table_notes"] = note_val
+        chunk_copy["business_metadata"] = meta_copy
+        if "chunk" in item:
+            item_copy = dict(item)
+            item_copy["chunk"] = chunk_copy
+            enriched.append(item_copy)
+        else:
+            enriched.append(chunk_copy)
+    return enriched
+
+
+def _maybe_auto_excel_summary(clean_query, ranked, ordered, corpus, scope):
+    """Compute an exact row-aggregation summary chunk for Excel count/list queries."""
+    if not ranked or not clean_query:
+        return None
+    q_search = " " + search_key(clean_query) + " "
+    q_search = q_search.replace(" tp hcm ", " ho chi minh ").replace(" tphcm ", " ho chi minh ").replace(" hcm ", " ho chi minh ")
+    agg_cues = (
+        " bao nhieu ", " tong cong ", " tong so ", " so luong ", " danh sach ",
+        " liet ke ", " nhung tinh ", " tinh thanh ", " hien dien ", " toan quoc ",
+        " phan bo ", " co may ", " may diem ", " gom nhung ",
+    )
+    is_agg_query = any(cue in q_search for cue in agg_cues)
+    if not is_agg_query:
+        return None
+
+    anchor = None
+    table_id = ""
+    src = ""
+    for cand in ranked[:2]:
+        meta = cand.get("business_metadata")
+        if isinstance(meta, dict) and meta.get("excel_table_id"):
+            anchor = cand
+            table_id = str(meta["excel_table_id"])
+            src = str(cand.get("source") or "")
+            break
+    if anchor is None or not table_id or not src:
+        return None
+
+    table_chunks = []
+    if src in ordered:
+        for ch in ordered[src][0]:
+            if (ch.get("business_metadata") or {}).get("excel_table_id") == table_id:
+                table_chunks.append(ch)
+    elif corpus:
+        for ch in corpus:
+            meta = ch.get("business_metadata") or {}
+            if ch.get("source") == src and meta.get("excel_table_id") == table_id:
+                if not scope or scope in meta.get("publication_scopes", ()):
+                    table_chunks.append(ch)
+    if not table_chunks:
+        return None
+
+    col_labels = {}
+    distinct_by_col = {}
+    for ch in table_chunks:
+        excel_data = (ch.get("table_data") or {}).get("excel")
+        if not isinstance(excel_data, dict):
+            continue
+        for c_key, c_lbl in (excel_data.get("columns") or {}).items():
+            if c_key not in col_labels and c_lbl:
+                col_labels[c_key] = str(c_lbl)
+        for row in excel_data.get("rows") or ():
+            vals = row.get("values") or {}
+            for c_key in col_labels:
+                cell = vals.get(c_key) or {}
+                txt = str(cell.get("text") or "").strip()
+                if txt:
+                    bucket = distinct_by_col.setdefault(c_key, set())
+                    if len(bucket) < 120:
+                        bucket.add(txt)
+
+    filters = []
+    group_by = []
+    tinh_col = ""
+    loai_col = ""
+    for c_key, c_lbl in col_labels.items():
+        lbl_key = search_key(c_lbl)
+        if "tinh" in lbl_key and "thanh pho" in lbl_key:
+            tinh_col = c_lbl
+        elif lbl_key == "loai":
+            loai_col = c_lbl
+
+    if tinh_col:
+        for c_key, c_lbl in col_labels.items():
+            if c_lbl == tinh_col:
+                matched_vals = []
+                for val in distinct_by_col.get(c_key, ()):
+                    c_val = canonical_excel_text(val)
+                    if c_val and len(c_val) >= 3 and (" " + c_val + " ") in q_search:
+                        matched_vals.append((len(c_val), val))
+                if matched_vals:
+                    matched_vals.sort(reverse=True)
+                    best_val = matched_vals[0][1]
+                    filters.append({"column": tinh_col, "op": "eq", "value": best_val})
+                break
+
+    if loai_col:
+        loai_vals = set()
+        for c_key, c_lbl in col_labels.items():
+            if c_lbl == loai_col:
+                loai_vals = distinct_by_col.get(c_key, set())
+                break
+        want_cn = " chi nhanh " in q_search
+        want_pgd = " phong giao dich " in q_search or " phong gd " in q_search or " pgd " in q_search
+        want_atm = " atm " in q_search or " cay atm " in q_search
+        want_cdm = " cdm " in q_search or " may nop tien tu dong " in q_search
+        mentioned = []
+        if want_cn and "Chi nhánh" in loai_vals:
+            mentioned.append("Chi nhánh")
+        if want_pgd:
+            for lv in loai_vals:
+                if "phong gd" in search_key(lv):
+                    mentioned.append(lv)
+                    break
+        if want_atm and "ATM" in loai_vals:
+            mentioned.append("ATM")
+        if want_cdm and "CDM" in loai_vals:
+            mentioned.append("CDM")
+        if len(mentioned) == 1 and " diem giao dich " not in q_search:
+            filters.append({"column": loai_col, "op": "eq", "value": mentioned[0]})
+        group_by.append(loai_col)
+    if tinh_col and not filters:
+        group_by.append(tinh_col)
+
+    if not group_by:
+        return None
+    excel_spec = {"table_id": table_id, "filters": filters, "group_by": group_by}
+    res = lookup_excel_rows(table_chunks, excel_spec, scope=scope, source=src, limit=1, offset=0)
+    if res.get("status") != "success" or res.get("excel_match_count", 0) <= 0:
+        return None
+    sum_doc = None
+    for doc_item in res.get("documents", []):
+        if str(doc_item.get("chunk_id", "")).endswith(":summary"):
+            sum_doc = doc_item
+            break
+    if sum_doc is None:
+        return None
+    return {"chunk": sum_doc, "context_for": anchor["chunk_id"], "relevance_score": 0.99}
 
 
 def _pin_intra_document_targets(ranked, ordered, seen, clean_query, related, related_limit):
@@ -279,8 +654,9 @@ def _pin_intra_document_targets(ranked, ordered, seen, clean_query, related, rel
     wants_diagram = any(cue in query_key for cue in _DIAGRAM_CUES)
     time_prefix = str(_RAG_CFG["guide_header"].get("excluded_terms", ["09:41"])[0])
 
-    # Collect immediate linked siblings sharing the exact same section_title as ranked[:2]
+    # Collect immediate linked siblings sharing the exact same section_title or table_id as ranked[:2]
     sibling_keys = {}
+    anchor_table_ids = {}
     primary_sources = []
     seen_sources = set()
     for anchor in ranked[:2]:
@@ -290,6 +666,9 @@ def _pin_intra_document_targets(ranked, ordered, seen, clean_query, related, rel
         if src not in seen_sources:
             seen_sources.add(src)
             primary_sources.append((src, anchor))
+        anchor_td = anchor.get("table_data")
+        if isinstance(anchor_td, dict) and anchor_td.get("table_id"):
+            anchor_table_ids.setdefault(src, set()).add(str(anchor_td["table_id"]))
         passages, positions = ordered[src]
         pos = positions.get(payload_index_key(anchor))
         anchor_sec = str(anchor.get("section_title") or "").strip()
@@ -316,12 +695,25 @@ def _pin_intra_document_targets(ranked, ordered, seen, clean_query, related, rel
     if wants_fee_table or wants_diagram:
         threshold = 3
 
+    table_slice_counts = {}
+    ref_targets = set()
+    for _, anchor in primary_sources:
+        passages_ref, _ = ordered[anchor.get("source")]
+        for pch in passages_ref:
+            ptd = pch.get("table_data")
+            if isinstance(ptd, dict) and ptd.get("table_id"):
+                tid = str(ptd["table_id"])
+                table_slice_counts[tid] = table_slice_counts.get(tid, 0) + 1
+        ref_targets.update(_extract_structural_targets(search_key(str(anchor.get("content") or ""))))
+
+    note_cues = (" luu y ", " ghi chu ", " mien phi ", " toi thieu ", " toi da ")
     pinned = []
     for src, anchor in primary_sources:
         passages, _ = ordered[src]
         anchor_scopes = set(anchor.get("business_metadata", {}).get("publication_scopes", []))
         wants_app_subflow = _app_guide(anchor)
         src_sibs = sibling_keys.get(src, set())
+        src_tbl_ids = anchor_table_ids.get(src, set())
         for idx, cand in enumerate(passages):
             cand_key_id = payload_index_key(cand)
             ident = (cand.get("source"), cand_key_id)
@@ -343,18 +735,33 @@ def _pin_intra_document_targets(ranked, ordered, seen, clean_query, related, rel
             for tok in q_tokens:
                 if tok in cand_tokens:
                     token_hits += 1
-            if token_hits == 0:
+            sec_targets = _extract_structural_targets(sec_key.strip())
+            matches_intra_ref = bool(ref_targets and sec_targets and ref_targets.intersection(sec_targets))
+            if token_hits == 0 and not matches_intra_ref:
                 continue
 
             score = token_hits
+            cand_td = cand.get("table_data")
+            cand_tbl_id = ""
+            if isinstance(cand_td, dict):
+                cand_tbl_id = str(cand_td.get("table_id") or "")
+            same_table = bool(cand_tbl_id and cand_tbl_id in src_tbl_ids)
             is_table_chunk = (
                 cand.get("chunk_type") == "table"
-                or bool(cand.get("table_data"))
+                or bool(cand_td)
                 or " phu luc " in sec_key
                 or " bieu phi " in sec_key
             )
             if wants_fee_table and is_table_chunk:
                 score += 3
+            if same_table:
+                slice_total = table_slice_counts.get(cand_tbl_id, 0)
+                if 2 <= slice_total <= 5 and (token_hits >= 1 or any(nc in cand_key for nc in note_cues)):
+                    score += 3
+                elif token_hits >= 2:
+                    score += 2
+            if matches_intra_ref:
+                score += 4
             has_diagram_cue = any(marker in cand_key for marker in _DIAGRAM_CHUNK_MARKERS)
             if wants_diagram and has_diagram_cue:
                 score += 3
@@ -431,10 +838,12 @@ class BankingRAGTool:
                         sources.setdefault(name, []).append(chunk)
                 labels = {name: search_key(_source_stem(name)) for name in sources}
                 matched_names = [name for name, label in labels.items() if label == src_key or label.startswith(src_key + " ")]
-                source_code = _SOURCE_CODE.match(src_key)
-                if not matched_names and source_code:
-                    matched_names = [name for name, label in labels.items()
-                                     if (code := _SOURCE_CODE.match(label)) and code.groups() == source_code.groups()]
+                source_code = _parse_source_code(src_key)
+                if not matched_names and source_code is not None:
+                    for name, label in labels.items():
+                        label_code = _parse_source_code(label)
+                        if label_code is not None and label_code == source_code:
+                            matched_names.append(name)
                 if not matched_names and len(src_key) >= min_key_len and (
                     any(ch.isdigit() for ch in src_key) or len(src_key) >= min_non_digit_len
                 ):
@@ -555,13 +964,16 @@ class BankingRAGTool:
                         source_chunks = []
             if source_chunks:
                 names = sorted({chunk["source"] for chunk in source_chunks})
-                filters["source"] = names[0] if len(names) == 1 else names
+                if len(names) == 1:
+                    filters["source"] = names[0]
+                else:
+                    filters["source"] = names
             elif not source_status:
                 source_status = "source_not_found"
         reading_chunks = source_chunks
         start_offset = offset or 0
         if page is None and source_chunks and offset is not None:
-            pages = set(_QUERY_PAGE.findall(clean_query))
+            pages = _extract_query_pages(clean_query)
             if len(pages) == 1:
                 page = int(pages.pop())
         if page is not None and source_chunks:
@@ -593,6 +1005,23 @@ class BankingRAGTool:
                 candidates = []
             else:
                 candidates = search(parsed_q)
+                if not source and not exact and candidates:
+                    sub_queries = decompose_subqueries(clean_query)
+                    if sub_queries:
+                        sub_k = min(24, candidate_count)
+                        sub_batches = []
+                        for sq in sub_queries:
+                            sq_parsed = self.pipeline.parse_query(sq)
+                            sq_items = self.pipeline.retriever.retrieve(
+                                query=sq_parsed,
+                                top_k=sub_k,
+                                candidate_k=sub_k,
+                                filter_dict=filters,
+                            )
+                            if sq_items:
+                                sub_batches.append(sq_items)
+                        if sub_batches:
+                            candidates = _merge_subquery_candidates(candidates, sub_batches, top_candidates)
             relaxed = any(item.get("retrieval_meta", {}).get("fallback_unfiltered") for item in candidates)
             if exact:
                 candidates = [item for item in candidates if matches_exact(item, exact)]
@@ -621,6 +1050,11 @@ class BankingRAGTool:
             )
 
         # 3. Cross-Encoder Reranker
+        vector_store_ref = getattr(self.pipeline, "vector_store", None)
+        table_paths_map = getattr(vector_store_ref, "_bm25_table_paths", None)
+        table_notes_map = getattr(vector_store_ref, "_bm25_table_notes", None)
+        if not reading and (table_paths_map or table_notes_map):
+            candidates = _attach_table_hierarchy_view(candidates, table_paths_map, table_notes_map)
         with trace_span("top_k_cross_encoder_reranker", run_type="retriever", query=clean_query, input_count=len(candidates), top_k=top_k) as rr_span:
             if reading:
                 reranked = candidates
@@ -639,7 +1073,7 @@ class BankingRAGTool:
         ordered = {}
         related = []
         if page is not None and source_chunks and start_offset == 0:
-            topic = " ".join(_QUERY_PAGE.sub(" ", search_text).split())
+            topic = " ".join(_strip_query_page_mentions(search_text).split())
             topic_words = {word for word in search_key(topic).split() if word.isalpha()} - _PIN_STOPWORDS
             if len(topic_words) >= 3:
                 with trace_span("source_page_alternatives", run_type="retriever", page=page) as span:
@@ -708,9 +1142,11 @@ class BankingRAGTool:
                                                 "document_contact": True})
                                 seen.add(identity)
                             break
+            neighbor_cap = related_limit
+            if top_k >= 3 and not procedure and related_limit > 2:
+                neighbor_cap = related_limit - 2
+            deferred_neighbors = []
             for anchor in ranked[:anchor_limit]:
-                if len(related) >= related_limit:
-                    break
                 is_table = anchor.get("chunk_type") == "table" or bool(anchor.get("table_data"))
                 if not (procedure or is_table) or anchor.get("source") not in ordered:
                     continue
@@ -719,15 +1155,37 @@ class BankingRAGTool:
                     identity = (chunk.get("source"), payload_index_key(chunk))
                     if identity in seen:
                         continue
-                    related.append({"chunk": chunk, "context_for": anchor["chunk_id"]})
-                    seen.add(identity)
-                    if len(related) == related_limit:
+                    if len(related) < neighbor_cap:
+                        related.append({"chunk": chunk, "context_for": anchor["chunk_id"]})
+                        seen.add(identity)
+                    else:
+                        deferred_neighbors.append((identity, chunk, anchor["chunk_id"]))
+                    if len(related) >= related_limit and not (top_k >= 3 and not procedure):
                         break
-                if len(related) == related_limit:
+                if len(related) >= related_limit and not (top_k >= 3 and not procedure):
                     break
             if top_k >= 3 and len(related) < related_limit:
                 _pin_intra_document_targets(ranked, ordered, seen, clean_query, related, related_limit)
+            for identity, chunk, anchor_id in deferred_neighbors:
+                if len(related) >= related_limit:
+                    break
+                if identity in seen:
+                    continue
+                related.append({"chunk": chunk, "context_for": anchor_id})
+                seen.add(identity)
             related.extend(reserved)
+
+        # Attach hierarchical table path/notes for any returned docs missing them & add auto-Excel summary
+        for name, (passages, _) in ordered.items():
+            src_paths, src_notes = compute_corpus_table_paths(passages)
+            if src_paths or src_notes:
+                reranked = _attach_table_hierarchy_view(reranked, src_paths, src_notes)
+                related = _attach_table_hierarchy_view(related, src_paths, src_notes)
+        if not reading and ranked:
+            corpus_ref = getattr(getattr(self.pipeline, "vector_store", None), "_bm25_corpus", ())
+            auto_sum = _maybe_auto_excel_summary(clean_query, ranked, ordered, corpus_ref, scope)
+            if auto_sum is not None:
+                related.insert(0, auto_sum)
 
         default_source = TOOL_TEMPLATES["rag_default_source_label"]
         score_precision = int(_RAG_CFG["score_precision"])
@@ -792,7 +1250,10 @@ class BankingRAGTool:
                 excel_location = {"sheet_name": excel_citation["sheet_name"],
                                   "cell_ranges": excel_citation.get("cell_ranges", [])}
                 ranges = ", ".join(excel_location["cell_ranges"])
-                label = excel_location["sheet_name"] + ("!" + ranges if ranges else "")
+                if ranges:
+                    label = excel_location["sheet_name"] + "!" + ranges
+                else:
+                    label = excel_location["sheet_name"]
                 cite_label = f"[{doc_name} · {label}]"
             elif breadcrumb:
                 cite_label = f"[{breadcrumb}]"
@@ -852,9 +1313,54 @@ class BankingRAGTool:
                 inventory.append({"source": name, "chunks": count})
         method = "none"
         if reading:
-            method = "page_order" if page is not None else "source_order"
+            if page is not None:
+                method = "page_order"
+            else:
+                method = "source_order"
         elif reranked:
             method = reranked[0].get("rerank_method", "unknown")
+
+        retrieval_quality = {}
+        if source_status:
+            retrieval_quality["source_status"] = source_status
+            retrieval_quality["source_candidates"] = source_candidates
+        retrieval_quality["relaxed_filters"] = relaxed
+        retrieval_quality["reranker"] = method
+        retrieval_quality["exact_match_missing"] = bool(exact and not docs)
+        retrieval_quality["searched_candidates"] = len(candidates)
+        retrieval_quality["top_scores"] = [round(item["relevance_score"], score_precision) for item in docs[:primary_count]]
+        retrieval_quality["source_chunk_count"] = len(source_chunks)
+        if page is not None:
+            retrieval_quality["page"] = page
+            retrieval_quality["page_chunk_count"] = len(reading_chunks)
+            retrieval_quality["other_page_matches"] = len(related)
+        if reading:
+            read_start = start_offset
+        else:
+            read_start = None
+        retrieval_quality["next_offset"] = self._next_offset(read_start, top_k, len(reading_chunks))
+        retrieval_quality["source_inventory"] = inventory
+        excel_tables = []
+        seen_excel_ids = set()
+        for doc_item in docs[:primary_count]:
+            bm_item = doc_item.get("business_metadata")
+            if not isinstance(bm_item, dict):
+                continue
+            tbl_id = str(bm_item.get("excel_table_id") or "")
+            if not tbl_id or tbl_id in seen_excel_ids:
+                continue
+            seen_excel_ids.add(tbl_id)
+            td_item = doc_item.get("table_data")
+            cols_item = {}
+            if isinstance(td_item, dict) and isinstance(td_item.get("excel"), dict):
+                cols_item = td_item["excel"].get("columns") or {}
+            excel_tables.append({
+                "source": doc_item.get("source", ""),
+                "excel_table_id": tbl_id,
+                "columns": cols_item,
+            })
+        if excel_tables:
+            retrieval_quality["excel_tables_available"] = excel_tables
 
         return {
             "status": "success",
@@ -866,19 +1372,7 @@ class BankingRAGTool:
             "sources": sorted(list(sources)),
             "citations": citations[:primary_count],
             "latency_ms": latency_ms,
-            "retrieval_quality": {
-                **({"source_status": source_status, "source_candidates": source_candidates} if source_status else {}),
-                "relaxed_filters": relaxed,
-                "reranker": method,
-                "exact_match_missing": bool(exact and not docs),
-                "searched_candidates": len(candidates),
-                "top_scores": [round(item["relevance_score"], score_precision) for item in docs[:primary_count]],
-                "source_chunk_count": len(source_chunks),
-                **({"page": page, "page_chunk_count": len(reading_chunks), "other_page_matches": len(related)}
-                   if page is not None else {}),
-                "next_offset": self._next_offset(start_offset if reading else None, top_k, len(reading_chunks)),
-                "source_inventory": inventory,
-            }
+            "retrieval_quality": retrieval_quality,
         }
 
     @staticmethod

@@ -73,6 +73,9 @@ def discover_documents(directory, extensions=None, *, reject_unsupported=False, 
     for path in sorted(directory.rglob("*")):
         if path.name.startswith("~$") or not path.is_file():
             continue
+        stem_lower = unicodedata.normalize("NFC", path.stem).casefold()
+        if "golden" in stem_lower and "evaluation" in stem_lower:
+            continue
         if excluded_paths and path.resolve() in excluded_paths:
             continue
         extension = path.suffix.lower()

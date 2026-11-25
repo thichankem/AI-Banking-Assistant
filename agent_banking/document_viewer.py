@@ -230,7 +230,18 @@ def load_document_chunks_for_source(source: str, knowledge_root: Path) -> list[d
         return []
     clean = str(source or "").replace("\\", "/").strip().lower()
     fname = clean.rsplit("/", 1)[-1]
-    inv_file = knowledge_root.parent.parent.parent / "vector_db" / "qdrant_db" / "knowledge_inventory.json"
+    vdb_root = knowledge_root.parent.parent.parent / "vector_db"
+    inv_candidates = []
+    env_qdrant = os.environ.get("ABANK_QDRANT_STORAGE_PATH", "").strip()
+    if env_qdrant:
+        inv_candidates.append(Path(env_qdrant) / "knowledge_inventory.json")
+    inv_candidates.append(vdb_root / "qdrant_db" / "knowledge_inventory.json")
+    inv_candidates.append(vdb_root / "qdrant_full_141" / "knowledge_inventory.json")
+    inv_file = inv_candidates[0]
+    for cand_inv in inv_candidates:
+        if cand_inv.is_file():
+            inv_file = cand_inv
+            break
     candidate_pubs = []
     if inv_file.is_file():
         try:
@@ -1064,6 +1075,30 @@ def render_pdf_page_png(doc_path: Path, page_number: int, dpi: int = 144) -> byt
         return pix.tobytes("png")
     finally:
         doc.close()
+
+
+def render_pdf_region_png(doc_path: Path, page_number: int, bbox: tuple[float, ...]) -> bytes:
+    """Render normalized display coordinates at up to 480 DPI, bounded to 2400 px per side."""
+    if len(bbox) != 4 or not (0 <= bbox[0] < bbox[2] <= 1 and 0 <= bbox[1] < bbox[3] <= 1):
+        raise ValueError("Invalid PDF region")
+    with pymupdf.open(str(doc_path)) as doc:
+        if page_number < 1 or page_number > len(doc):
+            raise IndexError("Page number out of range")
+        page = doc[page_number - 1]
+        rect = page.rect
+        clip = pymupdf.Rect(
+            rect.x0 + bbox[0] * rect.width, rect.y0 + bbox[1] * rect.height,
+            rect.x0 + bbox[2] * rect.width, rect.y0 + bbox[3] * rect.height,
+        )
+        if clip.width < 1 or clip.height < 1:
+            raise ValueError("PDF region is too small")
+        # Leave room for MuPDF's outward rounding at both edges.
+        scale = min(480 / 72, 2398 / max(clip.width, clip.height))
+        pixmap = page.get_pixmap(
+            matrix=pymupdf.Matrix(scale, scale), clip=clip,
+            colorspace=pymupdf.csRGB, alpha=False, annots=False,
+        )
+        return pixmap.tobytes("png")
 
 
 def _extract_native_pdf_lines(page) -> list[dict]:

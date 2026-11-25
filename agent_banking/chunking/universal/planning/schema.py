@@ -46,13 +46,28 @@ def clean_path_segment(segment):
     return str(segment).strip()
 
 
+def _is_numbered_abank_folder(segment):
+    text = str(segment or "").strip()
+    dot_pos = text.find(". ")
+    if dot_pos <= 0:
+        return False
+    return text[:dot_pos].isdigit()
+
+
 def _infer_semantic_domain(folder_segments, default_domain):
+    cat = ""
+    fallback = default_domain
     if len(folder_segments) >= 2 and folder_segments[0].casefold() == "a_bank":
         cat = folder_segments[1].casefold()
+        fallback = folder_segments[1]
+    elif len(folder_segments) >= 1 and _is_numbered_abank_folder(folder_segments[0]):
+        cat = folder_segments[0].casefold()
+        fallback = folder_segments[0]
+    if cat:
         for rule in _A_BANK_DOMAIN_RULES:
             if any(keyword in cat for keyword in rule["keywords"]):
                 return rule["domain"]
-        return folder_segments[1]
+        return fallback
     return default_domain
 
 

@@ -81,6 +81,9 @@ REVIEW_ISSUE = object_schema({
     "source": text_schema(32),
 }, ["item", "problem"])
 
+MAX_FOLLOW_UP_QUESTIONS = 2
+MAX_FOLLOW_UP_QUESTION_CHARS = 120
+
 SCHEMAS = {
     "tool": action_schema("tool", {"name": text_schema(100), "arguments": {"type": "object"}}),
     "skill": action_schema("skill", {"name": text_schema(100), "arguments": {"type": "object"}}),
@@ -100,14 +103,19 @@ SCHEMAS = {
     "forget": action_schema("forget", {"key": text_schema(48)}),
     "compact": action_schema("compact", {}),
     "final": action_schema("final", {
-        "answer": text_schema(8000), "insufficient_evidence": {"type": "boolean"}
-    }, optional=("insufficient_evidence",)),
+        "answer": text_schema(8000), "insufficient_evidence": {"type": "boolean"},
+        "follow_up_questions": {"type": "array", "items": text_schema(MAX_FOLLOW_UP_QUESTION_CHARS),
+                                "maxItems": MAX_FOLLOW_UP_QUESTIONS},
+    }, optional=("insufficient_evidence", "follow_up_questions")),
 }
 REVIEW_SCHEMA = object_schema(
     {"verdict": {"enum": ["approve", "revise"]}, "feedback": {"type": "string", "maxLength": _REVIEW_FEEDBACK_MAX_CHARS},
      "coverage": {"type": "array", "items": COVERAGE, "maxItems": 16},
      "claims": {"type": "array", "items": CLAIM, "maxItems": 40},
      "issues": {"type": "array", "items": REVIEW_ISSUE, "maxItems": 4},
+     "scope_issue": text_schema(_REVIEW_ISSUE_PROBLEM_MAX_CHARS),
+     "approved_follow_up_indices": {"type": "array", "maxItems": MAX_FOLLOW_UP_QUESTIONS,
+                                    "items": {"type": "integer", "minimum": 1, "maximum": MAX_FOLLOW_UP_QUESTIONS}},
      "visualization_approved": {"type": "boolean"}},
     ["verdict", "feedback", "coverage", "claims"]
 )
@@ -122,6 +130,14 @@ def _normalize_review(result):
     result = {key: value for key, value in result.items() if key in REVIEW_SCHEMA["properties"]}
     if type(result.get("visualization_approved")) is not bool:
         result.pop("visualization_approved", None)
+    approved = result.pop("approved_follow_up_indices", None)
+    if isinstance(approved, list):
+        result["approved_follow_up_indices"] = sorted({
+            index for index in approved if type(index) is int and 1 <= index <= MAX_FOLLOW_UP_QUESTIONS
+        })
+    scope_issue = result.pop("scope_issue", None)
+    if isinstance(scope_issue, str) and scope_issue.strip():
+        result["scope_issue"] = scope_issue.strip()[:_REVIEW_ISSUE_PROBLEM_MAX_CHARS]
     if isinstance(result.get("feedback"), str):
         result["feedback"] = result["feedback"][:_REVIEW_FEEDBACK_MAX_CHARS]
     if result.get("verdict") == "revise":
@@ -314,8 +330,13 @@ class StructuredModel:
                 # A provider may add prose fields to an otherwise valid decision.
                 # They have no effect on execution and must not enter the checkpoint.
                 result = {key: value for key, value in result.items() if key in fields}
-            if result.get("kind") == "final" and isinstance(result.get("answer"), str):
-                result["answer"] = result["answer"][:8000]
+            if result.get("kind") == "final":
+                questions = result.pop("follow_up_questions", None)
+                if isinstance(questions, list):
+                    result["follow_up_questions"] = [
+                        question.strip() for question in questions
+                        if isinstance(question, str) and 1 <= len(question.strip()) <= MAX_FOLLOW_UP_QUESTION_CHARS
+                    ][:MAX_FOLLOW_UP_QUESTIONS]
             if any(schema is REVIEW_SCHEMA or schema is ARTIFACT_REVIEW_SCHEMA for schema in schemas):
                 result = _normalize_review(result)
             if not any(validator.is_valid(result) for validator in validators):

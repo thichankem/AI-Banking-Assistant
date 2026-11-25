@@ -230,7 +230,8 @@ def native_table_elements(page, *, hidden=None):
     if hidden is None:
         hidden = hidden_glyphs(page)
     with NATIVE_TABLE_LOCK:
-        for table in page.find_tables().tables:
+        # Use the PDF's vector grid to preserve merged cells and multirow headers.
+        for table in page.find_tables(use_layout=False).tables:
             bbox = normalized_page_box(page, table.bbox)
             source_rows = [row.cells for row in table.rows]
             if bbox is None or len(source_rows) < 2 or len(source_rows[0]) < 2:
