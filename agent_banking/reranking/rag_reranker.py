@@ -308,9 +308,14 @@ class BankingReranker:
                 bonus += 0.065
             if (" ma pin " in padded_q or " cvv " in padded_q):
                 if " virtual card " in padded_src or " the " in padded_src:
-                    bonus += 0.06
+                    bonus += 0.065
                 elif " cap lai mat khau " in padded_src or " khoi phuc " in padded_src:
                     bonus -= 0.04
+            if any(m in padded_q for m in (" cai dat the ", " bat tat ", " trang thai hoat dong cua the ", " the ao ", " cvv ")):
+                if (" the ao " in padded_q or " cvv " in padded_q) and (" virtual card " in padded_src or " the ao " in padded_src):
+                    bonus += 0.075
+                elif " cai dat the " in padded_q and " quan ly the " in padded_src:
+                    bonus += 0.075
 
         for yr in years:
             if yr in q_tokens:
@@ -379,7 +384,8 @@ class BankingReranker:
             " chiu khoan phi ", " chiu phi ", " thu phi ", " tinh phi ", " chi phi ",
             " phi dich vu ", " phi giu ho ", " giu ho tai san ", " phi sec ", " phi ngan quy ",
             " phi tai san bao dam ", " phi giai chap ", " muc phi giai chap ", " niem phong ",
-            " dormant ", " khong hoat dong ",
+            " dormant ", " khong hoat dong ", " thong bao mat ", " chuyen quyen so huu ",
+            " thu xep tin dung ", " bieu phi dich vu ",
         )
         explicit_nv_or_tier = any(m in padded_q for m in (" nv ", " goi bach kim ", " goi uu tien ", " goi thinh vuong ", " phan hang "))
         if any(fc in padded_q for fc in fee_cues) and not explicit_nv_or_tier:
@@ -399,6 +405,12 @@ class BankingReranker:
                     bonus += 0.04
                 elif any(m in padded_q for m in (" tai san bao dam ", " the chap ", " giai chap ")) and src_key.startswith("bp 09"):
                     bonus += 0.05
+                elif any(m in padded_q for m in (
+                    " thu xep tin dung ", " thong bao mat ", " chuyen nhuong ", " chuyen quyen so huu ",
+                    " giay to co gia ", " chung chi tien gui ", " ky phieu ", " bao thanh toan ",
+                    " sao luc ", " cam ket rut von ", " thua ke ",
+                )) and src_key.startswith("bp 10"):
+                    bonus += 0.055
 
         network_cues = (" chi nhanh ", " phong giao dich ", " atm ", " cdm ", " mang luoi ", " diem giao dich ")
         if any(nc in padded_q for nc in network_cues):
@@ -896,6 +908,30 @@ class BankingReranker:
                                         last_src = str(last_chunk.get("source") or "").replace("\\", "/").casefold()
                                     if (last_src and source_counts.get(last_src, 0) >= 2) or (hdsd_score >= 0.35 and hdsd_score + 0.15 >= last_score):
                                         selected[-1] = best_hdsd
+                            else:
+                                from agent_banking.core.search_text import search_key as _sk
+                                qk_card = " " + _sk(query_text) + " "
+                                if any(cm in qk_card for cm in (" ma pin ", " the ao ", " cai dat the ", " cvv ")):
+                                    has_card_hdsd = False
+                                    bad_hdsd_idx = -1
+                                    for s_idx, s_it in enumerate(selected):
+                                        sc = s_it.get("chunk", s_it)
+                                        s_name = ""
+                                        if isinstance(sc, dict):
+                                            s_name = _sk(str(sc.get("source") or "").replace("\\", "/").rsplit("/", 1)[-1])
+                                        if s_name.startswith("hdsd "):
+                                            if " the " in s_name or " virtual card " in s_name:
+                                                has_card_hdsd = True
+                                            elif " cap lai mat khau " in s_name or " ten dang nhap " in s_name:
+                                                bad_hdsd_idx = s_idx
+                                    if not has_card_hdsd and bad_hdsd_idx >= 0:
+                                        for cand_item in ordered[:10]:
+                                            if self._is_hdsd_item(cand_item) and float(cand_item.get("relevance_score", 0.0)) >= 0.32:
+                                                c_chunk = cand_item.get("chunk", cand_item)
+                                                c_name = _sk(str(c_chunk.get("source") or "").replace("\\", "/").rsplit("/", 1)[-1])
+                                                if " the " in c_name or " virtual card " in c_name:
+                                                    selected[bad_hdsd_idx] = cand_item
+                                                    break
                         chosen = selected
                     else:
                         chosen = ordered[:top_k]
