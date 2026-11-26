@@ -301,8 +301,38 @@ class BankingGuardrailManager:
                         return f"{act} ... {tgt}"
         return None
 
+    def _check_runtime_security_markers(self, text_lower):
+        """Detect hidden HTML prompt overrides, secret exfiltration, and cross-session extraction (0% Regex)."""
+        if ("display:none" in text_lower or "display: none" in text_lower) and ("<" in text_lower and "style=" in text_lower):
+            for directive in ("override", "system", "api key", "secret", "password", "token", "ignore", "in ra"):
+                if directive in text_lower:
+                    return "hidden_html_prompt_injection"
+        explicit_markers = (
+            "[system instruction override]",
+            "system instruction override",
+            "[system override]",
+            "api key cấu hình",
+            "api key cau hinh",
+            "chuỗi api key",
+            "chuoi api key",
+            "phiên làm việc khác của người dùng",
+            "phien lam viec khac cua nguoi dung",
+            "bộ nhớ phiên làm việc khác",
+            "bo nho phien lam viec khac",
+            "hội thoại phiên làm việc khác",
+            "hoi thoai phien lam viec khac",
+        )
+        for marker in explicit_markers:
+            if marker in text_lower:
+                return marker
+        return None
+
     def _check_prompt_injection(self, text_lower):
         """Scan Prompt Injection / Jailbreak, Spaced Text, Unaccented Vietnamese, and Leetspeak (0% Regex)."""
+        runtime_sec = self._check_runtime_security_markers(text_lower)
+        if runtime_sec is not None:
+            return runtime_sec
+
         # 1. Scan direct keyword taxonomy on raw text
         for phrase in INJECTION_PHRASES:
             if phrase in text_lower:

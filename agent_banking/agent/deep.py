@@ -1076,6 +1076,11 @@ class BankingDeepAgent(BankingReActNodes):
             system += _DEEP_MESSAGES.get("subagents_header", "\n") + json.dumps(
                 {name: role["description"] for name, role in WORKERS.items()}, ensure_ascii=False
             )
+            if "search_banking_knowledge" in catalog["tool"]:
+                system += (
+                    "\nFor search_banking_knowledge, omit 'source' on broad fee, policy, or account lookups unless the customer "
+                    "explicitly names a document code/title (e.g., 'NV 01', 'BP 01', 'HDSD 05') or asks about mobile app navigation steps."
+                )
             if _COORDINATOR_SKILL_HINT:
                 system += "\n" + _COORDINATOR_SKILL_HINT
             if PRESENT_VISUALIZATION_TOOL in catalog["tool"] and "tool" in allowed:
@@ -1105,8 +1110,15 @@ class BankingDeepAgent(BankingReActNodes):
         if state.get("audit_feedback"):
             data["review_feedback"] = state["audit_feedback"]
             data["previous_draft"] = state.get("draft_answer", "")
+            data["revision_attempt"] = int(state.get("hallucination_retries") or 0)
             if _REVISION_INSTRUCTION:
                 system += "\n" + _REVISION_INSTRUCTION
+            system += (
+                "\nREVISION DISCIPLINE: Never output previous_draft unchanged. If review failed on missing citations or missing facts "
+                "and a previous search used a restrictive 'source' parameter (such as a folder prefix), call search_banking_knowledge "
+                "WITHOUT 'source' if tools remain available; otherwise embed valid [Nguồn N] tags matching current available_evidence "
+                "and drop/disclose unverified figures with insufficient_evidence=true."
+            )
 
         recent = state.get("recent_visualizations", [])
         active_skills = state.get("active_skills", {})
