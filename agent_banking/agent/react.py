@@ -15,6 +15,7 @@ from agent_banking.agent.document_context import (
 )
 from agent_banking.core.chat import FallbackChatClient
 from agent_banking.core.models import auto_routing_enabled
+from agent_banking.core.policy_dates import policy_query_date
 from agent_banking.core.search_text import search_key
 from agent_banking.guardrails.rag_guardrails import BankingGuardrailManager
 from agent_banking.skills.skill_registry import SkillRegistry, mapped_arguments, resolve_skill
@@ -323,9 +324,8 @@ class BankingReActNodes:
                 or not top_k <= candidate_k <= _SEARCH_CANDIDATE_K_MAX
             ):
                 return {}, "", _REACT_MESSAGES.get("invalid_rag_skill_params", "")
-            search = {"query": query, "top_k": top_k}
-            if "exact" in params:
-                search["exact"] = params["exact"]
+            search = {key: value for key, value in params.items() if key != "candidate_k"}
+            search.update(query=query, top_k=top_k)
             guarded, error = self._guard_tool("search_banking_knowledge", search, tools)
             return {**guarded, "candidate_k": candidate_k}, "", error
         if mode == "fact_checker_engine":
@@ -388,13 +388,12 @@ class BankingReActNodes:
             context = _format_retrieved_doc_context(record, max_chars=_EVIDENCE_CONTEXT_MAX_CHARS, query=data.get("query", ""))
             if not context:
                 continue
-            scan = getattr(self.guardrails, "indirect_guardrail", None)
-            if scan is not None and not scan.scan_text(context)["is_safe"]:
-                blocked_count += 1
-                continue
             meta = record.get("business_metadata") or {}
+            temporal = meta.get("temporal") or {}
             identity = (source, record.get("chunk_id"), meta.get("document_version"),
                         meta.get("publication_revision") or record.get("content", ""))
+            if temporal:
+                identity += (temporal.get("as_of"), temporal.get("status"))
             entry = next((item for item in evidence if tuple(item["identity"]) == identity), None)
             if entry is None:
                 if len(evidence) >= MAX_EVIDENCE:
@@ -465,8 +464,11 @@ class BankingReActNodes:
             result["new_evidence"] = len(evidence) - previous_count
         if isinstance(data.get("retrieval_quality"), dict):
             result["retrieval_quality"] = data["retrieval_quality"]
+        if "status" in data:
+            result["status"] = data["status"]
         if data.get("excel_match_count") is not None or str(data.get("status", "")).startswith("excel_"):
-            result.update({key: data[key] for key in ("status", "excel_columns", "excel_units", "excel_match_count", "excel_summary", "next_offset")
+            result.update({key: data[key] for key in ("status", "excel_columns", "excel_units", "excel_match_count",
+                                                    "excel_summary", "excel_unverified_row_count", "next_offset")
                            if key in data})
         return result
 
@@ -495,7 +497,29 @@ class BankingReActNodes:
             params, tool_name, error = self._prepare_skill(definition, params, evidence, tools)
         elif not error:
             params, error = self._guard_tool(name, params, tools)
+        knowledge_search = tool_name == "search_banking_knowledge"
+        if kind == "skill" and definition and definition["execution"]["type"] == "rag_pipeline":
+            knowledge_search = True
+        dated_search = knowledge_search or tool_name == LEGAL_WEB_SEARCH_TOOL
+        if not error and dated_search and "as_of" not in params and not (params.get("excel") or {}).get("as_of"):
+            try:
+                requested_date, _ = policy_query_date(state.get("user_query", ""))
+            except ValueError:
+                requested_date = None
+            if requested_date is None and state.get("human_replies"):
+                reply_text = " ".join(
+                    str(item.get("response") or "") for item in state["human_replies"]
+                    if isinstance(item, dict)
+                ).strip()
+                if reply_text:
+                    try:
+                        requested_date, _ = policy_query_date(reply_text)
+                    except ValueError:
+                        requested_date = None
+            if requested_date is not None:
+                params = {**params, "as_of": requested_date.isoformat()}
         key = ""
+        read_fingerprint = None
         calls = list(state.get("tool_outputs", []))
         if not error and tool_name == LEGAL_WEB_SEARCH_TOOL and not legal_searches_remaining(calls):
             error = _REACT_MESSAGES.get("legal_search_limit") or "Legal search limit reached for this turn."
@@ -509,18 +533,11 @@ class BankingReActNodes:
                 fingerprint_input = {k: v for k, v in params.items() if k != "documents"}
                 if tool_name == LEGAL_WEB_SEARCH_TOOL:
                     fingerprint_input["query"] = search_key(params["query"])
-                if kind == "tool" and name == "search_banking_knowledge" and params.get("offset") is not None and params.get("source"):
+                if knowledge_search and params.get("offset") is not None and params.get("source"):
                     fingerprint_input.pop("query", None)
-                    raw_src = str(params.get("source") or "").replace("\\", "/").casefold().rsplit("/", 1)[-1]
-                    if "." in raw_src:
-                        raw_stem = raw_src.rsplit(".", 1)[0]
-                    else:
-                        raw_stem = raw_src
-                    src_parts = raw_stem.split()
-                    if len(src_parts) >= 2 and src_parts[0].isalpha() and src_parts[1].isdigit():
-                        fingerprint_input["source"] = src_parts[0] + " " + src_parts[1]
-                    else:
-                        fingerprint_input["source"] = raw_stem
+                    raw_src = str(params["source"]).strip().replace("\\", "/").casefold()
+                    fingerprint_input["source"] = raw_src
+                    read_fingerprint = fingerprint_input
                 if kind == "skill" and name.replace("_", "-") == "fact-checking-audit":
                     fingerprint_input["evidence_count"] = len(evidence)
                 if kind == "skill":
@@ -573,7 +590,7 @@ class BankingReActNodes:
                 data = result.get("data")
                 web_details = {}
                 if web_search and isinstance(data, dict):
-                    web_details = {key: data[key] for key in ("provider", "attempts") if key in data}
+                    web_details = {key: data[key] for key in ("provider", "providers", "attempts") if key in data}
                     web_details["web_evidence_status"] = data.get("status")
                 if result.get("status") == "SUCCESS" and isinstance(data, dict) and str(data.get("status", "")).lower() not in ("failed", "error"):
                     observation = {"kind": kind, "name": name, "status": "SUCCESS"}
@@ -583,6 +600,17 @@ class BankingReActNodes:
                         retrieval = True
                     if retrieval:
                         observation["retrieval"] = True
+                        if knowledge_search:
+                            observation["knowledge_search"] = True
+                        if read_fingerprint is not None:
+                            primary_sources = {str(_unwrap_doc_dict(doc).get("source") or "") for doc in (documents or [])}
+                            if len(primary_sources) == 1 and (resolved := next(iter(primary_sources))):
+                                resolved = resolved.replace("\\", "/").casefold()
+                                canonical = {**read_fingerprint, "source": resolved}
+                                canonical_key = kind + ":" + identity + ":" + json.dumps(
+                                    canonical, ensure_ascii=False, sort_keys=True)
+                                if canonical_key not in attempts:
+                                    attempts.append(canonical_key)
                         data = self._observe_retrieval({**data, "query": params.get("query", "")}, evidence)
                         data.update(web_details)
                         searches += 1
@@ -594,7 +622,10 @@ class BankingReActNodes:
                     if retrieval:
                         observation["data"] = data
                         if not data["documents"]:
-                            code = data.get("retrieval_quality", {}).get("source_status") or "insufficient_evidence"
+                            code = data.get("retrieval_quality", {}).get("source_status")
+                            if not code and data.get("status") not in {None, "success", "no_results"}:
+                                code = data["status"]
+                            code = code or "insufficient_evidence"
                             observation.update(status="ERROR", error_code=code,
                                                error=_REACT_MESSAGES.get(code, _REACT_MESSAGES.get("insufficient_evidence", "")))
                     elif not verify_calculation(tool_name, data, params):
@@ -672,6 +703,11 @@ class BankingReActNodes:
             raise ValueError("Missing citation")
         documents = [evidence[index - 1]["chunk"] for index in sorted(used)]
         if documents:
+            temporal = [(doc.get("business_metadata") or {}).get("temporal") or {} for doc in documents]
+            if any(item.get("requested_date") and item.get("status") in {
+                       "reference_only", "conflict", "order_unknown", "latest_available"}
+                   for item in temporal) and not decision.get("insufficient_evidence"):
+                raise ValueError("Dated reference passages require insufficient_evidence and a reference-only answer")
             grounding = self.guardrails.verify_citation_grounding(draft, documents)
             if grounding["unsupported_citations"]:
                 raise ValueError("Unsupported legal citation")
@@ -680,10 +716,12 @@ class BankingReActNodes:
         for index in sorted(used):
             entry = evidence[index - 1]
             chunk = entry["chunk"]
+            meta = chunk.get("business_metadata") or {}
             citations.append({
                 "index": index, "label": f"[Nguồn {index}]", "source": entry["source"],
                 "chunk_id": chunk.get("chunk_id", ""), "breadcrumb": chunk.get("breadcrumb", ""),
                 "section_title": chunk.get("section_title", ""),
-                "document_version": (chunk.get("business_metadata") or {}).get("document_version", "")
+                "document_version": meta.get("document_version") or (meta.get("policy_revision") or {}).get("document_version", ""),
+                **{key: meta[key] for key in ("temporal", "graph_link") if key in meta},
             })
         return citations

@@ -574,12 +574,16 @@ class BankingQueryParser:
                         has_percent = True
 
                     if right_len <= 2 and (ch == "," or has_percent):
-                        for pos_idx in range(left_start, right_end + 1):
-                            masked_chars[pos_idx] = " "
+                        # Preserve decimal notation inside tokens ('1,5' -> '1.5' and '1,5') instead of blanking it.
+                        if ch == ",":
+                            masked_chars[i] = "."
+                            continue
 
         cleaned_chars = []
-        for c in masked_chars:
+        for idx_c, c in enumerate(masked_chars):
             if c.isalnum() or c.isspace():
+                cleaned_chars.append(c)
+            elif c == "." and 0 < idx_c < t_len - 1 and masked_chars[idx_c - 1].isdigit() and masked_chars[idx_c + 1].isdigit():
                 cleaned_chars.append(c)
             else:
                 cleaned_chars.append(" ")

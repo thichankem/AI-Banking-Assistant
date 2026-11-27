@@ -40,7 +40,7 @@ from agent_banking.core.settings import Config
 from agent_banking.embedding.config.settings import EmbeddingConfig
 from agent_banking.embedding.embedder import BankingEmbedder
 from agent_banking.vector_db.config.settings import VectorDBConfig
-from agent_banking.vector_db.qdrant_store import QdrantBankingStore
+from agent_banking.vector_db.qdrant_store import QdrantBankingStore, configured_qdrant_connection
 from agent_banking.retrieval.config.settings import RetrievalConfig
 from agent_banking.retrieval.hybrid_retriever import HybridRetriever
 from agent_banking.tools.extensions.banking_query import ParsedQuery, parse_banking_query
@@ -74,18 +74,11 @@ def init_retrieval_engine(config=None, use_memory=False, top_k=None):
         cache_db_path=cache_db_path
     )
 
-    raw_storage = getattr(cfg, "QDRANT_STORAGE_PATH", VectorDBConfig.QDRANT_STORAGE_PATH)
-    storage_candidate = Path(str(raw_storage))
-    if storage_candidate.is_absolute():
-        resolved_storage = str(storage_candidate)
-    else:
-        resolved_storage = str((PROJECT_ROOT / storage_candidate).resolve())
-
     store = QdrantBankingStore(
         collection_name=getattr(cfg, "QDRANT_COLLECTION", VectorDBConfig.QDRANT_COLLECTION),
         dimension=getattr(cfg, "EMBEDDING_DIM", EmbeddingConfig.EMBEDDING_DIM),
-        storage_path=resolved_storage,
-        use_memory=use_memory
+        use_memory=use_memory,
+        **configured_qdrant_connection(cfg),
     )
 
     bm25_k1 = getattr(cfg, "BM25_K1", RetrievalConfig.BM25_K1)
@@ -896,22 +889,55 @@ def run_auto_retrieval(
     )
 
 
-if __name__ == "__main__":
+def main():
     import argparse
     parser = argparse.ArgumentParser(description="Hybrid Retrieval Execution Node")
     parser.add_argument("--query", "-q", type=str, default=None, help="Cau hoi don le can truy van")
     parser.add_argument("--input", "-i", type=str, default=None, help="Path to raw or preprocessed query input (JSON or TXT)")
     parser.add_argument("--output", "-o", type=str, default=None, help="Thu muc output")
-    parser.add_argument("--top-k", "-k", type=int, default=RetrievalConfig.HYBRID_TOP_K, help="So luong candidates")
+    parser.add_argument("--top-k", "-k", type=int, default=None, help="Result limit")
     parser.add_argument("--force", "-f", action="store_true", help="Chay lai toan bo bo qua cache")
     parser.add_argument("--use-memory", action="store_true", help="Chay Qdrant In-Memory")
+    parser.add_argument("--hybrid-only", action="store_true", help="Return raw hybrid candidates for node diagnostics")
+    parser.add_argument("--source", default="")
+    parser.add_argument("--exact", default="")
+    parser.add_argument("--as-of")
+    parser.add_argument("--page", type=int)
+    parser.add_argument("--offset", type=int)
+    parser.add_argument("--no-graph", action="store_true")
+    parser.add_argument("--excel", type=json.loads, help="Structured Excel lookup as a JSON object")
     args = parser.parse_args()
+
+    if args.query is not None and not args.hybrid_only:
+        from agent_banking.pipeline import BankingRAGPipeline
+        from agent_banking.tools.rag_tool import BankingRAGTool
+
+        pipeline = BankingRAGPipeline(use_memory=args.use_memory)
+        try:
+            result = BankingRAGTool(pipeline_instance=pipeline).execute(
+                args.query, top_k=args.top_k, source=args.source, exact=args.exact, as_of=args.as_of,
+                page=args.page, offset=args.offset, expand_graph=not args.no_graph, excel=args.excel,
+            )
+        finally:
+            pipeline.close()
+        payload = json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False)
+        if args.output:
+            directory = Path(args.output)
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / "rag_search.json").write_text(payload, encoding="utf-8")
+        else:
+            print(payload)
+        return
 
     run_retrieval(
         query=args.query,
         input_file=args.input,
         output_dir=args.output,
-        top_k=args.top_k,
+        top_k=args.top_k or RetrievalConfig.HYBRID_TOP_K,
         force=args.force,
         use_memory=args.use_memory
     )
+
+
+if __name__ == "__main__":
+    main()

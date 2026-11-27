@@ -87,7 +87,8 @@ class UniversalDocxChunker:
                  max_chunk_size=None, min_section_size=None, config=None,
                  min_chunk_tokens=_PIPELINE["min_chunk_tokens"],
                  search_language=None, ocr_docx_images=_PIPELINE["ocr_docx_images"], excel_metadata=None,
-                 review_incomplete_pdf=False, previous_partial_pdf_pages=0):
+                 review_incomplete_pdf=False, previous_partial_pdf_pages=0, review_pdf_page_indexes=None,
+                 include_hidden_sheets=False):
         if max_chunk_chars is None and max_chunk_size is not None:
             max_chunk_chars = max_chunk_size
         if min_section_size is not None and min_section_chars == 0:
@@ -97,6 +98,7 @@ class UniversalDocxChunker:
             search_language = getattr(config, "CHUNK_SEARCH_LANGUAGE", ChunkingConfig.CHUNK_SEARCH_LANGUAGE)
         self.ocr_docx_images = ocr_docx_images
         self.excel_metadata = validate_excel_metadata(excel_metadata)
+        self.include_hidden_sheets = bool(include_hidden_sheets)
         self.dpi = dpi
         self.max_chunk_words = max_chunk_words
         if type(workers) is not int or workers < 1:
@@ -129,7 +131,7 @@ class UniversalDocxChunker:
                 asset_dir or MODULE / _PIPELINE["asset_dir_relpath"], self.cache, vision_client, review_vision_client,
                 dpi, max_pdf_pages, max_page_pixels, use_decision,
                 search_language=search_language, workers=ocr_workers, review_incomplete=review_incomplete_pdf,
-                previous_partial_pages=previous_partial_pdf_pages,
+                previous_partial_pages=previous_partial_pdf_pages, review_page_indexes=review_pdf_page_indexes,
             )
             self.planner = ChunkPlanner(
                 target_chunk_tokens, max_chunk_tokens, max_chunk_words, table_rows_per_chunk, tokenizer,
@@ -144,6 +146,7 @@ class UniversalDocxChunker:
             self.xlsx_extractor = XlsxExtractor(
                 self.pdf_extractor.asset_dir, self.cache, vision_client, review_vision_client, max_page_pixels,
                 use_llm=use_llm, use_decision=use_decision, workers=self.workers,
+                include_hidden_sheets=self.include_hidden_sheets,
             )
             source_root = Path(__file__).resolve().parent
             excluded_parts = set(_PIPELINE["code_snapshot_excluded_parts"])
@@ -209,6 +212,7 @@ class UniversalDocxChunker:
         return self.chunk_document(docx_path=xlsx_path, docx_bytes=xlsx_bytes, source_name=source_name, expected_format="xlsx")
 
     def _process_ir(self, ir):
+        from .enrichment.source_quality import annotate_page_quality
         from .text.language import classify_text_blocks
 
         ir["profile"] = _PIPELINE["profile"]
@@ -274,6 +278,13 @@ class UniversalDocxChunker:
             if "pages" in statistics:
                 quality["ocr_partial_pages"] = artifact["quality"]["ocr_partial_pages"]
                 quality["ocr_failed_page_numbers"] = artifact["quality"]["ocr_failed_page_numbers"]
+            if excel and statistics.get("excel_formula_cells_skipped"):
+                quality["excel_formula_cells_skipped"] = statistics["excel_formula_cells_skipped"]
+        chunks = annotate_page_quality(chunks, ir)
+        if self.use_llm:
+            from .enrichment.contextual_enricher import enrich_chunks_contextual
+            cache_path = getattr(self.cache, "db_path", None)
+            chunks = enrich_chunks_contextual(chunks, cache_db_path=cache_path, use_llm=True)
         self.last_artifact = artifact
         return chunks
 

@@ -371,6 +371,8 @@ class BaseSkill:
                 offset=params.get("offset"),
                 excel=params.get("excel"),
                 page=params.get("page"),
+                as_of=params.get("as_of"),
+                expand_graph=params.get("expand_graph", True),
             )
             documents = result["documents"]
             related_docs = result.get("related_documents") or []

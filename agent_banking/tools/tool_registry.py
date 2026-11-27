@@ -268,13 +268,11 @@ class BankingToolRegistry:
         if handler == RAG_HANDLER:
             from agent_banking.tools.rag_tool import BankingRAGTool
 
-            excel = {}
-            if "excel" in params:
-                excel = {"excel": params["excel"]}
+            options = {key: params[key] for key in ("excel", "as_of", "expand_graph") if key in params}
             return BankingRAGTool(pipeline_instance=self.pipeline_instance).execute(
                 query=params.get("query", ""), top_k=params.get("top_k", DEFAULT_RAG_TOP_K),
                 exact=params.get("exact", ""), source=params.get("source", ""), offset=params.get("offset"),
-                page=params.get("page"), **excel,
+                page=params.get("page"), **options,
             )
         if not is_extension(spec):
             return getattr(import_module(BANKING_MODULE), handler["function"])(**params)

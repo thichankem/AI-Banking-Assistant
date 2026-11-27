@@ -286,6 +286,12 @@ def project_region(sheet, region, points, cells, merges, bold, document_key, cla
                 title_cell = actual[0]
                 title = cells[title_cell].text
                 rows = [r_rem for r_rem in rows if r_rem > banner.bottom]
+            elif banner is None and len(rows) > 2:
+                next_visible = sum(visible(cells.get((rows[1], col))) for col in columns)
+                if next_visible >= 2:
+                    title_cell = actual[0]
+                    title = cells[title_cell].text
+                    rows = rows[1:]
     if region.headers is None:
         header_count = _infer_headers(rows, columns, resolved, relevant_merges, bold)
     else:

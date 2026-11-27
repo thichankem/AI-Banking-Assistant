@@ -15,14 +15,16 @@ if sys.platform == "win32":
 
 from agent_banking.core.config.settings import CoreConfig, get_core_messages
 from agent_banking.core.environment import ROOT_DIR
+from agent_banking.core.document_revisions import archive_document, copy_publication_revisions, is_document_version
 from agent_banking.core.settings import Config
+from .chunking.policy_revision import attach_policy_revision, is_policy_source
 from .chunking.run_chunking import load_published_chunks
 from .chunking.universal.extraction.sources import discover_documents, document_source_root, source_key
 from .chunking.universal.pipeline import DLAChunker
 from .chunking.universal.planning.schema import link_chunk_sequence, require_index_ready
 from .embedding.embedder import BankingEmbedder
 from .vector_db.qdrant_store import (
-    QdrantBankingStore, QdrantVectorStore, mark_publication_chunks, publication_scope,
+    QdrantBankingStore, QdrantVectorStore, configured_qdrant_connection, mark_publication_chunks, publication_scope,
 )
 from .core.llm_rag_cache import rag_llm_available
 from .tools.extensions.banking_query import ParsedQuery, parse_banking_query
@@ -40,7 +42,6 @@ _DEFAULT_CHUNK_MAX_TOKENS = int(_RAG_CFG["default_chunk_max_tokens"])
 _DEFAULT_CHUNK_MIN_TOKENS = int(_RAG_CFG["default_chunk_min_tokens"])
 _DEFAULT_CHUNK_SEARCH_LANGUAGE = str(_RAG_CFG["default_chunk_search_language"])
 _EMBEDDING_CACHE_FILENAME = str(_RAG_CFG["embedding_cache_filename"])
-_DEFAULT_QDRANT_SUBDIR = str(_RAG_CFG["default_qdrant_subdir"])
 _DEFAULT_BATCH_SIZE = int(_RAG_CFG["ingest_batch_size"])
 _CHUNK_FILE_PATTERN = str(_RAG_CFG["chunk_file_pattern"])
 _MANIFEST_FILENAME = str(_RAG_CFG["chunking_manifest_filename"])
@@ -90,18 +91,11 @@ class BankingRAGPipeline:
         else:
             store_mode = "Disk"
         print(f"[3/4] Initializing Vector & BM25 Store ({store_mode})...")
-        selected_store = getattr(self.config, "ABANK_QDRANT_STORAGE_PATH", "")
-        raw_qdrant_path = Path(selected_store or getattr(self.config, "QDRANT_STORAGE_PATH",
-                                                        self.config.STORAGE_DIR / _DEFAULT_QDRANT_SUBDIR))
-        if raw_qdrant_path.is_absolute():
-            qdrant_storage_path = raw_qdrant_path
-        else:
-            qdrant_storage_path = self.config.ROOT_DIR / raw_qdrant_path
         self.vector_store = QdrantBankingStore(
             collection_name=self.config.QDRANT_COLLECTION,
             dimension=self.config.EMBEDDING_DIM,
-            storage_path=str(qdrant_storage_path),
-            use_memory=use_memory
+            use_memory=use_memory,
+            **configured_qdrant_connection(self.config),
         )
 
         # 4. Initialize Query Parser, Hybrid Retriever (RRF) & Reranker
@@ -143,6 +137,25 @@ class BankingRAGPipeline:
             if return_index_keys:
                 return 0, set()
             return 0
+
+        editions = {}
+        for chunk in chunks:
+            metadata = chunk.get("business_metadata", {})
+            source, version = chunk.get("source", ""), metadata.get("document_version")
+            if not metadata.get("policy_revision") and is_document_version(version) and is_policy_source(source):
+                editions.setdefault((source, version), []).append(chunk)
+        if editions:
+            previous = {}
+            for chunk in getattr(self.vector_store, "_bm25_corpus", ()):
+                metadata = chunk["business_metadata"]
+                edition = (chunk["source"], metadata.get("document_version"))
+                if edition in editions:
+                    previous[edition] = metadata.get("policy_revision") or {}
+            for (source, version), edition_chunks in editions.items():
+                metadata = edition_chunks[0]["business_metadata"]
+                identity = {"source": source, "document_id": metadata.get("document_id") or source,
+                            "document_version": version}
+                attach_policy_revision(identity, edition_chunks, previous.get((source, version)))
 
         t0 = time.time()
         print(f" -> [Ingest] Generating embeddings for {len(chunks)} chunks...")
@@ -189,6 +202,8 @@ class BankingRAGPipeline:
             chunk for chunk in chunks
             if chunk.get("business_metadata", {}).get("retrieval", {}).get("role") != _EXCLUDED_ROLE
         ], scope)
+        if not self.vector_store.use_memory:
+            copy_publication_revisions(target_out, self.vector_store.storage_path, manifest["records"])
         link_chunk_sequence(searchable)
         count, index_keys = self.ingest_chunks(searchable, batch_size=batch_size, return_index_keys=True)
         sources = {record["rel_path"] for record in manifest["records"] if record["status"] != "FAILED"}
@@ -310,6 +325,12 @@ class BankingRAGPipeline:
         )
 
         # Ingest into Vector DB and BM25
+        store = getattr(self, "vector_store", None)
+        if store is not None and not store.use_memory:
+            revisions = {(chunk["source"], chunk["business_metadata"].get("document_version")) for chunk in chunks}
+            for source, version in revisions:
+                if is_document_version(version):
+                    archive_document(Path(store.storage_path) / "revisions", source_root / source, version)
         return self.ingest_chunks(chunks)
 
     def parse_query(self, query):

@@ -26,6 +26,8 @@ else:
 
 
 class VectorDBConfig:
+    QDRANT_SERVER_URL = os.getenv("ABANK_QDRANT_SERVER_URL", "").strip()
+    QDRANT_SERVER_API_KEY = os.getenv("ABANK_QDRANT_SERVER_API_KEY", "")
     QDRANT_COLLECTION = _qdrant_collection
     QDRANT_STORAGE_PATH = str(_cfg["qdrant_storage_path"])
     QDRANT_DISTANCE_METRIC = str(_cfg["distance_metric"])

@@ -18,6 +18,7 @@ DESIGN INVARIANTS:
 4. NO __INIT__.PY: Direct module imports.
 """
 
+import logging
 import time
 
 from agent_banking.chunking.universal.planning.schema import (
@@ -26,6 +27,12 @@ from agent_banking.chunking.universal.planning.schema import (
 )
 from agent_banking.retrieval.config.settings import RetrievalConfig
 from agent_banking.tools.extensions.banking_query import ParsedQuery
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class RetrievalUnavailable(RuntimeError):
+    """A required search channel failed and the remaining channel found no evidence."""
 
 
 class HybridRetriever:
@@ -251,6 +258,10 @@ class HybridRetriever:
         filter_dict=None,
         breadcrumb_boost=None,
         dense_weight=None,
+        strict_filters=False,
+        source_restricted=None,
+        prefer_query_filters=False,
+        query_embeddings=None,
     ):
         """
         Execute Hybrid Retrieval and fuse rankings using Reciprocal Rank Fusion (RRF k=60).
@@ -381,40 +392,54 @@ class HybridRetriever:
         if filter_dict is not None and isinstance(filter_dict, dict):
             active_filter = dict(filter_dict)
 
-        if active_filter is None:
+        required_filter = self._normalize_filter_dict(active_filter)
+        if active_filter is None or prefer_query_filters:
             if suggested_filters is not None and isinstance(suggested_filters, dict):
                 safe_suggested = {}
                 for sf_key, sf_val in suggested_filters.items():
                     if sf_key != "chunk_type":
                         safe_suggested[sf_key] = sf_val
-                if len(safe_suggested) > 0:
-                    active_filter = safe_suggested
+                if safe_suggested:
+                    active_filter = {**safe_suggested, **(active_filter or {})}
 
         norm_filter = self._normalize_filter_dict(active_filter)
 
         # 4. Dense Vector Search (Cosine HNSW 1024-dim)
         t_dense_start = time.time()
-        if self.embedding_model is not None and hasattr(self.embedding_model, "embed_query"):
-            query_vector = self.embedding_model.embed_query(dense_query_text)
-            self.last_query_vector = query_vector
-        else:
-            query_vector = []
-            self.last_query_vector = None
+        query_vector = []
+        dense_error = None
+        if query_embeddings is not None and dense_query_text in query_embeddings:
+            query_vector, dense_error = query_embeddings[dense_query_text]
+        elif self.embedding_model is not None and hasattr(self.embedding_model, "embed_query"):
+            try:
+                query_vector = self.embedding_model.embed_query(dense_query_text)
+                if not any(query_vector):
+                    raise ValueError("Empty query embedding")
+            except (ValueError, RuntimeError, OSError) as error:
+                dense_error = error
+            if query_embeddings is not None:
+                query_embeddings[dense_query_text] = (query_vector, dense_error)
+        self.last_query_vector = query_vector or None
 
-        has_source_filter = bool(norm_filter and norm_filter.get("source"))
+        has_source_filter = source_restricted
+        if has_source_filter is None:
+            has_source_filter = bool(norm_filter and norm_filter.get("source"))
         leg_k = effective_candidate_k
         min_leg_k = RetrievalConfig.RETRIEVAL_MIN_UNFILTERED_LEG_K
         if not has_source_filter and leg_k < min_leg_k:
             leg_k = min_leg_k
 
-        if self.vector_store is not None and hasattr(self.vector_store, "search_vector"):
-            dense_results = self.vector_store.search_vector(
-                query_vector=query_vector,
-                top_k=leg_k,
-                filter_dict=norm_filter
-            )
-        else:
-            dense_results = []
+        def dense_search(filters):
+            nonlocal dense_error
+            if dense_error or self.vector_store is None or not hasattr(self.vector_store, "search_vector"):
+                return []
+            try:
+                return self.vector_store.search_vector(query_vector=query_vector, top_k=leg_k, filter_dict=filters)
+            except (ValueError, RuntimeError, OSError) as error:
+                dense_error = error
+                return []
+
+        dense_results = dense_search(norm_filter)
         t_dense_duration = (time.time() - t_dense_start) * 1000
 
         # 5. Sparse BM25 Okapi Search (BM25F Multi-field with Breadcrumb Boost)
@@ -446,17 +471,17 @@ class HybridRetriever:
         # 6. Filter Zero-Result Fallback mechanism
         fallback_unfiltered = False
         scope_key = RetrievalConfig.RETRIEVAL_PUBLICATION_SCOPE_KEY
-        if not dense_results and not bm25_results and norm_filter and set(norm_filter) != {scope_key}:
-            fallback_unfiltered = True
+        if prefer_query_filters:
+            fallback_filter = required_filter
+            can_relax = norm_filter != required_filter
+        else:
             fallback_filter = None
-            if scope_key in norm_filter:
+            can_relax = not strict_filters and norm_filter and set(norm_filter) != {scope_key}
+            if norm_filter and scope_key in norm_filter:
                 fallback_filter = {scope_key: norm_filter[scope_key]}
-            if self.vector_store is not None and hasattr(self.vector_store, "search_vector"):
-                dense_results = self.vector_store.search_vector(
-                    query_vector=query_vector,
-                    top_k=leg_k,
-                    filter_dict=fallback_filter
-                )
+        if can_relax and not dense_results and not bm25_results:
+            fallback_unfiltered = True
+            dense_results = dense_search(fallback_filter)
             if self.bm25_search is not None and hasattr(self.bm25_search, "search"):
                 bm25_results = self.bm25_search.search(
                     bm25_query_text,
@@ -477,6 +502,11 @@ class HybridRetriever:
                         top_k=leg_k,
                         filter_dict=fallback_filter
                     )
+
+        if dense_error:
+            _LOGGER.warning("Dense retrieval unavailable (%s)", type(dense_error).__name__)
+            if not bm25_results:
+                raise RetrievalUnavailable("Dense retrieval failed and BM25 found no evidence") from dense_error
 
         # 7. Reciprocal Rank Fusion (RRF k=60) merge
         candidates = {}
@@ -624,7 +654,8 @@ class HybridRetriever:
                     "bm25_query_used": bm25_query_text,
                     "raw_query": raw_query_text,
                     "filter_applied": active_filter,
-                    "fallback_unfiltered": fallback_unfiltered
+                    "fallback_unfiltered": fallback_unfiltered,
+                    "dense_degraded": dense_error is not None,
                 }
             })
 

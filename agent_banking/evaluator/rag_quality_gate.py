@@ -21,6 +21,7 @@ import time
 import openpyxl
 
 from agent_banking.core.search_text import search_key
+from agent_banking.core.numeric_tokens import extract_canonical_numeric_tokens
 from agent_banking.core.settings import Config
 from agent_banking.evaluator.config.settings import EvaluatorConfig, resolve_repo_path
 from agent_banking.tools.rag_tool import BankingRAGTool, _parse_source_code, _source_stem
@@ -37,6 +38,17 @@ def _source_code_key(text: str) -> str:
     if parsed is None:
         return ""
     return f"{parsed[0]} {parsed[1]}"
+
+
+def _reference_fee_codes(text: str) -> set[str]:
+    codes = set()
+    words = search_key(text).split()
+    for index, word in enumerate(words):
+        if word.startswith("bp"):
+            parsed = _parse_source_code(" ".join(words[index:index + 2]))
+            if parsed and parsed[0] == "bp":
+                codes.add("bp " + parsed[1])
+    return codes
 
 
 def _extract_expected_targets(case: dict) -> tuple:
@@ -71,6 +83,41 @@ def _matches_target(source_path: str, exp_names: set, exp_codes: set) -> bool:
     if code and code in exp_codes:
         return True
     return False
+
+
+def _expects_absent_evidence(anchor):
+    quote = search_key(str(anchor.get("verbatim_quote") or anchor.get("quote") or ""))
+    section = search_key(str(anchor.get("section") or ""))
+    marker = "khong co trong tai lieu hien hanh"
+    return quote == marker and (section == marker or section.startswith(marker + " "))
+
+
+def _anchor_hits(case, documents):
+    hits = []
+    for anchor in case.get("evidence", ()):
+        source = anchor.get("source_path", "")
+        quote = search_key(str(anchor.get("verbatim_quote") or anchor.get("quote") or ""))
+        section = search_key(str(anchor.get("section") or ""))
+        if not source or not (quote or section) or _expects_absent_evidence(anchor):
+            continue
+        code = _source_code_key(source)
+        located = False
+        for document in documents:
+            if not _matches_target(document.get("source", ""), {_source_stem(source)}, {code}):
+                continue
+            text = search_key(document.get("content", "") + " " + document.get("parent_content", ""))
+            heading = search_key(document.get("section_title", "") + " " + document.get("breadcrumb", ""))
+            if quote and f" {quote} " in f" {text} " or not quote and section and section in heading:
+                located = True
+                break
+        hits.append(located)
+    return hits
+
+
+class _HybridOrder:
+    @staticmethod
+    def rerank(query, candidates, top_k):
+        return [{**item, "rerank_method": "hybrid_order"} for item in candidates[:top_k]]
 
 
 def _select_balanced_785(root: Path, limit: int, seed: int) -> list:
@@ -120,6 +167,7 @@ def _load_excel_350(root: Path, limit: int) -> list:
             "criteria": criteria,
             "question": question,
             "source_path": src_path,
+            "reference_answer": str(row[6] or "").strip(),
         })
     wb.close()
     if limit > 0:
@@ -134,6 +182,8 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--skip-rerank", action="store_true", help="Skip Cloud Cross-Encoder step (faster candidate pool check)")
+    parser.add_argument("--min-hit45-pct", type=float, default=0.0, help="Exit non-zero if 785 Hit@45%% drops below this threshold")
+    parser.add_argument("--min-excel-hit45-pct", type=float, default=0.0, help="Exit non-zero if Excel-350 Hit@45%% drops below this threshold")
     parser.add_argument("--output", type=Path, default=Path("agent_banking/evaluator/output/rag_quality_gate_report.json"))
     args = parser.parse_args()
 
@@ -141,10 +191,10 @@ def main():
 
     root = Path(__file__).resolve().parents[2]
     cfg = Config()
-    cfg.KNOWLEDGE_PUBLICATION_SCOPE = ""
-
     t_init0 = time.perf_counter()
     pipeline = BankingRAGPipeline(config=cfg)
+    if args.skip_rerank:
+        pipeline.reranker = _HybridOrder()
     init_ms = round((time.perf_counter() - t_init0) * 1000.0, 1)
     rag_tool = BankingRAGTool(pipeline_instance=pipeline)
 
@@ -157,27 +207,19 @@ def main():
         cases_785 = _select_balanced_785(root, args.limit_785, args.seed)
         group_stats = {}
         misses_785 = []
+        evidence_misses = []
+        absent_evidence_cases = []
         latencies_785 = []
 
         def _eval_785(case):
             exp_names, exp_codes = _extract_expected_targets(case)
             t0 = time.perf_counter()
             q = case["question"]
-            if args.skip_rerank:
-                parsed = pipeline.parse_query(q)
-                cands = pipeline.retriever.retrieve(parsed, top_k=45, candidate_k=45, filter_dict={})
-                top_sources = [c.get("chunk", c).get("source", "") for c in cands[:5]]
-                pool_sources = [c.get("chunk", c).get("source", "") for c in cands]
-            else:
-                res = rag_tool.execute(q, top_k=5, candidate_k=45)
-                top_sources = [d.get("source", "") for d in res.get("documents", [])]
-                pool_sources = list(top_sources)
-                for rd in res.get("related_documents", []):
-                    pool_sources.append(rd.get("source", ""))
-                parsed = pipeline.parse_query(q)
-                cands = pipeline.retriever.retrieve(parsed, top_k=45, candidate_k=45, filter_dict={})
-                for c in cands:
-                    pool_sources.append(c.get("chunk", c).get("source", ""))
+            res = rag_tool.execute(q, top_k=5, candidate_k=45, include_candidates=True)
+            top = res.get("documents", [])
+            top_sources = [d.get("source", "") for d in top]
+            pool_sources = [d.get("source", "") for d in res.get("candidate_documents", [])[:45]]
+            anchors = _anchor_hits(case, [*top, *res.get("related_documents", [])])
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
             hit1 = bool(top_sources and _matches_target(top_sources[0], exp_names, exp_codes))
             hit5 = any(_matches_target(s, exp_names, exp_codes) for s in top_sources[:5])
@@ -188,6 +230,9 @@ def main():
                 "hit1": hit1,
                 "hit5": hit5,
                 "hit45": hit45,
+                "anchor_count": len(anchors),
+                "anchor_hits": sum(anchors),
+                "absent_evidence_count": sum(_expects_absent_evidence(anchor) for anchor in case.get("evidence", [])),
                 "ms": elapsed_ms,
                 "question": q[:100],
                 "expected": sorted(exp_codes or exp_names)[:2],
@@ -198,9 +243,11 @@ def main():
             for rec in [f.result() for f in as_completed([pool.submit(_eval_785, c) for c in cases_785])]:
                 grp = rec["group"]
                 if grp not in group_stats:
-                    group_stats[grp] = {"n": 0, "hit1": 0, "hit5": 0, "hit45": 0}
+                    group_stats[grp] = {"n": 0, "hit1": 0, "hit5": 0, "hit45": 0, "anchor_count": 0, "anchor_hits": 0}
                 gs = group_stats[grp]
                 gs["n"] += 1
+                gs["anchor_count"] += rec["anchor_count"]
+                gs["anchor_hits"] += rec["anchor_hits"]
                 if rec["hit1"]:
                     gs["hit1"] += 1
                 if rec["hit5"]:
@@ -211,11 +258,19 @@ def main():
                     misses_785.append(rec)
                 if not rec["hit5"] and rec["hit45"]:
                     misses_785.append(rec)
+                if rec["anchor_hits"] < rec["anchor_count"]:
+                    evidence_misses.append({key: rec[key] for key in ("id", "group", "anchor_hits", "anchor_count", "expected")})
+                if rec["absent_evidence_count"]:
+                    absent_evidence_cases.append({key: rec[key] for key in ("id", "group", "absent_evidence_count", "expected")})
                 latencies_785.append(rec["ms"])
 
         excel_cases = _load_excel_350(root, args.limit_excel)
         excel_hit45 = 0
+        excel_table_hits = 0
+        excel_numeric_cases = 0
+        excel_numeric_hits = 0
         excel_misses = []
+        excel_evidence_misses = []
 
         def _eval_excel(case):
             exp_codes = set()
@@ -228,66 +283,53 @@ def main():
                 c_sp = _source_code_key(case["source_path"])
                 if c_sp:
                     exp_codes.add(c_sp)
-            from agent_banking.tools.extensions.banking_query import decompose_subqueries
-            from agent_banking.tools.rag_tool import _merge_subquery_candidates
             q = case["question"]
-            parsed = pipeline.parse_query(q)
-            plan = pipeline.plan_query(q)
-            d_weight = None
-            if isinstance(plan, dict) and plan.get("method") == "llm_model":
-                rewritten = str(plan.get("rewritten_query") or "").strip()
-                sem_terms = [str(t).strip() for t in (plan.get("semantic_terms") or ()) if str(t).strip()]
-                if rewritten:
-                    parsed.expanded_query = (str(parsed.expanded_query or q) + " " + rewritten + " " + " ".join(sem_terms)).strip()
-                if sem_terms:
-                    extra_kws = pipeline.parse_query(" ".join(sem_terms)).keywords
-                    parsed.keywords_str = (str(parsed.keywords_str or "") + " " + " ".join(extra_kws)).strip()
-                d_weight = plan.get("dense_weight")
-            cands = pipeline.retriever.retrieve(parsed, top_k=45, candidate_k=45, filter_dict={}, dense_weight=d_weight)
-            sub_qs = []
-            if isinstance(plan, dict) and plan.get("method") == "llm_model":
-                sub_qs = list(plan.get("sub_queries") or [])
-            if not sub_qs:
-                sub_qs = decompose_subqueries(q)
-            batches = []
-            if sub_qs:
-                for sq in sub_qs:
-                    sp = pipeline.parse_query(sq)
-                    sb = pipeline.retriever.retrieve(sp, top_k=24, candidate_k=24, filter_dict={})
-                    if sb:
-                        batches.append(sb)
-            if isinstance(plan, dict) and plan.get("method") == "llm_model":
-                if plan.get("needs_app_guide"):
-                    ab = pipeline.retriever.retrieve(parsed, top_k=12, candidate_k=12, filter_dict={"business_metadata.domain": "ngan_hang_so"})
-                    if ab:
-                        batches.append((ab[:8], 0.30))
-                if plan.get("needs_fee_schedule"):
-                    fb = pipeline.retriever.retrieve(parsed, top_k=14, candidate_k=14, filter_dict={"business_metadata.domain": "bieu_phi_dich_vu"})
-                    if fb:
-                        batches.append((fb[:8], 0.35))
-                if plan.get("needs_network_lookup"):
-                    nb = pipeline.retriever.retrieve(parsed, top_k=12, candidate_k=12, filter_dict={"business_metadata.domain": "mang_luoi_hoat_dong"})
-                    if nb:
-                        batches.append((nb[:8], 0.35))
-            if batches:
-                cands = _merge_subquery_candidates(cands, batches, 45)
-            pool_sources = [c.get("chunk", c).get("source", "") for c in cands]
+            result = rag_tool.execute(q, top_k=5, candidate_k=45, include_candidates=True)
+            pool_sources = [d.get("source", "") for d in result.get("candidate_documents", [])[:45]]
             hit45 = any(_matches_target(s, exp_names, exp_codes) for s in pool_sources)
+            tables = []
+            for document in [*result.get("documents", []), *result.get("related_documents", [])]:
+                meta = document["business_metadata"]
+                citation = meta.get("citation", {})
+                if (meta.get("excel_table_id") and citation.get("sheet_name") and citation.get("cell_ranges")
+                        and meta.get("temporal", {}).get("status") not in {"reference_only", "conflict"}
+                        and _matches_target(document["source"], exp_names, exp_codes)):
+                    tables.append(document)
+            expected_numbers = set(extract_canonical_numeric_tokens(case["reference_answer"]))
+            returned_numbers = set()
+            for document in tables:
+                returned_numbers.update(extract_canonical_numeric_tokens(document["content"]))
+            missing_numbers = expected_numbers - returned_numbers
+            question_numbers = set(extract_canonical_numeric_tokens(q))
+            reference = case["reference_answer"]
+            alternate_codes = _reference_fee_codes(reference) - exp_codes
             return {
                 "id": case["id"],
                 "doc_code": case["doc_code"],
                 "criteria": case["criteria"],
                 "hit45": hit45,
+                "table_hit": bool(tables),
+                "numeric_checked": bool(expected_numbers),
+                "numeric_hit": bool(expected_numbers) and expected_numbers <= returned_numbers,
+                "missing_reference_numbers": sorted(missing_numbers),
+                "missing_numbers_given_in_question": sorted(missing_numbers & question_numbers),
+                "alternate_fee_codes_in_reference": sorted(alternate_codes),
+                "reference_contains_formula": "=" in reference and any(op in reference for op in ("*", "×")),
                 "question": q[:100],
                 "top3": [_source_stem(s)[:35] for s in pool_sources[:3]],
             }
 
         with ThreadPoolExecutor(max_workers=args.workers) as pool:
             for rec in [f.result() for f in as_completed([pool.submit(_eval_excel, c) for c in excel_cases])]:
+                excel_table_hits += rec["table_hit"]
+                excel_numeric_cases += rec["numeric_checked"]
+                excel_numeric_hits += rec["numeric_hit"]
                 if rec["hit45"]:
                     excel_hit45 += 1
                 else:
                     excel_misses.append(rec)
+                if not rec["table_hit"] or (rec["numeric_checked"] and not rec["numeric_hit"]):
+                    excel_evidence_misses.append(rec)
 
         report = {
             "cold_init_ms": init_ms,
@@ -297,12 +339,18 @@ def main():
                 "count": len(cases_785),
                 "groups": group_stats,
                 "misses": sorted(misses_785, key=lambda x: x["id"])[:25],
+                "evidence_misses": sorted(evidence_misses, key=lambda x: x["id"]),
+                "absent_evidence_cases": sorted(absent_evidence_cases, key=lambda x: x["id"]),
             },
             "excel_350": {
                 "count": len(excel_cases),
                 "hit45": excel_hit45,
                 "hit45_pct": round((excel_hit45 / max(1, len(excel_cases))) * 100.0, 2),
+                "citable_table_hits": excel_table_hits,
+                "numeric_reference_cases": excel_numeric_cases,
+                "numeric_reference_hits": excel_numeric_hits,
                 "misses": sorted(excel_misses, key=lambda x: x["id"]),
+                "evidence_misses": sorted(excel_evidence_misses, key=lambda x: x["id"]),
             },
         }
         out_path = args.output
@@ -318,10 +366,12 @@ def main():
                 f"  785[{grp:11s}] n={gs['n']} | Hit@1={gs['hit1']}/{gs['n']} ({100*gs['hit1']/n:.1f}%)"
                 f" | Hit@5={gs['hit5']}/{gs['n']} ({100*gs['hit5']/n:.1f}%)"
                 f" | Hit@45={gs['hit45']}/{gs['n']} ({100*gs['hit45']/n:.1f}%)"
+                f" | Evidence anchors={gs['anchor_hits']}/{gs['anchor_count']}"
             )
         print(
             f"  EXCEL-350: Hit@45={excel_hit45}/{len(excel_cases)} "
-            f"({report['excel_350']['hit45_pct']}%)"
+            f"({report['excel_350']['hit45_pct']}%) | tables={excel_table_hits}/{len(excel_cases)} "
+            f"| reference figures={excel_numeric_hits}/{excel_numeric_cases}"
         )
         for m in sorted(misses_785, key=lambda x: x["id"])[:10]:
             print("  785 MISS:", m["id"], m["group"], m["expected"], "->", m["top3"])
@@ -329,6 +379,16 @@ def main():
             print("  EX MISS@45:", em["id"], em["doc_code"], em["top3"])
     finally:
         pipeline.close()
+
+    total_785 = sum(gs["n"] for gs in group_stats.values())
+    hit45_785_pct = (sum(gs["hit45"] for gs in group_stats.values()) * 100.0) / max(1, total_785)
+    gate_failures = []
+    if args.min_hit45_pct > 0.0 and total_785 > 0 and hit45_785_pct < args.min_hit45_pct:
+        gate_failures.append(f"785 Hit@45 {hit45_785_pct:.2f}% < min {args.min_hit45_pct:.2f}%")
+    if args.min_excel_hit45_pct > 0.0 and len(excel_cases) > 0 and report["excel_350"]["hit45_pct"] < args.min_excel_hit45_pct:
+        gate_failures.append(f"Excel Hit@45 {report['excel_350']['hit45_pct']:.2f}% < min {args.min_excel_hit45_pct:.2f}%")
+    if gate_failures:
+        raise SystemExit("Quality gate failed: " + "; ".join(gate_failures))
 
 
 if __name__ == "__main__":

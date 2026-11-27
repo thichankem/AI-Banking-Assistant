@@ -1,8 +1,8 @@
 name: search_legal_web
-title: Search Legal Documents on Thư Viện Pháp Luật
+title: Search Vietnamese Legal Documents
 description: >-
-  Search public Vietnamese legal documents on Thư Viện Pháp Luật, such as laws,
-  decrees, circulars, decisions, consolidated documents, and amendment updates. Use when customers
+  Search public Vietnamese legal documents through Thư Viện Pháp Luật and Công báo Chính phủ,
+  including laws, decrees, circulars, decisions, consolidated documents, and amendment updates. Use when customers
   ask about legal regulations, request web searches, or need to verify document validity.
   Use search_banking_knowledge for A-Bank fee schedules, products, and internal procedures.
   Send concise public keywords, omitting customer information, internal data, and chat history.
@@ -10,7 +10,8 @@ description: >-
   the article number and document number to retrieve the correct section. The incomplete_article_evidence
   status indicates missing clauses. Cite sources for each conclusion. Only state that a document
   is currently valid or assert exact clauses when excerpts provide sufficient evidence. If evidence
-  is lacking, state the portion requiring verification at the source link.
+  is lacking, state the portion requiring verification at the source link. A Công báo extract marked
+  as_published establishes original wording. Verify amendments and applicability independently.
 inputSchema:
   type: object
   properties:
@@ -22,20 +23,28 @@ inputSchema:
         Document name or number and general keywords of the clause, such as Thông tư
         17/2024/TT-NHNN mở tài khoản thanh toán. Do not enter URLs, emails, phone numbers,
         account numbers, customer names, OTP, or internal document contents.
+    as_of:
+      type: string
+      pattern: '^\d{4}-\d{2}-\d{2}$'
+      description: Applicability date when the customer asks which version applied at a specified date.
   required: [query]
   additionalProperties: false
 outputSchema:
   type: object
   properties:
     status: {type: string}
-    provider: {enum: [tavily, brave, ""]}
+    provider: {enum: [tavily, brave, congbao, ""]}
+    providers:
+      type: array
+      uniqueItems: true
+      items: {enum: [tavily, brave, congbao]}
     attempts:
       type: array
-      maxItems: 2
+      maxItems: 3
       items:
         type: object
         properties:
-          provider: {enum: [tavily, brave]}
+          provider: {enum: [tavily, brave, congbao]}
           status: {type: string}
         required: [provider, status]
     documents:

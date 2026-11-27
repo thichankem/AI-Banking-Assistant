@@ -187,7 +187,7 @@ class ChunkPlanner:
             if block["type"] == "heading":
                 level = min(_MAX_HEADING_LEVEL, block.get("level", 1))
                 carried = []
-                if (pending and stack and level > stack[-1][0]
+                if (pending and stack
                         and not block.get("foreign_language")
                         and all(item["type"] == "heading" for item in pending)
                         and all(item["id"] in self.parents[current]["block_ids"] for item in pending)):
@@ -392,6 +392,28 @@ class ChunkPlanner:
         if (pending and self.chunks and self.chunks[-1]["parent_id"] == parent_id
                 and sum(len(item["text"].split()) for item in pending) < self.min_words):
             self._try_append_tail_to_last_chunk(pending)
+        if pending and self.chunks and all(item["type"] == "heading" for item in pending):
+            last = self.chunks[-1]
+            last_prov = last["business_metadata"]["provenance"]
+            if last_prov.get("block_ids") and section_region(self.block_map[last_prov["block_ids"][-1]]) == section_region(pending[0]):
+                old_pid = last["parent_id"]
+                reassigned = list(pending)
+                saved_parent_blocks = list(self.parents[parent_id]["block_ids"])
+                saved_old_blocks = list(self.parents[old_pid]["block_ids"])
+                pending_ids = {item["id"] for item in reassigned}
+                for item in reassigned:
+                    item["section_id"] = old_pid
+                    if item["id"] not in self.parents[old_pid]["block_ids"]:
+                        self.parents[old_pid]["block_ids"].append(item["id"])
+                    self.parents[parent_id]["block_ids"] = [
+                        bid for bid in self.parents[parent_id]["block_ids"] if bid not in pending_ids
+                    ]
+                self._try_append_tail_to_last_chunk(pending)
+                if pending:
+                    for item in reassigned:
+                        item["section_id"] = parent_id
+                    self.parents[parent_id]["block_ids"] = saved_parent_blocks
+                    self.parents[old_pid]["block_ids"] = saved_old_blocks
         flush_text(self, pending, parent_id)
 
     def _try_append_tail_to_last_chunk(self, pending):

@@ -48,7 +48,12 @@ class NodePipeline:
     Orchestrator for automated node execution from Input to Output with deduplication.
     """
 
-    def __init__(self, base_dir: Path | None = None):
+    def __init__(self, base_dir: Path | None = None, *, policy_metadata_path=None, excel_metadata_path=None):
+        self.publication_options = {}
+        if policy_metadata_path is not None:
+            self.publication_options["policy_metadata_path"] = Path(policy_metadata_path).resolve()
+        if excel_metadata_path is not None:
+            self.publication_options["excel_metadata_path"] = Path(excel_metadata_path).resolve()
         if base_dir is not None:
             self.base_dir = Path(base_dir)
         else:
@@ -91,7 +96,8 @@ class NodePipeline:
                 f["chunking"]["input"],
                 f["chunking"]["output"],
                 force=force,
-                max_files=max_files
+                max_files=max_files,
+                **self.publication_options,
             )
             return {"node": "chunking", "count": len(chunks)}
         elif clean_name in _NODE_ALIASES["embedding"]:
@@ -203,7 +209,7 @@ class NodePipeline:
             chunk_out_dir = chunk_out_dir / _DIAGNOSTICS_DIRNAME / (_DIAGNOSTICS_PREFIX + str(max_files))
 
         chunks = run_auto_chunking(input_dir=f["chunking"]["input"], output_dir=f["chunking"]["output"],
-                                   force=force, max_files=max_files)
+                                    force=force, max_files=max_files, **self.publication_options)
         if max_files is not None:
             chunk_manifest = json.loads((chunk_out_dir / _PUBLISHED_MANIFEST).read_text(encoding="utf-8"))
             failed_files = [record["file_name"] for record in chunk_manifest["records"] if record["status"] == "FAILED"]
@@ -266,12 +272,14 @@ class NodePipeline:
         def compute_dir_signature(d: Path) -> str:
             if not d.exists():
                 return ""
-            files = sorted(list(d.rglob("*")))
+            files = list(d.rglob("*"))
+            if d == folders["chunking"]["input"]:
+                files.extend(self.publication_options.values())
             sig_parts = []
-            for f in files:
+            for f in sorted(set(files)):
                 if f.is_file() and not f.name.startswith("."):
                     stat = f.stat()
-                    sig_parts.append(f"{f.name}:{stat.st_size}:{stat.st_mtime}")
+                    sig_parts.append(f"{f}:{stat.st_size}:{stat.st_mtime_ns}")
             return ";".join(sig_parts)
 
         # Initialize initial directory signatures
@@ -285,14 +293,16 @@ class NodePipeline:
                     current_sig = compute_dir_signature(paths["input"])
                     prev_sig = last_hashes.get(node_name, "")
                     if current_sig != prev_sig:
-                        last_hashes[node_name] = current_sig
                         print(f"\n[CHANGE DETECTED] New data in {paths['input']}!")
                         print(f"Triggering execution for Node: '{node_name}'...")
                         try:
                             if node_name == "chunking":
-                                self.run_indexing_pipeline(force=False)
+                                result = self.run_indexing_pipeline(force=False)
                             else:
-                                self.run_node(node_name, force=False)
+                                result = self.run_node(node_name, force=False)
+                            status = str(result.get("status", "success")).casefold()
+                            if status in {"success", "skipped", "diagnostics"}:
+                                last_hashes[node_name] = current_sig
                         except Exception as e:
                             print(f"[NodePipeline] Error while processing Node '{node_name}': {e}")
         except KeyboardInterrupt:
@@ -306,9 +316,11 @@ def main():
     parser.add_argument("--watch", action="store_true", help="Run automatic input folder watcher daemon")
     parser.add_argument("--force", action="store_true", help="Clear state caches and re-run all nodes from scratch")
     parser.add_argument("--max-files", type=int, default=None, help="Limit maximum number of document files during chunking")
+    parser.add_argument("--policy-metadata", type=Path, help="Reviewed PDF and Word policy revision metadata")
+    parser.add_argument("--excel-metadata", type=Path, help="Reviewed workbook revision metadata")
     args = parser.parse_args()
 
-    pipeline = NodePipeline()
+    pipeline = NodePipeline(policy_metadata_path=args.policy_metadata, excel_metadata_path=args.excel_metadata)
 
     if args.watch:
         pipeline.watch_inputs()

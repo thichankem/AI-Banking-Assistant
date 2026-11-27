@@ -5,6 +5,8 @@ from importlib.metadata import version
 import json
 import os
 
+from pathlib import Path
+
 from agent_banking.chunking.config.settings import get_config_section
 from .enrichment import enricher as model_enrichment
 from .planning import semantic_boundaries
@@ -27,6 +29,7 @@ def chunker_fingerprint(chunker, pipeline_version):
                      "semantic": chunker.semantic, "image_mode": chunker.image_mode,
                      "ocr_docx_images": chunker.ocr_docx_images,
                      "excel_metadata": getattr(chunker, "excel_metadata", {}),
+                     "include_hidden_sheets": bool(getattr(chunker, "include_hidden_sheets", False)),
                      "search_language": chunker.planner.search_language,
                      "dpi": chunker.dpi, "max_pdf_pages": chunker.pdf_extractor.max_pages,
                      "max_page_pixels": chunker.pdf_extractor.max_page_pixels,
@@ -55,4 +58,10 @@ def chunker_fingerprint(chunker, pipeline_version):
         if callable(getattr(client, "identity", None)):
             configuration[role + "_identity"] = client.identity()
     configuration["sources"] = chunker._code_snapshot
+    cfg_dir = Path(__file__).resolve().parent.parent / "config" / "settings"
+    if cfg_dir.is_dir():
+        configuration["config_settings"] = {
+            path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted(cfg_dir.glob("*.yaml"))
+        }
     return hashlib.sha256(json.dumps(configuration, sort_keys=True).encode("utf-8")).hexdigest()

@@ -4,11 +4,13 @@ import argparse
 import json
 from pathlib import Path
 
+from agent_banking.chunking.universal.enrichment.source_quality import annotate_page_quality
 from agent_banking.evaluator.config.settings import EvaluatorConfig
 
 _KB_CFG = EvaluatorConfig.KNOWLEDGE_BUILD
 _UNAVAILABLE_ISSUES = set(_KB_CFG["unavailable_image_issues"])
 _EXCLUDED_ROLE = str(_KB_CFG["excluded_retrieval_role"])
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def refresh_legacy_domain_metadata(chunks):
@@ -27,29 +29,6 @@ def refresh_legacy_domain_metadata(chunks):
             chunk = {**chunk, "business_metadata": updated_meta}
         refreshed.append(chunk)
     return refreshed
-
-
-def annotate_page_quality(chunks, document):
-    uncertain = {review["page_index"] for review in document.get("page_reviews", [])
-                 if review.get("incomplete") or review.get("content") == "unavailable"}
-    uncertain_images = {review.get("asset_sha256") for review in document.get("docx_image_reviews", []) if review.get("incomplete")}
-    result = []
-    for chunk in chunks:
-        metadata = chunk.get("business_metadata", {})
-        locations = metadata.get("provenance", {}).get("locations", [])
-        pages = {location.get("page_index") for location in locations}
-        affected = sorted(page + 1 for page in uncertain.intersection(pages))
-        image_affected = any(location.get("image_asset_sha256") in uncertain_images
-                             for location in locations if location.get("image_asset_sha256"))
-        if affected or image_affected:
-            quality = {**metadata.get("quality", {})}
-            if affected:
-                quality["ocr_uncertain_pages"] = affected
-            if image_affected:
-                quality["ocr_uncertain_images"] = True
-            chunk = {**chunk, "business_metadata": {**metadata, "quality": quality}}
-        result.append(chunk)
-    return result
 
 
 def unavailable_images(document):
@@ -73,6 +52,7 @@ def main():
     parser.add_argument("--require-docx-images", action="store_true")
     args = parser.parse_args()
     from agent_banking.core.settings import Config
+    from agent_banking.core.document_revisions import archive_document
     from agent_banking.pipeline import BankingRAGPipeline
     from agent_banking.chunking.run_chunking import load_published_chunks
     from agent_banking.chunking.universal.enrichment.contextual_enricher import enrich_chunks_contextual
@@ -101,6 +81,7 @@ def main():
                 path = config.CHUNKING_INPUT_DIR / record["rel_path"]
                 if not path.is_file() or file_hash(path) != record["input_sha256"]:
                     raise ValueError("Source changed after publication: " + record["rel_path"])
+                archive_document(Path(pipeline.vector_store.storage_path) / "revisions", path, record["input_sha256"])
                 verified[record["rel_path"]] = record
             artifact = json.loads((folder / metadata["records"][0]["artifact_file"]).read_text(encoding="utf-8"))
             if unavailable_images(artifact["document"]):
@@ -113,13 +94,19 @@ def main():
             scope = publication_scope(folder)
             verified_scopes.add(scope)
             chunks = mark_publication_chunks(chunks, scope)
-            current = [chunk for chunk in pipeline.vector_store._bm25_corpus
-                       if scope in chunk.get("business_metadata", {}).get("publication_scopes", [])]
             expected = {chunk["chunk_id"] for chunk in chunks}
+            current = [chunk for chunk in pipeline.vector_store._bm25_corpus
+                       if chunk["chunk_id"] in expected
+                       and scope in chunk.get("business_metadata", {}).get("publication_scopes", [])]
             if not publication_matches(current, chunks):
                 pending.extend(chunks)
                 prune.append((expected, sources, scope))
-            indexed.append({"sources": sorted(sources), "chunks": len(chunks), "publication": str(folder.resolve())})
+            resolved_folder = folder.resolve()
+            try:
+                pub_label = resolved_folder.relative_to(PROJECT_ROOT.resolve()).as_posix()
+            except ValueError:
+                pub_label = str(resolved_folder)
+            indexed.append({"sources": sorted(sources), "chunks": len(chunks), "publication": pub_label})
         expected_sources = {path.relative_to(config.CHUNKING_INPUT_DIR).as_posix()
                     for path in discover_documents(config.CHUNKING_INPUT_DIR)}
         complete = bool(expected_sources) and set(verified) == expected_sources

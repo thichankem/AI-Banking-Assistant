@@ -511,7 +511,7 @@ def _compute_suite_summary(cases: list[dict[str, Any]], completed: dict[str, dic
         if verdict == "PASS":
             passed += 1
             bucket["PASS"] += 1
-        elif verdict == "ERROR":
+        elif verdict in ("ERROR", "JUDGE_ERROR"):
             errors += 1
             bucket["ERROR"] += 1
         else:
@@ -524,7 +524,7 @@ def _compute_suite_summary(cases: list[dict[str, Any]], completed: dict[str, dic
             bucket["det_pass"] += 1
 
         judge = row.get("judge")
-        if isinstance(judge, dict) and "overall_score" in judge and judge.get("verdict") != "SKIPPED":
+        if isinstance(judge, dict) and "overall_score" in judge and judge.get("verdict") not in ("SKIPPED", "JUDGE_ERROR", "ERROR"):
             judge_score_sum += float(judge.get("overall_score", 0.0))
             judge_count += 1
 
@@ -572,7 +572,6 @@ def run_suite(args: argparse.Namespace) -> dict[str, Any]:
     """Execute any DS-01..DS-07 JSON dataset online with Tier-1 + Tier-2 checks."""
     os.environ["ABANK_QDRANT_STORAGE_PATH"] = str(args.index)
 
-    from fastapi.testclient import TestClient
     from agent_banking.agent import simulator as sim_mod
     from agent_banking.agent import visualization as viz_mod
     from agent_banking.agent_pipeline import BankingAgentPipeline
@@ -601,12 +600,11 @@ def run_suite(args: argparse.Namespace) -> dict[str, Any]:
     cfg.QDRANT_STORAGE_PATH = str(args.index)
     cfg.ABANK_QDRANT_STORAGE_PATH = str(args.index)
 
-    api_client = None
+    app_main = None
     if needs_http:
         import main as app_main
         rag = app_main.rag_pipeline
         pipe = app_main.get_agent_pipeline()
-        api_client = TestClient(app_main.app)
     else:
         rag = BankingRAGPipeline(config=cfg)
         pipe = BankingAgentPipeline(config=cfg, rag_pipeline=rag, use_memory=True)
@@ -623,7 +621,7 @@ def run_suite(args: argparse.Namespace) -> dict[str, Any]:
             if not line.strip():
                 continue
             row = json.loads(line)
-            if args.retry_errors and row.get("verdict") == "ERROR":
+            if args.retry_errors and row.get("verdict") in ("ERROR", "JUDGE_ERROR"):
                 continue
             completed[str(row["id"])] = row
 
@@ -653,32 +651,24 @@ def run_suite(args: argparse.Namespace) -> dict[str, Any]:
         turn_results: list[dict[str, Any]] = []
         try:
             for turn_idx, user_msg in enumerate(turns):
-                if turn_idx == 0 and encoded_atts and api_client is not None:
-                    with lock:
-                        resp = api_client.post(
-                            "/api/agent/chat",
-                            json={
-                                "session_id": session_id,
-                                "message": str(user_msg),
-                                "persona": persona,
-                                "tone": tone,
-                                "format_style": format_type,
-                                "custom_persona": custom_persona,
-                                "attachments": encoded_atts,
-                            },
-                        )
-                    if resp.status_code >= 400:
-                        raise RuntimeError(f"/api/agent/chat HTTP {resp.status_code}: {resp.text[:200]}")
-                    res = resp.json()
-                else:
-                    res = pipe.chat(
-                        query=str(user_msg),
+                chat_query = str(user_msg)
+                if turn_idx == 0 and encoded_atts and app_main is not None:
+                    att_models = [app_main.ImageAttachment(**att) for att in encoded_atts]
+                    decoded_items = app_main._validate_and_decode_attachments(att_models)
+                    chat_query, _ = app_main._prepare_query_with_attachments(
+                        chat_query.strip(),
+                        decoded_items,
+                        agent=pipe,
                         session_id=session_id,
-                        persona=persona,
-                        tone=tone,
-                        format_type=format_type,
-                        custom_persona=custom_persona,
                     )
+                res = pipe.chat(
+                    query=chat_query,
+                    session_id=session_id,
+                    persona=persona,
+                    tone=tone,
+                    format_type=format_type,
+                    custom_persona=custom_persona,
+                )
                 turn_results.append(res)
 
                 resume_steps = 0
@@ -691,27 +681,13 @@ def run_suite(args: argparse.Namespace) -> dict[str, Any]:
                     if not inter_id:
                         break
                     reply = _select_hitl_reply(interaction, hitl_replies)
-                    if turn_idx == 0 and encoded_atts and api_client is not None:
-                        with lock:
-                            r2 = api_client.post(
-                                "/api/agent/resume",
-                                json={
-                                    "session_id": session_id,
-                                    "interaction_id": inter_id,
-                                    "choice_id": reply.get("choice_id"),
-                                    "choice_ids": reply.get("choice_ids"),
-                                    "text": reply.get("text"),
-                                },
-                            )
-                        res = r2.json()
-                    else:
-                        res = pipe.resume(
-                            session_id=session_id,
-                            interaction_id=inter_id,
-                            choice_id=reply.get("choice_id"),
-                            text=reply.get("text"),
-                            choice_ids=reply.get("choice_ids"),
-                        )
+                    res = pipe.resume(
+                        session_id=session_id,
+                        interaction_id=inter_id,
+                        choice_id=reply.get("choice_id"),
+                        text=reply.get("text"),
+                        choice_ids=reply.get("choice_ids"),
+                    )
                     turn_results.append(res)
                     resume_steps += 1
 
@@ -719,8 +695,10 @@ def run_suite(args: argparse.Namespace) -> dict[str, Any]:
             final_answer = str(final_res.get("answer", ""))
             det = verify_deterministic_checks(case, turn_results, final_res, viz_mod, sim_mod)
 
+            exp_blocked = (case.get("checks") or {}).get("expected_blocked")
+            has_ref_text = bool(str(case.get("reference_answer", "")).strip())
             must_inc = case.get("rubric", {}).get("must_include", [])
-            if judge_client is not None:
+            if judge_client is not None and exp_blocked is None and has_ref_text:
                 judge = call_llm_judge(
                     judge_client,
                     str(case.get("question", "")),
@@ -735,14 +713,16 @@ def run_suite(args: argparse.Namespace) -> dict[str, Any]:
                     skip_score = 0.0
                 judge = {"verdict": "SKIPPED", "overall_score": skip_score}
 
-            exp_blocked = (case.get("checks") or {}).get("expected_blocked")
             if exp_blocked is not None:
                 if det["deterministic_pass"]:
                     verdict = "PASS"
                 else:
                     verdict = "FAIL"
-            elif judge_client is not None:
-                if det["deterministic_pass"] and str(judge.get("verdict", "FAIL")) == "PASS":
+            elif judge_client is not None and has_ref_text:
+                judge_verdict = str(judge.get("verdict", "FAIL"))
+                if judge_verdict == "JUDGE_ERROR":
+                    verdict = "JUDGE_ERROR"
+                elif det["deterministic_pass"] and judge_verdict == "PASS":
                     verdict = "PASS"
                 else:
                     verdict = "FAIL"

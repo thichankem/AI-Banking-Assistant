@@ -73,8 +73,28 @@ class BankingToolGuardrail:
         self.max_loan_tenure = Config.MAX_LOAN_TENURE_MONTHS
         self.min_savings_vnd = Config.MIN_SAVINGS_AMOUNT_VND
 
+    @staticmethod
+    def _ireplace_token(text, needle, replacement):
+        """Case-insensitive substring replacement without regex."""
+        if not needle:
+            return text
+        needle_low = needle.lower()
+        needle_len = len(needle_low)
+        out = []
+        pos = 0
+        low = text.lower()
+        while True:
+            idx = low.find(needle_low, pos)
+            if idx == -1:
+                out.append(text[pos:])
+                break
+            out.append(text[pos:idx])
+            out.append(replacement)
+            pos = idx + needle_len
+        return "".join(out)
+
     def _sanitize_string(self, text, max_len=None):
-        """Sanitize text string, removing dangerous control characters (0% Regex)."""
+        """Sanitize text string, removing dangerous SQLi/XSS markers (0% Regex)."""
         if not text:
             return ""
 
@@ -86,8 +106,14 @@ class BankingToolGuardrail:
         raw = str(text).strip()
         cleaned = raw
         for dang in DANGEROUS_INPUT_CHARACTERS:
-            if dang in cleaned.lower():
-                cleaned = cleaned.replace(dang, _REDACTION_TOOL_INPUT)
+            if dang == "--":
+                # Only treat SQL comment markers (' -- ', ';--', trailing ' --') as dangerous; preserve '2025--2026' or '---'.
+                for sql_comment in (";--", " -- ", " --"):
+                    if sql_comment in cleaned and "---" not in cleaned:
+                        cleaned = cleaned.replace(sql_comment, _REDACTION_TOOL_INPUT)
+                continue
+            if dang.lower() in cleaned.lower():
+                cleaned = self._ireplace_token(cleaned, dang, _REDACTION_TOOL_INPUT)
 
         if limit > 0 and len(cleaned) > limit:
             cleaned = cleaned[:limit].strip()

@@ -165,13 +165,33 @@ def _normalize_review(result):
         result["issues"] = cleaned[:4]
     coverage = result.get("coverage")
     if isinstance(coverage, list):
-        result["coverage"] = [{key: value[:240] if key == "item" and isinstance(value, str) else value
-                               for key, value in item.items() if key in COVERAGE["properties"]}
-                              if isinstance(item, dict) else item for item in coverage]
+        clean_cov = []
+        for item in coverage:
+            if isinstance(item, dict):
+                entry = {}
+                for key, value in item.items():
+                    if key not in COVERAGE["properties"]:
+                        continue
+                    if key == "item" and isinstance(value, str):
+                        entry[key] = value[:240]
+                    else:
+                        entry[key] = value
+                clean_cov.append(entry)
+            else:
+                clean_cov.append(item)
+        result["coverage"] = clean_cov
     claims = result.get("claims")
     if isinstance(claims, list):
-        result["claims"] = [{key: value for key, value in item.items() if key in CLAIM["properties"] and value is not None}
-                            if isinstance(item, dict) else item for item in claims]
+        clean_claims = []
+        for item in claims:
+            if isinstance(item, dict):
+                clean_claims.append({
+                    key: value for key, value in item.items()
+                    if key in CLAIM["properties"] and value is not None
+                })
+            else:
+                clean_claims.append(item)
+        result["claims"] = clean_claims
     return result
 
 
@@ -442,10 +462,9 @@ class StructuredModel:
             ) + _PROMPT_OVERHEAD_BYTES
             budget = self.context_bytes - overhead - output_tokens * 4
             if candidate.context_window:
-                # Bound unknown tokenizers conservatively using UTF-8 input bytes.
-                budget = candidate.context_window - overhead - output_tokens
-                if "AGENT_CONTEXT_BYTES" in os.environ:
-                    budget = min(budget, self.context_bytes - overhead - output_tokens * 4)
+                # Bound unknown tokenizers conservatively using UTF-8 input bytes while honoring configured context_bytes.
+                win_budget = candidate.context_window - overhead - output_tokens
+                budget = min(win_budget, budget)
             try:
                 packed = pack_context(data, budget, keep_evidence=review)
             except ModelFallbackError:

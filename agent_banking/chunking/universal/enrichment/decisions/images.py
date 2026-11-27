@@ -113,6 +113,9 @@ def _image_inputs(ir):
                 paragraphs.append(block)
                 paragraphs = paragraphs[-para_window:]
         elif block["type"] == "image":
+            if block.get("image", {}).get("status") == "ocr_transcribed":
+                paragraphs = []
+                continue
             preceding = adjacent_source(blocks, index, -1, {"paragraph", "caption", "heading"})
             following = adjacent_source(blocks, index, 1, {"paragraph", "caption"})
             explicit = captions.get(block["id"], [])

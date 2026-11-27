@@ -112,7 +112,7 @@ class SemanticBankingGuardrail:
         for b_tpl in BENIGN_BANKING_TEMPLATES:
             benign_items.append({"template": b_tpl})
 
-        use_query_prefix = False
+        use_query_prefix = True
         if hasattr(self.embedder, "use_query_prefix"):
             use_query_prefix = bool(self.embedder.use_query_prefix)
         elif hasattr(self.embedder, "prefix_query"):
@@ -121,7 +121,7 @@ class SemanticBankingGuardrail:
         hashes = []
         for item in attack_items:
             tpl = item["template"]
-            if use_query_prefix:
+            if use_query_prefix and not tpl.startswith(_QUERY_PREFIX):
                 vp = _QUERY_PREFIX + tpl
             else:
                 vp = tpl
@@ -134,7 +134,7 @@ class SemanticBankingGuardrail:
 
         for b_item in benign_items:
             b_tpl = b_item["template"]
-            if use_query_prefix:
+            if use_query_prefix and not b_tpl.startswith(_QUERY_PREFIX):
                 b_vp = _QUERY_PREFIX + b_tpl
             else:
                 b_vp = b_tpl

@@ -37,10 +37,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent_banking.core.settings import Config
+from agent_banking.core.document_revisions import copy_publication_revisions
 from agent_banking.chunking.universal.extraction.sources import legacy_source_resolver, source_key
 from agent_banking.chunking.universal.planning.schema import require_index_ready
 from agent_banking.vector_db.config.settings import VectorDBConfig
-from agent_banking.vector_db.qdrant_store import QdrantBankingStore, mark_publication_chunks, publication_scope
+from agent_banking.vector_db.qdrant_store import (
+    QdrantBankingStore, configured_qdrant_connection, mark_publication_chunks, publication_scope,
+)
 from agent_banking.state_tracker import StateTracker
 
 
@@ -171,7 +174,7 @@ def run_auto_indexing(
     embedding_dim = getattr(cfg, "EMBEDDING_DIM", VectorDBConfig.QDRANT_VECTOR_SIZE)
 
     # Kiem tra nhanh: Neu khong force va khong use_memory, kiem tra xem tat ca chunks da xu ly chua
-    if not force and not snapshot:
+    if not force and not snapshot and not getattr(cfg, "QDRANT_SERVER_URL", ""):
         if not use_memory:
             if manifest_file.exists():
                 try:
@@ -212,22 +215,21 @@ def run_auto_indexing(
                 except Exception:
                     pass
 
-    raw_storage = getattr(cfg, "QDRANT_STORAGE_PATH", VectorDBConfig.QDRANT_STORAGE_PATH)
-    storage_candidate = Path(str(raw_storage))
-    if storage_candidate.is_absolute():
-        resolved_storage = str(storage_candidate)
-    else:
-        resolved_storage = str((PROJECT_ROOT / storage_candidate).resolve())
-
     store = QdrantBankingStore(
         collection_name=collection_name,
         dimension=embedding_dim,
-        storage_path=resolved_storage,
-        use_memory=use_memory
+        use_memory=use_memory,
+        **configured_qdrant_connection(cfg),
     )
     if snapshot and not use_memory and store.use_memory:
         store.close()
         raise RuntimeError("The persistent index is unavailable")
+    if scope and not use_memory:
+        try:
+            copy_publication_revisions(publication_dir, store.storage_path, publication_manifest["records"])
+        except (OSError, ValueError):
+            store.close()
+            raise
 
     # Snapshot mode upserts verified replacements before removing obsolete chunks.
     if force and not snapshot:

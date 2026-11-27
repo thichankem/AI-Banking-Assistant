@@ -7,25 +7,54 @@ parameters_schema:
         For follow-up questions, use the subject determined from session context.
     top_k:
       type: integer
-      default: 3
+      default: 5
       minimum: 1
-      maximum: 6
+      maximum: 8
       description: Number of most accurate text chunks after Rerank
     exact:
       type: string
       minLength: 2
       maxLength: 100
+    source:
+      type: string
+      minLength: 2
+      maxLength: 400
+      description: Source filename, document code, or indexed folder path.
+    page:
+      type: integer
+      minimum: 1
+      maximum: 10000
+      description: One-based PDF page number when reading a specific document.
+    offset:
+      type: integer
+      minimum: 0
+      maximum: 10000
+      description: Zero-based chunk offset when reading sequentially from a specific document.
+    excel:
+      type: object
+      description: Structured Excel row lookup specification with table_id, filters, and group_by.
     candidate_k:
       type: integer
-      default: 30
+      default: 45
       minimum: 1
       maximum: 80
       description: Initial number of candidate passages collected from Hybrid Retrieval
+    as_of:
+      type: string
+      format: date
+      description: Applicability date in YYYY-MM-DD. Preserve the customer's date in follow-up lookups.
+    expand_graph:
+      type: boolean
+      description: Include related policies through verified links.
   required:
   - query
 output_schema:
   type: object
   properties:
+    documents:
+      type: array
+    related_documents:
+      type: array
     chunks:
       type: array
     formatted_context:

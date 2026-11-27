@@ -172,6 +172,10 @@ def resolve_table_structures_and_titles(ir, ask_decisions, cache=None):
                 for row in grid[start_hdr_row:header_count]:
                     if row[column] and row[column] not in labels:
                         labels.append(row[column])
+                if not labels and start_hdr_row > 0:
+                    for row in grid[:start_hdr_row]:
+                        if row[column] and row[column] != resolved_title and row[column] not in labels:
+                            labels.append(row[column])
                 headers.append(" / ".join(labels))
             if "row_provenance" not in table:
                 table["headers"] = headers
@@ -241,6 +245,26 @@ def record_header_occurrence(target, source, row_provenance):
         })
 
 
+def _intervening_blocks_bridgeable(non_furniture, max_intervening, max_intervening_words, prev_page, curr_page):
+    if len(non_furniture) > max_intervening:
+        return False
+    for item in non_furniture:
+        kind = item.get("type")
+        if kind not in ("caption", "paragraph", "heading"):
+            return False
+        text = str(item.get("text") or "").strip()
+        if len(text.split()) > max_intervening_words:
+            return False
+        if item.get("provenance", {}).get("page_index") not in (prev_page, curr_page):
+            return False
+        low = text.casefold()
+        if low.startswith(("lưu ý", "luu y", "ghi chú", "ghi chu", "chú ý", "chu y", "cảnh báo", "canh bao")):
+            return False
+        if kind == "heading" and low.startswith(("chương ", "chuong ", "mục ", "muc ", "điều ", "dieu ", "phần ", "phan ", "phụ lục", "phu luc")):
+            return False
+    return True
+
+
 def merge_continued_tables(ir, ask_decisions, cache=None):
     """Use decision model to determine whether consecutive multi-page PDF tables should merge."""
     blocks = ir["blocks"]
@@ -277,14 +301,8 @@ def merge_continued_tables(ir, ask_decisions, cache=None):
             cell_chars = _TABLE_DECISION_CFG["cell_chars"]
             hdr_cols = _TABLE_DECISION_CFG["header_preview_cols"]
             non_furniture = [item for item in intervening if not is_furniture_block(item)]
-            bridgeable = (
-                len(non_furniture) <= max_intervening
-                and all(
-                    item["type"] in ("caption", "paragraph", "heading")
-                    and len(item.get("text", "").split()) <= max_intervening_words
-                    and item.get("provenance", {}).get("page_index") in (prev_page, curr_page)
-                    for item in non_furniture
-                )
+            bridgeable = _intervening_blocks_bridgeable(
+                non_furniture, max_intervening, max_intervening_words, prev_page, curr_page
             )
             if prev_page >= 0 and curr_page == prev_page + 1 and width1 > 0 and width1 == width2 and bridgeable:
                 pid = "tbl_" + str(len(pairs))

@@ -144,6 +144,9 @@ def cell_image_relationships(package, workbook_rels):
     return result
 
 
+_LEGACY_LOGO_TEXTS = frozenset(("lpbank", "lp bank", "ngan hang buu dien lien viet", "lienvietpostbank"))
+
+
 class WorkbookObjects:
     def __init__(self, package, ir, asset_dir, cache, vision, review, max_pixels):
         self.package = package
@@ -244,6 +247,9 @@ class WorkbookObjects:
             if item["type"] == "table":
                 data = item["table_data"]
                 text = "\n".join(" | ".join(row) for row in data["header_grid"] + data["rows"])
+            clean_txt = " ".join(text.split()).strip().casefold()
+            if clean_txt in _LEGACY_LOGO_TEXTS:
+                continue
             if text.strip():
                 yield loc, text, "image_ocr", {"asset_sha256": digest, "part": rel.target}
 

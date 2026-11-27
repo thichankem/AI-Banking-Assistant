@@ -110,7 +110,10 @@ def main():
 
     root = Path(__file__).resolve().parents[2]
     config = Config()
-    index = args.index.resolve() if args.index else Path(config.ABANK_QDRANT_STORAGE_PATH or config.QDRANT_STORAGE_PATH)
+    if args.index:
+        index = args.index.resolve()
+    else:
+        index = Path(config.ABANK_QDRANT_STORAGE_PATH or config.QDRANT_STORAGE_PATH)
     if not index.is_absolute():
         index = root / index
     inventory = index / "knowledge_inventory.json"

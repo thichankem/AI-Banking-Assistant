@@ -37,6 +37,9 @@ from agent_banking.agent.memory import (
     should_compact,
 )
 from agent_banking.agent.model_protocol import ARTIFACT_REVIEW_SCHEMA, REVIEW_SCHEMA, StructuredModel
+from agent_banking.core.document_revisions import is_document_version
+from agent_banking.core.numeric_tokens import extract_canonical_numeric_tokens
+from agent_banking.core.policy_dates import policy_query_date
 from agent_banking.agent.simulator import SIMULATOR_SCHEMA, SKILL_ID as SIMULATOR_SKILL
 from agent_banking.agent.visualization import (
     MAX_RECENT as MAX_RECENT_VISUALIZATIONS,
@@ -103,6 +106,7 @@ _DECIDE_MAX_TOKENS = get_int_setting("decide_max_tokens")
 _RECOVER_MAX_TOKENS = get_int_setting("recover_max_tokens")
 _WORKER_MAX_TOKENS = get_int_setting("worker_max_tokens")
 _PARTIAL_RECOVERY_MAX_TOKENS = get_int_setting("partial_recovery_max_tokens")
+_PARTIAL_RECOVERY_MAX_SOURCES = get_int_setting("partial_recovery_max_sources")
 _REVIEW_MAX_TOKENS = get_int_setting("review_max_tokens")
 _PARTIAL_REVIEW_MAX_TOKENS = get_int_setting("partial_review_max_tokens")
 _DEFAULT_PERSONA = str(get_setting("default_persona", ""))
@@ -130,28 +134,77 @@ def _evidence_view(evidence: list[dict]) -> list[dict]:
     result = []
     for item in evidence:
         chunk = item["chunk"]
+        meta = chunk.get("business_metadata") or {}
         record = {"label": _label(item["index"]), "text": item["context"], "source": item["source"],
-                  "version": (chunk.get("business_metadata") or {}).get("document_version", "")}
+                  "version": meta.get("document_version", "")}
+        temporal = meta.get("temporal")
+        if temporal:
+            record["temporal"] = temporal
         if type(chunk.get("source_offset")) is int:
             record["source_offset"] = chunk["source_offset"]
         if chunk.get("context_for"):
             record["context_neighbor"] = True
+        pages = _extract_page_numbers(meta)
+        if pages:
+            record["pages"] = pages
+        section_title = str(chunk.get("section_title") or "").strip()
+        if section_title:
+            record["section"] = section_title
+        cit_meta = meta.get("citation")
+        if isinstance(cit_meta, dict) and cit_meta.get("sheet_name"):
+            record["sheet_name"] = str(cit_meta["sheet_name"])
+            if cit_meta.get("cell_ranges"):
+                record["cell_ranges"] = list(cit_meta["cell_ranges"])
         result.append(record)
     return result
 
 
+def _split_user_and_attachment(text: str) -> tuple[str, str]:
+    marker = "[Thông tin trích xuất từ ảnh đính kèm của khách hàng:"
+    pos = text.find(marker)
+    if pos < 0:
+        return text, ""
+    user_part = text[:pos].strip()
+    attach_part = text[pos:].strip()
+    return user_part, attach_part
+
+
 def _support_view(state: dict) -> dict:
     turn = state["react_turn"]
-    user_text = [
-        item["content"] for item in state.get("chat_history", [])[-_SUPPORT_HISTORY_LIMIT:]
-        if item["role"] == "user"
-    ]
-    user_text += [state["user_query"]] + [reply["response"] for reply in state["human_replies"]]
+    user_messages = []
+    assistant_messages = []
+    attachment_segments = []
+    for item in state.get("chat_history", [])[-_SUPPORT_HISTORY_LIMIT:]:
+        if item["role"] == "user":
+            u_part, a_part = _split_user_and_attachment(str(item["content"]))
+            if u_part:
+                user_messages.append(u_part)
+            if a_part:
+                attachment_segments.append(a_part)
+        elif item["role"] == "assistant":
+            a_text = str(item["content"]).strip()
+            if a_text and a_text != FALLBACK_ANSWER:
+                assistant_messages.append(a_text)
+    cur_u, cur_a = _split_user_and_attachment(str(state["user_query"]))
+    if cur_u:
+        user_messages.append(cur_u)
+    elif not cur_a:
+        user_messages.append(str(state["user_query"]))
+    if cur_a:
+        attachment_segments.append(cur_a)
+    user_messages += [reply["response"] for reply in state["human_replies"]]
     notes = [item["value"] for item in memory_view(state)["notes"].values()]
-    user_text = notes[:_SUPPORT_NOTES_LIMIT] + user_text
+    user_messages = notes[:_SUPPORT_NOTES_LIMIT] + user_messages
     user_label = _DEEP_MESSAGES.get("user_support_label", "[Khách]")
     tool_prefix = _DEEP_MESSAGES.get("tool_support_prefix", "[Tool ")
-    result = {user_label: "\n".join(text[:_SUPPORT_MESSAGE_MAX_CHARS] for text in user_text)[-_SUPPORT_USER_TEXT_MAX_CHARS:]}
+    result = {user_label: "\n".join(text[:_SUPPORT_MESSAGE_MAX_CHARS] for text in user_messages)[-_SUPPORT_USER_TEXT_MAX_CHARS:]}
+    if attachment_segments:
+        attach_budget = max(_SUPPORT_MESSAGE_MAX_CHARS, 3600)
+        result["[Ảnh đính kèm]"] = "\n".join(seg[:attach_budget] for seg in attachment_segments)[-attach_budget:]
+    if assistant_messages:
+        result["[Lịch sử trả lời trước]"] = "\n---\n".join(
+            text[:_SUPPORT_MESSAGE_MAX_CHARS] for text in assistant_messages
+        )[-_SUPPORT_USER_TEXT_MAX_CHARS:]
 
     def add(observation):
         if observation["status"] == "SUCCESS" and not observation.get("retrieval") and observation["kind"] in ("tool", "skill"):
@@ -198,6 +251,49 @@ def _matches_table_cells(quote, source_text):
             if remaining.startswith(text + " "):
                 remaining = remaining[len(text) + 1:]
     return False
+
+
+_FX_CURRENCY_UNITS = frozenset(("usd", "eur", "gbp", "jpy", "aud", "sgd", "chf", "cad", "cny", "krw", "thb"))
+_FX_SPLIT_CHARS = "/|;()[]{}:\"'“”‘’\n\r\t"
+
+
+def _extract_fx_tokens(text: str) -> set[str]:
+    """Extract normalized foreign-currency numeric tokens (~fx_usd_100) without regex."""
+    if not text:
+        return set()
+    work = text.casefold()
+    for ch in _FX_SPLIT_CHARS:
+        if ch in work:
+            work = work.replace(ch, " ")
+    words = [w.strip(",.;!?*+<>=") for w in work.split()]
+    tokens = set()
+    for idx in range(len(words) - 1):
+        amt = words[idx]
+        unit = words[idx + 1]
+        if unit not in _FX_CURRENCY_UNITS or not amt or not amt[0].isdigit():
+            continue
+        clean_num = amt.replace(",", ".")
+        if clean_num.count(".") == 1 and len(clean_num.split(".")[1]) == 3 and clean_num.split(".")[0] != "0":
+            clean_num = clean_num.replace(".", "")
+        elif clean_num.count(".") > 1:
+            clean_num = clean_num.replace(".", "")
+        valid = True
+        dot_seen = 0
+        for ch in clean_num:
+            if ch == ".":
+                dot_seen += 1
+            elif not ch.isdigit():
+                valid = False
+                break
+        if valid and dot_seen <= 1:
+            if "." in clean_num:
+                norm = clean_num.rstrip("0").rstrip(".")
+            else:
+                norm = clean_num
+            if not norm:
+                norm = "0"
+            tokens.add(f"~fx_{unit}_{norm}")
+    return tokens
 
 
 def validate_review(verdict: dict, draft: str, citations: list, evidence: list, support: dict) -> None:
@@ -264,6 +360,29 @@ def validate_review(verdict: dict, draft: str, citations: list, evidence: list, 
         missing = [item["label"] for item in citations if item["label"] not in claimed]
         if citations and not any(item["label"] in claimed for item in citations):
             raise ValueError("Citation missing claim grounding: " + ", ".join(missing))
+        labels = {item["label"] for item in citations}
+        ungrounded_line_cites = []
+        for line in _normalize_citation_markers(draft).replace(". ", ".\n").splitlines():
+            line_labels = [label for label in labels if label.casefold() in line.casefold()]
+            if not line_labels:
+                continue
+            if not any(lbl in claimed for lbl in line_labels):
+                for lbl in line_labels:
+                    if lbl not in claimed and lbl not in ungrounded_line_cites:
+                        ungrounded_line_cites.append(lbl)
+            numbers = {token for token in extract_canonical_numeric_tokens(line)
+                       if token.startswith(("~pct_", "~vnd_"))}
+            fx_numbers = _extract_fx_tokens(line)
+            source_numbers = set()
+            source_fx = set()
+            for label in set(line_labels) | (claimed & support.keys()):
+                src_val = sources.get(label, "")
+                source_numbers.update(extract_canonical_numeric_tokens(src_val, max_tokens=128))
+                source_fx.update(_extract_fx_tokens(src_val))
+            if numbers - source_numbers or fx_numbers - source_fx:
+                raise ValueError("Unsupported financial figure in cited answer line")
+        if ungrounded_line_cites:
+            raise ValueError("Citation missing claim grounding: " + ", ".join(ungrounded_line_cites))
 
 
 def _compact_observations(observations: list[dict]) -> list[dict]:
@@ -316,9 +435,30 @@ def _compact_observations(observations: list[dict]) -> list[dict]:
     return bounded
 
 
+_CREDENTIAL_SOLICITATION_CUES = (
+    " nhap ", " cung cap ", " gui ", " cho biet ", " dien ", " doc ", " chia se ",
+    " bao nhieu ", " la gi ", " cua ban ", " cua quy khach ", " de tiep tuc ",
+    " xac minh so ", " doi chieu so ", " xac nhan ma ",
+)
+_STRICT_SECRET_FIELDS = {"otp", "pin", "cvv", "cvc", "mat khau", "mật khẩu", "password"}
+_TOPIC_CONTEXT_CUES = (
+    " tinh huong ", " van de ", " dich vu ", " loi ", " chu de ", " nhom ",
+    " quy trinh ", " chinh sach ", " huong dan ", " mo khoa ", " quen ",
+)
+
+
 def _requests_restricted_field(text: str) -> bool:
     normalized = _alnum_or_space(text.casefold().replace(".", ""))
-    return any(f" {field} " in normalized for field in RESTRICTED_CARD_FIELDS)
+    folded = " " + search_key(text) + " "
+    has_field = any(f" {field} " in normalized or f" {search_key(field)} " in folded for field in RESTRICTED_CARD_FIELDS)
+    if not has_field:
+        return False
+    if any(cue in folded for cue in _CREDENTIAL_SOLICITATION_CUES):
+        return True
+    has_secret = any(f" {field} " in normalized or f" {search_key(field)} " in folded for field in _STRICT_SECRET_FIELDS)
+    if has_secret and not any(cue in folded for cue in _TOPIC_CONTEXT_CUES):
+        return True
+    return False
 
 
 def _requests_brief_summary(state: dict) -> bool:
@@ -493,11 +633,14 @@ def _normalize_image_entry(img: dict, citation: dict, doc_name: str):
             and isinstance(bbox, (list, tuple)) and len(bbox) == 4
             and all(type(coordinate) in (int, float) for coordinate in bbox)
             and 0 <= bbox[0] < bbox[2] <= 1 and 0 <= bbox[1] < bbox[3] <= 1):
-        entry["detail_url"] = "/api/documents/pdf/region?" + urlencode({
+        params = {
             "source": source,
             "page": page_number,
             "bbox": ",".join(map(str, bbox)),
-        })
+        }
+        if is_document_version(citation.get("document_version")):
+            params["version"] = citation["document_version"]
+        entry["detail_url"] = "/api/documents/pdf/region?" + urlencode(params)
     return entry
 
 
@@ -756,7 +899,7 @@ def _extract_document_name(source: str, business_metadata: dict) -> str:
     return clean
 
 
-def _build_pdf_url(source: str, page_numbers: list) -> str:
+def _build_pdf_url(source: str, page_numbers: list, version="") -> str:
     """Build browser-ready inline PDF URL with #page=N anchor for PDF sources."""
     clean = str(source or "").replace("\\", "/").strip()
     while clean.startswith("/"):
@@ -764,6 +907,8 @@ def _build_pdf_url(source: str, page_numbers: list) -> str:
     if not clean or not clean.lower().endswith(".pdf"):
         return ""
     url = "/api/documents/pdf?source=" + quote(clean, safe="")
+    if is_document_version(version):
+        url += "&version=" + version
     if isinstance(page_numbers, list) and page_numbers:
         first_page = page_numbers[0]
         if type(first_page) is int and first_page > 0:
@@ -950,7 +1095,7 @@ def _enrich_citations(citations: list, retrieved_chunks: list, cited_images: lis
         if isinstance(excel_citation, dict) and excel_citation.get("sheet_name"):
             enriched_item["sheet_name"] = excel_citation["sheet_name"]
             enriched_item["cell_ranges"] = excel_citation.get("cell_ranges", [])
-        enriched_item["pdf_url"] = _build_pdf_url(src, pages)
+        enriched_item["pdf_url"] = _build_pdf_url(src, pages, enriched_item.get("document_version", ""))
         enriched_item["chunk_type"] = chunk_type
         enriched_item["excerpt"] = _format_citation_excerpt(chunk)
         prov_summary = _extract_citation_provenance(meta)
@@ -1006,6 +1151,22 @@ class BankingDeepAgent(BankingReActNodes):
             ]
             if amounts:
                 hints["financial_amounts"] = amounts
+        try:
+            resolved_date, _ = policy_query_date(state["user_query"])
+        except ValueError:
+            resolved_date = None
+        if resolved_date is None and state.get("human_replies"):
+            reply_text = " ".join(
+                str(item.get("response") or "") for item in state["human_replies"]
+                if isinstance(item, dict)
+            ).strip()
+            if reply_text:
+                try:
+                    resolved_date, _ = policy_query_date(reply_text)
+                except ValueError:
+                    resolved_date = None
+        if resolved_date is not None:
+            hints["as_of"] = resolved_date.isoformat()
         state = {**state, "query_hints": hints, "last_action": None}
         if not should_compact(state.get("chat_history", [])):
             return state
@@ -1079,7 +1240,10 @@ class BankingDeepAgent(BankingReActNodes):
             if "search_banking_knowledge" in catalog["tool"]:
                 system += (
                     "\nFor search_banking_knowledge, omit 'source' on broad fee, policy, or account lookups unless the customer "
-                    "explicitly names a document code/title (e.g., 'NV 01', 'BP 01', 'HDSD 05') or asks about mobile app navigation steps."
+                    "explicitly names a document code/title (e.g., 'NV 01', 'BP 01', 'HDSD 05') or asks about mobile app navigation steps. "
+                    "For comparison across specific dates, search each date separately with its explicit as_of. "
+                    "When an applicability date is only a month or is ambiguous, clarify the date or state that the period needs verification. "
+                    "A transaction date changes the policy lookup date only if the customer asks for the policy in force on that date."
                 )
             if _COORDINATOR_SKILL_HINT:
                 system += "\n" + _COORDINATOR_SKILL_HINT
@@ -1138,8 +1302,19 @@ class BankingDeepAgent(BankingReActNodes):
         if prepared:
             data["active_skills"] = {key: value for key, value in active_skills.items()
                                      if key not in (SIMULATOR_SKILL, VISUALIZATION_SKILL)}
+            prepared_vis = prepared.get("visualization") or {}
+            extra_vis_hint = ""
+            if prepared_vis.get("engine") == "mermaid":
+                extra_vis_hint = (" Because engine='mermaid', also include the fenced ```mermaid source block in final.answer "
+                                  "alongside the explanation and verified citations.")
+            elif prepared_vis.get("engine") == "simulator":
+                extra_vis_hint = (" Name the Interactive Simulator calculation operation(s) (e.g. operation='pmt'/'subtract'/'multiply') "
+                                  "and adjustable slider defaults in final.answer without inventing ungrounded fee codes or rates.")
+            if type(prepared_vis.get("revision")) is int and prepared_vis["revision"] > 1:
+                extra_vis_hint += " Explicitly describe how this visual was updated from the previous version."
             system += ("\nThe visualization is ready and will appear in the conversation. Return final with a helpful "
-                       "customer-facing explanation and any necessary citations. Explain assumptions or trade-offs.")
+                       "customer-facing explanation and any necessary citations. Explain assumptions or trade-offs."
+                       + extra_vis_hint)
         if recent:
             available_skills = state["capabilities"]["skill"]
             artifacts = []
@@ -1168,9 +1343,8 @@ class BankingDeepAgent(BankingReActNodes):
         turn = state["react_turn"]
         search_obs = []
         for item in turn.get("observations", []):
-            if item.get("kind") == "tool":
-                if item.get("name") == "search_banking_knowledge":
-                    search_obs.append(item)
+            if item.get("knowledge_search") or (item.get("kind"), item.get("name")) == ("tool", "search_banking_knowledge"):
+                search_obs.append(item)
         num_searches = len(search_obs)
         zero_evidence_streak = 0
         for obs in reversed(search_obs):
@@ -1210,19 +1384,30 @@ class BankingDeepAgent(BankingReActNodes):
                     "execution_steps": state["execution_steps"] + ["deep_decide: model_error"]
                 }
             state = {**state, "execution_steps": state["execution_steps"] + ["deep_decide: recovered_contract"]}
-        if (search_limit_reached and decision["kind"] == "tool"
-                and decision["name"].strip() == "search_banking_knowledge"):
+        target_name = decision.get("name", "").strip()
+        skill_target = None
+        if decision["kind"] == "skill":
+            skill_target = resolve_skill(catalog["skill"], target_name)
+        if search_limit_reached and (
+            (decision["kind"] == "tool" and target_name == "search_banking_knowledge")
+            or (skill_target and skill_target["execution"]["type"] == "rag_pipeline")
+        ):
             decision = self.recover_decision(data, state["confirmation_required"], can_clarify="clarify" in allowed)
             if decision is None:
                 return {**state, "audit_status": "ERROR", "final_answer": FALLBACK_ANSWER}
         if (decision["kind"] == "final" and not decision.get("insufficient_evidence") and "tool" in allowed
                 and not state.get("presentation_arguments_requested")
+                and int(state.get("visual_revisions") or 0) < 1
                 and self._explicit_chart_request(state["user_query"], recent)):
             definition = state["capabilities"]["tool"].get(PRESENT_VISUALIZATION_TOOL)
             if definition:
                 state = {**state, "presentation_arguments_requested": True}
+                if self._prefers_simulator(state["user_query"], recent):
+                    target_skills = {SIMULATOR_SKILL: active_skills.get(SIMULATOR_SKILL, {})}
+                else:
+                    target_skills = {VISUALIZATION_SKILL: active_skills.get(VISUALIZATION_SKILL, {})}
                 arguments = self._design_presentation_arguments(
-                    definition, {VISUALIZATION_SKILL: active_skills.get(VISUALIZATION_SKILL, {})}, data, recent,
+                    definition, target_skills, data, recent,
                 )
                 if self._valid_presentation_arguments(arguments, recent):
                     decision = {"kind": "tool", "name": PRESENT_VISUALIZATION_TOOL, "arguments": arguments}
@@ -1231,34 +1416,57 @@ class BankingDeepAgent(BankingReActNodes):
             arguments = decision["arguments"]
             artifact = arguments.get("artifact")
             name = decision["name"].strip().lstrip(":").strip()
-            if name == "export_visualization_json" and set(arguments) <= {"filename", "artifact"}:
-                name = PRESENT_VISUALIZATION_TOOL
-                if artifact is not None:
-                    arguments = {"artifact": artifact}
-                else:
-                    arguments = {}
-            if (name not in registered and set(arguments) == {"artifact"}
-                    and isinstance(artifact, dict) and PRESENT_VISUALIZATION_TOOL in registered):
-                engine = artifact.get("engine")
-                if ((engine == "simulator" and SIMULATOR_SKILL in active_skills)
-                        or (engine in ("echarts", "mermaid") and VISUALIZATION_SKILL in active_skills)):
-                    name = PRESENT_VISUALIZATION_TOOL
-            if name == PRESENT_VISUALIZATION_TOOL and name in registered:
-                valid = self._valid_presentation_arguments(arguments, recent)
-                if not valid and not state.get("presentation_arguments_requested"):
-                    state = {**state, "presentation_arguments_requested": True}
-                    arguments = self._design_presentation_arguments(registered[name], active_skills, data, recent)
-                    valid = self._valid_presentation_arguments(arguments, recent)
-                if valid:
-                    decision = {**decision, "name": name, "arguments": arguments}
-                else:
-                    try:
-                        decision = self.model.decide(
-                            system + "\nContinue with a useful text answer. This turn's visualization is unavailable.",
-                            data, ["final"], max_tokens=_RECOVER_MAX_TOKENS,
+            if not state.get("worker") and name in ("create_support_ticket", "transfer_to_agent") and "confirm" in allowed:
+                approved_confirm = any(
+                    item.get("kind") == "confirm" and "approve" in item.get("selected_ids", [])
+                    for item in state.get("human_replies", [])
+                )
+                if not approved_confirm:
+                    if name == "transfer_to_agent":
+                        proposal = (
+                            "Xác nhận kết nối yêu cầu của Quý khách tới hàng đợi Chuyên viên Tư vấn "
+                            "(trường hợp khẩn cấp vui lòng gọi ngay Hotline 1900 6688). Quý khách muốn tiếp tục không?"
                         )
-                    except ModelFallbackError:
-                        decision = {"kind": "final", "answer": FALLBACK_ANSWER, "insufficient_evidence": True}
+                    else:
+                        issue_desc = str(arguments.get("description") or arguments.get("issue_type") or "hỗ trợ khẩn cấp").strip()
+                        proposal = (
+                            f"Xác nhận tạo phiếu yêu cầu hỗ trợ ({issue_desc[:140]}). "
+                            "Trường hợp khẩn cấp vui lòng liên hệ Hotline 1900 6688. Quý khách có đồng ý tiếp tục không?"
+                        )
+                    decision = {"kind": "confirm", "proposal": proposal}
+            if decision["kind"] == "tool":
+                if name == "export_visualization_json" and set(arguments) <= {"filename", "artifact"}:
+                    name = PRESENT_VISUALIZATION_TOOL
+                    if artifact is not None:
+                        arguments = {"artifact": artifact}
+                    else:
+                        arguments = {}
+                if (name not in registered and set(arguments) == {"artifact"}
+                        and isinstance(artifact, dict) and PRESENT_VISUALIZATION_TOOL in registered):
+                    engine = artifact.get("engine")
+                    if ((engine == "simulator" and SIMULATOR_SKILL in active_skills)
+                            or (engine in ("echarts", "mermaid") and VISUALIZATION_SKILL in active_skills)):
+                        name = PRESENT_VISUALIZATION_TOOL
+                if name == PRESENT_VISUALIZATION_TOOL and name in registered:
+                    if int(state.get("visual_revisions") or 0) >= 1:
+                        valid = False
+                        state = {**state, "presentation_arguments_requested": True}
+                    else:
+                        valid = self._valid_presentation_arguments(arguments, recent)
+                        if not valid and not state.get("presentation_arguments_requested"):
+                            state = {**state, "presentation_arguments_requested": True}
+                            arguments = self._design_presentation_arguments(registered[name], active_skills, data, recent)
+                            valid = self._valid_presentation_arguments(arguments, recent)
+                    if valid:
+                        decision = {**decision, "name": name, "arguments": arguments}
+                    else:
+                        try:
+                            decision = self.model.decide(
+                                system + "\nContinue with a useful text answer. This turn's visualization is unavailable.",
+                                data, ["final"], max_tokens=_RECOVER_MAX_TOKENS,
+                            )
+                        except ModelFallbackError:
+                            decision = {"kind": "final", "answer": FALLBACK_ANSWER, "insufficient_evidence": True}
         if state["confirmation_required"] and decision["kind"] == "final":
             return {
                 **state,
@@ -1279,19 +1487,38 @@ class BankingDeepAgent(BankingReActNodes):
         }
 
     @staticmethod
+    def _prefers_simulator(query, recent):
+        text = " " + search_key(query) + " "
+        sim_tokens = (
+            " mo phong ", " bo mo phong ", " trinh mo phong ", " interactive simulator ",
+            " simulator ", " thanh truot ", " slider ", " cong cu mo phong ",
+        )
+        if any(token in text for token in sim_tokens):
+            return True
+        if recent and (recent[0].get("visualization") or {}).get("engine") == "simulator":
+            return True
+        return False
+
+    @staticmethod
     def _explicit_chart_request(query, recent):
-        text = search_key(query) + " "
+        text = " " + search_key(query) + " "
         visual_tokens = (
-            "so do", "bieu do", "chart", "diagram", "flowchart", "mindmap",
-            "ve bieu do", "tao bieu do", "ve so do", "tao so do", "show so do",
-            "cho xem so do", "xem so do", "hien thi so do", "do thi"
+            " so do ", " bieu do ", " chart ", " diagram ", " flowchart ", " mindmap ",
+            " ve bieu do ", " tao bieu do ", " ve so do ", " tao so do ", " show so do ",
+            " cho xem so do ", " xem so do ", " hien thi so do ", " do thi ",
+            " mo phong ", " bo mo phong ", " trinh mo phong ", " interactive simulator ",
+            " simulator ", " thanh truot ", " slider ", " cong cu mo phong ",
         )
         for token in visual_tokens:
             if token in text:
                 return True
-        has_echarts = any(item["visualization"]["engine"] == "echarts" for item in recent)
-        if has_echarts:
-            for switch_token in ("doi sang", "chuyen sang", "change it to", "switch to"):
+        if recent:
+            update_tokens = (
+                " doi sang ", " chuyen sang ", " change it to ", " switch to ",
+                " cap nhat ", " update ", " chinh sua ", " sua lai ",
+                " thay doi ", " dieu chinh ", " bo sung ", " doi mau ", " them nhom ",
+            )
+            for switch_token in update_tokens:
                 if switch_token in text:
                     return True
         return False
@@ -1704,15 +1931,20 @@ class BankingDeepAgent(BankingReActNodes):
                 worker = self.act(worker)
         return {"error": _DEEP_MESSAGES.get("worker_exhausted", "")}
 
-    def _merge_worker_evidence(self, parent: list, child: list) -> tuple[list, dict]:
+    def _merge_worker_evidence(self, parent: list, child: list, preferred_indices: set | None = None) -> tuple[list, dict]:
         merged = list(parent)
         known = {tuple(item["identity"]): item["index"] for item in merged}
         mapping = {}
-        for item in child:
+        ordered_child = list(child)
+        if preferred_indices:
+            ordered_child.sort(key=lambda item: item["index"] not in preferred_indices)
+        for item in ordered_child:
             key = tuple(item["identity"])
             if key not in known:
                 if len(merged) >= MAX_EVIDENCE:
-                    raise ValueError("Turn evidence limit reached")
+                    if preferred_indices and item["index"] in preferred_indices:
+                        raise ValueError("Turn evidence limit reached")
+                    continue
                 known[key] = len(merged) + 1
                 merged.append({**item, "index": known[key]})
             mapping[item["index"]] = known[key]
@@ -1738,9 +1970,24 @@ class BankingDeepAgent(BankingReActNodes):
                     result = self._run_worker(role, task, state["capabilities"])
                     error = result.get("error", "")
                     if not error:
-                        merged, mapping = self._merge_worker_evidence(turn["evidence"], result["evidence"])
                         norm_report = _normalize_citation_markers(result["report"])
                         parts = norm_report.split("[Nguồn ")
+                        cited_worker_indices = set()
+                        for part in parts[1:]:
+                            label_body, closing, _ = part.partition("]")
+                            if not closing:
+                                raise ValueError("Invalid worker citation")
+                            for tok in label_body.replace(";", ",").split(","):
+                                clean_tok = tok.strip()
+                                if clean_tok.startswith("Nguồn "):
+                                    clean_tok = clean_tok[len("Nguồn "):].strip()
+                                if " " in clean_tok:
+                                    clean_tok = clean_tok.split()[0].rstrip(":,-")
+                                if clean_tok.isdigit():
+                                    cited_worker_indices.add(int(clean_tok))
+                        merged, mapping = self._merge_worker_evidence(
+                            turn["evidence"], result["evidence"], preferred_indices=cited_worker_indices
+                        )
                         report = parts[0]
                         for part in parts[1:]:
                             label_body, closing, tail = part.partition("]")
@@ -1758,7 +2005,13 @@ class BankingDeepAgent(BankingReActNodes):
                                     clean_tok = clean_tok.split()[0].rstrip(":,-")
                                 remapped.append(_label(mapping[int(clean_tok)]))
                             report += "".join(remapped) + tail
-                        docs = [merged[index - 1] for index in dict.fromkeys(mapping.values())]
+                        used_indices = []
+                        for item in result["evidence"]:
+                            if item["index"] in mapping:
+                                mapped_idx = mapping[item["index"]]
+                                if mapped_idx not in used_indices:
+                                    used_indices.append(mapped_idx)
+                        docs = [merged[index - 1] for index in used_indices]
                         work = [
                             item for item in result["observations"] if not item.get("retrieval")
                         ]
@@ -1832,16 +2085,38 @@ class BankingDeepAgent(BankingReActNodes):
             items.append(description)
         return "\n".join(items) or _DEEP_MESSAGES.get("review_default_feedback", "")
 
+    def _has_non_rag_grounding(self, state: dict) -> bool:
+        support = _support_view(state)
+        tool_prefix = _DEEP_MESSAGES.get("tool_support_prefix", "[Tool ")
+        if "[Ảnh đính kèm]" in support or "[Lịch sử trả lời trước]" in support:
+            return True
+        if any(key.startswith(tool_prefix) for key in support):
+            return True
+        return bool(state.get("search_count"))
+
     def review(self, state: dict) -> dict:
         result = self._review_draft(state)
+        can_recover = bool(state["react_turn"]["evidence"] or self._has_non_rag_grounding(state))
         if (result["audit_status"] != "FAIL" or state.get("confirmation_required")
                 or result["reviews"][-1] not in ("revise", "claim_failed", "citation_failed", "unavailable")
-                or not state["react_turn"]["evidence"] or not result.get("draft_answer")):
+                or not can_recover or not result.get("draft_answer")):
             return result
 
         # A single final-only attempt after ordinary revisions are used up.
         # It cannot call tools, and its new answer must pass the normal reviewer.
         data = self._decide_input(result)
+        ev_items = data.get("available_evidence") or []
+        if ev_items and _PARTIAL_RECOVERY_MAX_SOURCES > 0:
+            kept_sources = set()
+            bounded_ev = []
+            for ev_item in ev_items:
+                src_name = str(ev_item.get("source") or "")
+                if src_name not in kept_sources:
+                    if len(kept_sources) >= _PARTIAL_RECOVERY_MAX_SOURCES:
+                        continue
+                    kept_sources.add(src_name)
+                bounded_ev.append(ev_item)
+            data["available_evidence"] = bounded_ev
         data["review_feedback"] = result["audit_feedback"]
         data["previous_draft"] = result["draft_answer"]
         instruction = "\n\n".join((BASE_PROMPT, _PARTIAL_RECOVERY_PROMPT, ANSWER_SCOPE))
@@ -1888,7 +2163,7 @@ class BankingDeepAgent(BankingReActNodes):
             return self._retry_review(state, draft, SUMMARY_INSTRUCTION, "revise")
         try:
             citations = self.validate_citations({**decision, "answer": draft}, turn["evidence"])
-            if partial and not citations:
+            if partial and not citations and (turn["evidence"] or not self._has_non_rag_grounding(state)):
                 raise ValueError("Partial answer requires grounded citations")
         except ValueError as error:
             annotate_span(citation_validation_error=str(error))
@@ -2016,7 +2291,11 @@ class BankingDeepAgent(BankingReActNodes):
         if verdict["verdict"] == "revise" or verdict.get("scope_issue"):
             feedback = self._review_feedback(verdict, draft, evidence)
             if visualization and verdict.get("visualization_approved") is False:
-                state = {**state, "prepared_visualization": None}
+                state = {
+                    **state,
+                    "prepared_visualization": None,
+                    "visual_revisions": int(state.get("visual_revisions") or 0) + 1,
+                }
             return self._retry_review(state, draft, feedback, "revise")
         try:
             validate_review(verdict, draft, citations, evidence, support)
@@ -2037,7 +2316,11 @@ class BankingDeepAgent(BankingReActNodes):
                 if repaired["verdict"] != "approve" or repaired.get("scope_issue"):
                     feedback = self._review_feedback(repaired, draft, evidence)
                     if visualization and repaired.get("visualization_approved") is False:
-                        state = {**state, "prepared_visualization": None}
+                        state = {
+                            **state,
+                            "prepared_visualization": None,
+                            "visual_revisions": int(state.get("visual_revisions") or 0) + 1,
+                        }
                     return self._retry_review(state, draft, feedback, "revise")
                 validate_review(repaired, draft, citations, evidence, support)
                 verdict = repaired
@@ -2133,6 +2416,15 @@ class BankingDeepAgent(BankingReActNodes):
         else:
             visual = None
         if visual:
+            if visual.get("engine") == "mermaid" and "```mermaid" not in answer.casefold():
+                mermaid_src = str(visual.get("source") or "").strip()
+                if mermaid_src:
+                    candidate_with_block = answer + "\n\n```mermaid\n" + mermaid_src + "\n```"
+                    rechecked = self.guardrails.guard_output(candidate_with_block)
+                    if rechecked.is_safe and rechecked.sanitized_answer and not rechecked.flags:
+                        answer = rechecked.sanitized_answer
+                        if state["is_safe"] and status == "PASS" and history:
+                            history = history[:-1] + [{"role": "assistant", "content": answer[:_HISTORY_MESSAGE_MAX_CHARS]}]
             recent = [candidate, *(item for item in recent if item["visualization"]["id"] != visual["id"])]
         follow_up_questions = []
         if state["is_safe"] and status == "PASS" and answer == state["final_answer"]:
@@ -2159,4 +2451,5 @@ class BankingDeepAgent(BankingReActNodes):
         result_state.pop("visualization_candidate", None)
         result_state.pop("prepared_visualization", None)
         result_state.pop("presentation_arguments_requested", None)
+        result_state.pop("visual_revisions", None)
         return result_state

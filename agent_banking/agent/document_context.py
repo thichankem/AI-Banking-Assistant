@@ -67,6 +67,44 @@ def _render_table_data_text(table_data, query="", budget=None) -> str:
             continue
         headers = tbl.get("headers") or tbl.get("header") or []
         rows = tbl.get("rows") or tbl.get("cells") or []
+        if not headers and isinstance(tbl.get("header_grid"), list):
+            grid_rows = [r for r in tbl["header_grid"] if isinstance(r, list) and any(str(c or "").strip() for c in r)]
+            if grid_rows:
+                width = max(len(r) for r in grid_rows)
+                collapsed = []
+                for col_idx in range(width):
+                    col_parts = []
+                    for g_row in grid_rows:
+                        if col_idx < len(g_row):
+                            val = " ".join(str(g_row[col_idx] or "").split())
+                            if val and val not in col_parts:
+                                col_parts.append(val)
+                    collapsed.append(" - ".join(col_parts))
+                if any(collapsed):
+                    headers = collapsed
+        if not rows and isinstance(tbl.get("excel"), dict):
+            ex = tbl["excel"]
+            ex_cols = ex.get("columns")
+            ex_rows = ex.get("rows")
+            if isinstance(ex_cols, dict) and ex_cols:
+                col_keys = list(ex_cols.keys())
+                if not headers:
+                    headers = [str(ex_cols[k] or k) for k in col_keys]
+                if isinstance(ex_rows, list):
+                    built_rows = []
+                    for r_item in ex_rows:
+                        if not isinstance(r_item, dict):
+                            continue
+                        vals = r_item.get("values") or {}
+                        row_cells = []
+                        for ck in col_keys:
+                            cell_obj = vals.get(ck)
+                            if isinstance(cell_obj, dict):
+                                row_cells.append(cell_obj.get("text", cell_obj.get("value", "")))
+                            else:
+                                row_cells.append(cell_obj or "")
+                        built_rows.append(row_cells)
+                    rows = built_rows
         lines = []
         for key in ("title", "caption", "units", "unit", "conditions", "notes", "footnotes"):
             value = tbl.get(key)
@@ -212,7 +250,11 @@ def _format_retrieved_doc_context(doc, max_chars=None, query="") -> str:
         header_parts.append(section_title)
     citation = meta.get("citation")
     if isinstance(citation, dict) and citation.get("sheet_name"):
-        ranges = ", ".join(citation.get("cell_ranges", []))
+        raw_ranges = [str(r) for r in (citation.get("cell_ranges") or ()) if r]
+        if len(raw_ranges) > 6:
+            ranges = ", ".join(raw_ranges[:6]) + ", ..."
+        else:
+            ranges = ", ".join(raw_ranges)
         if ranges:
             header_parts.append(f"{citation['sheet_name']}!{ranges}")
     pages = []
@@ -234,6 +276,43 @@ def _format_retrieved_doc_context(doc, max_chars=None, query="") -> str:
     if pages:
         pages.sort()
         header_parts.append("Trang " + ", ".join(str(p) for p in pages))
+    temporal = meta.get("temporal") or {}
+    if not isinstance(temporal, dict):
+        temporal = {}
+    status = temporal.get("status")
+    as_of = temporal.get("as_of")
+    if status == "effective":
+        header_parts.append(f"Có hiệu lực ngày {as_of}")
+    elif status == "reference_only":
+        header_parts.append(f"Chỉ tham khảo. Chưa xác minh được bản áp dụng ngày {as_of}")
+        if not meta.get("legal_evidence_kind"):
+            revision = meta.get("policy_revision") or {}
+            if revision.get("uploaded_at"):
+                header_parts.append(f"Mốc tải lên {revision['uploaded_at']}")
+            elif revision.get("first_ingested_at"):
+                header_parts.append(f"Mốc nhập kho {revision['first_ingested_at']}")
+            else:
+                header_parts.append("Chưa xác định được bản mới nhất theo mốc tải lên hoặc nhập kho")
+    elif status == "conflict":
+        header_parts.append(f"Chỉ tham khảo. Mốc hiệu lực mâu thuẫn khi tra ngày {as_of}")
+    elif status == "latest_available":
+        revision = meta.get("policy_revision") or {}
+        if revision.get("uploaded_at"):
+            header_parts.append(f"Bản mới nhất trong kho theo mốc tải lên {revision['uploaded_at']}. Chưa rõ ngày hiệu lực")
+        else:
+            header_parts.append(f"Bản mới nhất trong kho theo mốc nhập {revision.get('first_ingested_at')}. Chưa rõ ngày hiệu lực")
+    elif status == "order_unknown":
+        header_parts.append("Chưa xác định được thứ tự bản trong kho và ngày hiệu lực")
+    if meta.get("legal_evidence_kind") == "search_excerpt":
+        header_parts.append("Đoạn trích tìm kiếm web. Cần đối chiếu điều khoản và tình trạng hiệu lực khi kết luận.")
+    if meta.get("legal_version") == "as_published":
+        header_parts.append("Bản gốc đăng Công báo. Cần đối chiếu sửa đổi và tình trạng hiệu lực trước khi áp dụng.")
+    graph = meta.get("graph_link") or {}
+    if not isinstance(graph, dict):
+        graph = {}
+    relation = {"amends": "sửa đổi", "replaces": "thay thế", "references": "dẫn chiếu"}.get(graph.get("relation"))
+    if relation and graph.get("from_source") and graph.get("to_source"):
+        header_parts.append(f"Liên kết đã kiểm chứng {graph['from_source']} {relation} {graph['to_source']}")
 
     meta_tags = []
     if chunk_type and chunk_type != "text":
@@ -329,7 +408,11 @@ def _format_retrieved_doc_context(doc, max_chars=None, query="") -> str:
 
     body_text = "\n".join(body_parts).strip()
     if max_chars is not None and len(body_text) > max_chars:
-        body_text = body_text[:max_chars]
+        clipped = body_text[:max_chars].rstrip()
+        cut = max(clipped.rfind("\n"), clipped.rfind(" "))
+        if cut >= (max_chars * 3) // 4:
+            clipped = clipped[:cut].rstrip()
+        body_text = clipped
 
     header_line = ""
     if header_parts:
@@ -347,8 +430,13 @@ def _format_retrieved_doc_context(doc, max_chars=None, query="") -> str:
         pages_text = ", ".join(str(page) for page in uncertain_pages)
         warning = _DOC_MESSAGES.get("ocr_uncertain_pages_template", "").replace("{pages}", pages_text)
         header_line = header_line + "\n" + warning
+    failed_pages = quality.get("ocr_failed_page_numbers", [])
+    if failed_pages:
+        header_line += "\nBản này còn trang chưa OCR được: " + ", ".join(str(page) for page in failed_pages)
     if quality.get("ocr_uncertain_images") is True:
         header_line += _DOC_MESSAGES.get("ocr_uncertain_images_warning", "")
+    if quality.get("excel_formula_cells_skipped"):
+        header_line += "\nMột số ô công thức trong tệp Excel chưa có giá trị đã xác minh."
     if d.get("document_contact") is True:
         header_line += _DOC_MESSAGES.get("document_contact_flag", "")
 

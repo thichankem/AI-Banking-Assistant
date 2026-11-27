@@ -41,6 +41,67 @@ Khi file JSON được bỏ qua, hệ thống đọc các nhãn như `Mã tài l
 
 Trong `search_banking_knowledge`, dùng tìm kiếm thông thường để lấy `business_metadata.excel_table_id`. Tra theo hàng bằng tham số `excel`, ví dụ `{"table_id":"<id>","as_of":"2025-07-01","filters":[{"column":"Phí VND","op":"gte","value":100000,"unit":"VND"}]}`. Điều kiện được kiểm tra trên cùng một hàng của bản có hiệu lực. Giá trị phần trăm dùng điểm phần trăm, ví dụ `2.5` cho `2,5%`.
 
+## Phiên bản chính sách PDF và Word
+
+Metadata của từng bản nằm trong `policy_revision` ở manifest, artifact và `business_metadata` của chunk. Pipeline ghi `first_ingested_at` theo UTC ở lần xuất bản thành công đầu tiên của cặp đường dẫn và SHA-256. Lần xử lý lại giữ nguyên mốc này. Nếu bản đã có trong manifest cũ mà chưa ghi mốc thì trường có giá trị `null`.
+
+Pipeline đọc các mệnh đề ghi rõ mốc hiệu lực trong nội dung, chẳng hạn `Ngày hiệu lực: 01/07/2025` hoặc `có hiệu lực từ ngày 01/07/2025 đến hết ngày 31/12/2025`. Các mốc khác nhau trong cùng bản được đánh dấu mâu thuẫn. Metadata đã đối chiếu có thể khai báo thủ công và được ưu tiên khi có mặt.
+
+Để nhóm nhiều bản của cùng chính sách hoặc khai báo ngày hiệu lực đã kiểm tra trong tài liệu, dùng `--policy-metadata` với một file JSON. Khóa là `rel_path` trong manifest. Lấy `document_version` từ `input_sha256` của manifest hoặc từ `(Get-FileHash -LiteralPath <tệp>).Hash.ToLowerInvariant()` trong PowerShell.
+
+```json
+{
+  "quy-dinh-tra-soat-v2.pdf": {
+    "document_version": "<sha256-viet-thuong>",
+    "policy_id": "sla-tra-soat",
+    "effective_from": "2025-07-01",
+    "effective_to": null,
+    "effective_date_reference": "Trang 8, Điều 14",
+    "uploaded_at": "2025-06-20T09:30:00+07:00"
+  }
+}
+```
+
+```powershell
+python -m agent_banking.chunking.run_chunking --input "<thu_muc_input>" --output "<thu_muc_output>" --policy-metadata "<policies.json>"
+```
+
+Luồng cập nhật chỉ mục nhận cùng khai báo qua
+`python -m agent_banking.node_pipeline --auto --policy-metadata "<policies.json>"`.
+Bản gốc đã đối chiếu được lưu theo SHA-256 trong thư mục `revisions` của publication
+và chỉ mục. Khi xuất bản lần kế tiếp, chỉ mục giữ các bản chính sách cũ cùng
+đường dẫn nếu chúng có mốc hiệu lực, thông tin bản đã khai báo hoặc dấu hiệu mâu thuẫn cần đối chiếu.
+
+Với chỉ mục có `knowledge_inventory.json`, có thể bổ sung metadata và lưu bản
+gốc mà dùng lại toàn bộ vector hiện có.
+
+```powershell
+python -m agent_banking.vector_db.backfill_document_metadata
+python -m agent_banking.vector_db.backfill_document_metadata --apply
+```
+
+`effective_to` là ngày hiệu lực cuối cùng nếu văn bản có ghi. Chỉ khai báo `uploaded_at` khi có mốc tải lên đã xác nhận. Nếu thiếu ngày hiệu lực, giữ trường ngày trống. Khai báo đã xuất bản được giữ theo đúng phiên bản. Đặt file JSON ngoài thư mục input nếu muốn bỏ tham số `--policy-metadata` trong lần chạy kế tiếp.
+
+### Truy xuất theo ngày và liên kết văn bản
+
+`search_banking_knowledge` đọc ngày tiếng Việt trong câu hỏi hoặc nhận `as_of` dạng `YYYY-MM-DD`. Tool chọn bản trước khi tìm theo Qdrant và BM25. Nếu thiếu căn cứ cho ngày được hỏi, tool trả bản gần nhất có thể xác định trong kho với trạng thái `reference_only`. Nếu cả ngày hiệu lực và mốc vào kho đều thiếu thì thứ tự phiên bản chưa xác định. Chỉ mục cũ có thể đọc mốc hiệu lực từ các đoạn đã nạp và dùng lại kết quả trong bộ nhớ.
+
+GraphRAG hỗ trợ `amends`, `replaces` và `references`. Mỗi liên kết cần hai `source` đúng như chỉ mục, một trích đoạn trong một đầu mút và trang PDF hoặc mục Word chứa trích đoạn. Với `amends` và `replaces`, đặt bản sửa đổi hoặc thay thế ở `from_source`. Tool có thể lần theo hai hướng của hai loại này, kiểm tra trích đoạn trong chỉ mục ở thời điểm tìm và giữ phạm vi truy xuất đã cấu hình. `references` chạy từ nguồn dẫn chiếu đến tài liệu được dẫn chiếu.
+
+Lệnh sau nạp liên kết VH 01 dẫn chiếu VH 03 đã kiểm chứng vào `agent_banking/vector_db/policy_graph.sqlite3`. Thêm `--replace` khi muốn thay cả tập liên kết trong cơ sở dữ liệu hiện có. Cấu hình pipeline có thể chỉ định đường dẫn khác bằng `KNOWLEDGE_GRAPH_PATH`. Dùng `expand_graph: false` để đối chiếu với tìm kiếm hybrid trên cùng câu hỏi.
+
+```powershell
+python -m agent_banking.retrieval.policy_graph agent_banking/retrieval/abank_policy_links.json
+```
+
+CLI `python -m agent_banking.retrieval.run_retrieval --query "<câu hỏi>"` dùng luồng
+tra cứu như tool của agent. Thêm `--as-of YYYY-MM-DD` để tra bản theo ngày hoặc
+`--hybrid-only` khi cần xem riêng các ứng viên dense/BM25. Dùng
+`python -m pytest agent_banking/evaluator/policy_retrieval_check.py agent_banking/evaluator/rag_regression_check.py`
+để chạy các ca hồi quy dùng dữ liệu giả lập.
+
+Chạy bộ kiểm thử Temporal Retrieval và GraphRAG bằng `uv run --group dev pytest -q agent_banking/evaluator/policy_retrieval_check.py`.
+
 ## PDF scan, ảnh và chú thích
 
 - Pipeline render từng trang PDF và gửi ảnh trang cho model OCR cloud. DOCX được đọc từ cấu trúc OpenXML.

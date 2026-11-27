@@ -10,6 +10,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent_banking.chunking.config.settings import ChunkingConfig, get_config_section
+from agent_banking.chunking.policy_revision import (
+    attach_policy_revision,
+    is_policy_source,
+    read_policy_history,
+    read_policy_metadata,
+)
 from agent_banking.chunking.publication import (
     _load_snapshot,
     _publish_document_files,
@@ -35,6 +41,7 @@ from agent_banking.chunking.universal.extraction.pdf.page_review import CloudOCR
 from agent_banking.chunking.universal.extraction.sources import discover_documents, document_source_root
 from agent_banking.chunking.universal.extraction.xlsx.package import InvalidWorkbook
 from agent_banking.chunking.universal.pipeline import LayoutAwareChunker
+from agent_banking.core.document_revisions import archive_document
 
 _PIPELINE = get_config_section("pipeline")
 _DEFAULT_RETRY_DELAYS = tuple(_PIPELINE["retry_delays"])
@@ -99,7 +106,7 @@ def run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=No
 
 def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=None, *,
                        require_ready=None, clean_output=False,
-                       retry_delays=None, excel_metadata_path=None, **chunker_options):
+                       retry_delays=None, excel_metadata_path=None, policy_metadata_path=None, **chunker_options):
     if retry_delays is None:
         retry_delays = _DEFAULT_RETRY_DELAYS
     module = Path(__file__).resolve().parent
@@ -109,6 +116,11 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
         raise FileNotFoundError("Input directory not found: " + str(incoming))
     source_root = document_source_root(incoming, getattr(chunker_options.get("config"), "CHUNKING_INPUT_DIR", module / _DEFAULT_INPUT_SUBDIR))
     excluded_paths = set()
+    policy_metadata = {}
+    if policy_metadata_path is not None:
+        metadata_path = Path(policy_metadata_path).resolve()
+        excluded_paths.add(metadata_path)
+        policy_metadata = read_policy_metadata(metadata_path)
     if excel_metadata_path is not None:
         if "excel_metadata" in chunker_options:
             raise ValueError("Specify either Excel metadata or an Excel metadata file")
@@ -118,7 +130,10 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
     discovered = discover_documents(incoming, reject_unsupported=True, excluded_paths=excluded_paths)
     files = {path.relative_to(source_root).as_posix(): path for path in discovered}
     active_sources = set(files)
+    if unknown_sources := policy_metadata.keys() - active_sources:
+        raise ValueError("Policy metadata refers to unknown source paths: " + ", ".join(sorted(unknown_sources)))
     output.mkdir(parents=True, exist_ok=True)
+    policy_history = read_policy_history(output / _MANIFEST_FILENAME, _SCHEMA_VERSION)
     previous_files = set()
     if clean_output:
         if incoming.resolve().is_relative_to(output.resolve()):
@@ -154,6 +169,10 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
             beginning = time.perf_counter()
             try:
                 digest = file_hash(path)
+                declaration = policy_metadata.get(source, {})
+                if declaration and declaration["document_version"] != digest:
+                    permanent_failures.add(source)
+                    raise ValueError(f"Policy metadata document_version does not match the contents of {source}")
                 record = records.get(source, {})
                 if force and source not in refreshed:
                     cached = None
@@ -173,7 +192,20 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
                     status = "SUCCESS"
                 if require_ready and not artifact["quality"].get("index_ready"):
                     raise ValueError("Document has unresolved interpretation; index publication refused")
-                if cached is None:
+                archive_document(output / "revisions", path, digest)
+                revision = None
+                revision_changed = False
+                if is_policy_source(source):
+                    old_revision = artifact["document"].get("policy_revision")
+                    try:
+                        revision = attach_policy_revision(
+                            artifact["document"], chunks, policy_history.get(source, {}).get(digest), declaration,
+                        )
+                    except ValueError:
+                        permanent_failures.add(source)
+                        raise
+                    revision_changed = revision != old_revision
+                if cached is None or revision_changed:
                     records[source] = _publish_document_files(output, chunks, artifact, digest, fingerprint)
                     atomic_json(state_path, {"schema_version": _SCHEMA_VERSION, "records": records})
                     refreshed.add(source)
@@ -185,8 +217,13 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
                 completed[source] = (chunks, {
                     "file_name": path.name, "rel_path": source, "input_rel_path": path.relative_to(incoming).as_posix(),
                     "status": status, "attempts": attempt, "quality": artifact["quality"],
-                    "duration_sec": round(time.perf_counter() - beginning, 3), **records[source],
+                    "duration_sec": round(time.perf_counter() - beginning, 3),
+                    "ocr_docx_images": bool(chunker_options.get("ocr_docx_images")),
+                    "include_hidden_sheets": bool(chunker_options.get("include_hidden_sheets")),
+                    **records[source],
                 })
+                if revision is not None:
+                    policy_history.setdefault(source, {})[digest] = revision
                 errors.pop(source, None)
                 detail = ""
                 quality = artifact["quality"]
@@ -250,6 +287,8 @@ def _run_auto_chunking(input_dir=None, output_dir=None, force=False, max_files=N
                     "index_ready": (not files or bool(completed))
                     and all(record["quality"]["index_ready"] for _, record in completed.values()),
                     "records": manifests}
+        if policy_history:
+            manifest["policy_revision_history"] = policy_history
         for metric in (*_QUALITY_METRICS, "excel_formula_cells_skipped", "excel_sheets", "excel_tables",
                        "excel_ocr_images", "excel_ocr_unresolved", "excel_issues"):
             manifest[metric] = sum(item.get("quality", {}).get(metric, 0) for item in manifests)
@@ -286,7 +325,10 @@ def main():
                         help="Deprecated compatibility option. Standalone images are ignored in both modes.")
     parser.add_argument("--check-models", action="store_true", help="Probe configured cloud endpoints without processing documents")
     parser.add_argument("--ocr-docx-images", action="store_true", help="Transcribe embedded DOCX raster images via cloud vision")
+    parser.add_argument("--include-hidden-sheets", action="store_true",
+                        help="Include standard hidden Excel sheets (while still skipping veryHidden)")
     parser.add_argument("--excel-metadata", type=Path, help="JSON file mapping XLSX source paths to revision metadata")
+    parser.add_argument("--policy-metadata", type=Path, help="JSON file mapping PDF and DOCX source paths to policy revision metadata")
     parser.add_argument("--search-language", choices=["vi", "all"], default=None,
                         help="Retain all source languages for search (default) or opt into Vietnamese-only search")
     parser.add_argument("--input", type=Path, default=None, help="Input directory")
@@ -302,7 +344,10 @@ def main():
 
     module_dir = Path(__file__).resolve().parent
     in_dir = args.input or module_dir / _DEFAULT_INPUT_SUBDIR
-    options = {"ocr_docx_images": args.ocr_docx_images, "excel_metadata_path": args.excel_metadata}
+    options = {"ocr_docx_images": args.ocr_docx_images, "excel_metadata_path": args.excel_metadata,
+               "policy_metadata_path": args.policy_metadata}
+    if args.include_hidden_sheets:
+        options["include_hidden_sheets"] = True
     if args.search_language is not None:
         options["search_language"] = args.search_language
     run_auto_chunking(

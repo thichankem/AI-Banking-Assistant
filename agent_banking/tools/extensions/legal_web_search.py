@@ -13,6 +13,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from agent_banking.core.environment import ROOT_DIR
 from agent_banking.core.search_text import search_key
+from agent_banking.core.policy_dates import extract_policy_dates, policy_query_date
 from agent_banking.guardrails.indirect_injection_guardrail import get_indirect_injection_guardrail
 
 TOOL_NAME = "search_legal_web"
@@ -29,6 +30,10 @@ _LEGAL_TERMS = (
     "law", "decree", "circular", "legislation",
 )
 _ARTICLE_EXCERPT_LIMIT = 6000
+_GAZETTE_SEARCH = "https://api-searchcongbao.chinhphu.vn/search/van-ban"
+_GAZETTE_ORIGIN = "https://congbao.chinhphu.vn"
+_GAZETTE_FILE_HOST = "congbaocdn.chinhphu.vn"
+_GAZETTE_PDF_LIMIT = 12_000_000
 MAX_SEARCHES_PER_TURN = 2
 
 
@@ -140,12 +145,19 @@ def _is_valid_document_path(path: str) -> bool:
 
 def _has_private_number(text: str) -> bool:
     digit_run = 0
-    for ch in text:
+    for idx, ch in enumerate(text):
         if ch.isdigit():
             digit_run += 1
             if digit_run >= 9:
                 return True
         elif ch in " .()-":
+            # Do not concatenate adjacent calendar years like '2024 - 2025' into an 8+ digit run.
+            if ch in " -":
+                left = text[max(0, idx - 4):idx]
+                right = text[idx + 1:].lstrip(" -")[:4]
+                if len(left) == 4 and left.isdigit() and len(right) == 4 and right.isdigit():
+                    digit_run = 0
+                    continue
             continue
         else:
             digit_run = 0
@@ -250,8 +262,16 @@ def _query_is_public_legal(query: str) -> bool:
     query = _strip_benign_quotes(query)
     if not 3 <= len(query) <= 300:
         return False
-    # A query cannot supply a URL, an engine operator, an email or a long account/ID number.
-    if any(not (ch.isalnum() or ch in " -/.,()") for ch in query):
+    # Allow benign prose punctuation (including ': ') while blocking search operators like 'site:'.
+    low_q = query.lower()
+    for op_marker in ("site:", "inurl:", "intitle:", "filetype:", "ext:", "cache:", "related:"):
+        if op_marker in low_q:
+            return False
+    for idx, ch in enumerate(query):
+        if ch.isalnum() or ch in " -/.,()?;!%":
+            continue
+        if ch == ":" and idx + 1 < len(query) and query[idx + 1] == " ":
+            continue
         return False
     if _has_private_number(query) or "www." in query.casefold() or "//" in query:
         return False
@@ -284,6 +304,19 @@ def _reserve_request(provider: str) -> bool:
             ON CONFLICT (provider, month) DO UPDATE SET requests = requests + 1 WHERE requests < ?
         """, (provider, month, limit))
         return cursor.rowcount == 1
+
+
+def _refund_request(provider: str) -> None:
+    """Refund a monthly budget slot when a transient transport/server error aborted the call."""
+    month = datetime.now(_VIETNAM_TIME).strftime("%Y-%m")
+    try:
+        with closing(sqlite3.connect(_QUOTA_DB, timeout=3)) as connection, connection:
+            connection.execute(
+                "UPDATE provider_usage SET requests = MAX(0, requests - 1) WHERE provider = ? AND month = ?",
+                (provider, month),
+            )
+    except (OSError, sqlite3.Error):
+        return
 
 
 class _NoRedirects(HTTPRedirectHandler):
@@ -413,7 +446,11 @@ def _documents(provider: str, rows: list, query: str) -> list[dict]:
             document_text = " " + search_key(title + " " + unquote(urlsplit(url).path)) + " "
             if not any(f" {code} " in document_text for code in expected_codes):
                 continue
-        passages = _article_passages(row.get("raw_content"), articles)
+        raw_content = row.get("raw_content")
+        passages = _article_passages(raw_content, articles)
+        validity = {}
+        if isinstance(raw_content, str):
+            validity = extract_policy_dates([{"source": url, "content": raw_content}])
         if not passages:
             merged_excerpt = "\n\n".join(excerpts)[:3500].strip()
             passages = [("", merged_excerpt)]
@@ -425,9 +462,13 @@ def _documents(provider: str, rows: list, query: str) -> list[dict]:
                 "document_name": title,
                 "source_url": url,
                 "category": "Đoạn trích tìm kiếm web",
+                "legal_evidence_kind": "search_excerpt",
             }
             if article:
                 biz_meta["legal_article"] = article
+                biz_meta["legal_evidence_kind"] = "article_body"
+            if validity.get("effective_from"):
+                biz_meta["legal_validity_window"] = validity
             documents.append({
                 "chunk_id": "tvpl-" + sha256((document_id + "\n" + content).encode("utf-8")).hexdigest()[:24],
                 "source": url, "content": content, "chunk_type": "text",
@@ -455,9 +496,13 @@ def search_provider(provider: str, query: str) -> dict:
     try:
         rows = _provider_results(provider, query, key)
     except HTTPError as error:
+        status_code = getattr(error, "code", 0)
         error.close()
+        if isinstance(status_code, int) and status_code >= 500:
+            _refund_request(provider)
         return {**outcome, "status": f"http_{error.code}"}
     except (OSError, ValueError):
+        _refund_request(provider)
         return {**outcome, "status": "provider_error"}
     outcome["documents"] = _documents(provider, rows, query)
     if outcome["documents"]:
@@ -465,41 +510,175 @@ def search_provider(provider: str, query: str) -> dict:
     return {**outcome, "status": "no_documents"}
 
 
-def search_legal_web(query: str) -> dict:
-    """Try the primary provider, and use the other only if usable evidence is missing."""
+def _gazette_pdf_url(value, document_id) -> str:
+    if not isinstance(value, str) or type(document_id) is not int or document_id <= 0:
+        return ""
+    try:
+        url = urlsplit(value)
+    except ValueError:
+        return ""
+    if url.scheme != "https" or url.netloc != _GAZETTE_FILE_HOST or url.query or url.fragment:
+        return ""
+    parts = url.path.split("/")
+    if len(parts) != 7 or parts[:3] != ["", "CongBaoCP", "VanBan"]:
+        return ""
+    year, month, doc, name = parts[3:]
+    if (len(year) != 4 or not year.isascii() or not year.isdigit()
+            or not 1 <= len(month) <= 2 or not month.isascii() or not month.isdigit()
+            or doc != str(document_id) or not name.endswith(".pdf") or len(name) <= 4
+            or not all(ch.isascii() and (ch.isalnum() or ch in "_.-") for ch in name)):
+        return ""
+    return value
+
+
+def _gazette_page_text(page) -> str:
+    lines = [line.strip() for line in page.get_text().splitlines() if line.strip()]
+    for index, line in enumerate(lines[:4]):
+        if search_key(line).startswith("cong bao so "):
+            if index + 1 < len(lines) and lines[index + 1].isdigit():
+                del lines[index + 1]
+            del lines[index]
+            if index > 0 and lines[index - 1].isdigit():
+                del lines[index - 1]
+            break
+    return "\n".join(lines)
+
+
+def _gazette_articles(code: str, articles: set[str]) -> tuple[list[dict], str]:
+    """Fetch the exact numbered original from the official gazette's public search."""
+    import pymupdf
+
+    opener = build_opener(_NoRedirects())
+    request = Request(_GAZETTE_SEARCH, headers={
+        "Accept": "application/json", "Content-Type": "application/json", "Origin": _GAZETTE_ORIGIN,
+    }, data=json.dumps({
+        "filters": {}, "page": 1, "page_size": 4, "query": code,
+    }).encode("utf-8"))
+    try:
+        with opener.open(request, timeout=5) as response:
+            payload = json.loads(response.read(1_000_000))
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+            return [], "provider_error"
+        rows = payload["data"]
+        rows = [row for row in rows[:4] if isinstance(row, dict)
+                and _clean_text(row.get("so_ky_hieu"), 100).upper().replace(" ", "") == code]
+        if len(rows) != 1:
+            return [], "no_documents"
+        row = rows[0]
+        files = row.get("danh_sach_tep_van_ban")
+        if not isinstance(files, list):
+            return [], "no_documents"
+        urls = [_gazette_pdf_url(file.get("duong_dan"), row.get("id_van_ban"))
+                for file in files[:6] if isinstance(file, dict) and file.get("file_extension") == "pdf"]
+        url = next((url for url in urls if url), "")
+        if not url:
+            return [], "no_documents"
+        with opener.open(Request(url, headers={"Accept": "application/pdf"}), timeout=6) as response:
+            data = response.read(_GAZETTE_PDF_LIMIT + 1)
+        if len(data) > _GAZETTE_PDF_LIMIT or not data.startswith(b"%PDF-"):
+            return [], "invalid_pdf"
+        with pymupdf.open(stream=data, filetype="pdf") as document:
+            if not 0 < len(document) <= 180 or document.needs_pass:
+                return [], "invalid_pdf"
+            content = "\n".join(_gazette_page_text(page) for page in document)
+    except HTTPError as error:
+        error.close()
+        return [], f"http_{error.code}"
+    except (OSError, ValueError, RuntimeError):
+        return [], "provider_error"
+    title = " ".join(filter(None, (
+        _clean_text(row.get("loai_van_ban"), 40), code, _clean_text(row.get("trich_yeu"), 240),
+    )))
+    scan = get_indirect_injection_guardrail().scan_text
+    documents = [{
+        "chunk_id": "congbao-" + sha256(f"{url}\n{article}\n{passage}".encode("utf-8")).hexdigest()[:24],
+        "source": url, "content": passage, "chunk_type": "text",
+        "business_metadata": {
+            "document_name": title, "source_url": url, "category": "Công báo Chính phủ",
+            "legal_article": article, "legal_evidence_kind": "article_body", "legal_version": "as_published",
+        },
+    } for article, passage in _article_passages(content, articles) if scan(title + "\n" + passage)["is_safe"]]
+    found = {doc["business_metadata"]["legal_article"] for doc in documents}
+    if articles <= found:
+        return documents, "ok"
+    return documents, "incomplete_article_evidence"
+
+
+def _select_legal_evidence(pool: list, articles: set[str]) -> tuple[list, set[str]]:
+    remaining = pool.copy()
+    uncovered = articles.copy()
+    selected = []
+    while remaining and len(selected) < 4:
+        item = max(remaining, key=lambda entry: (len(entry[1] & uncovered), len(entry[2] & uncovered)))
+        if articles and not (item[1] & uncovered) and selected:
+            break
+        remaining.remove(item)
+        uncovered -= item[1]
+        selected.append(item)
+    return selected, uncovered
+
+
+def search_legal_web(query: str, as_of=None) -> dict:
+    """Use alternate providers and the gazette for missing numbered articles."""
     providers = PROVIDERS
+    try:
+        requested_date, _ = policy_query_date(query, as_of)
+    except ValueError as error:
+        return {"status": str(error), "provider": "", "documents": [], "attempts": []}
     if os.getenv("LEGAL_WEB_SEARCH_PRIMARY", "").strip().lower() == "tavily":
         providers = ("tavily", "brave")
     articles = set(_extract_articles(search_key(query)))
     attempts = []
-    best = None
-    best_coverage = -1
+    pool = []
+    selected = []
+    uncovered = articles.copy()
+    seen = set()
     for provider in providers:
         outcome = search_provider(provider, query)
         status = outcome["status"]
         if status == "ok":
-            ranked = []
             for doc in outcome["documents"]:
                 article = doc["business_metadata"].get("legal_article")
+                identity = (doc.get("source"), article, doc["content"])
+                if identity in seen:
+                    continue
+                seen.add(identity)
                 headings = {"dieu " + num.casefold() for _, num in _find_article_headings(doc["content"])}
-                if article:
-                    candidate_articles = {article}
-                else:
-                    candidate_articles = headings
-                hits = articles.intersection(candidate_articles)
-                ranked.append((doc, hits, bool(article)))
-            top = sorted(ranked, key=lambda item: (len(item[1]), item[2]), reverse=True)[:4]
-            coverage = len(set().union(*(hits for _, hits, _ in top)))
-            if coverage > best_coverage:
-                best = {**outcome, "documents": [doc for doc, _, _ in top]}
-                best_coverage = coverage
-            if coverage < len(articles):
+                pool.append((doc, articles.intersection({article}), headings, provider))
+            selected, uncovered = _select_legal_evidence(pool, articles)
+            if uncovered:
                 status = "incomplete_article_evidence"
         attempts.append({"provider": provider, "status": status})
         if status in {"ok", "invalid_legal_query"}:
             break
-    if best is not None:
-        if best_coverage < len(articles):
-            best["status"] = "incomplete_article_evidence"
-        return {**best, "attempts": attempts}
-    return {"status": attempts[-1]["status"], "provider": "", "documents": [], "attempts": attempts}
+    cleaned_query = _strip_benign_quotes(query)
+    codes = {"".join(code.split()).upper() for code in _extract_document_codes(cleaned_query)}
+    if uncovered and len(codes) == 1 and _query_is_public_legal(cleaned_query):
+        documents, status = _gazette_articles(next(iter(codes)), uncovered)
+        attempts.append({"provider": "congbao", "status": status})
+        for doc in documents:
+            article = doc["business_metadata"]["legal_article"]
+            pool.append((doc, {article}, {article}, "congbao"))
+        selected, uncovered = _select_legal_evidence(pool, articles)
+    if selected:
+        providers_used = list(dict.fromkeys(item[3] for item in selected))
+        result_status = "ok"
+        if uncovered:
+            result_status = "incomplete_article_evidence"
+        documents = [item[0] for item in selected]
+        if requested_date is not None:
+            day = requested_date.isoformat()
+            for doc in documents:
+                metadata = doc["business_metadata"]
+                validity = metadata.get("legal_validity_window") or {}
+                status = "reference_only"
+                start, end = validity.get("effective_from"), validity.get("effective_to")
+                if start and start <= day and (not end or day <= end):
+                    status = "effective"
+                metadata["temporal"] = {"status": status, "as_of": day, "requested_date": True}
+        return {"status": result_status, "provider": providers_used[0], "providers": providers_used,
+                "documents": documents, "attempts": attempts}
+    status = attempts[-1]["status"]
+    if uncovered and attempts[-1]["provider"] == "congbao":
+        status = "incomplete_article_evidence"
+    return {"status": status, "provider": "", "documents": [], "attempts": attempts}

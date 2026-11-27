@@ -42,6 +42,97 @@ _redaction_tokens = dict(getattr(_prompts, "REDACTION_TOKENS", {}) or {})
 _guardrail_logs = dict(getattr(_prompts, "GUARDRAIL_LOG_MESSAGES", {}) or {})
 
 
+_PUBLIC_ID_CONTEXT_MARKERS = (
+    "mst",
+    "mã số thuế",
+    "ma so thue",
+    "tax",
+    "hotline",
+    "tổng đài",
+    "tong dai",
+    "fax",
+    "gpkd",
+    "giấy phép",
+    "giay phep",
+    "sđt bàn",
+    "điện thoại bàn",
+)
+
+_NON_CVV_247_CONTEXT = (
+    "ngân hàng",
+    "ngan hang",
+    "dịch vụ",
+    "dich vu",
+    "trực tuyến",
+    "truc tuyen",
+    "online",
+    "tổng đài",
+    "tong dai",
+    "hotline",
+    "trên app",
+    "tren app",
+    "ứng dụng",
+    "ung dung",
+    "hỗ trợ",
+    "ho tro",
+    "24/7",
+    "là gì",
+    "la gi",
+)
+
+
+def _is_247_banking_service_phrase(cvk_matched, after_tokens):
+    """Avoid mistaking banking service code '247' ('ngân hàng 247') for a 3-digit card CVV."""
+    if cvk_matched not in ("mã bảo mật", "ma bao mat", "mã bảo vệ", "ma bao ve"):
+        return False
+    tail_str = " " + " ".join(after_tokens).lower() + " "
+    for cue in _NON_CVV_247_CONTEXT:
+        if cue in tail_str:
+            return True
+    return False
+
+
+def _split_preserve_separators(text):
+    """Split text into tokens and exact whitespace/pipe separators so newlines/tables survive masking."""
+    pieces = []
+    curr = []
+    curr_is_sep = None
+    for ch in text:
+        is_sep = ch.isspace() or ch == "|"
+        if curr_is_sep is None:
+            curr_is_sep = is_sep
+            curr.append(ch)
+        elif is_sep == curr_is_sep:
+            curr.append(ch)
+        else:
+            pieces.append(("".join(curr), curr_is_sep))
+            curr = [ch]
+            curr_is_sep = is_sep
+    if curr:
+        pieces.append(("".join(curr), curr_is_sep))
+    return pieces
+
+
+def _ireplace_all(text, needle, replacement):
+    """Replace all case-insensitive occurrences of needle in text without regex."""
+    if not needle:
+        return text
+    needle_low = needle.lower()
+    needle_len = len(needle_low)
+    out = []
+    pos = 0
+    low = text.lower()
+    while True:
+        idx = low.find(needle_low, pos)
+        if idx == -1:
+            out.append(text[pos:])
+            break
+        out.append(text[pos:idx])
+        out.append(replacement)
+        pos = idx + needle_len
+    return "".join(out)
+
+
 def _unwrap_guardrail_chunk(raw_item):
     """Unwrap {'chunk': <13-key dict>, ...} or flat chunk dict cleanly."""
     if isinstance(raw_item, dict) and "chunk" in raw_item:
@@ -452,7 +543,22 @@ class BankingGuardrailManager:
                     if len(tokens) > 0:
                         cand = tokens[0].strip(strip_chars)
                         is_non_secret = False
-                        if cand.lower() in non_secret_words:
+                        cand_low = cand.lower()
+                        prose_words = (
+                            "truong", "trường", "khach", "khách", "nguoi", "người",
+                            "huong", "hướng", "cach", "cách", "buoc", "bước",
+                            "viec", "việc", "nhap", "nhập", "quen", "quên",
+                            "thay", "doi", "đổi", "bao", "bảo", "mat", "mật",
+                            "tai", "tài", "khoan", "khoản", "ung", "ứng",
+                            "dung", "dụng", "he", "hệ", "thong", "thống",
+                            "toi", "tối", "duoi", "dưới", "tren", "trên",
+                            "nhieu", "nhiều", "khac", "khác", "sau", "truoc", "trước",
+                        )
+                        has_non_ascii = any(ord(ch) >= 128 for ch in cand)
+                        has_digit = any(ch.isdigit() for ch in cand)
+                        if cand_low in non_secret_words or cand_low in prose_words:
+                            is_non_secret = True
+                        elif has_non_ascii and not has_digit:
                             is_non_secret = True
 
                         if cand.isdigit() and len(cand) <= pw_hint_max_digits:
@@ -463,10 +569,12 @@ class BankingGuardrailManager:
 
                         if not is_non_secret:
                             is_pw_leak = False
-                            if len(cand) >= pw_min_len:
+                            has_alpha = any(ch.isalpha() for ch in cand)
+                            if has_digit and has_alpha:
                                 is_pw_leak = True
-                            elif any(c.isdigit() for c in cand) and any(c.isalpha() for c in cand):
-                                is_pw_leak = True
+                            elif len(cand) >= pw_min_len:
+                                if not cand.isalpha() or matched_marker in explicit_markers:
+                                    is_pw_leak = True
                             elif matched_marker in explicit_markers and len(cand) >= explicit_min_len:
                                 is_pw_leak = True
 
@@ -483,8 +591,9 @@ class BankingGuardrailManager:
                 if len(parts) > 0:
                     cand = parts[0].strip(strip_chars)
                     if len(cand) in cvv_digit_lengths and cand.isdigit():
-                        msg = self._get_refusal_for_category("AUTH_LEAK_CVV")
-                        return True, "AUTH_LEAK_CVV", msg
+                        if not (cand == "247" and _is_247_banking_service_phrase(cvk, parts[1:7])):
+                            msg = self._get_refusal_for_category("AUTH_LEAK_CVV")
+                            return True, "AUTH_LEAK_CVV", msg
 
                 if has_leak_marker:
                     after_marker = text_lower[idx + len(cvk):].strip(" :,.")
@@ -496,8 +605,9 @@ class BankingGuardrailManager:
                     if len(m_parts) > 0:
                         cand = m_parts[0].strip(strip_chars)
                         if len(cand) in cvv_digit_lengths and cand.isdigit():
-                            msg = self._get_refusal_for_category("AUTH_LEAK_CVV")
-                            return True, "AUTH_LEAK_CVV", msg
+                            if not (cand == "247" and _is_247_banking_service_phrase(cvk, m_parts[1:7])):
+                                msg = self._get_refusal_for_category("AUTH_LEAK_CVV")
+                                return True, "AUTH_LEAK_CVV", msg
 
         # 3. OTP code leak
         for ok in otp_keywords:
@@ -566,21 +676,38 @@ class BankingGuardrailManager:
         tok_cid = str(_redaction_tokens.get("citizen_id") or "")
         tok_account = str(_redaction_tokens.get("account_number") or "")
 
-        # 1. Mask space-separated credit card numbers (4 groups of 4 digits)
-        words = sanitized.split(" ")
-        idx = 0
-        while idx <= len(words) - 4:
-            raw0 = words[idx]
-            raw1 = words[idx + 1]
-            raw2 = words[idx + 2]
-            raw3 = words[idx + 3]
+        # 1. Mask space-separated credit card numbers (4 groups of 4 digits) while preserving separators
+        pieces = _split_preserve_separators(sanitized)
+        word_slots = [idx for idx, (_, is_sep) in enumerate(pieces) if not is_sep]
+        slot_pos = 0
+        while slot_pos <= len(word_slots) - 4:
+            i0 = word_slots[slot_pos]
+            i1 = word_slots[slot_pos + 1]
+            i2 = word_slots[slot_pos + 2]
+            i3 = word_slots[slot_pos + 3]
+            gap_ok = True
+            for g_idx in (i0 + 1, i1 + 1, i2 + 1):
+                if g_idx >= len(pieces) or not pieces[g_idx][1]:
+                    gap_ok = False
+                    break
+                sep_str = pieces[g_idx][0]
+                if "\n" in sep_str or "\r" in sep_str or "|" in sep_str:
+                    gap_ok = False
+                    break
+            if not gap_ok:
+                slot_pos += 1
+                continue
+            raw0 = pieces[i0][0]
+            raw1 = pieces[i1][0]
+            raw2 = pieces[i2][0]
+            raw3 = pieces[i3][0]
             if (raw0.endswith(",") or raw0.endswith(";") or
                     raw1.endswith(",") or raw1.endswith(";") or
                     raw2.endswith(",") or raw2.endswith(";") or
                     raw1.startswith(",") or raw1.startswith(";") or
                     raw2.startswith(",") or raw2.startswith(";") or
                     raw3.startswith(",") or raw3.startswith(";")):
-                idx += 1
+                slot_pos += 1
                 continue
             w0 = raw0.strip(strip_chars)
             w1 = raw1.strip(strip_chars)
@@ -599,19 +726,19 @@ class BankingGuardrailManager:
                     if (n1 - n0 == 1 and n2 - n1 == 1 and n3 - n2 == 1) or (n0 - n1 == 1 and n1 - n2 == 1 and n2 - n3 == 1):
                         is_year_seq = True
                 if is_year_seq:
-                    idx += 1
+                    slot_pos += 1
                     continue
-                target_str = raw0 + " " + raw1 + " " + raw2 + " " + raw3
-                sanitized = sanitized.replace(target_str, tok_card)
-                words = sanitized.split(" ")
-                idx = 0
+                pieces[i0:i3 + 1] = [(tok_card, False)]
+                word_slots = [idx for idx, (_, is_sep) in enumerate(pieces) if not is_sep]
+                slot_pos = 0
             else:
-                idx += 1
+                slot_pos += 1
 
-        # 2. Process each token
-        tokens = sanitized.split(" ")
-        out_tokens = []
+        # 2. Process each non-separator token while preserving whitespace, newlines, tabs, and pipes
+        word_slots = [idx for idx, (_, is_sep) in enumerate(pieces) if not is_sep]
+        tokens = [pieces[idx][0] for idx in word_slots]
         for index, token in enumerate(tokens):
+            slot_idx = word_slots[index]
             clean_tok = token.strip(strip_chars)
 
             # 2.1. Mask Email (preserve official domains)
@@ -629,17 +756,15 @@ class BankingGuardrailManager:
                                     if dom_lower.endswith(suffix):
                                         is_official = True
                                         break
-                            if is_official:
-                                out_tokens.append(token)
-                            else:
-                                out_tokens.append(token.replace(clean_tok, tok_email))
+                            if not is_official:
+                                pieces[slot_idx] = (token.replace(clean_tok, tok_email), False)
                             continue
 
             # 2.2. Mask credit card with hyphens or dots
             if len(clean_tok) == hyphen_card_len and ("-" in clean_tok or "." in clean_tok):
                 card_digits = clean_tok.replace("-", "").replace(".", "")
                 if len(card_digits) == card_digits_len and card_digits.isdigit():
-                    out_tokens.append(token.replace(clean_tok, tok_card))
+                    pieces[slot_idx] = (token.replace(clean_tok, tok_card), False)
                     continue
 
             # 2.3. Mask phone numbers with separators
@@ -649,55 +774,57 @@ class BankingGuardrailManager:
                     phone_digits = "0" + phone_digits[len(vn_country_prefix):]
                 if len(phone_digits) == phone_digits_len and phone_digits.isdigit():
                     if phone_digits.startswith(vn_mobile_prefixes):
-                        out_tokens.append(token.replace(clean_tok, tok_phone))
+                        pieces[slot_idx] = (token.replace(clean_tok, tok_phone), False)
                         continue
 
             # 2.4. Mask international phone number
             if vn_country_prefix and clean_tok.startswith(vn_country_prefix):
                 norm_int_phone = "0" + clean_tok[len(vn_country_prefix):]
                 if len(norm_int_phone) == phone_digits_len and norm_int_phone.isdigit():
-                    out_tokens.append(token.replace(clean_tok, tok_phone))
+                    pieces[slot_idx] = (token.replace(clean_tok, tok_phone), False)
                     continue
 
             # 2.5. Mask CVV/CVC when context and number follow recognition keyword
             is_cvv = False
             if clean_tok.isdigit() and len(clean_tok) in cvv_digit_lengths:
+                following_words = tokens[index + 1:index + 7]
                 for cvk in cvv_markers:
                     context = " ".join(tokens[max(0, index - cvv_window):index + 1]).lower()
                     if cvk in context:
                         tail = context.rsplit(cvk, 1)[1].replace(":", " ").split()
                         if tail and all(part in connector_words for part in tail[:-1]):
-                            is_cvv = True
-                            break
+                            if not (clean_tok == "247" and _is_247_banking_service_phrase(cvk, following_words)):
+                                is_cvv = True
+                                break
 
             if is_cvv:
-                out_tokens.append(token.replace(clean_tok, tok_cvv))
+                pieces[slot_idx] = (token.replace(clean_tok, tok_cvv), False)
                 continue
 
             # 2.6. Mask contiguous numbers
             if clean_tok.isdigit():
                 following = tokens[index + 1:index + 2]
+                preceding = " ".join(tokens[max(0, index - 4):index]).lower()
                 currency_amount = False
                 if following and cur_min_len <= len(clean_tok) <= cur_max_len and not clean_tok.startswith("0"):
                     currency_amount = following[0].strip(currency_strip_chars).lower() in currency_units
-                if currency_amount:
-                    out_tokens.append(token)
+                public_entity_num = False
+                if any(marker in preceding for marker in _PUBLIC_ID_CONTEXT_MARKERS):
+                    public_entity_num = True
+                if currency_amount or public_entity_num:
+                    continue
                 elif len(clean_tok) == card_digits_len:
-                    out_tokens.append(token.replace(clean_tok, tok_card))
+                    pieces[slot_idx] = (token.replace(clean_tok, tok_card), False)
                 elif len(clean_tok) == cid_12_len and clean_tok.startswith("0"):
-                    out_tokens.append(token.replace(clean_tok, tok_cid))
+                    pieces[slot_idx] = (token.replace(clean_tok, tok_cid), False)
                 elif len(clean_tok) == cid_9_len:
-                    out_tokens.append(token.replace(clean_tok, tok_cid))
+                    pieces[slot_idx] = (token.replace(clean_tok, tok_cid), False)
                 elif len(clean_tok) == phone_digits_len and clean_tok.startswith(vn_mobile_prefixes):
-                    out_tokens.append(token.replace(clean_tok, tok_phone))
+                    pieces[slot_idx] = (token.replace(clean_tok, tok_phone), False)
                 elif acc_min_len <= len(clean_tok) <= acc_max_len:
-                    out_tokens.append(token.replace(clean_tok, tok_account))
-                else:
-                    out_tokens.append(token)
-            else:
-                out_tokens.append(token)
+                    pieces[slot_idx] = (token.replace(clean_tok, tok_account), False)
 
-        return " ".join(out_tokens)
+        return "".join(piece for piece, _ in pieces)
 
     def _check_fraud_and_crime(self, text_lower):
         """Scan Financial Fraud & Cyber Crime patterns (0% Regex)."""
@@ -819,7 +946,7 @@ class BankingGuardrailManager:
     # -----------------------------------------------------------------
     # STAGE 1: INPUT GUARDRAIL (INJECTION & OUT-OF-DOMAIN PROTECTION)
     # -----------------------------------------------------------------
-    def guard_input(self, query, use_decision_model=None):
+    def guard_input(self, query, use_decision_model=None, *, local_only=False):
         """
         Validate input query (optimized ordering & caching):
         1. L1 Decision Cache Hit
@@ -861,13 +988,17 @@ class BankingGuardrailManager:
                 refusal_message=_EMPTY_QUERY_REFUSAL_MESSAGE
             )
 
+        should_use_decision = self.use_decision_model
+        if use_decision_model is not None:
+            should_use_decision = use_decision_model
         norm_key = raw_query.lower()
+        cache_key = (norm_key, should_use_decision and not local_only, local_only)
 
         # 1. Check L1 Decision Cache
         with self._decision_cache_lock:
-            cached = self._decision_cache.pop(norm_key, None)
+            cached = self._decision_cache.pop(cache_key, None)
             if cached is not None:
-                self._decision_cache[norm_key] = cached
+                self._decision_cache[cache_key] = cached
         if cached is not None:
             return InputGuardResult(
                 is_safe=cached.is_safe,
@@ -901,7 +1032,7 @@ class BankingGuardrailManager:
                 refusal_message=refusal,
                 details={"matched_phrase": matched_inject}
             )
-            self._save_to_decision_cache(norm_key, res)
+            self._save_to_decision_cache(cache_key, res)
             return res
 
         # 4. Scan Financial Fraud & Cyber Security
@@ -915,7 +1046,7 @@ class BankingGuardrailManager:
                 refusal_message=refusal,
                 details={"matched_phrase": matched_phrase}
             )
-            self._save_to_decision_cache(norm_key, res)
+            self._save_to_decision_cache(cache_key, res)
             return res
 
         # 5. Scan Domain Boundary
@@ -929,22 +1060,18 @@ class BankingGuardrailManager:
                 refusal_message=refusal,
                 details={"matched_phrase": off_topic_phrase}
             )
-            self._save_to_decision_cache(norm_key, res)
+            self._save_to_decision_cache(cache_key, res)
             return res
 
         # 6. Deferred PII masking (runs only on legitimate queries)
         sanitized_query = self._mask_pii(raw_query)
 
-        should_use_decision = self.use_decision_model
-        if use_decision_model is not None:
-            should_use_decision = use_decision_model
-
         # 7. Decision Verification Tier
-        if should_use_decision is True:
+        if should_use_decision is True and not local_only:
             if self.decision_client is not None:
                 try:
                     if self.decision_client.is_available():
-                        audit = self.decision_client.audit_adversarial_input(raw_query)
+                        audit = self.decision_client.audit_adversarial_input(sanitized_query)
                         if isinstance(audit, dict):
                             is_attack = False
                             if audit.get("is_adversarial") is True:
@@ -967,7 +1094,7 @@ class BankingGuardrailManager:
                                         "audit": audit
                                     }
                                 )
-                                self._save_to_decision_cache(norm_key, res)
+                                self._save_to_decision_cache(cache_key, res)
                                 return res
                 except Exception as e:
                     tpl = str(_guardrail_logs.get("decision_client_fallback") or "")
@@ -975,8 +1102,8 @@ class BankingGuardrailManager:
                         print(tpl.format(error=e))
 
         # 8. Semantic Vector Guardrail Scan
-        if Config.ENABLE_SEMANTIC_GUARDRAIL is True:
-            sem_res = self.semantic_guardrail.check_query(raw_query, use_decision_model=False)
+        if Config.ENABLE_SEMANTIC_GUARDRAIL is True and not local_only:
+            sem_res = self.semantic_guardrail.check_query(sanitized_query, use_decision_model=False)
             if sem_res["is_safe"] is False:
                 cat = sem_res["category"]
                 matched_tpl = sem_res["matched_template"]
@@ -993,11 +1120,11 @@ class BankingGuardrailManager:
                         "matched_template": matched_tpl
                     }
                 )
-                self._save_to_decision_cache(norm_key, res)
+                self._save_to_decision_cache(cache_key, res)
                 return res
 
         res = InputGuardResult(is_safe=True, sanitized_query=sanitized_query)
-        self._save_to_decision_cache(norm_key, res)
+        self._save_to_decision_cache(cache_key, res)
         return res
 
     def _save_to_decision_cache(self, key, result):
@@ -1094,19 +1221,20 @@ class BankingGuardrailManager:
         for sig in PROMPT_LEAK_SIGNATURES:
             if sig.lower() in sanitized.lower():
                 flags.append(f"SYSTEM_PROMPT_LEAK_{sig}")
-                sanitized = sanitized.replace(sig, "")
+                sanitized = _ireplace_all(sanitized, sig, "")
 
         echoed_attack_markers = (
-            "DROP TABLE", "drop table",
-            "UNION SELECT", "union select",
-            "OR '1'='1'", "or '1'='1'",
+            "DROP TABLE",
+            "UNION SELECT",
+            "OR '1'='1'",
             "password_hash",
-            "<script>", "</script>",
+            "<script>",
+            "</script>",
         )
         for atk in echoed_attack_markers:
-            if atk in sanitized:
+            if atk.lower() in sanitized.lower():
                 flags.append("SANITIZED_ATTACK_ECHO")
-                sanitized = sanitized.replace(atk, "[noi_dung_khong_an_toan]")
+                sanitized = _ireplace_all(sanitized, atk, "[noi_dung_khong_an_toan]")
 
         # 3. Remove preliminary analytical monologue before greeting
         for greeting in greeting_prefixes:
@@ -1118,21 +1246,39 @@ class BankingGuardrailManager:
                         sanitized = sanitized[g_idx:]
                 break
 
-        # 4. Capture conclusive answer phrases after draft
+        # 4. Capture conclusive answer phrases after draft (only when marker starts a line)
         for fa in conclusive_markers:
             if fa in sanitized:
-                candidate = sanitized.split(fa)[-1].strip()
-                if len(candidate) > conclusive_min_len:
-                    sanitized = candidate
-                    break
+                line_idx = -1
+                if sanitized.startswith(fa):
+                    line_idx = 0
+                else:
+                    nl_pos = sanitized.find("\n" + fa)
+                    if nl_pos != -1:
+                        line_idx = nl_pos + 1
+                if line_idx != -1:
+                    candidate = sanitized[line_idx + len(fa):].strip()
+                    if len(candidate) > conclusive_min_len:
+                        sanitized = candidate
+                        break
 
         if sanitized.startswith('"') or sanitized.startswith("'"):
             sanitized = sanitized[1:].strip()
 
         # 5. Trim guardrail self-censoring monologue if present at tail
+        explicit_monologue_markers = ("Guardrail nói", "Hmm, guardrail", "Như vậy có ổn không?", "Liệu như vậy có ổn")
         for ca in tail_markers:
             if ca in sanitized:
-                c_idx = sanitized.find(ca)
+                if ca in explicit_monologue_markers:
+                    c_idx = sanitized.find(ca)
+                elif sanitized.startswith(ca):
+                    c_idx = 0
+                else:
+                    nl_pos = sanitized.find("\n" + ca)
+                    if nl_pos != -1:
+                        c_idx = nl_pos + 1
+                    else:
+                        c_idx = -1
                 if c_idx > tail_min_prefix_len:
                     sanitized = sanitized[:c_idx].strip()
                     break

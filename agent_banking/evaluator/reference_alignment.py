@@ -48,10 +48,30 @@ def resolve_source(label, sources):
     return None, "unresolved"
 
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _resolve_publication_path(raw_path):
+    path = Path(raw_path)
+    if path.is_dir():
+        return path
+    if not path.is_absolute():
+        rel_cand = _PROJECT_ROOT / path
+        if rel_cand.is_dir():
+            return rel_cand
+    norm = str(raw_path).replace("\\", "/")
+    pos = norm.find("/agent_banking/")
+    if pos >= 0:
+        mapped = _PROJECT_ROOT / norm[pos + 1:]
+        if mapped.is_dir():
+            return mapped
+    return path
+
+
 def source_documents(inventory):
     documents = {}
     for publication in inventory["publications"]:
-        for chunk in json.loads((Path(publication["publication"]) / "all_chunks.json").read_bytes()):
+        for chunk in json.loads((_resolve_publication_path(publication["publication"]) / "all_chunks.json").read_bytes()):
             documents.setdefault(chunk["source"], []).append(chunk)
     if set(documents) != set(inventory["source_hashes"]):
         raise ValueError("Publications do not cover the inventory sources")

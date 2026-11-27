@@ -21,12 +21,14 @@ import os
 import pickle
 import shutil
 import struct
+from threading import RLock
 import uuid
 import warnings
 from pathlib import Path
 
 from agent_banking.chunking.universal.planning.schema import VALID_CHUNK_TYPES, payload_index_key
 from agent_banking.core.numeric_tokens import extract_canonical_numeric_tokens
+from agent_banking.core.policy_dates import extract_policy_dates
 from agent_banking.core.search_text import search_key
 from agent_banking.vector_db.config.settings import VectorDBConfig
 
@@ -37,6 +39,7 @@ from qdrant_client.models import (
     Distance,
     VectorParams,
     HnswConfigDiff,
+    OptimizersConfigDiff,
     PointStruct,
     Filter,
     FilterSelector,
@@ -45,6 +48,22 @@ from qdrant_client.models import (
     MatchAny,
     PayloadSchemaType
 )
+
+
+def configured_qdrant_path(config):
+    path = Path(getattr(config, "ABANK_QDRANT_STORAGE_PATH", "") or
+                getattr(config, "QDRANT_STORAGE_PATH", VectorDBConfig.QDRANT_STORAGE_PATH))
+    if not path.is_absolute():
+        path = Path(getattr(config, "ROOT_DIR", PROJECT_ROOT)) / path
+    return path.resolve()
+
+
+def configured_qdrant_connection(config):
+    return {
+        "storage_path": configured_qdrant_path(config),
+        "server_url": getattr(config, "QDRANT_SERVER_URL", ""),
+        "server_api_key": getattr(config, "QDRANT_SERVER_API_KEY", ""),
+    }
 
 
 def publication_scope(output_dir):
@@ -106,9 +125,8 @@ def _set_publication_revision(payload, vector):
     metadata["publication_revision"] = "publication:" + hashlib.sha256(encoded + stored_vector).hexdigest()
 
 
-_BM25_DISK_CACHE_VERSION = "v5"
+_BM25_DISK_CACHE_VERSION = "v7"
 _SLIM_TABLE_SKIP_KEYS = frozenset(("html", "cells", "header_cells", "source_cells", "row_provenance", "cell_span"))
-_SLIM_BM_SKIP_KEYS = frozenset(("quality", "document_version"))
 
 
 def _slim_runtime_chunk(chunk):
@@ -125,10 +143,7 @@ def _slim_runtime_chunk(chunk):
         slim["table_data"] = slim_td
     bm = slim.get("business_metadata")
     if isinstance(bm, dict):
-        slim_bm = {}
-        for bk, bv in bm.items():
-            if bk not in _SLIM_BM_SKIP_KEYS:
-                slim_bm[bk] = bv
+        slim_bm = dict(bm)
         ret = slim_bm.get("retrieval")
         if isinstance(ret, dict) and "embedding_content" in ret:
             slim_ret = {}
@@ -136,20 +151,15 @@ def _slim_runtime_chunk(chunk):
                 if rk != "embedding_content":
                     slim_ret[rk] = rv
             slim_bm["retrieval"] = slim_ret
-        prov = slim_bm.get("provenance")
-        if isinstance(prov, dict):
-            compact_locs = []
-            locs = prov.get("locations")
-            if isinstance(locs, list):
-                for loc in locs:
-                    if isinstance(loc, dict):
-                        compact_loc = {}
-                        if "page_number" in loc:
-                            compact_loc["page_number"] = loc["page_number"]
-                        if "page_index" in loc:
-                            compact_loc["page_index"] = loc["page_index"]
-                        compact_locs.append(compact_loc)
-            slim_bm["provenance"] = {"locations": compact_locs}
+        provenance = slim_bm.get("provenance")
+        if isinstance(provenance, dict):
+            compact_locations = [
+                {key: value for key, value in location.items() if key in {
+                    "page_number", "page_index", "xpath", "sheet_name", "cell_range", "image_asset_sha256",
+                }}
+                for location in provenance.get("locations", ()) if isinstance(location, dict)
+            ]
+            slim_bm["provenance"] = {**provenance, "locations": compact_locations}
         slim["business_metadata"] = slim_bm
     return slim
 _BM25_PHRASE_STOPWORDS = frozenset({
@@ -161,15 +171,19 @@ _BM25_PHRASE_STOPWORDS = frozenset({
 _ROMAN_LEVELS = frozenset({"i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii"})
 
 
-def _classify_table_group_row(row):
+def _classify_table_group_row(row, *, allow_merged=False):
     """Classify a Markdown table row as (kind, depth, label) without regex or ternaries."""
     if not isinstance(row, list) or len(row) < 3:
         return None
     cells = [str(c or "").replace("\r", " ").replace("\n", " ").strip() for c in row]
     c0 = " ".join(cells[0].split())
     c1 = " ".join(cells[1].split())
-    tail = cells[2:]
-    if not any(tail):
+    tail = [cell for cell in cells[2:] if cell]
+    merged_label = False
+    if allow_merged and c1 and len(tail) > 1:
+        label_key = search_key(c1)
+        merged_label = bool(label_key) and all(search_key(cell) == label_key for cell in tail)
+    if not tail or merged_label:
         low0 = c0.casefold()
         low1 = c1.casefold()
         if low0.startswith(("lưu ý", "ghi chú")) or low1.startswith(("lưu ý", "ghi chú")):
@@ -223,7 +237,7 @@ def compute_corpus_table_paths(chunks):
         r_start = td.get("row_start")
         if type(r_start) is not int:
             r_start = 0
-        grouped.setdefault((src, tbl_id), []).append((r_start, chunk))
+        grouped.setdefault((src, tbl_id, meta.get("document_version")), []).append((r_start, chunk))
 
     paths_by_key = {}
     notes_by_key = {}
@@ -234,10 +248,11 @@ def compute_corpus_table_paths(chunks):
         chunk_entries = []
         for _, chunk in group_items:
             key = payload_index_key(chunk)
-            rows = chunk["table_data"]["rows"]
+            table = chunk["table_data"]
+            rows = table["rows"]
             chunk_paths = []
             for row in rows:
-                classified = _classify_table_group_row(row)
+                classified = _classify_table_group_row(row, allow_merged=bool(table.get("excel")))
                 if classified is not None:
                     kind, depth, label = classified
                     if kind == "note":
@@ -275,7 +290,10 @@ class QdrantBankingStore:
         collection_name=VectorDBConfig.QDRANT_COLLECTION,
         dimension=VectorDBConfig.QDRANT_VECTOR_SIZE,
         storage_path=None,
-        use_memory=False
+        use_memory=False,
+        *,
+        server_url="",
+        server_api_key="",
     ):
         if collection_name:
             self.collection_name = collection_name
@@ -286,6 +304,9 @@ class QdrantBankingStore:
         else:
             self.dimension = VectorDBConfig.QDRANT_VECTOR_SIZE
         self.use_memory = use_memory
+        self.server_url = ""
+        if not use_memory:
+            self.server_url = str(server_url or "").strip()
 
         resolved_raw = storage_path
         if not resolved_raw:
@@ -296,17 +317,24 @@ class QdrantBankingStore:
         else:
             self.storage_path = str((PROJECT_ROOT / raw_path).resolve())
 
-        # 1. Initialize Qdrant Client (local path or in-memory)
+        self._server_stamp_path = None
+        self._server_refresh_lock = RLock()
+        self._server_stamp = None
+        # The embedded client performs exact vector search. HNSW runs in server mode.
         if use_memory:
             self.client = QdrantClient(":memory:")
         else:
             Path(self.storage_path).mkdir(parents=True, exist_ok=True)
             try:
-                self.client = QdrantClient(path=self.storage_path)
-            except Exception as e:
-                print(f"⚠️ [Qdrant Storage Lock] Không thể mở độc quyền '{self.storage_path}' -> Chuyển sang In-Memory mode an toàn!")
-                self.client = QdrantClient(":memory:")
-                self.use_memory = True
+                if self.server_url:
+                    alias = hashlib.sha256((self.server_url + ":" + self.collection_name).encode()).hexdigest()[:16]
+                    self._server_stamp_path = Path(self.storage_path) / (".qdrant_generation_" + alias)
+                    self.client = QdrantClient(url=self.server_url, api_key=server_api_key or None)
+                    self._server_stamp = self._read_server_stamp()
+                else:
+                    self.client = QdrantClient(path=self.storage_path)
+            except (OSError, RuntimeError, ValueError) as error:
+                raise RuntimeError("Cannot open the configured persistent knowledge index") from error
 
         # 2. Initialize HNSW Cosine Collection and Payload Indexes
         self._init_collection()
@@ -347,6 +375,9 @@ class QdrantBankingStore:
             existing_collections.append(c.name)
 
         if self.collection_name not in existing_collections:
+            server_options = {}
+            if self.server_url:
+                server_options["optimizers_config"] = OptimizersConfigDiff(indexing_threshold=1000)
             self.client.create_collection(
                 collection_name=self.collection_name,
                 vectors_config=VectorParams(
@@ -356,11 +387,38 @@ class QdrantBankingStore:
                 hnsw_config=HnswConfigDiff(
                     m=VectorDBConfig.QDRANT_HNSW_M,
                     ef_construct=VectorDBConfig.QDRANT_HNSW_EF_CONSTRUCT
-                )
+                ),
+                **server_options,
             )
             self._create_payload_indexes()
         else:
             self._create_payload_indexes()
+
+    def _read_server_stamp(self):
+        if self._server_stamp_path is None:
+            return None
+        try:
+            return self._server_stamp_path.read_bytes()
+        except FileNotFoundError:
+            return None
+
+    def _publish_server_change(self):
+        if self._server_stamp_path is not None:
+            from agent_banking.chunking.publication_io import atomic_bytes
+
+            self._server_stamp = uuid.uuid4().bytes
+            atomic_bytes(self._server_stamp_path, self._server_stamp)
+
+    def refresh_if_changed(self):
+        if self._server_stamp_path is None:
+            return
+        with self._server_refresh_lock:
+            stamp = self._read_server_stamp()
+            if stamp != self._server_stamp:
+                previous_stamp = self._server_stamp
+                self._server_stamp = stamp
+                if not self._load_bm25_from_existing_store():
+                    self._server_stamp = previous_stamp
 
     def recreate_collection(self):
         """
@@ -387,7 +445,7 @@ class QdrantBankingStore:
             print(f"⚠️ [Qdrant Store] Lỗi khi xóa collection '{self.collection_name}': {e}")
 
         # Multi-tier physical cleanup (Defense-in-depth on disk)
-        if not self.use_memory:
+        if not self.use_memory and not self.server_url:
             try:
                 gc.collect()
                 col_dir = Path(self.storage_path) / "collection" / self.collection_name
@@ -422,6 +480,7 @@ class QdrantBankingStore:
         self._bm25_phrase_keys = []
         self._bm25_table_paths = {}
         self._bm25_table_notes = {}
+        self._publish_server_change()
         self._remove_bm25_cache()
 
         return True
@@ -454,7 +513,7 @@ class QdrantBankingStore:
         else:
             inv_sig = (0, 0)
         weights = tuple(sorted((str(k), float(v)) for k, v in VectorDBConfig.VECTOR_DB_BM25_FIELD_WEIGHTS.items()))
-        return (
+        signature = (
             _BM25_DISK_CACHE_VERSION,
             self.collection_name,
             int(pts_count),
@@ -465,6 +524,9 @@ class QdrantBankingStore:
             sqlite_sig,
             inv_sig,
         )
+        if self._server_stamp_path is not None:
+            return signature + (self._server_stamp_path.name, self._server_stamp)
+        return signature
 
     def _try_load_bm25_cache(self, pts_count):
         cache_path = self._bm25_cache_file()
@@ -500,7 +562,7 @@ class QdrantBankingStore:
         if cache_path is None or not self._bm25_corpus:
             return
         try:
-            pts_count = self.count()
+            pts_count = self.client.get_collection(self.collection_name).points_count
             if pts_count <= 0:
                 return
             cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -544,9 +606,9 @@ class QdrantBankingStore:
         """Khôi phục lại chỉ mục BM25 từ các payload đã lưu trong Qdrant trên đĩa (có phân trang đầy đủ)."""
         try:
             pts_count = self.count()
-            if pts_count > 0:
+            if pts_count:
                 if self._try_load_bm25_cache(pts_count):
-                    return
+                    return True
                 scroll_batch = VectorDBConfig.VECTOR_DB_SCROLL_BATCH_SIZE
                 if scroll_batch < 64:
                     scroll_batch = 256
@@ -570,8 +632,12 @@ class QdrantBankingStore:
                     self._build_bm25_index(self._bm25_corpus)
                     self._save_bm25_cache()
                     print(f"📦 [Qdrant Store] Đã tự động khôi phục BM25 cho {len(chunks)} chunks từ kho lưu trữ đĩa!")
+            else:
+                self._build_bm25_index([])
+            return True
         except Exception as exc:
-            print(f"⚠️ [Qdrant Store] Cảnh báo khi khôi phục BM25 từ đĩa: {exc}")
+            print(f"⚠️ [Qdrant Store] BM25 reload failed: {type(exc).__name__}")
+            return False
 
     # -------------------------------------------------------------------------
     # 1. DATA INGESTION
@@ -654,11 +720,44 @@ class QdrantBankingStore:
                     corpus_id_to_idx[cid] = new_idx
 
         self._build_bm25_index(self._bm25_corpus)
+        if total_points:
+            self._publish_server_change()
         self._save_bm25_cache()
         print(f"✅ [Qdrant Store] Đã nạp thành công {total_points} chunks vào Vector DB (Tổng BM25: {len(self._bm25_corpus)} chunks)!")
         return {payload_index_key(payload) for payload in new_payloads}
 
     upsert_chunks = add_chunks
+
+    def update_document_metadata(self, updates):
+        """Apply verified backfill fields while keeping vectors and publication identities intact."""
+        if not updates:
+            return
+        groups = {}
+        reported = set()
+        offset = None
+        while True:
+            points, offset = self.client.scroll(
+                self.collection_name, offset=offset, limit=VectorDBConfig.VECTOR_DB_SCROLL_BATCH_SIZE,
+                with_payload=["chunk_id", "business_metadata.publication_revision"], with_vectors=False,
+            )
+            for point in points:
+                key = payload_index_key(point.payload or {})
+                if key in updates:
+                    encoded = json.dumps(updates[key], ensure_ascii=False, sort_keys=True)
+                    groups.setdefault(encoded, []).append(point.id)
+                    reported.add(key)
+            if offset is None:
+                break
+        if reported != updates.keys():
+            raise RuntimeError("Knowledge index changed during metadata backfill")
+        batch_size = VectorDBConfig.VECTOR_DB_MUTATE_BATCH_SIZE
+        for encoded, identifiers in groups.items():
+            fields = json.loads(encoded)
+            for start in range(0, len(identifiers), batch_size):
+                self.client.set_payload(self.collection_name, payload=fields, key="business_metadata",
+                                        points=identifiers[start:start + batch_size], wait=True)
+        self._publish_server_change()
+        self._load_bm25_from_existing_store()
 
     def chunk_ids(self, *, scope=None, index_keys=False):
         identifiers = set()
@@ -683,6 +782,37 @@ class QdrantBankingStore:
             if offset is None:
                 return identifiers
 
+    def _policy_history_keys(self, scope, current_chunks):
+        """Retain older versions with evidence usable in historical policy searches."""
+        from agent_banking.chunking.policy_revision import is_policy_source
+        from agent_banking.chunking.universal.extraction.sources import source_key
+
+        versions = {}
+        for chunk in current_chunks:
+            source = chunk["source"]
+            version = chunk["business_metadata"].get("document_version")
+            if version and (is_policy_source(source) or source.lower().endswith(".xlsx")):
+                versions.setdefault(source_key(source), set()).add(version)
+        if not versions:
+            return set()
+        legacy = self.legacy_policy_dates(scope)
+        keys = set()
+        for chunk in self._bm25_corpus:
+            source = chunk["source"]
+            metadata = chunk["business_metadata"]
+            version = metadata.get("document_version")
+            replacements = versions.get(source_key(source))
+            if not replacements or not version or version in replacements or scope not in _publication_owners(chunk):
+                continue
+            revision = metadata.get("policy_revision") or legacy.get((source, version), {})
+            excel_revision = metadata.get("excel_revision", {})
+            if (revision.get("effective_from") or revision.get("effective_to") or revision.get("uploaded_at")
+                    or revision.get("effective_date_status") == "conflict"
+                    or revision.get("policy_id", metadata.get("document_id")) != metadata.get("document_id")
+                    or excel_revision.get("effective_from") or excel_revision.get("business_version")):
+                keys.add(payload_index_key(chunk))
+        return keys
+
     def prune_chunks(self, active_chunk_ids, sources=None, *, scope=None, preserve_sources=(), active_index_keys=None):
         """Remove obsolete versions after their replacements have been upserted.
 
@@ -692,6 +822,14 @@ class QdrantBankingStore:
         from agent_banking.chunking.universal.extraction.sources import legacy_source_resolver, source_key
 
         active = set(active_chunk_ids)
+        if scope and (active or active_index_keys):
+            active_keys = set(active_index_keys or ())
+            current = [chunk for chunk in self._bm25_corpus if scope in _publication_owners(chunk)
+                       and (payload_index_key(chunk) in active_keys
+                            or active_index_keys is None and chunk["chunk_id"] in active)]
+            history = self._policy_history_keys(scope, current)
+            if history:
+                active_index_keys = active_keys | history | {payload_index_key(chunk) for chunk in current}
         preserved = {source_key(source) for source in preserve_sources}
         current_sources = {source_key(source) for source in sources or () if isinstance(source, str)}
         resolve_legacy = legacy_source_resolver(current_sources | preserved)
@@ -750,8 +888,9 @@ class QdrantBankingStore:
                 item["business_metadata"]["publication_scopes"] = owners
             if not stale(item):
                 remaining.append(item)
-        if len(remaining) != len(self._bm25_corpus):
+        if obsolete or shared:
             self._build_bm25_index(remaining)
+            self._publish_server_change()
             self._save_bm25_cache()
         return len(obsolete)
 
@@ -766,6 +905,13 @@ class QdrantBankingStore:
         if any(not isinstance(scope, str) or not scope for scope in active_by_scope):
             raise ValueError("Batch pruning requires explicit nonempty publication scopes")
         active = {scope: set(keys) for scope, keys in active_by_scope.items()}
+        current_by_scope = {scope: [] for scope, keys in active.items() if keys}
+        for chunk in self._bm25_corpus:
+            for owner in _publication_owners(chunk):
+                if owner in current_by_scope and payload_index_key(chunk) in active[owner]:
+                    current_by_scope[owner].append(chunk)
+        for scope, chunks in current_by_scope.items():
+            active[scope].update(self._policy_history_keys(scope, chunks))
 
         def remaining_owners(payload):
             owners = _publication_owners(payload)
@@ -811,6 +957,7 @@ class QdrantBankingStore:
                 remaining.append({**item, "business_metadata": metadata})
         if obsolete or shared:
             self._build_bm25_index(remaining)
+            self._publish_server_change()
             self._save_bm25_cache()
         return len(obsolete)
 
@@ -1187,6 +1334,8 @@ class QdrantBankingStore:
         """
         Tìm kiếm Top-K chunks theo Cosine Similarity trên Qdrant HNSW Index kèm bộ lọc Metadata.
         """
+        if len(query_vector) == 0:
+            return []
         qdrant_filter = self._build_qdrant_filter(filter_dict)
 
         try:
@@ -1202,9 +1351,8 @@ class QdrantBankingStore:
                 score = float(hit.score)  # Cosine Similarity [-1.0, 1.0]
                 results.append((chunk, score))
             return results
-        except Exception as e:
-            print(f"⚠️ [Qdrant Store] Lỗi search_vector: {e}")
-            return []
+        except Exception as error:
+            raise RuntimeError("Qdrant dense search failed") from error
 
     # -------------------------------------------------------------------------
     # 5. KEYWORD SEARCH (BM25F OKAPI SEARCH USING INVERTED INDEX)
@@ -1432,6 +1580,72 @@ class QdrantBankingStore:
         # Sort results descending by RRF and take Top-K
         sorted_candidates = sorted(candidates.values(), key=lambda x: x["rrf_score"], reverse=True)
         return sorted_candidates[:top_k]
+
+    def legacy_policy_dates(self, scope):
+        """Read date clauses already in the index when there is no intake metadata."""
+        corpus = self._bm25_corpus
+        cached = getattr(self, "_legacy_policy_dates", None)
+        if cached is None or cached[0] is not corpus:
+            cached = (corpus, {})
+            self._legacy_policy_dates = cached
+        by_scope = cached[1]
+        if scope not in by_scope:
+            sources = {}
+            for chunk in corpus:
+                source = chunk.get("source", "")
+                metadata = chunk.get("business_metadata", {})
+                if (source.lower().endswith((".pdf", ".docx")) and not metadata.get("policy_revision")
+                        and (not scope or scope in metadata.get("publication_scopes", ()))):
+                    sources.setdefault((source, metadata.get("document_version")), []).append(chunk)
+            by_scope[scope] = {edition: dates for edition, chunks in sources.items()
+                               if (dates := extract_policy_dates(chunks))}
+        return by_scope[scope]
+
+    def source_groups(self, scope=""):
+        """Look up scoped documents without walking every chunk on each request."""
+        self.refresh_if_changed()
+        corpus = self._bm25_corpus
+        cached = getattr(self, "_source_groups", None)
+        if cached is None or cached[0] is not corpus:
+            groups = {}
+            for chunk in corpus:
+                groups.setdefault(chunk["source"], []).append(chunk)
+            cached = (corpus, {"": groups})
+            self._source_groups = cached
+        by_scope = cached[1]
+        if scope not in by_scope:
+            scoped = {}
+            for source, chunks in by_scope[""].items():
+                eligible = [chunk for chunk in chunks if scope in _publication_owners(chunk)]
+                if eligible:
+                    scoped[source] = eligible
+            by_scope[scope] = scoped
+        return by_scope[scope]
+
+    def policy_catalog(self, scope, requested_date, today, graph_path):
+        from agent_banking.retrieval.policy_versions import PolicyVersions
+
+        graph_stamp = None
+        if graph_path:
+            try:
+                graph_stat = Path(graph_path).stat()
+                graph_stamp = (graph_stat.st_mtime_ns, graph_stat.st_size)
+            except OSError:
+                pass
+        corpus = self._bm25_corpus
+        cache = getattr(self, "_policy_catalogs", None)
+        if cache is None or cache[0] is not corpus:
+            cache = (corpus, {})
+            self._policy_catalogs = cache
+        entries = cache[1]
+        key = (scope, requested_date, today, graph_path, graph_stamp)
+        catalog = entries.get(key)
+        if catalog is None:
+            catalog = PolicyVersions(corpus, scope, requested_date, today, self.legacy_policy_dates(scope), graph_path)
+            if len(entries) >= 32:
+                entries.clear()
+            entries[key] = catalog
+        return catalog
 
     def count(self):
         """Count total stored vector records."""

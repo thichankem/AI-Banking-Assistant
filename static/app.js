@@ -2089,6 +2089,11 @@ document.addEventListener("DOMContentLoaded", () => {
         return out.trim();
     }
 
+    function documentVersionQuery(citation) {
+        const version = String(citation?.document_version || "");
+        return /^[0-9a-f]{64}$/.test(version) ? "&version=" + encodeURIComponent(version) : "";
+    }
+
     function buildPdfPageUrl(citation, pageNumber) {
         if (!citation) {
             return "";
@@ -2096,7 +2101,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const rawSource = String(citation.source || "").split("\\").join("/").trim();
         let baseUrl = "";
         if (rawSource.toLowerCase().endsWith(".pdf")) {
-            baseUrl = "/api/documents/pdf?source=" + encodeURIComponent(rawSource);
+            baseUrl = "/api/documents/pdf?source=" + encodeURIComponent(rawSource) + documentVersionQuery(citation);
         } else if (citation.pdf_url) {
             const rawUrl = String(citation.pdf_url).trim();
             const hashIdx = rawUrl.indexOf("#");
@@ -2132,7 +2137,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!rawSource) {
             return "";
         }
-        return "/api/documents/file?source=" + encodeURIComponent(rawSource);
+        return "/api/documents/file?source=" + encodeURIComponent(rawSource) + documentVersionQuery(citation);
     }
 
     function extractCitationXPaths(citation, fallbackXPaths) {
@@ -2334,12 +2339,14 @@ document.addEventListener("DOMContentLoaded", () => {
             docOutline.replaceChildren();
             setDocStatus("Đang tải cấu trúc trang PDF và định vị chính xác đoạn trích dẫn...");
 
-            let manifest = docPreviewCache.get("pdf:" + rawSource);
+            const sourceParams = encodeURIComponent(rawSource) + documentVersionQuery(item);
+            const manifestKey = "pdf:" + sourceParams;
+            let manifest = docPreviewCache.get(manifestKey);
             let manifestPromise;
             if (manifest) {
                 manifestPromise = Promise.resolve(manifest);
             } else {
-                manifestPromise = fetch("/api/documents/pdf/manifest?source=" + encodeURIComponent(rawSource)).then((res) => {
+                manifestPromise = fetch("/api/documents/pdf/manifest?source=" + sourceParams).then((res) => {
                     if (!res.ok) {
                         throw new Error("Không tải được manifest PDF (" + res.status + ")");
                     }
@@ -2347,7 +2354,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 });
             }
 
-            const locateKey = rawSource + "|" + String(item.chunk_id || "") + "|" + String((item.page_numbers || []).join(","));
+            const locateKey = sourceParams + "|" + String(item.chunk_id || "") + "|" + String((item.page_numbers || []).join(","));
             let locateData = pdfLocateCache.get(locateKey);
             let locatePromise;
             if (locateData) {
@@ -2366,6 +2373,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         source: rawSource,
+                        version: String(item.document_version || ""),
                         page_numbers: reqPages,
                         chunk_id: String(item.chunk_id || ""),
                         excerpt: String(item.excerpt || ""),
@@ -2407,7 +2415,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (renderToken !== citationDrawerState.renderToken) {
                 return;
             }
-            docPreviewCache.set("pdf:" + rawSource, manifest);
+            docPreviewCache.set(manifestKey, manifest);
 
             let fallbackPageCount = 0;
             if (Array.isArray(manifest.pages)) {
@@ -2438,7 +2446,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     return;
                 }
                 rec.loaded = true;
-                rec.img.src = "/api/documents/pdf/page?source=" + encodeURIComponent(rawSource) + "&page=" + pageNumber + "&dpi=144";
+                rec.img.src = "/api/documents/pdf/page?source=" + sourceParams + "&page=" + pageNumber + "&dpi=144";
             }
 
             for (const pMeta of manifest.pages || []) {
@@ -2796,7 +2804,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 try {
                     const resp = await fetch(
                         "/api/documents/pdf/search?source="
-                        + encodeURIComponent(rawSource)
+                        + sourceParams
                         + "&q="
                         + encodeURIComponent(q)
                     );
@@ -2872,12 +2880,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
         async function renderDocxReader(item, rawSource, renderToken) {
             setDocStatus("Đang tải toàn bộ nội dung file Word (.docx)...");
-            const cacheKey = "docx:" + rawSource;
+            const sourceParams = encodeURIComponent(rawSource) + documentVersionQuery(item);
+            const cacheKey = "docx:" + sourceParams + "|" + String(item.chunk_id || "");
             let data = docPreviewCache.get(cacheKey);
             if (!data) {
                 try {
                     const url = "/api/documents/docx/preview?source="
-                        + encodeURIComponent(rawSource)
+                        + sourceParams
                         + "&chunk_id="
                         + encodeURIComponent(String(item.chunk_id || ""));
                     const resp = await fetch(url);
@@ -3116,6 +3125,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const targetInfo = extractCitationExcelTarget(item);
             const url = "/api/documents/xlsx/preview?source="
                 + encodeURIComponent(rawSource)
+                + documentVersionQuery(item)
                 + "&sheet="
                 + encodeURIComponent(targetInfo.sheetName)
                 + "&range="
@@ -3620,8 +3630,15 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         try {
             const url = new URL(source);
-            if (url.origin === "https://thuvienphapluat.vn" && !url.username && !url.password
+            if (url.username || url.password) {
+                return "";
+            }
+            if (url.origin === "https://thuvienphapluat.vn"
                 && url.pathname.toLowerCase().startsWith("/van-ban/") && url.pathname.toLowerCase().endsWith(".aspx")) {
+                return url.href;
+            }
+            if (url.origin === "https://congbaocdn.chinhphu.vn" && !url.search && !url.hash
+                && /^\/CongBaoCP\/VanBan\/\d{4}\/\d{1,2}\/[1-9]\d*\/[A-Za-z0-9_.-]+\.pdf$/.test(url.pathname)) {
                 return url.href;
             }
         } catch {

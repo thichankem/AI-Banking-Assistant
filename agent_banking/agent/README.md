@@ -279,3 +279,19 @@ Từ thư mục gốc repo, chạy phép so sánh với 7 truy vấn pháp lý c
 ```
 
 Báo cáo xếp theo số truy vấn tìm đúng văn bản trong 4 kết quả đầu, số cụm từ cần có trong đoạn trích, thứ hạng trung bình nghịch đảo và độ trễ trung vị. Các lượt đánh giá dùng cùng hạn mức với agent.
+
+# Truy cập tài liệu nguồn
+
+Các API tài liệu dùng cùng `ABANK_KNOWLEDGE_SCOPE` với tìm kiếm. Citation có
+SHA-256 mở đúng bản đã lưu. Nếu bản đó thiếu và file hiện tại đã thay đổi,
+API báo bản được trích dẫn không còn truy cập được.
+
+Khi phục vụ qua mạng, cấu hình `ABANK_KNOWLEDGE_ACCESS_TOKEN` trong môi trường
+chạy ứng dụng. Trình duyệt dùng tên đăng nhập `banking` và token làm mật khẩu
+qua HTTPS. API client có thể gửi cùng token bằng Bearer authorization.
+
+Qdrant nhúng dùng tìm kiếm vector chính xác trên đĩa. Để dùng HNSW và cho nhiều
+tiến trình truy cập chỉ mục qua dịch vụ Qdrant nội bộ, cấu hình
+`ABANK_QDRANT_SERVER_URL` và `ABANK_QDRANT_SERVER_API_KEY` nếu dịch vụ yêu cầu.
+Tiến trình nạp chỉ mục và API dùng cùng thư mục lưu metadata, bản gốc và tín hiệu
+cập nhật BM25.

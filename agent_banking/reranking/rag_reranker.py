@@ -364,12 +364,20 @@ class BankingReranker:
         )
         explicit_nv_or_tier = any(m in padded_q for m in (" nv ", " goi bach kim ", " goi uu tien ", " goi thinh vuong ", " phan hang "))
         if any(fc in padded_q for fc in fee_cues) and not explicit_nv_or_tier:
-            if src_path_low.endswith(".xlsx") and ("8. biểu phí dịch vụ/" in src_path_low or src_key.startswith("bp ")):
+            if src_path_low.endswith(".xlsx") and (
+                "8. biểu phí dịch vụ/" in src_path_low
+                or src_key.startswith("bp ")
+                or meta.get("domain") == "bieu_phi_dich_vu"
+            ):
                 bonus += 0.08
 
         network_cues = (" chi nhanh ", " phong giao dich ", " atm ", " cdm ", " mang luoi ", " diem giao dich ")
         if any(nc in padded_q for nc in network_cues):
-            if src_path_low.endswith(".xlsx") and ("9. mạng lưới hoạt động/" in src_path_low or src_key.startswith("ml ")):
+            if src_path_low.endswith(".xlsx") and (
+                "9. mạng lưới hoạt động/" in src_path_low
+                or src_key.startswith("ml ")
+                or meta.get("domain") == "mang_luoi_hoat_dong"
+            ):
                 bonus += 0.08
 
         eligibility_cues = (
@@ -937,7 +945,7 @@ class BankingReranker:
                     for result in sub_results:
                         index = result.get("index")
                         score = result.get("relevance_score")
-                        if not isinstance(index, int) or index in seen_sub or not 0 <= index < len(batch_docs):
+                        if type(index) is not int or index in seen_sub or not 0 <= index < len(batch_docs):
                             raise ValueError("Invalid reranker index")
                         if not isinstance(score, (int, float)) or not math.isfinite(score):
                             raise ValueError("Invalid reranker score")
@@ -948,6 +956,8 @@ class BankingReranker:
                             "relevance_score": float(score)
                         })
                         to_cache.append((doc_hashes[orig_idx], float(score)))
+                    if len(seen_sub) != len(batch_docs):
+                        raise ValueError("Incomplete reranker response")
             if to_cache:
                 self._save_cached_scores_batch(to_cache)
 

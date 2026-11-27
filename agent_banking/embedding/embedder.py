@@ -248,9 +248,25 @@ class BankingEmbedder:
         if not isinstance(metadata, dict):
             metadata = {}
         if metadata.get("schema_version") == "2.0":
+            from agent_banking.chunking.universal.enrichment.contextual_enricher import strip_ui_noise_for_context
             from agent_banking.chunking.universal.text.token_budget import format_passage_fields
             retrieval = dict(metadata.get("retrieval", {}))
-            return format_passage_fields(chunk.get("content", ""), retrieval)
+            content = chunk.get("content", "")
+            source_name = str(chunk.get("source", ""))
+            if not chunk.get("table_data") and "HDSD " in source_name:
+                if "passage_content" in retrieval:
+                    cleaned_passage = strip_ui_noise_for_context(str(retrieval.get("passage_content", "")))
+                    if cleaned_passage:
+                        retrieval["passage_content"] = cleaned_passage
+                elif "embedding_content" in retrieval:
+                    cleaned_embed = strip_ui_noise_for_context(str(retrieval.get("embedding_content", "")))
+                    if cleaned_embed:
+                        retrieval["embedding_content"] = cleaned_embed
+                else:
+                    cleaned_content = strip_ui_noise_for_context(str(content))
+                    if cleaned_content:
+                        content = cleaned_content
+            return format_passage_fields(content, retrieval)
 
         # Retrieve raw content from content or original_text
         raw_content = chunk.get("content")
@@ -521,7 +537,44 @@ class BankingEmbedder:
             chunk_mock = {"content": text, "chunk_type": "text"}
             virtual_passage = self.format_virtual_passage(chunk_mock)
 
-        self._validate_passages([virtual_passage])
+        if not is_query:
+            self._validate_passages([virtual_passage])
+        else:
+            from agent_banking.chunking.universal.text.boundaries import safe_boundaries
+            from agent_banking.chunking.universal.text.token_budget import TokenBudget, get_tokenizer
+
+            limit = self._passage_limit()
+            budget = TokenBudget(limit, limit, get_tokenizer())
+            if budget.count(virtual_passage) > limit:
+                cached_long = self._get_cached_vector(virtual_passage)
+                if cached_long:
+                    return cached_long
+                query_prefix = EmbeddingConfig.EMBEDDING_QUERY_PREFIX
+                body = virtual_passage.removeprefix(query_prefix).lstrip("\n")
+                spans = budget.split(
+                    body,
+                    lambda fragment: budget.count(query_prefix + fragment) <= limit,
+                    align_words=True,
+                    boundaries=safe_boundaries(body, protect_markup=False),
+                )
+                windows = [
+                    (query_prefix + fragment, max(1, budget.count(fragment)))
+                    for _, _, fragment in spans
+                    if fragment.strip()
+                ]
+                if not windows:
+                    windows = [(query_prefix + body[:max(1, limit)], 1)]
+                win_vectors = self._call_api([w_text for w_text, _ in windows], input_type="query")
+                if not win_vectors or len(win_vectors) != len(windows):
+                    return [0.0] * self.dimension
+                pooled = [0.0] * self.dimension
+                for (_, weight), w_vec in zip(windows, win_vectors):
+                    for dim_i, val in enumerate(w_vec):
+                        pooled[dim_i] += val * weight
+                norm_vec = self._l2_normalize(pooled)
+                if any(norm_vec):
+                    self._save_cache_batch([(self._get_hash(virtual_passage), norm_vec)])
+                return norm_vec
         if is_query:
             with trace_span(
                 "query_embedding",

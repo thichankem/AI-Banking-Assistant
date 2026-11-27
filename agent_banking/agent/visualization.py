@@ -1,11 +1,11 @@
 """Validate declarative chart and diagram data, styling and layouts."""
 
-import re
 from typing import Annotated, Literal
 from uuid import uuid4
 
 from jsonschema import Draft202012Validator
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -21,35 +21,182 @@ MAX_RECENT = 2
 MAX_SAFE_INTEGER = 2**53 - 1
 MAX_ROWS = 60
 MAX_COLUMNS = 8
+_HEX_LOWER = set("0123456789abcdef")
+_HEX_ALL = set("0123456789abcdefABCDEF")
+_SCHEME_BODY = set("abcdefghijklmnopqrstuvwxyz0123456789+.-")
+_FLOWCHART_HEADERS = (
+    "flowchart TB",
+    "flowchart TD",
+    "flowchart BT",
+    "flowchart RL",
+    "flowchart LR",
+    "graph TB",
+    "graph TD",
+    "graph BT",
+    "graph RL",
+    "graph LR",
+)
+_EXACT_HEADERS = {
+    "sequence": "sequenceDiagram",
+    "class": "classDiagram",
+    "er": "erDiagram",
+    "mindmap": "mindmap",
+    "architecture": "architecture-beta",
+}
+_UNSAFE_DIRECTIVES = {
+    "click",
+    "href",
+    "link",
+    "links",
+    "callback",
+    "call",
+    "style",
+    "classdef",
+    "cssclass",
+    "linkstyle",
+    "classname",
+    "acctitle",
+    "accdescr",
+}
+_ALLOWED_ARCHITECTURE_ICONS = ("cloud", "database", "disk", "internet", "server")
+
+
+def _check_visual_id(value: str) -> str:
+    if len(value) != 32 or any(ch not in _HEX_LOWER for ch in value):
+        raise ValueError("Invalid visual identifier")
+    return value
+
+
+def _check_chart_color(value: str) -> str:
+    if len(value) != 7 or not value.startswith("#") or any(ch not in _HEX_ALL for ch in value[1:]):
+        raise ValueError("Invalid hex color")
+    return value
+
+
+def _is_word_char(ch: str) -> bool:
+    return ch.isalnum() or ch == "_"
+
+
+def _has_control_text(text: str) -> bool:
+    for ch in text:
+        code = ord(ch)
+        if code < 0x20 or code == 0x7F or 0x202A <= code <= 0x202E or 0x2066 <= code <= 0x2069:
+            return True
+    return False
+
+
+def _skip_spaces(text: str, pos: int) -> int:
+    length = len(text)
+    while pos < length and text[pos].isspace():
+        pos += 1
+    return pos
+
+
+def _has_unsafe_mermaid(source: str) -> bool:
+    for token in ("%%", "@{", "`", "\\", ";"):
+        if token in source:
+            return True
+    length = len(source)
+    idx = source.find(":::")
+    while idx != -1:
+        pos = _skip_spaces(source, idx + 3)
+        if pos < length and _is_word_char(source[pos]):
+            return True
+        idx = source.find(":::", idx + 3)
+
+    low = source.lower()
+    idx = low.find("<")
+    while idx != -1:
+        pos = _skip_spaces(low, idx + 1)
+        if pos < length:
+            nxt = low[pos]
+            if nxt in ("!", "?", "/") or ("a" <= nxt <= "z"):
+                return True
+        idx = low.find("<", idx + 1)
+
+    idx = low.find("://")
+    while idx != -1:
+        cursor = idx - 1
+        has_alpha = False
+        while cursor >= 0 and low[cursor] in _SCHEME_BODY:
+            if "a" <= low[cursor] <= "z":
+                has_alpha = True
+            cursor -= 1
+        if has_alpha:
+            return True
+        idx = low.find("://", idx + 3)
+
+    for kw, suffix in (("url", "("), ("javascript", ":"), ("data", ":"), ("file", ":")):
+        idx = low.find(kw)
+        while idx != -1:
+            if idx == 0 or not _is_word_char(low[idx - 1]):
+                pos = _skip_spaces(low, idx + len(kw))
+                if pos < length and low[pos] == suffix:
+                    return True
+            idx = low.find(kw, idx + len(kw))
+
+    for line in source.split("\n"):
+        stripped = line.strip()
+        if stripped == "---":
+            return True
+        word_chars = []
+        for ch in stripped:
+            if _is_word_char(ch):
+                word_chars.append(ch)
+            else:
+                break
+        if word_chars and "".join(word_chars).lower() in _UNSAFE_DIRECTIVES:
+            return True
+
+    idx = source.find("::icon")
+    while idx != -1:
+        end = idx + 6
+        if end == length or not _is_word_char(source[end]):
+            return True
+        idx = source.find("::icon", idx + 6)
+    return False
+
+
+def _has_custom_architecture_icon(source: str) -> bool:
+    for line in source.split("\n"):
+        stripped = line.lstrip()
+        prefix_len = 0
+        if stripped.startswith("service") and len(stripped) > 7 and stripped[7].isspace():
+            prefix_len = 7
+        elif stripped.startswith("group") and len(stripped) > 5 and stripped[5].isspace():
+            prefix_len = 5
+        if prefix_len == 0:
+            continue
+        pos = _skip_spaces(stripped, prefix_len)
+        ident_start = pos
+        while pos < len(stripped) and (_is_word_char(stripped[pos]) or stripped[pos] == "-"):
+            pos += 1
+        if pos == ident_start:
+            continue
+        pos = _skip_spaces(stripped, pos)
+        if pos >= len(stripped) or stripped[pos] != "(":
+            continue
+        after = stripped[pos + 1:]
+        matched_allowed = False
+        for icon in _ALLOWED_ARCHITECTURE_ICONS:
+            if after.startswith(icon):
+                close_pos = _skip_spaces(after, len(icon))
+                if close_pos < len(after) and after[close_pos] == ")":
+                    matched_allowed = True
+                    break
+        if not matched_allowed:
+            return True
+    return False
+
+
 Label = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=90)
 ]
-VisualId = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}$")]
-
-_HEADERS = {
-    "flowchart": r"(?:flowchart|graph) (?:TB|TD|BT|RL|LR)",
-    "sequence": r"sequenceDiagram",
-    "class": r"classDiagram",
-    "er": r"erDiagram",
-    "mindmap": r"mindmap",
-    "architecture": r"architecture-beta",
-}
-_UNSAFE_MERMAID = re.compile(
-    r"%%|@\{|`|\\|;|:::(?:\s*\w)|<\s*(?:/?\s*[a-z]|[!?/])|"
-    r"(?:[a-z][a-z0-9+.-]*://|\b(?:url\s*\(|(?:javascript|data|file)\s*:))|"
-    r"(?m:^\s*(?:click|href|link|links|callback|call|style|classDef|cssClass|linkStyle|"
-    r"className|accTitle|accDescr)\b)|^\s*---\s*$",
-    re.IGNORECASE,
-)
-_CUSTOM_ARCHITECTURE_ICON = re.compile(
-    r"^\s*(?:service|group)\s+[\w-]+\s*\((?!(?:cloud|database|disk|internet|server)\s*\))",
-    re.MULTILINE,
-)
-_CONTROL_TEXT = re.compile(r"[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]")
+VisualId = Annotated[str, Field(min_length=32, max_length=32), AfterValidator(_check_visual_id)]
 ChartNumber = Annotated[
     float, Field(allow_inf_nan=False, ge=-MAX_SAFE_INTEGER, le=MAX_SAFE_INTEGER)
 ]
-ChartColor = Annotated[str, StringConstraints(pattern=r"^#[0-9a-fA-F]{6}$")]
+ChartColor = Annotated[str, Field(min_length=7, max_length=7), AfterValidator(_check_chart_color)]
 ChartKind = Literal["bar", "stacked_bar", "line", "area", "pie", "donut", "scatter"]
 
 
@@ -144,18 +291,18 @@ class DiagramSelection(_Selection):
         check_layout(self.layout, {("diagram", None)}, {("diagram", None)})
         self.source = self.source.replace("\r\n", "\n").strip()
         lines = self.source.split("\n")
-        if not 2 <= len(lines) <= 48 or not re.fullmatch(_HEADERS[self.kind], lines[0]):
+        if self.kind == "flowchart":
+            valid_header = lines[0] in _FLOWCHART_HEADERS
+        else:
+            valid_header = lines[0] == _EXACT_HEADERS.get(self.kind)
+        if not 2 <= len(lines) <= 48 or not valid_header:
             raise ValueError("Invalid Mermaid header or line count")
-        if any(len(line) > 180 or _CONTROL_TEXT.search(line) for line in lines):
+        if any(len(line) > 180 or _has_control_text(line) for line in lines):
             raise ValueError("Unsupported Mermaid characters or line length")
-        custom_icon = self.kind == "architecture" and _CUSTOM_ARCHITECTURE_ICON.search(
+        custom_icon = self.kind == "architecture" and _has_custom_architecture_icon(
             self.source
         )
-        if (
-            _UNSAFE_MERMAID.search(self.source)
-            or re.search(r"::icon\b", self.source)
-            or custom_icon
-        ):
+        if _has_unsafe_mermaid(self.source) or custom_icon:
             raise ValueError(
                 "Mermaid includes an unsupported directive or external resource"
             )
@@ -176,7 +323,7 @@ def validate_selection(raw):
 def safe_visualization_label(label: str, guard) -> str:
     if (
         any(char in label for char in "<>`")
-        or _CONTROL_TEXT.search(label)
+        or _has_control_text(label)
         or guard(label) != label
         or "[REDACTED" in label.upper()
     ):
@@ -198,7 +345,10 @@ def prepare_visualization(raw, recent: list[dict], guard) -> dict | None:
         )
         if selection.update_of and previous is None:
             return None
-        prior = previous["visualization"] if previous else None
+        if previous:
+            prior = previous["visualization"]
+        else:
+            prior = None
         if isinstance(selection, ChartUpdate):
             if prior["engine"] != "echarts":
                 return None
@@ -211,22 +361,32 @@ def prepare_visualization(raw, recent: list[dict], guard) -> dict | None:
             if "config" in changes:
                 changes["config"] = {**(base.get("config") or {}), **changes["config"]}
             selection = ChartSelection.model_validate({**base, **changes})
-        primary = (
-            "chart" if isinstance(selection, ChartSelection) else "diagram",
-            None,
-        )
+        if isinstance(selection, ChartSelection):
+            primary = ("chart", None)
+        else:
+            primary = ("diagram", None)
+        if primary[0] == "chart":
+            allowed_blocks = {primary, ("table", None)}
+        else:
+            allowed_blocks = {primary}
         check_layout(
             selection.layout,
-            {primary, ("table", None)} if primary[0] == "chart" else {primary},
+            allowed_blocks,
             {primary},
             lambda label: safe_visualization_label(label, guard),
         )
+        if prior:
+            vis_id = prior["id"]
+            revision = prior["revision"] + 1
+        else:
+            vis_id = uuid4().hex
+            revision = 1
         visual = {
             **selection.model_dump(exclude={"update_of"}),
             "schema_version": 1,
             "title": safe_visualization_label(selection.title, guard),
-            "id": prior["id"] if prior else uuid4().hex,
-            "revision": prior["revision"] + 1 if prior else 1,
+            "id": vis_id,
+            "revision": revision,
         }
         if isinstance(selection, ChartSelection):
             labels = [

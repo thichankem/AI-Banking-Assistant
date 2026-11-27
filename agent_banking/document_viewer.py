@@ -200,12 +200,18 @@ def _load_knowledge_chunk(chunk_id: str, knowledge_root: Path) -> dict | None:
         doc_id = chunk_id.split(":", 1)[0].strip()
     if not doc_id:
         return None
+    all_chunks_file = knowledge_root / doc_id / "all_chunks.json"
+    if not all_chunks_file.is_file():
+        return None
+    try:
+        mtime_ns = int(all_chunks_file.stat().st_mtime_ns)
+    except OSError:
+        return None
     with _CHUNK_INDEX_LOCK:
-        cached_map = _CHUNK_INDEX_CACHE.get(doc_id)
-    if cached_map is None:
-        all_chunks_file = knowledge_root / doc_id / "all_chunks.json"
-        if not all_chunks_file.is_file():
-            return None
+        cached_entry = _CHUNK_INDEX_CACHE.get(doc_id)
+    if cached_entry is not None and cached_entry[0] == mtime_ns:
+        cached_map = cached_entry[1]
+    else:
         try:
             raw_list = json.loads(all_chunks_file.read_text(encoding="utf-8"))
         except Exception:
@@ -219,7 +225,10 @@ def _load_knowledge_chunk(chunk_id: str, knowledge_root: Path) -> dict | None:
                 if cid:
                     built[cid] = item
         with _CHUNK_INDEX_LOCK:
-            _CHUNK_INDEX_CACHE[doc_id] = built
+            if len(_CHUNK_INDEX_CACHE) >= 256 and doc_id not in _CHUNK_INDEX_CACHE:
+                oldest_key = next(iter(_CHUNK_INDEX_CACHE))
+                _CHUNK_INDEX_CACHE.pop(oldest_key, None)
+            _CHUNK_INDEX_CACHE[doc_id] = (mtime_ns, built)
             cached_map = built
     return cached_map.get(chunk_id)
 
@@ -445,6 +454,13 @@ def _render_docx_run(run_el, rels: dict[str, dict], source: str) -> str:
                         + escape_html(media_url)
                         + '">'
                     )
+            for node in child.iter():
+                if etree.QName(node).localname == "txbxContent":
+                    for sub_node in node:
+                        if etree.QName(sub_node).localname == "p":
+                            tb_txt = "".join(t_el.text or "" for t_el in sub_node.findall(".//" + _w_tag("t"))).strip()
+                            if tb_txt:
+                                chunks.append('<span class="docx-textbox">' + escape_html(tb_txt) + "</span>")
 
     inner = "".join(chunks)
     if not inner:
@@ -502,6 +518,65 @@ def _infer_visual_heading_level(p_el, plain_text: str) -> int:
     return 0
 
 
+def _collect_docx_inline_nodes(container, rels: dict[str, dict], source: str, outline: list[dict], parts: list[str], plain_parts: list[str]) -> None:
+    for child in container:
+        lname = etree.QName(child).localname
+        if lname == "r":
+            rendered = _render_docx_run(child, rels, source)
+            if rendered:
+                parts.append(rendered)
+            for t_el in child.findall(_w_tag("t")):
+                if t_el.text:
+                    plain_parts.append(t_el.text)
+            for node in child.iter():
+                if etree.QName(node).localname == "txbxContent":
+                    for sub_node in node:
+                        if etree.QName(sub_node).localname == "p":
+                            tb_txt = "".join(t_el.text or "" for t_el in sub_node.findall(".//" + _w_tag("t"))).strip()
+                            if tb_txt:
+                                plain_parts.append(" " + tb_txt + " ")
+        elif lname == "hyperlink":
+            rid = child.get(_r_tag("id")) or ""
+            rel = rels.get(rid)
+            link_inner = []
+            link_plain = []
+            _collect_docx_inline_nodes(child, rels, source, outline, link_inner, link_plain)
+            plain_parts.extend(link_plain)
+            if link_inner:
+                joined = "".join(link_inner)
+                if rel and rel.get("external") and rel.get("target"):
+                    href = str(rel["target"]).strip()
+                    if href.startswith("http://") or href.startswith("https://"):
+                        parts.append(
+                            '<a href="' + escape_html(href) + '" target="_blank" rel="noopener noreferrer">'
+                            + joined + "</a>"
+                        )
+                    else:
+                        parts.append(joined)
+                else:
+                    parts.append(joined)
+        elif lname in ("ins", "smartTag"):
+            _collect_docx_inline_nodes(child, rels, source, outline, parts, plain_parts)
+        elif lname == "sdt":
+            sdt_content = child.find(_w_tag("sdtContent"))
+            if sdt_content is not None:
+                _collect_docx_inline_nodes(sdt_content, rels, source, outline, parts, plain_parts)
+        elif lname == "AlternateContent":
+            chosen = None
+            fallback = None
+            for branch in child:
+                bname = etree.QName(branch).localname
+                if bname == "Choice" and chosen is None:
+                    chosen = branch
+                elif bname == "Fallback" and fallback is None:
+                    fallback = branch
+            target_branch = chosen
+            if target_branch is None:
+                target_branch = fallback
+            if target_branch is not None:
+                _collect_docx_inline_nodes(target_branch, rels, source, outline, parts, plain_parts)
+
+
 def _render_docx_paragraph(
     p_el,
     rels: dict[str, dict],
@@ -534,39 +609,7 @@ def _render_docx_paragraph(
 
     parts = []
     plain_parts = []
-    for child in p_el:
-        lname = etree.QName(child).localname
-        if lname == "r":
-            rendered = _render_docx_run(child, rels, source)
-            if rendered:
-                parts.append(rendered)
-            for t_el in child.findall(_w_tag("t")):
-                if t_el.text:
-                    plain_parts.append(t_el.text)
-        elif lname == "hyperlink":
-            rid = child.get(_r_tag("id")) or ""
-            rel = rels.get(rid)
-            link_inner = []
-            for r_el in child.findall(_w_tag("r")):
-                rendered = _render_docx_run(r_el, rels, source)
-                if rendered:
-                    link_inner.append(rendered)
-                for t_el in r_el.findall(_w_tag("t")):
-                    if t_el.text:
-                        plain_parts.append(t_el.text)
-            if link_inner:
-                joined = "".join(link_inner)
-                if rel and rel.get("external") and rel.get("target"):
-                    href = str(rel["target"]).strip()
-                    if href.startswith("http://") or href.startswith("https://"):
-                        parts.append(
-                            '<a href="' + escape_html(href) + '" target="_blank" rel="noopener noreferrer">'
-                            + joined + "</a>"
-                        )
-                    else:
-                        parts.append(joined)
-                else:
-                    parts.append(joined)
+    _collect_docx_inline_nodes(p_el, rels, source, outline, parts, plain_parts)
 
     content_html = "".join(parts)
     plain_text = " ".join("".join(plain_parts).split())
@@ -601,6 +644,21 @@ def _render_docx_paragraph(
     )
 
 
+def _iter_docx_tr_cells(tr_el):
+    for child in tr_el:
+        lname = etree.QName(child).localname
+        if lname == "tc":
+            yield child
+        elif lname in ("ins", "smartTag"):
+            for sub in _iter_docx_tr_cells(child):
+                yield sub
+        elif lname == "sdt":
+            sdt_content = child.find(_w_tag("sdtContent"))
+            if sdt_content is not None:
+                for sub in _iter_docx_tr_cells(sdt_content):
+                    yield sub
+
+
 def _render_docx_table(tbl_el, rels: dict[str, dict], styles: dict[str, dict], source: str, outline: list[dict]) -> str:
     tbl_xpath = tbl_el.getroottree().getpath(tbl_el)
     tr_nodes = tbl_el.findall(_w_tag("tr"))
@@ -612,14 +670,32 @@ def _render_docx_table(tbl_el, rels: dict[str, dict], styles: dict[str, dict], s
         tr_xpath = tr.getroottree().getpath(tr)
         tr_pr = tr.find(_w_tag("trPr"))
         is_header_row = False
-        if tr_pr is not None and tr_pr.find(_w_tag("tblHeader")) is not None:
-            is_header_row = True
+        grid_before = 0
+        if tr_pr is not None:
+            if tr_pr.find(_w_tag("tblHeader")) is not None:
+                is_header_row = True
+            gb_el = tr_pr.find(_w_tag("gridBefore"))
+            if gb_el is not None:
+                raw_gb = str(gb_el.get(_w_tag("val")) or "").strip()
+                if raw_gb.isdigit() and int(raw_gb) > 0:
+                    grid_before = int(raw_gb)
         elif tr_idx == 0:
             is_header_row = True
 
         cells_meta = []
         col_cursor = 0
-        for tc in tr.findall(_w_tag("tc")):
+        if grid_before > 0:
+            cells_meta.append({
+                "col_start": 0,
+                "colspan": grid_before,
+                "rowspan": 1,
+                "vmerge": "",
+                "skip": False,
+                "bg": "",
+                "html": "",
+            })
+            col_cursor = grid_before
+        for tc in _iter_docx_tr_cells(tr):
             tc_pr = tc.find(_w_tag("tcPr"))
             colspan = 1
             vmerge = ""
@@ -739,7 +815,8 @@ def _walk_docx_container(container, rels: dict[str, dict], styles: dict[str, dic
     return html_parts
 
 
-def render_docx_preview(doc_path: Path, source: str, chunk_id: str = "", knowledge_root: Path | None = None) -> dict:
+def render_docx_preview(doc_path: Path, source: str, chunk_id: str = "", knowledge_root: Path | None = None,
+                        *, indexed_chunk=None, document_version="") -> dict:
     """Render a DOCX file into structured HTML preserving 1:1 XML XPath anchors."""
     try:
         with ZipFile(str(doc_path), "r") as zf:
@@ -756,19 +833,25 @@ def render_docx_preview(doc_path: Path, source: str, chunk_id: str = "", knowled
     blocks_html = []
     if body is not None:
         blocks_html = _walk_docx_container(body, rels, styles, source, outline)
+        if document_version:
+            media = "/api/documents/docx/media?source=" + quote(source, safe="")
+            encoded_media = escape_html(media)
+            blocks_html = [block.replace(encoded_media + "&amp;part=", encoded_media + "&amp;version=" +
+                                         quote(document_version, safe="") + "&amp;part=") for block in blocks_html]
 
     fallback_xpaths = []
-    if chunk_id and knowledge_root is not None:
+    chunk_rec = indexed_chunk
+    if chunk_rec is None and chunk_id and knowledge_root is not None:
         chunk_rec = _load_knowledge_chunk(chunk_id, knowledge_root)
-        if chunk_rec:
-            locs = ((chunk_rec.get("business_metadata") or {}).get("provenance") or {}).get("locations") or []
-            for loc in locs:
-                if isinstance(loc, dict) and loc.get("xpath"):
-                    fallback_xpaths.append(str(loc["xpath"]))
+    if chunk_rec:
+        locs = ((chunk_rec.get("business_metadata") or {}).get("provenance") or {}).get("locations") or []
+        for loc in locs:
+            if isinstance(loc, dict) and loc.get("xpath"):
+                fallback_xpaths.append(str(loc["xpath"]))
 
     return {
         "file_type": "docx",
-        "file_name": doc_path.name,
+        "file_name": Path(source).name or doc_path.name,
         "source": source,
         "html": '<article class="docx-paper">' + "".join(blocks_html) + "</article>",
         "outline": outline,
@@ -908,29 +991,59 @@ def render_xlsx_preview(
     target_range: str = "",
     chunk_id: str = "",
     knowledge_root: Path | None = None,
+    *,
+    indexed_chunk=None,
 ) -> dict:
     """Extract all sheets of an XLSX workbook with cell grid, merged regions, and target highlight bounds."""
     wb = openpyxl.load_workbook(str(doc_path), data_only=True, read_only=False)
     try:
         resolved_sheet = str(target_sheet or "").strip()
         resolved_range = str(target_range or "").strip()
-        if (not resolved_sheet or not resolved_range) and chunk_id and knowledge_root is not None:
-            chunk_rec = _load_knowledge_chunk(chunk_id, knowledge_root)
+        extra_range_texts = []
+        if "," in resolved_range:
+            parts = [seg.strip() for seg in resolved_range.split(",") if seg.strip()]
+            if parts:
+                resolved_range = parts[0]
+                extra_range_texts.extend(parts)
+        elif resolved_range:
+            extra_range_texts.append(resolved_range)
+        if not resolved_sheet or not resolved_range:
+            chunk_rec = indexed_chunk
+            if chunk_rec is None and chunk_id and knowledge_root is not None:
+                chunk_rec = _load_knowledge_chunk(chunk_id, knowledge_root)
             if chunk_rec:
-                locs = ((chunk_rec.get("business_metadata") or {}).get("provenance") or {}).get("locations") or []
+                bm_rec = chunk_rec.get("business_metadata") or {}
+                locs = (bm_rec.get("provenance") or {}).get("locations") or []
                 for loc in locs:
                     if not isinstance(loc, dict):
                         continue
                     if not resolved_sheet and loc.get("sheet_name"):
                         resolved_sheet = str(loc["sheet_name"])
-                    if not resolved_range and loc.get("cell_range"):
-                        resolved_range = str(loc["cell_range"])
-                    if resolved_sheet and resolved_range:
-                        break
+                    if loc.get("cell_range"):
+                        cr = str(loc["cell_range"]).strip()
+                        if not resolved_range:
+                            resolved_range = cr
+                        if cr and cr not in extra_range_texts:
+                            extra_range_texts.append(cr)
+                cit_rec = bm_rec.get("citation") or {}
+                if isinstance(cit_rec, dict):
+                    if not resolved_sheet and cit_rec.get("sheet_name"):
+                        resolved_sheet = str(cit_rec["sheet_name"])
+                    for cr in cit_rec.get("cell_ranges") or ():
+                        cr_txt = str(cr or "").strip()
+                        if not resolved_range and cr_txt:
+                            resolved_range = cr_txt
+                        if cr_txt and cr_txt not in extra_range_texts:
+                            extra_range_texts.append(cr_txt)
 
         parsed_target = parse_a1_range(resolved_range)
         if parsed_target and parsed_target.get("sheet_name") and not resolved_sheet:
             resolved_sheet = parsed_target["sheet_name"]
+        parsed_targets = []
+        for rt in extra_range_texts:
+            pt = parse_a1_range(rt)
+            if pt is not None:
+                parsed_targets.append(pt)
 
         sheets_out = []
         max_rows_cap = 800
@@ -993,6 +1106,29 @@ def render_xlsx_preview(
                     })
                 rows_data.append({"row_num": r_idx, "cells": cells_row})
 
+            frozen_rows_data = []
+            frozen_row_count = 0
+            if ws.freeze_panes:
+                fp_cell = _split_a1_cell(str(ws.freeze_panes))
+                if fp_cell and fp_cell[0] > 1:
+                    frozen_row_count = min(4, fp_cell[0] - 1)
+            if frozen_row_count == 0 and row_start > 1:
+                frozen_row_count = min(4, row_start - 1)
+            if frozen_row_count > 0 and row_start > 1:
+                for fr_idx in range(1, frozen_row_count + 1):
+                    f_cells = []
+                    for c_idx in range(col_start, col_end + 1):
+                        f_cell = ws.cell(row=fr_idx, column=c_idx)
+                        f_cells.append({
+                            "r": fr_idx,
+                            "c": c_idx,
+                            "a1": _col_index_to_letters(c_idx) + str(fr_idx),
+                            "v": _format_excel_cell_value(f_cell.value),
+                            "b": True,
+                            "al": "",
+                        })
+                    frozen_rows_data.append({"row_num": fr_idx, "cells": f_cells})
+
             sheets_out.append({
                 "name": ws.title,
                 "state": str(ws.sheet_state or "visible"),
@@ -1005,16 +1141,19 @@ def render_xlsx_preview(
                 "truncated": raw_max_row > row_end or raw_max_col > col_end,
                 "col_headers": col_headers,
                 "merges": merges,
+                "frozen_row_count": frozen_row_count,
+                "frozen_rows": frozen_rows_data,
                 "rows": rows_data,
             })
 
         return {
             "file_type": "xlsx",
-            "file_name": doc_path.name,
+            "file_name": Path(source).name or doc_path.name,
             "source": source,
             "sheets": sheets_out,
             "target_sheet": resolved_sheet,
             "target_range": parsed_target,
+            "target_ranges": parsed_targets,
         }
     finally:
         wb.close()
@@ -1055,7 +1194,7 @@ def get_pdf_manifest(doc_path: Path, source: str) -> dict:
             })
         return {
             "file_type": "pdf",
-            "file_name": doc_path.name,
+            "file_name": Path(source).name or doc_path.name,
             "source": source,
             "total_pages": len(doc),
             "pages": pages,
@@ -1225,7 +1364,9 @@ def get_pdf_page_lines(
             conn.close()
     if row is not None:
         try:
-            return json.loads(row[1]), str(row[0])
+            cached_lines = json.loads(row[1])
+            if cached_lines:
+                return cached_lines, str(row[0])
         except Exception:
             pass
 
@@ -1246,18 +1387,19 @@ def get_pdf_page_lines(
     finally:
         doc.close()
 
-    with _OCR_DB_LOCK:
-        conn = _ocr_cache_connection(cache_db_path)
-        try:
-            conn.execute(
-                "INSERT OR REPLACE INTO page_ocr_lines "
-                "(cache_key, page_width, page_height, ocr_source, lines_json, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (cache_key, pw, ph, ocr_source, json.dumps(lines, ensure_ascii=False), time.time()),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+    if lines:
+        with _OCR_DB_LOCK:
+            conn = _ocr_cache_connection(cache_db_path)
+            try:
+                conn.execute(
+                    "INSERT OR REPLACE INTO page_ocr_lines "
+                    "(cache_key, page_width, page_height, ocr_source, lines_json, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (cache_key, pw, ph, ocr_source, json.dumps(lines, ensure_ascii=False), time.time()),
+                )
+                conn.commit()
+            finally:
+                conn.close()
     return lines, ocr_source
 
 
@@ -1283,6 +1425,37 @@ def _build_target_text_for_chunk(
                 for row in grid:
                     if isinstance(row, list):
                         parts.append(" ".join(str(cell) for cell in row))
+            header_grid = tbl.get("header_grid")
+            if isinstance(header_grid, list):
+                for h_row in header_grid:
+                    if isinstance(h_row, list):
+                        parts.append(" ".join(str(cell) for cell in h_row if cell))
+            headers = tbl.get("headers") or tbl.get("header")
+            if isinstance(headers, list) and headers:
+                parts.append(" ".join(str(h) for h in headers if h))
+            rows = tbl.get("rows") or tbl.get("cells")
+            if isinstance(rows, list):
+                for row in rows:
+                    if isinstance(row, list):
+                        parts.append(" ".join(str(cell) for cell in row))
+                    elif isinstance(row, dict):
+                        parts.append(" ".join(str(val) for val in row.values()))
+            ex = tbl.get("excel")
+            if isinstance(ex, dict):
+                ex_cols = ex.get("columns")
+                if isinstance(ex_cols, dict) and ex_cols:
+                    parts.append(" ".join(str(v) for v in ex_cols.values() if v))
+                for ex_row in ex.get("rows") or ():
+                    if isinstance(ex_row, dict):
+                        vals = ex_row.get("values") or {}
+                        row_txts = []
+                        for cell_obj in vals.values():
+                            if isinstance(cell_obj, dict):
+                                row_txts.append(str(cell_obj.get("text") or cell_obj.get("value") or ""))
+                            else:
+                                row_txts.append(str(cell_obj or ""))
+                        if any(row_txts):
+                            parts.append(" ".join(t for t in row_txts if t))
     return "\n".join(parts)
 
 
@@ -1436,10 +1609,12 @@ def locate_pdf_passages(
     chunk_id: str = "",
     images: list[dict] | None = None,
     knowledge_root: Path | None = None,
+    *,
+    indexed_chunk=None,
 ) -> dict:
     """Locate Level-2 highlight boxes on target PDF pages for a citation."""
-    chunk_rec = None
-    if chunk_id and knowledge_root is not None:
+    chunk_rec = indexed_chunk
+    if chunk_rec is None and chunk_id and knowledge_root is not None:
         chunk_rec = _load_knowledge_chunk(chunk_id, knowledge_root)
 
     effective_pages = []
@@ -1449,11 +1624,22 @@ def locate_pdf_passages(
             seen.add(p)
             effective_pages.append(p)
     if not effective_pages and chunk_rec:
-        raw_p = ((chunk_rec.get("business_metadata") or {}).get("citation") or {}).get("page_numbers") or []
+        bm_chunk = chunk_rec.get("business_metadata") or {}
+        raw_p = (bm_chunk.get("citation") or {}).get("page_numbers") or []
         for p in raw_p:
             if type(p) is int and p > 0 and p not in seen:
                 seen.add(p)
                 effective_pages.append(p)
+        if not effective_pages:
+            locs = (bm_chunk.get("provenance") or {}).get("locations") or []
+            for loc in locs:
+                if isinstance(loc, dict):
+                    p = loc.get("page_number")
+                    if type(p) is not int and type(loc.get("page_index")) is int and loc["page_index"] >= 0:
+                        p = loc["page_index"] + 1
+                    if type(p) is int and p > 0 and p not in seen:
+                        seen.add(p)
+                        effective_pages.append(p)
     if not effective_pages:
         effective_pages = [1]
 
@@ -1509,16 +1695,6 @@ def locate_pdf_passages(
         regions = region_by_page.get(p_num, [])
         region_bboxes = [r["bbox"] for r in regions]
         matched = _match_ocr_lines_to_target(page_lines, target_text, region_boxes=region_bboxes)
-        if region_bboxes and matched:
-            col_filtered = []
-            for m_item in matched:
-                mx0, _, mx1, _ = m_item["box"]
-                mcx = (mx0 + mx1) * 0.5
-                for rb in region_bboxes:
-                    if (rb[0] - 0.06) <= mcx <= (rb[2] + 0.06):
-                        col_filtered.append(m_item)
-                        break
-            matched = col_filtered
         text_boxes, focus_box = _merge_line_boxes(matched)
 
         combined_boxes = list(regions) + list(text_boxes)
@@ -1555,6 +1731,8 @@ def search_pdf_document(
     cache_db_path: Path,
     knowledge_root: Path | None = None,
     max_pages: int = 5,
+    *,
+    indexed_chunks=None,
 ) -> dict:
     """Search inside a PDF using published chunks, native text, and OCR cache."""
     clean_query = fold_search_text(query)
@@ -1566,9 +1744,10 @@ def search_pdf_document(
     seen_pages = set()
 
     # 1. Check published chunks for instant page discovery even on 143-page scanned PDFs
-    if knowledge_root is not None:
-        chunks = load_document_chunks_for_source(source, knowledge_root)
-        for ch in chunks:
+    if indexed_chunks is not None or knowledge_root is not None:
+        if indexed_chunks is None:
+            indexed_chunks = load_document_chunks_for_source(source, knowledge_root)
+        for ch in indexed_chunks:
             hay = fold_search_text(
                 str(ch.get("section_title") or "") + " " + str(ch.get("content") or "")
             )

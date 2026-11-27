@@ -29,7 +29,7 @@ class PdfExtractor:
     def __init__(self, asset_dir, cache, vision_client=None, review_client=None,
                  dpi=_PIPELINE["dpi"], max_pages=_PIPELINE["max_pdf_pages"],
                  max_page_pixels=_PIPELINE["max_page_pixels"], use_decision=True, *, search_language="vi", workers=1,
-                 review_incomplete=False, previous_partial_pages=0):
+                 review_incomplete=False, previous_partial_pages=0, review_page_indexes=None):
         if isinstance(dpi, bool) or not isinstance(dpi, int) or not _MIN_DPI <= dpi <= _MAX_DPI or isinstance(max_pages, bool) or not isinstance(max_pages, int) or max_pages < 1:
             raise ValueError("PDF limits require " + str(_MIN_DPI) + ".." + str(_MAX_DPI) + " DPI and positive max_pages")
         if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
@@ -48,6 +48,7 @@ class PdfExtractor:
         self.workers = workers
         self.review_incomplete = review_incomplete
         self.previous_partial_pages = previous_partial_pages
+        self.review_page_indexes = review_page_indexes
 
     def extract(self, source, source_name):
         import pymupdf
@@ -163,7 +164,8 @@ class PdfExtractor:
     def _read_rendered_page(self, pixels, width, height, sha, page_index, rotation):
         try:
             reader = PdfVisualReviewer(self.asset_dir, self.cache, self.vision_client, self.review_client, self.use_decision)
-            layout = reader.read(pixels, [], width, height, review_incomplete=self.review_incomplete)
+            review_page = self.review_incomplete and (self.review_page_indexes is None or page_index in self.review_page_indexes)
+            layout = reader.read(pixels, [], width, height, review_incomplete=review_page, prefer_halves=review_page)
             return page_index, sha, rotation, layout, None
         except CloudOCRUnavailable as error:
             error.pdf_render_sha256 = sha

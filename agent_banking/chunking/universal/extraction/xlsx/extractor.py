@@ -153,7 +153,8 @@ def _named_regions(workbook):
 
 
 class XlsxExtractor:
-    def __init__(self, asset_dir, cache, vision, review, max_pixels, *, use_llm, use_decision, workers):
+    def __init__(self, asset_dir, cache, vision, review, max_pixels, *, use_llm, use_decision, workers,
+                 include_hidden_sheets=False):
         self.asset_dir = Path(asset_dir)
         self.cache = cache
         self.vision = vision
@@ -162,6 +163,7 @@ class XlsxExtractor:
         self.use_llm = use_llm
         self.use_decision = use_decision
         self.workers = workers
+        self.include_hidden_sheets = bool(include_hidden_sheets)
 
     def extract(self, source, source_name, declared):
         if isinstance(source, bytes):
@@ -219,7 +221,9 @@ class XlsxExtractor:
             rel = relationships.get(attribute(node, "id"))
             state = node.get("state", "visible")
             ir["excel_sheets"].append({"name": name, "state": state})
-            if state != "visible":
+            if state == "veryHidden":
+                continue
+            if state != "visible" and not self.include_hidden_sheets:
                 continue
             ir["statistics"]["excel_sheets"] += 1
             if rel is None or rel.external or rel.kind not in {"worksheet", "chartsheet"}:
@@ -490,7 +494,8 @@ class XlsxExtractor:
         result = enricher._optional_cached(
             ir, "excel_structure", endpoint.model, evidence,
             lambda: cloud_json(endpoint.url.rstrip("/") + "/chat/completions", endpoint.api_key,
-                               {"model": endpoint.model, "messages": messages, "max_tokens": 256},
+                               {"model": endpoint.model, "messages": messages,
+                                "chat_template_kwargs": {"enable_thinking": False}, "max_tokens": 1024},
                                model_module="chunking.text", validate=validate), validate) or {}
         if self.use_decision and (result.get("header_rows") or result.get("question_column") or result.get("split_before")):
             confirmed = ask_decisions(

@@ -1,0 +1,898 @@
+[
+  {
+    "from_source": "A_Bank/7. Quy trình vận hành và SLA/VH 01 Hướng dẫn xử lý tình huống tra soát và rủi ro giao dịch.pdf",
+    "to_source": "A_Bank/7. Quy trình vận hành và SLA/VH 03 Quy định cam kết chất lượng dịch vụ SLA xử lý tra soát.pdf",
+    "relation": "references",
+    "evidence_source": "A_Bank/7. Quy trình vận hành và SLA/VH 01 Hướng dẫn xử lý tình huống tra soát và rủi ro giao dịch.pdf",
+    "evidence_quote": "Tham chiếu kho tri thức file SLA tra soát VH 03.",
+    "evidence_page": 1
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 01 Quy định mở đóng và sử dụng tài khoản thanh toán cá nhân.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 01 Biểu phí giao dịch tài khoản VND.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 01 Quy định mở đóng và sử dụng tài khoản thanh toán cá nhân.docx",
+    "evidence_quote": "2. Thu các khoản phí duy trì tài khoản, phí sử dụng dịch vụ ngân hàng số, phí phát hành thẻ và các biểu phí khác theo đúng Biểu phí hiện hành đã được công bố công khai.",
+    "evidence_section": "Điều 20. Trích nợ tự động tài khoản thanh toán"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 01 Quy định mở đóng và sử dụng tài khoản thanh toán cá nhân.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 03 Quy định phòng chống rửa tiền và tài trợ khủng bố toàn hệ thống.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 01 Quy định mở đóng và sử dụng tài khoản thanh toán cá nhân.docx",
+    "evidence_quote": "4. Khi hệ thống giám sát an ninh thanh toán tự động (Fraud Detection System) của ABank phát hiện các chuỗi giao dịch có dấu hiệu bất thường nghiêm trọng, dấu hiệu rửa tiền hoặc vi phạm chính sách cấm mua bán tài khoản.",
+    "evidence_section": "Điều 26. Các trường hợp phong tỏa tài khoản thanh toán"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 01 Quy định mở đóng và sử dụng tài khoản thanh toán cá nhân.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 04 Quy chế nhận biết khách hàng CDD và kiểm tra tăng cường EDD.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 01 Quy định mở đóng và sử dụng tài khoản thanh toán cá nhân.docx",
+    "evidence_quote": "• Khách hàng muốn nâng hạn mức lên mức tối đa (1.5 tỷ hoặc 5 tỷ/ngày) chỉ cần thực hiện thủ tục nhận biết khách hàng trực tiếp (Face-to-Face) tại bất kỳ quầy giao dịch nào của ABank trên toàn quốc.",
+    "evidence_section": "Điều 18. Hạn mức giao dịch ban đầu đối với tài khoản mở bằng eKYC"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 01 Quy định mở đóng và sử dụng tài khoản thanh toán cá nhân.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 05 Quy định bảo vệ dữ liệu cá nhân theo Nghị định 13 2023 NĐ CP.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 01 Quy định mở đóng và sử dụng tài khoản thanh toán cá nhân.docx",
+    "evidence_quote": "1. ABank coi dữ liệu cá nhân của khách hàng là tài sản vô giá và cam kết tuân thủ nghiêm ngặt toàn bộ các điều khoản của Nghị định số 13/2023/NĐ-CP của Chính phủ về bảo vệ dữ liệu cá nhân.",
+    "evidence_section": "Điều 33. Cam kết bảo vệ dữ liệu khách hàng của ABank"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 02 Quy định mở đóng và quản lý tài khoản thanh toán tổ chức.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 02 Biểu phí giao dịch tài khoản ngoại tệ.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 02 Quy định mở đóng và quản lý tài khoản thanh toán tổ chức.docx",
+    "evidence_quote": "• Mở bắt buộc bằng ngoại tệ hoặc VND cho doanh nghiệp có vốn đầu tư trực tiếp nước ngoài;",
+    "evidence_section": "Điều 7. Tài khoản vốn chuyên dùng và tài khoản vốn đầu tư FDI"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 02 Quy định mở đóng và quản lý tài khoản thanh toán tổ chức.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 01 Biểu phí giao dịch tài khoản VND.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 02 Quy định mở đóng và quản lý tài khoản thanh toán tổ chức.docx",
+    "evidence_quote": "PHỤ LỤC I: BIỂU PHÍ DỊCH VỤ TÀI KHOẢN THANH TOÁN TỔ CHỨC NĂM 2026",
+    "evidence_section": "PHỤ LỤC I: BIỂU PHÍ DỊCH VỤ TÀI KHOẢN THANH TOÁN TỔ CHỨC NĂM 2026"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 02 Quy định mở đóng và quản lý tài khoản thanh toán tổ chức.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 03 Quy định phòng chống rửa tiền và tài trợ khủng bố toàn hệ thống.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 02 Quy định mở đóng và quản lý tài khoản thanh toán tổ chức.docx",
+    "evidence_quote": "1. Căn cứ Luật Phòng, chống rửa tiền năm 2022, ABank bắt buộc phải thu thập thông tin, nhận biết và xác minh danh tính của Chủ sở hữu hưởng lợi cuối cùng (Ultimate Beneficial Owner - UBO) của tổ chức.",
+    "evidence_section": "Điều 10. Tiêu chuẩn thẩm định chủ sở hữu hưởng lợi cuối cùng (UBO)"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 03 Quy định tiền gửi tiết kiệm có kỳ hạn và chứng chỉ tiền gửi cá nhân.docx",
+    "to_source": "A_Bank/9. Mạng lưới hoạt động/ML 01 Danh sách mạng lưới Chi nhánh Phòng giao dịch ATM CDM.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 03 Quy định tiền gửi tiết kiệm có kỳ hạn và chứng chỉ tiền gửi cá nhân.docx",
+    "evidence_quote": "2. Khối Bán lẻ và Mạng lưới Chi nhánh: Triển khai công tác tiếp thị, huy động tiền gửi dân cư và đảm bảo chất lượng dịch vụ khách hàng chuẩn mực.",
+    "evidence_section": "Điều 20. Phân công trách nhiệm các đơn vị"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 04 Quy định tiền gửi tiết kiệm tích lũy và bậc thang linh hoạt.docx",
+    "to_source": "A_Bank/9. Mạng lưới hoạt động/ML 01 Danh sách mạng lưới Chi nhánh Phòng giao dịch ATM CDM.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 04 Quy định tiền gửi tiết kiệm tích lũy và bậc thang linh hoạt.docx",
+    "evidence_quote": "2. Khối Bán lẻ và Mạng lưới Chi nhánh: Triển khai tư vấn sản phẩm rộng rãi đến khách hàng cá nhân.",
+    "evidence_section": "Điều 23. Phân công trách nhiệm"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 14 Quy định quản lý kho quỹ vận chuyển tiền mặt và tiếp quỹ ATM CRM.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 03 Biểu phí giao dịch tiền mặt.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 14 Quy định quản lý kho quỹ vận chuyển tiền mặt và tiếp quỹ ATM CRM.docx",
+    "evidence_quote": "4. Hộp tiền (Cassette): Là thiết bị chuyên dùng bằng thép hợp kim chống phá bọc kín, có gắn khóa cơ và chip nhận diện RFID, dùng để chứa và nạp tiền mặt trực tiếp vào các khay tiếp quỹ của máy ATM và CRM.",
+    "evidence_section": "Điều 2. Giải thích từ ngữ chuyên môn kho quỹ"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 14 Quy định quản lý kho quỹ vận chuyển tiền mặt và tiếp quỹ ATM CRM.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 06 Biểu phí giao dịch ngân quỹ.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 14 Quy định quản lý kho quỹ vận chuyển tiền mặt và tiếp quỹ ATM CRM.docx",
+    "evidence_quote": "3. Hạn mức nạp quỹ cho từng máy ATM/CRM được Khối Nguồn vốn và Trung tâm Quản lý Ngân quỹ phân bổ tự động dựa trên thuật toán dự báo dòng tiền AI nhằm tối ưu hóa chi phí vốn chết và đảm bảo không xảy ra tình trạng thiếu tiền phục vụ nhân dân.",
+    "evidence_section": "Điều 4. Thẩm quyền quyết định và phê duyệt hạn mức tồn quỹ"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 14 Quy định quản lý kho quỹ vận chuyển tiền mặt và tiếp quỹ ATM CRM.docx",
+    "to_source": "A_Bank/9. Mạng lưới hoạt động/ML 01 Danh sách mạng lưới Chi nhánh Phòng giao dịch ATM CDM.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 14 Quy định quản lý kho quỹ vận chuyển tiền mặt và tiếp quỹ ATM CRM.docx",
+    "evidence_quote": "4. Hộp tiền (Cassette): Là thiết bị chuyên dùng bằng thép hợp kim chống phá bọc kín, có gắn khóa cơ và chip nhận diện RFID, dùng để chứa và nạp tiền mặt trực tiếp vào các khay tiếp quỹ của máy ATM và CRM.",
+    "evidence_section": "Điều 2. Giải thích từ ngữ chuyên môn kho quỹ"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 23 Quy định nghiệp vụ tài trợ thương mại nguồn vốn cho doanh nghiệp FDI.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 02 Biểu phí giao dịch tài khoản ngoại tệ.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 23 Quy định nghiệp vụ tài trợ thương mại nguồn vốn cho doanh nghiệp FDI.docx",
+    "evidence_quote": "1. Mỗi doanh nghiệp FDI chỉ được mở 01 Tài khoản DICA bằng loại ngoại tệ tương ứng với đồng tiền góp vốn và/hoặc 01 Tài khoản DICA bằng Đồng Việt Nam tại duy nhất 01 ngân hàng được phép tại Việt Nam.",
+    "evidence_section": "Điều 4. Nguyên tắc mở và vận hành tài khoản DICA"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 12 Quy định dịch vụ thanh toán quốc tế LC và nhờ thu DP DA.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 08 Biểu phí khách hàng cá nhân và thanh toán quốc tế.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 12 Quy định dịch vụ thanh toán quốc tế LC và nhờ thu DP DA.docx",
+    "evidence_quote": "1. Quy định này được ban hành căn cứ theo Luật Các tổ chức tín dụng số 32/2024/QH15 quy định về hoạt động cung ứng dịch vụ thanh toán quốc tế và tài trợ thương mại của các tổ chức tín dụng.",
+    "evidence_section": "Điều 1. Căn cứ ban hành và phạm vi điều chỉnh"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 23 Quy định nghiệp vụ tài trợ thương mại nguồn vốn cho doanh nghiệp FDI.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 08 Biểu phí khách hàng cá nhân và thanh toán quốc tế.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 23 Quy định nghiệp vụ tài trợ thương mại nguồn vốn cho doanh nghiệp FDI.docx",
+    "evidence_quote": "2. Trung tâm Tài trợ Thương mại & Thanh toán Quốc tế: Kiểm soát tính tuân thủ của các chứng từ L/C, nhờ thu, bảo lãnh theo đúng tập quán thương mại quốc tế (UCP, URC, URDG) và quy định quản lý ngoại hối của Ngân hàng Nhà nước.",
+    "evidence_section": "Điều 14. Trách nhiệm của các Khối phòng ban"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 25 Quy định nghiệp vụ đầu tư trái phiếu chính phủ và kinh doanh ngoại hối.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 02 Biểu phí giao dịch tài khoản ngoại tệ.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 25 Quy định nghiệp vụ đầu tư trái phiếu chính phủ và kinh doanh ngoại hối.docx",
+    "evidence_quote": "2. Back Office chỉ thực hiện duyệt điện chuyển tiền SWIFT MT300 (xác nhận giao dịch ngoại hối) hoặc MT202 (lệnh chuyển tiền liên ngân hàng) khi nhận được đầy đủ:",
+    "evidence_section": "Điều 11. Quy chuẩn kiểm soát chứng từ và phân định trách nhiệm"
+  },
+  {
+    "from_source": "A_Bank/7. Quy trình vận hành và SLA/VH 02 Hướng dẫn xử lý tình huống Tổng đài chăm sóc khách hàng.pdf",
+    "to_source": "A_Bank/7. Quy trình vận hành và SLA/VH 01 Hướng dẫn xử lý tình huống tra soát và rủi ro giao dịch.pdf",
+    "relation": "references",
+    "evidence_source": "A_Bank/7. Quy trình vận hành và SLA/VH 02 Hướng dẫn xử lý tình huống Tổng đài chăm sóc khách hàng.pdf",
+    "evidence_quote": "Để hỗ trợ A-Smart nhận diện chính xác nhất, Khách hàng nên diễn đạt ngắn gọn các cụm từ khóa nghiệp vụ trọng tâm (ví dụ: 'khóa thẻ tín dụng', 'tra soát chuyển tiền', 'quên mật khẩu app', 'tra cứu lãi suất').",
+    "evidence_page": 4
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 15 Quy trình xử lý tra soát khiếu nại giao dịch chuyển tiền trong nước.docx",
+    "to_source": "A_Bank/7. Quy trình vận hành và SLA/VH 03 Quy định cam kết chất lượng dịch vụ SLA xử lý tra soát.pdf",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 15 Quy trình xử lý tra soát khiếu nại giao dịch chuyển tiền trong nước.docx",
+    "evidence_quote": "ABank cam kết tuân thủ thời hạn xử lý tra soát khiếu nại (SLA) vượt trội so với quy định chuẩn của Ngân hàng Nhà nước:",
+    "evidence_section": "Điều 17. Cam kết thời hạn xử lý tra soát theo từng loại giao dịch"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 15 Quy trình xử lý tra soát khiếu nại giao dịch chuyển tiền trong nước.docx",
+    "to_source": "A_Bank/7. Quy trình vận hành và SLA/VH 01 Hướng dẫn xử lý tình huống tra soát và rủi ro giao dịch.pdf",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 15 Quy trình xử lý tra soát khiếu nại giao dịch chuyển tiền trong nước.docx",
+    "evidence_quote": "5. Điện tra soát (Camt.027 / Pain.002 / Napas Dispute Message): Là định dạng bức điện tử chuẩn hóa dùng để trao đổi thông tin yêu cầu xác minh và xử lý giữa các ngân hàng thành viên qua hệ thống Napas hoặc CITAD.",
+    "evidence_section": "Điều 2. Giải thích từ ngữ chuyên ngành tra soát"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 12 Quy trình tra soát khiếu nại giao dịch thẻ quốc tế Chargeback.docx",
+    "to_source": "A_Bank/7. Quy trình vận hành và SLA/VH 03 Quy định cam kết chất lượng dịch vụ SLA xử lý tra soát.pdf",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 12 Quy trình tra soát khiếu nại giao dịch thẻ quốc tế Chargeback.docx",
+    "evidence_quote": "2. Căn cứ Thông tư số 18/2024/TT-NHNN của Ngân hàng Nhà nước Việt Nam quy định về hoạt động thẻ ngân hàng, đặc biệt là các quy định về thời hạn tiếp nhận và xử lý tra soát, khiếu nại của khách hàng.",
+    "evidence_section": "Điều 1. Căn cứ ban hành và phạm vi điều chỉnh"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 12 Quy trình tra soát khiếu nại giao dịch thẻ quốc tế Chargeback.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 12 Quy trình tra soát khiếu nại giao dịch thẻ quốc tế Chargeback.docx",
+    "evidence_quote": "• Thu khoản \"Phí xử lý khiếu nại sai\" theo Biểu phí quy định là 150.000 VNĐ / giao dịch.",
+    "evidence_section": "Điều 13. Nhận diện và chế tài đối với \"Gian lận thân thiện\" (Friendly Fraud)"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 12 Quy trình tra soát khiếu nại giao dịch thẻ quốc tế Chargeback.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 08 Biểu phí khách hàng cá nhân và thanh toán quốc tế.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 12 Quy trình tra soát khiếu nại giao dịch thẻ quốc tế Chargeback.docx",
+    "evidence_quote": "2. Căn cứ Thông tư số 18/2024/TT-NHNN của Ngân hàng Nhà nước Việt Nam quy định về hoạt động thẻ ngân hàng, đặc biệt là các quy định về thời hạn tiếp nhận và xử lý tra soát, khiếu nại của khách hàng.",
+    "evidence_section": "Điều 1. Căn cứ ban hành và phạm vi điều chỉnh"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 06 Quy định cho vay mua nhà và sửa chữa bất động sản.docx",
+    "to_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 22 Quy trình thẩm định và định giá tài sản bảo đảm bất động sản nội bộ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 06 Quy định cho vay mua nhà và sửa chữa bất động sản.docx",
+    "evidence_quote": "1. Việc định giá tài sản bảo đảm được thực hiện độc lập bởi Trung tâm Thẩm định & Định giá Tài sản nội bộ của ABank hoặc do các Công ty Thẩm định giá độc lập có uy tín trong danh sách chỉ định của ngân hàng thực hiện.",
+    "evidence_section": "Điều 13. Nguyên tắc định giá tài sản bảo đảm"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 19 Quy định cho vay mua nhà dự án liên kết bảo lãnh chủ đầu tư.docx",
+    "to_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 22 Quy trình thẩm định và định giá tài sản bảo đảm bất động sản nội bộ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 19 Quy định cho vay mua nhà dự án liên kết bảo lãnh chủ đầu tư.docx",
+    "evidence_quote": "CHƯƠNG X: QUY TRÌNH KIỂM SOÁT ĐỊNH KỲ VÀ THẨM ĐỊNH LẠI GIÁ TRỊ TÀI SẢN BẢO ĐẢM",
+    "evidence_section": "Điều 18. Tần suất và nội dung kiểm tra sau giải ngân"
+  },
+  {
+    "from_source": "A_Bank/5. Sản phẩm bảo hiểm và tín dụng/TD 03 Quy định sản phẩm cho vay tái tài trợ mua bất động sản.pdf",
+    "to_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 22 Quy trình thẩm định và định giá tài sản bảo đảm bất động sản nội bộ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/5. Sản phẩm bảo hiểm và tín dụng/TD 03 Quy định sản phẩm cho vay tái tài trợ mua bất động sản.pdf",
+    "evidence_quote": "BẢNG TIÊU CHUẨN THẨM ĐỊNH TÀI SẢN BẢO ĐẢM VÀ TỶ LỆ CẤP TÍN DỤNG LTV (BẢNG 3)",
+    "evidence_page": 3
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 06 Quy định cho vay mua nhà và sửa chữa bất động sản.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 09 Biểu phí tài sản bảo đảm.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 06 Quy định cho vay mua nhà và sửa chữa bất động sản.docx",
+    "evidence_quote": "1. Quy định này điều chỉnh toàn bộ các khoản cấp tín dụng trung và dài hạn có tài sản bảo đảm bằng bất động sản dành cho đối tượng khách hàng cá nhân hoặc hộ gia đình phục vụ mục đích tiêu dùng nhà ở.",
+    "evidence_section": "Điều 2. Phạm vi điều chỉnh"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 07 Quy định cho vay mua ô tô tiêu dùng và kinh doanh.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 09 Biểu phí tài sản bảo đảm.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 07 Quy định cho vay mua ô tô tiêu dùng và kinh doanh.docx",
+    "evidence_quote": "1. Quy định này điều chỉnh các khoản cấp tín dụng trung và dài hạn có tài sản bảo đảm là chính chiếc xe ô tô mua hoặc tài sản bảo đảm là bất động sản/sổ tiết kiệm độc lập khác.",
+    "evidence_section": "Điều 2. Phạm vi điều chỉnh"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 09 Quy định cho vay sản xuất kinh doanh hộ kinh doanh cá thể.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 09 Biểu phí tài sản bảo đảm.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 09 Quy định cho vay sản xuất kinh doanh hộ kinh doanh cá thể.docx",
+    "evidence_quote": "1. Quy định này điều chỉnh các khoản cấp tín dụng ngắn hạn, trung và dài hạn có tài sản bảo đảm hoặc không có tài sản bảo đảm phục vụ hoạt động sản xuất kinh doanh, thương mại, dịch vụ của hộ kinh doanh cá thể.",
+    "evidence_section": "Điều 2. Phạm vi điều chỉnh"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 17 Quy trình nghiệp vụ cho vay mua nhà ở xã hội gói tín dụng ưu đãi 120 nghìn tỷ.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 09 Biểu phí tài sản bảo đảm.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 17 Quy trình nghiệp vụ cho vay mua nhà ở xã hội gói tín dụng ưu đãi 120 nghìn tỷ.docx",
+    "evidence_quote": "1. Tài sản bảo đảm là toàn bộ các quyền tài sản phát sinh từ Hợp đồng mua bán căn hộ nhà ở xã hội hình thành trong tương lai.",
+    "evidence_section": "Điều 12. Tài sản bảo đảm cho khoản vay"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 19 Quy định cho vay mua nhà dự án liên kết bảo lãnh chủ đầu tư.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 09 Biểu phí tài sản bảo đảm.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 19 Quy định cho vay mua nhà dự án liên kết bảo lãnh chủ đầu tư.docx",
+    "evidence_quote": "• Tối đa lên đến 80% giá trị căn hộ/nhà ở ghi trên Hợp đồng Mua bán (đã bao gồm thuế GTGT và chưa bao gồm kinh phí bảo trì 2%) nếu tài sản bảo đảm chính là Quyền tài sản phát sinh từ chính HĐMB căn nhà mua.",
+    "evidence_section": "Điều 7. Tỷ lệ cho vay và thời hạn cấp tín dụng"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 26 Quy trình tất toán hợp đồng tín dụng và giải chấp tài sản bảo đảm.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 09 Biểu phí tài sản bảo đảm.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 26 Quy trình tất toán hợp đồng tín dụng và giải chấp tài sản bảo đảm.docx",
+    "evidence_quote": "• Phương thức 2 (Tại quầy): Khách hàng nộp \"Đơn đề nghị tất toán khoản vay và rút tài sản bảo đảm\" tại quầy giao dịch Chi nhánh quản lý khoản vay trước ngày dự kiến nộp tiền tối thiểu 03 ngày làm việc.",
+    "evidence_section": "Điều 6. Tiếp nhận và đăng ký lịch tất toán"
+  },
+  {
+    "from_source": "A_Bank/5. Sản phẩm bảo hiểm và tín dụng/TD 03 Quy định sản phẩm cho vay tái tài trợ mua bất động sản.pdf",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 09 Biểu phí tài sản bảo đảm.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/5. Sản phẩm bảo hiểm và tín dụng/TD 03 Quy định sản phẩm cho vay tái tài trợ mua bất động sản.pdf",
+    "evidence_quote": "3.2. Giám sát dòng tiền sau giải ngân: ĐVKD định kỳ kiểm tra thực tế việc quản lý sử dụng bất động sản, theo dõi đôn đốc trả nợ đúng hạn và cập nhật chứng thư định giá lại tài sản bảo đảm tối thiểu 02 năm/lần.",
+    "evidence_page": 4
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 07 Quy định cho vay mua ô tô tiêu dùng và kinh doanh.docx",
+    "to_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 22 Quy trình thẩm định và định giá tài sản bảo đảm bất động sản nội bộ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 07 Quy định cho vay mua ô tô tiêu dùng và kinh doanh.docx",
+    "evidence_quote": "1. Quy định này điều chỉnh các khoản cấp tín dụng trung và dài hạn có tài sản bảo đảm là chính chiếc xe ô tô mua hoặc tài sản bảo đảm là bất động sản/sổ tiết kiệm độc lập khác.",
+    "evidence_section": "Điều 2. Phạm vi điều chỉnh"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 09 Quy định cho vay sản xuất kinh doanh hộ kinh doanh cá thể.docx",
+    "to_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 22 Quy trình thẩm định và định giá tài sản bảo đảm bất động sản nội bộ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 09 Quy định cho vay sản xuất kinh doanh hộ kinh doanh cá thể.docx",
+    "evidence_quote": "1. Quy định này điều chỉnh các khoản cấp tín dụng ngắn hạn, trung và dài hạn có tài sản bảo đảm hoặc không có tài sản bảo đảm phục vụ hoạt động sản xuất kinh doanh, thương mại, dịch vụ của hộ kinh doanh cá thể.",
+    "evidence_section": "Điều 2. Phạm vi điều chỉnh"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 26 Quy trình tất toán hợp đồng tín dụng và giải chấp tài sản bảo đảm.docx",
+    "to_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 22 Quy trình thẩm định và định giá tài sản bảo đảm bất động sản nội bộ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 26 Quy trình tất toán hợp đồng tín dụng và giải chấp tài sản bảo đảm.docx",
+    "evidence_quote": "• Phương thức 2 (Tại quầy): Khách hàng nộp \"Đơn đề nghị tất toán khoản vay và rút tài sản bảo đảm\" tại quầy giao dịch Chi nhánh quản lý khoản vay trước ngày dự kiến nộp tiền tối thiểu 03 ngày làm việc.",
+    "evidence_section": "Điều 6. Tiếp nhận và đăng ký lịch tất toán"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 05 Quy trình cho vay tiêu dùng tín chấp qua lương.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 22 Quy định về quản lý và xử lý nợ xấu theo Nghị quyết 42 và Luật TCTD 2024.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 05 Quy trình cho vay tiêu dùng tín chấp qua lương.docx",
+    "evidence_quote": "a) Khách hàng và vợ/chồng của khách hàng (nếu có) tại thời điểm xét duyệt vay không có nợ cần chú ý (Nhóm 2) hoặc nợ xấu (Nhóm 3 đến Nhóm 5) tại ABank cũng như tại bất kỳ tổ chức tín dụng hoặc công ty tài chính nào khác trong vòng 12 tháng gần nhất.",
+    "evidence_section": "Điều 8. Tiêu chuẩn về lịch sử tín dụng và hệ số nợ DSR"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 08 Quy trình cấp hạn mức thấu chi tài khoản thanh toán cá nhân.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 22 Quy định về quản lý và xử lý nợ xấu theo Nghị quyết 42 và Luật TCTD 2024.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 08 Quy trình cấp hạn mức thấu chi tài khoản thanh toán cá nhân.docx",
+    "evidence_quote": "4. Lịch sử tín dụng CIC hoàn hảo: Thuộc Nhóm 1 (Chuẩn), không có lịch sử nợ cần chú ý Nhóm 2 trong 12 tháng gần nhất và không có nợ xấu Nhóm 3-5 trong 36 tháng gần nhất.",
+    "evidence_section": "Điều 12. Điều kiện đối với khách hàng xin cấp thấu chi tín chấp"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 09 Quy định cho vay sản xuất kinh doanh hộ kinh doanh cá thể.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 22 Quy định về quản lý và xử lý nợ xấu theo Nghị quyết 42 và Luật TCTD 2024.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 09 Quy định cho vay sản xuất kinh doanh hộ kinh doanh cá thể.docx",
+    "evidence_quote": "• Sau 90 ngày quá hạn: Chuyển khoản vay sang nợ xấu (Nhóm 3), khởi kiện ra Tòa án và tiến hành xử lý phát mãi tài sản bảo đảm (nhà đất hoặc thu hồi quyền thuê sạp chợ) để thu hồi dứt điểm nợ vay.",
+    "evidence_section": "Điều 17. Chế tài xử lý vi phạm nghĩa vụ trả nợ"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 16 Quy định về nghiệp vụ thấu chi tài khoản doanh nghiệp Corporate Overdraft.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 22 Quy định về quản lý và xử lý nợ xấu theo Nghị quyết 42 và Luật TCTD 2024.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 16 Quy định về nghiệp vụ thấu chi tài khoản doanh nghiệp Corporate Overdraft.docx",
+    "evidence_quote": "2. Doanh nghiệp và người đại diện theo pháp luật không có nợ cần chú ý hoặc nợ xấu (Nợ nhóm 2 đến nhóm 5) tại bất kỳ tổ chức tín dụng nào trên hệ thống Trung tâm Thông tin Tín dụng Quốc gia (CIC) trong vòng 24 tháng gần nhất.",
+    "evidence_section": "Điều 6. Tiêu chí tài chính, xếp hạng tín dụng nội bộ và CIC"
+  },
+  {
+    "from_source": "A_Bank/5. Sản phẩm bảo hiểm và tín dụng/TD 01 Quy định sản phẩm cho vay cán bộ nhân viên Đại học Quốc gia.pdf",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 22 Quy định về quản lý và xử lý nợ xấu theo Nghị quyết 42 và Luật TCTD 2024.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/5. Sản phẩm bảo hiểm và tín dụng/TD 01 Quy định sản phẩm cho vay cán bộ nhân viên Đại học Quốc gia.pdf",
+    "evidence_quote": "3. Xử lý nợ xấu nhóm 3 - 5: Sau 90 ngày quá hạn, hồ sơ được chuyển giao cho Phòng Quản lý và Thu hồi nợ Hội sở chính để thực hiện thủ tục khởi kiện dân sự theo quy định pháp luật.",
+    "evidence_page": 6
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 05 Quy trình cho vay tiêu dùng tín chấp qua lương.docx",
+    "to_source": "A_Bank/5. Sản phẩm bảo hiểm và tín dụng/TD 01 Quy định sản phẩm cho vay cán bộ nhân viên Đại học Quốc gia.pdf",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 05 Quy trình cho vay tiêu dùng tín chấp qua lương.docx",
+    "evidence_quote": "1. Thiết lập quy chuẩn thống nhất về trình tự, thủ tục, điều kiện thẩm định và quản trị rủi ro đối với sản phẩm Cho vay tiêu dùng tín chấp theo lương dành cho khách hàng cá nhân tại Ngân hàng Thương mại Cổ phần A (ABank).",
+    "evidence_section": "Điều 1. Mục đích ban hành"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 24 Quy trình cho vay thấu chi tiêu dùng tín chấp qua tài khoản lương.docx",
+    "to_source": "A_Bank/5. Sản phẩm bảo hiểm và tín dụng/TD 01 Quy định sản phẩm cho vay cán bộ nhân viên Đại học Quốc gia.pdf",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 24 Quy trình cho vay thấu chi tiêu dùng tín chấp qua tài khoản lương.docx",
+    "evidence_quote": "• Khách hàng đăng nhập vào ứng dụng ABank Digital -> Chọn phân hệ \"Vay tiêu dùng\" -> Nhấn chọn \"Thấu chi tín chấp nhận lương (Payroll Overdraft)\".",
+    "evidence_section": "Điều 9. Quy trình cấp thấu chi tự động qua Ngân hàng số (ABank Digital)"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 10 Quy định nghiệp vụ phát hành bảo lãnh ngân hàng dành cho doanh nghiệp.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 08 Biểu phí khách hàng cá nhân và thanh toán quốc tế.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 10 Quy định nghiệp vụ phát hành bảo lãnh ngân hàng dành cho doanh nghiệp.docx",
+    "evidence_quote": "Điều 23. Biểu phí dịch vụ bảo lãnh tiêu chuẩn",
+    "evidence_section": "Điều 23. Biểu phí dịch vụ bảo lãnh tiêu chuẩn"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 11 Quy trình chiết khấu hối phiếu và bộ chứng từ thương mại.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 08 Biểu phí khách hàng cá nhân và thanh toán quốc tế.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 11 Quy trình chiết khấu hối phiếu và bộ chứng từ thương mại.docx",
+    "evidence_quote": "Điều 14. Biểu phí dịch vụ chiết khấu chuẩn",
+    "evidence_section": "Điều 14. Biểu phí dịch vụ chiết khấu chuẩn"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 13 Quy trình cho vay tài trợ chuỗi cung ứng và bao thanh toán.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 08 Biểu phí khách hàng cá nhân và thanh toán quốc tế.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 13 Quy trình cho vay tài trợ chuỗi cung ứng và bao thanh toán.docx",
+    "evidence_quote": "Điều 14. Bảng biểu phí dịch vụ tiêu chuẩn",
+    "evidence_section": "Điều 14. Bảng biểu phí dịch vụ tiêu chuẩn"
+  },
+  {
+    "from_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 20 Quy trình nghiệp vụ thanh toán thu chi hộ doanh nghiệp Cash Management.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 07 Biểu phí dịch vụ theo yêu cầu.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 20 Quy trình nghiệp vụ thanh toán thu chi hộ doanh nghiệp Cash Management.docx",
+    "evidence_quote": "1. Áp dụng cho các doanh nghiệp cung cấp dịch vụ có chu kỳ thu phí đều đặn: Điện, nước, viễn thông, truyền hình cáp, học phí trường học, phí bảo hiểm định kỳ, phí quản lý chung cư.",
+    "evidence_section": "Điều 6. Thu hộ định kỳ tự động (Direct Debit)"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 01 Quy định chung sản phẩm thẻ ghi nợ và thẻ tín dụng.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 01 Quy định chung sản phẩm thẻ ghi nợ và thẻ tín dụng.docx",
+    "evidence_quote": "• Tự động chuyển đổi ngoại tệ linh hoạt với biểu phí chuyển đổi ưu đãi.",
+    "evidence_section": "Điều 5. Các dòng sản phẩm Thẻ ghi nợ (Debit Card)"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 02 Quy chế phát hành và sử dụng thẻ tín dụng quốc tế Visa Platinum.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 02 Quy chế phát hành và sử dụng thẻ tín dụng quốc tế Visa Platinum.docx",
+    "evidence_quote": "PHỤ LỤC I: BIỂU PHÍ DỊCH VỤ THẺ ABANK VISA PLATINUM NĂM 2026",
+    "evidence_section": "PHỤ LỤC I: BIỂU PHÍ DỊCH VỤ THẺ ABANK VISA PLATINUM NĂM 2026"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 03 Quy định sản phẩm thẻ tín dụng hoàn tiền Cashback Visa.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 03 Quy định sản phẩm thẻ tín dụng hoàn tiền Cashback Visa.docx",
+    "evidence_quote": "PHỤ LỤC I: BIỂU PHÍ DỊCH VỤ THẺ ABANK CASHBACK VISA NĂM 2026",
+    "evidence_section": "PHỤ LỤC I: BIỂU PHÍ DỊCH VỤ THẺ ABANK CASHBACK VISA NĂM 2026"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 04 Quy định sản phẩm thẻ ghi nợ nội địa Napas Chip Contactless.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 04 Quy định sản phẩm thẻ ghi nợ nội địa Napas Chip Contactless.docx",
+    "evidence_quote": "ABank công khai minh bạch biểu phí sản phẩm thẻ ghi nợ nội địa ABank Napas Chip Contactless:",
+    "evidence_section": "CHƯƠNG VI: BIỂU PHÍ DỊCH VỤ VÀ CHÍNH SÁCH ƯU ĐÃI THƯỜNG NIÊN"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 05 Quy chế phát hành và quản lý thẻ ghi nợ quốc tế Mastercard Debit.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 05 Quy chế phát hành và quản lý thẻ ghi nợ quốc tế Mastercard Debit.docx",
+    "evidence_quote": "Biểu phí giao dịch quốc tế của thẻ ABank Mastercard và Visa tối ưu vượt trội: Phí chuyển đổi ngoại tệ chỉ 1.5% (thấp hơn nhiều so với mức 3.5% - 4.0% của thị trường chung), áp dụng tỷ giá liên ngân hàng cạnh tranh thời gian thực.",
+    "evidence_section": "CHƯƠNG V: CƠ CHẾ QUY ĐỔI NGOẠI TỆ VÀ PHÍ GIAO DỊCH QUỐC TẾ"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 06 Quy định sản phẩm thẻ tín dụng du lịch Travel Visa Signature.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 06 Quy định sản phẩm thẻ tín dụng du lịch Travel Visa Signature.docx",
+    "evidence_quote": "Hình 2: So sánh biểu phí chuyển đổi ngoại tệ vượt trội của thẻ Signature (Nguồn: Trung tâm Thẻ Quốc tế ABank)",
+    "evidence_section": "CHƯƠNG VII: CHÍNH SÁCH PHÍ QUẢN LÝ CHUYỂN ĐỔI NGOẠI TỆ SIÊU THẤP"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 07 Quy chế phát hành và sử dụng thẻ tín dụng doanh nghiệp Corporate Visa.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 07 Quy chế phát hành và sử dụng thẻ tín dụng doanh nghiệp Corporate Visa.docx",
+    "evidence_quote": "CHƯƠNG VII: BIỂU PHÍ DỊCH VỤ VÀ CHÍNH SÁCH HOÀN TIỀN DOANH NGHIỆP (CASHBACK)",
+    "evidence_section": "CHƯƠNG VII: BIỂU PHÍ DỊCH VỤ VÀ CHÍNH SÁCH HOÀN TIỀN DOANH NGHIỆP (CASHBACK)"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 08 Quy định sản phẩm thẻ tín dụng hoàn tiền mua sắm Super Shopper.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 08 Quy định sản phẩm thẻ tín dụng hoàn tiền mua sắm Super Shopper.docx",
+    "evidence_quote": "ABank công khai biểu phí dịch vụ thẻ tín dụng hoàn tiền Shopper:",
+    "evidence_section": "CHƯƠNG VIII: BIỂU PHÍ DỊCH VỤ VÀ CHÍNH SÁCH MIỄN PHÍ THƯỜNG NIÊN TRỌN ĐỜI"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 09 Quy chế phát hành và sử dụng thẻ trả trước quốc tế Prepaid Gift.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 09 Quy chế phát hành và sử dụng thẻ trả trước quốc tế Prepaid Gift.docx",
+    "evidence_quote": "ABank công bố biểu phí áp dụng cho dòng sản phẩm thẻ trả trước:",
+    "evidence_section": "CHƯƠNG VII: BIỂU PHÍ DỊCH VỤ VÀ CHÍNH SÁCH QUẢN LÝ SỐ DƯ"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 13 Quy định sản phẩm thẻ tín dụng sinh viên Edu Visa.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 13 Quy định sản phẩm thẻ tín dụng sinh viên Edu Visa.docx",
+    "evidence_quote": "Điều 12. Biểu phí ưu đãi tối đa của ABank Edu Visa",
+    "evidence_section": "Điều 12. Biểu phí ưu đãi tối đa của ABank Edu Visa"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 14 Quy định sản phẩm thẻ tín dụng xanh bảo vệ môi trường Eco Visa.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 14 Quy định sản phẩm thẻ tín dụng xanh bảo vệ môi trường Eco Visa.docx",
+    "evidence_quote": "1. Quy định này điều chỉnh các hoạt động liên quan đến thiết kế, phát hành, quản lý hạn mức, vận hành kỹ thuật, biểu phí, đặc quyền sinh thái và quản trị rủi ro đối với sản phẩm thẻ tín dụng quốc tế ABank Eco Visa.",
+    "evidence_section": "Điều 1. Phạm vi điều chỉnh và đối tượng áp dụng"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 15 Quy chế phát hành và sử dụng thẻ ảo thanh toán một lần Virtual Card.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 15 Quy chế phát hành và sử dụng thẻ ảo thanh toán một lần Virtual Card.docx",
+    "evidence_quote": "Điều 21. Biểu phí dịch vụ thẻ ảo ABank Virtual Card",
+    "evidence_section": "Điều 21. Biểu phí dịch vụ thẻ ảo ABank Virtual Card"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 16 Quy chế phát hành và sử dụng thẻ tín dụng nữ giới Lady Visa.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 16 Quy chế phát hành và sử dụng thẻ tín dụng nữ giới Lady Visa.docx",
+    "evidence_quote": "Điều 18. Biểu phí dịch vụ thẻ ABank Lady Visa",
+    "evidence_section": "Điều 18. Biểu phí dịch vụ thẻ ABank Lady Visa"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 17 Quy định sản phẩm thẻ tín dụng ẩm thực và giải trí Dining Visa.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 17 Quy định sản phẩm thẻ tín dụng ẩm thực và giải trí Dining Visa.docx",
+    "evidence_quote": "1. Quy định này quy định chi tiết về đối tượng, điều kiện phát hành, cơ cấu hạn mức, chính sách hoàn tiền ưu đãi ẩm thực, hệ thống đối tác nhà hàng, biểu phí dịch vụ và quy trình kiểm soát rủi ro đối với sản phẩm thẻ tín dụng quốc tế ABank Dining Visa.",
+    "evidence_section": "Điều 1. Phạm vi điều chỉnh và đối tượng áp dụng"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 18 Quy định sản phẩm thẻ tín dụng chơi Golf đẳng cấp Golf Visa Infinite.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 18 Quy định sản phẩm thẻ tín dụng chơi Golf đẳng cấp Golf Visa Infinite.docx",
+    "evidence_quote": "1. Bảng biểu phí tiêu chuẩn áp dụng cho thẻ ABank Golf Visa Infinite:",
+    "evidence_section": "Điều 8. Biểu phí và lãi suất dịch vụ thẻ"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 19 Quy chế phát hành và sử dụng thẻ tín dụng Hoàn tiền Xăng dầu Auto Visa.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 19 Quy chế phát hành và sử dụng thẻ tín dụng Hoàn tiền Xăng dầu Auto Visa.docx",
+    "evidence_quote": "Điều 7. Biểu phí dịch vụ và lãi suất thẻ",
+    "evidence_section": "Điều 7. Biểu phí dịch vụ và lãi suất thẻ"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 20 Quy định sản phẩm thẻ ghi nợ quốc tế sinh viên Edu Mastercard.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 20 Quy định sản phẩm thẻ ghi nợ quốc tế sinh viên Edu Mastercard.docx",
+    "evidence_quote": "• Giải đáp tự động 24/7 mọi thắc mắc về biểu phí, ưu đãi hoàn tiền, tra cứu điểm thưởng và hướng dẫn mở hạn mức thấu chi.",
+    "evidence_section": "Điều 24. Trợ lý ảo sinh viên A-Bot Campus Support"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 21 Quy chế phát hành và sử dụng thẻ tín dụng thương mại điện tử E-Com Visa.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 21 Quy chế phát hành và sử dụng thẻ tín dụng thương mại điện tử E-Com Visa.docx",
+    "evidence_quote": "3. Sử dụng thẻ tín dụng cá nhân để thực hiện các giao dịch thanh toán chi phí quảng cáo doanh nghiệp (Facebook Ads, Google Ads, TikTok Ads) với mục đích né tránh biểu phí thẻ doanh nghiệp.",
+    "evidence_section": "Điều 16. Các hành vi bị nghiêm cấm trong sử dụng thẻ E-Com"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 22 Quy định sản phẩm thẻ tín dụng tích lũy dặm bay Air Miles Visa.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 22 Quy định sản phẩm thẻ tín dụng tích lũy dặm bay Air Miles Visa.docx",
+    "evidence_quote": "Điều 7. Biểu phí và lãi suất dịch vụ thẻ",
+    "evidence_section": "Điều 7. Biểu phí và lãi suất dịch vụ thẻ"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 23 Quy chế phát hành thẻ tín dụng bảo đảm bằng sổ tiết kiệm Secured Card.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 23 Quy chế phát hành thẻ tín dụng bảo đảm bằng sổ tiết kiệm Secured Card.docx",
+    "evidence_quote": "Điều 7. Biểu phí và lãi suất dịch vụ thẻ",
+    "evidence_section": "Điều 7. Biểu phí và lãi suất dịch vụ thẻ"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 24 Quy định sản phẩm thẻ tín dụng siêu thị Mart Visa Platinum.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 24 Quy định sản phẩm thẻ tín dụng siêu thị Mart Visa Platinum.docx",
+    "evidence_quote": "Điều 5. Biểu phí nghiệp vụ và lãi suất dịch vụ thẻ",
+    "evidence_section": "Điều 5. Biểu phí nghiệp vụ và lãi suất dịch vụ thẻ"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 01 Quy định chung sản phẩm thẻ ghi nợ và thẻ tín dụng.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 20 Quy định về an toàn thanh toán thẻ và bảo vệ mã PIN theo chuẩn PCI DSS.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 01 Quy định chung sản phẩm thẻ ghi nợ và thẻ tín dụng.docx",
+    "evidence_quote": "6. Mã CVV2/CVC2: Là mã số bảo mật gồm 03 chữ số in nghiêng tại dải chữ ký mặt sau của thẻ tín dụng/ghi nợ quốc tế, dùng để xác thực các giao dịch thanh toán trực tuyến không xuất trình thẻ (Card-Not-Present).",
+    "evidence_section": "Điều 3. Giải thích thuật ngữ chuyên ngành thẻ"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 02 Quy chế phát hành và sử dụng thẻ tín dụng quốc tế Visa Platinum.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 20 Quy định về an toàn thanh toán thẻ và bảo vệ mã PIN theo chuẩn PCI DSS.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 02 Quy chế phát hành và sử dụng thẻ tín dụng quốc tế Visa Platinum.docx",
+    "evidence_quote": "7. Tiêu chuẩn bảo mật dữ liệu thẻ thanh toán quốc tế PCI DSS (Payment Card Industry Data Security Standard) Cấp độ 1.",
+    "evidence_section": "Điều 2. Căn cứ pháp lý nền tảng"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 04 Quy định sản phẩm thẻ ghi nợ nội địa Napas Chip Contactless.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 20 Quy định về an toàn thanh toán thẻ và bảo vệ mã PIN theo chuẩn PCI DSS.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 04 Quy định sản phẩm thẻ ghi nợ nội địa Napas Chip Contactless.docx",
+    "evidence_quote": "1. Chuẩn hóa quy trình phát hành, quản lý vận hành, bảo mật và cung cấp dịch vụ đối với sản phẩm Thẻ ghi nợ nội địa ABank Napas Chip Contactless trong toàn hệ thống Ngân hàng Thương mại Cổ phần A (ABank).",
+    "evidence_section": "Điều 1. Mục đích ban hành quy định"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 05 Quy chế phát hành và quản lý thẻ ghi nợ quốc tế Mastercard Debit.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 20 Quy định về an toàn thanh toán thẻ và bảo vệ mã PIN theo chuẩn PCI DSS.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 05 Quy chế phát hành và quản lý thẻ ghi nợ quốc tế Mastercard Debit.docx",
+    "evidence_quote": "1. Thiết lập khung pháp lý và quy chuẩn nghiệp vụ hoàn chỉnh cho việc phát hành, quản lý vận hành, bảo mật và cung cấp dịch vụ thẻ ghi nợ quốc tế mang thương hiệu ABank Mastercard Debit.",
+    "evidence_section": "Điều 1. Mục đích ban hành quy chế"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 07 Quy chế phát hành và sử dụng thẻ tín dụng doanh nghiệp Corporate Visa.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 20 Quy định về an toàn thanh toán thẻ và bảo vệ mã PIN theo chuẩn PCI DSS.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 07 Quy chế phát hành và sử dụng thẻ tín dụng doanh nghiệp Corporate Visa.docx",
+    "evidence_quote": "• Lưu trữ hồ sơ bảo mật bất biến",
+    "evidence_section": "CHƯƠNG IX: QUY TRÌNH THANH TOÁN SAO KÊ VÀ THU HỒI NỢ"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 11 Quy chế quản lý rủi ro đơn vị chấp nhận thẻ POS và Cổng E-Commerce.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 20 Quy định về an toàn thanh toán thẻ và bảo vệ mã PIN theo chuẩn PCI DSS.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 11 Quy chế quản lý rủi ro đơn vị chấp nhận thẻ POS và Cổng E-Commerce.docx",
+    "evidence_quote": "3. Căn cứ Thông tư số 47/2014/TT-NHNN của Ngân hàng Nhà nước Việt Nam quy định về các yêu cầu kỹ thuật an toàn bảo mật đối với trang thiết bị phục vụ thanh toán thẻ ngân hàng.",
+    "evidence_section": "Điều 1. Căn cứ ban hành và phạm vi điều chỉnh"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 12 Quy trình tra soát khiếu nại giao dịch thẻ quốc tế Chargeback.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 20 Quy định về an toàn thanh toán thẻ và bảo vệ mã PIN theo chuẩn PCI DSS.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 12 Quy trình tra soát khiếu nại giao dịch thẻ quốc tế Chargeback.docx",
+    "evidence_quote": "1. Toàn bộ hồ sơ tra soát, đơn từ, chứng cứ đối soát và phán quyết trọng tài phải được lưu trữ bảo mật dưới dạng dữ liệu số hóa trong thời hạn tối thiểu 05 năm kể từ ngày đóng vụ việc tra soát.",
+    "evidence_section": "Điều 16. Hiệu lực thi hành và chế độ lưu trữ hồ sơ"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 20 Quy định sản phẩm thẻ ghi nợ quốc tế sinh viên Edu Mastercard.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 20 Quy định về an toàn thanh toán thẻ và bảo vệ mã PIN theo chuẩn PCI DSS.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 20 Quy định sản phẩm thẻ ghi nợ quốc tế sinh viên Edu Mastercard.docx",
+    "evidence_quote": "• Dữ liệu tài chính (Số dư tài khoản, lịch sử quẹt thẻ thanh toán, mã PIN, dữ liệu sinh trắc học) được mã hóa bảo mật trên chip EMV Contactless thuộc quyền quản trị độc quyền của ABank.",
+    "evidence_section": "Điều 16. Phân định dữ liệu giữa nhà trường và ngân hàng"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 20 Quy định về an toàn thanh toán thẻ và bảo vệ mã PIN theo chuẩn PCI DSS.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 26 Quy định tổng thể về biểu phí hạn mức và chính sách chăm sóc chủ thẻ.docx",
+    "evidence_quote": "3. Quyết định số 2345/QĐ-NHNN ngày 18 tháng 12 năm 2023 của Thống đốc NHNN về triển khai các giải pháp an toàn, bảo mật trong thanh toán trực tuyến và thanh toán thẻ ngân hàng;",
+    "evidence_section": "Điều 2. Căn cứ pháp lý"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 02 Quy chế phát hành và sử dụng thẻ tín dụng quốc tế Visa Platinum.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 08 Biểu phí khách hàng cá nhân và thanh toán quốc tế.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 02 Quy chế phát hành và sử dụng thẻ tín dụng quốc tế Visa Platinum.docx",
+    "evidence_quote": "4. Thời hạn xử lý: Tối đa 45 ngày làm việc. Nếu hai bên không thống nhất, vụ việc được chuyển lên Hội đồng Trọng tài Quốc tế của Visa giải quyết theo phán quyết chung thẩm.",
+    "evidence_section": "Điều 19. Các mã lý do tra soát thẻ quốc tế (Visa Chargeback Reason Codes)"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 05 Quy chế phát hành và quản lý thẻ ghi nợ quốc tế Mastercard Debit.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 08 Biểu phí khách hàng cá nhân và thanh toán quốc tế.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 05 Quy chế phát hành và quản lý thẻ ghi nợ quốc tế Mastercard Debit.docx",
+    "evidence_quote": "1. Thiết lập khung pháp lý và quy chuẩn nghiệp vụ hoàn chỉnh cho việc phát hành, quản lý vận hành, bảo mật và cung cấp dịch vụ thẻ ghi nợ quốc tế mang thương hiệu ABank Mastercard Debit.",
+    "evidence_section": "Điều 1. Mục đích ban hành quy chế"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 06 Quy định sản phẩm thẻ tín dụng du lịch Travel Visa Signature.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 08 Biểu phí khách hàng cá nhân và thanh toán quốc tế.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 06 Quy định sản phẩm thẻ tín dụng du lịch Travel Visa Signature.docx",
+    "evidence_quote": "2. Thiết lập quy chuẩn thống nhất về thẩm định hạn mức, quy trình cấp phát thẻ phôi kim loại nguyên khối, quản trị rủi ro thanh toán quốc tế và cơ chế chăm sóc khách hàng đặc biệt theo tiêu chuẩn 5 sao quốc tế.",
+    "evidence_section": "Điều 1. Mục đích ban hành"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 07 Quy chế phát hành và sử dụng thẻ tín dụng doanh nghiệp Corporate Visa.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 08 Biểu phí khách hàng cá nhân và thanh toán quốc tế.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 07 Quy chế phát hành và sử dụng thẻ tín dụng doanh nghiệp Corporate Visa.docx",
+    "evidence_quote": "3. Bảo đảm hoạt động cấp tín dụng doanh nghiệp tuân thủ nghiêm ngặt Luật Các tổ chức tín dụng năm 2024, Thông tư 17/2024/TT-NHNN của Ngân hàng Nhà nước và các chuẩn mực quản lý thẻ thương mại của Tổ chức thẻ quốc tế Visa Worldwide.",
+    "evidence_section": "Điều 1. Mục đích ban hành"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 09 Quy chế phát hành và sử dụng thẻ trả trước quốc tế Prepaid Gift.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 08 Biểu phí khách hàng cá nhân và thanh toán quốc tế.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 09 Quy chế phát hành và sử dụng thẻ trả trước quốc tế Prepaid Gift.docx",
+    "evidence_quote": "1. Thiết lập một khung chính sách và quy chuẩn nghiệp vụ chặt chẽ, an toàn và minh bạch cho dòng sản phẩm Thẻ trả trước quốc tế ABank Prepaid Card (bao gồm Thẻ định danh và Thẻ quà tặng Gift Card).",
+    "evidence_section": "Điều 1. Mục đích ban hành"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 20 Quy định sản phẩm thẻ ghi nợ quốc tế sinh viên Edu Mastercard.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 08 Biểu phí khách hàng cá nhân và thanh toán quốc tế.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 20 Quy định sản phẩm thẻ ghi nợ quốc tế sinh viên Edu Mastercard.docx",
+    "evidence_quote": "2. Đối tượng khách hàng là học sinh từ đủ 15 tuổi trở lên hoặc sinh viên đang theo học tại các trường đại học, học viện, cao đẳng, trung cấp chuyên nghiệp hợp pháp tại Việt Nam (bao gồm cả du học sinh quốc tế học tập tại Việt Nam).",
+    "evidence_section": "Điều 2. Phạm vi điều chỉnh và đối tượng áp dụng"
+  },
+  {
+    "from_source": "A_Bank/2. Chương trình thẻ/THE 22 Quy định sản phẩm thẻ tín dụng tích lũy dặm bay Air Miles Visa.docx",
+    "to_source": "A_Bank/8. Biểu phí dịch vụ/BP 08 Biểu phí khách hàng cá nhân và thanh toán quốc tế.xlsx",
+    "relation": "references",
+    "evidence_source": "A_Bank/2. Chương trình thẻ/THE 22 Quy định sản phẩm thẻ tín dụng tích lũy dặm bay Air Miles Visa.docx",
+    "evidence_quote": "1. ABank Air Miles Visa Signature: Là dòng thẻ tín dụng quốc tế phân hạng Signature cao cấp thuộc hệ thống Tổ chức thẻ quốc tế Visa phát hành bởi ABank, tích hợp đồng thời chip EMV Contactless và cơ chế tích lũy điểm dặm bay tự động.",
+    "evidence_section": "Điều 3. Giải thích từ ngữ chuyên môn"
+  },
+  {
+    "from_source": "A_Bank/5. Sản phẩm bảo hiểm và tín dụng/BH 01 Quy định sản phẩm bảo hiểm nhân thọ A-Life Trọn Đời.pdf",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 05 Quy định bảo vệ dữ liệu cá nhân theo Nghị định 13 2023 NĐ CP.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/5. Sản phẩm bảo hiểm và tín dụng/BH 01 Quy định sản phẩm bảo hiểm nhân thọ A-Life Trọn Đời.pdf",
+    "evidence_quote": "b. Việc xử lý thông tin dữ liệu cá nhân của Bên mua bảo hiểm và/hoặc Người được bảo hiểm phải có sự đồng ý của Bên mua bảo hiểm và/hoặc Người được bảo hiểm, trừ các trường hợp không cần sự đồng ý của chủ thể dữ liệu theo quy định của pháp luật.",
+    "evidence_page": 12
+  },
+  {
+    "from_source": "A_Bank/5. Sản phẩm bảo hiểm và tín dụng/BH 02 Quy định sản phẩm bảo hiểm chăm sóc sức khỏe A-Life An Khang.pdf",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 05 Quy định bảo vệ dữ liệu cá nhân theo Nghị định 13 2023 NĐ CP.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/5. Sản phẩm bảo hiểm và tín dụng/BH 02 Quy định sản phẩm bảo hiểm chăm sóc sức khỏe A-Life An Khang.pdf",
+    "evidence_quote": "b. Việc xử lý thông tin dữ liệu cá nhân của Bên mua bảo hiểm và/hoặc Người được bảo hiểm phải có sự đồng ý của Bên mua bảo hiểm và/hoặc Người được bảo hiểm, trừ các trường hợp không cần sự đồng ý của chủ thể dữ liệu theo quy định của pháp luật.",
+    "evidence_page": 14
+  },
+  {
+    "from_source": "A_Bank/5. Sản phẩm bảo hiểm và tín dụng/BH 03 Quy định sản phẩm bảo hiểm liên kết đầu tư A-Life Hưng Thịnh.pdf",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 05 Quy định bảo vệ dữ liệu cá nhân theo Nghị định 13 2023 NĐ CP.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/5. Sản phẩm bảo hiểm và tín dụng/BH 03 Quy định sản phẩm bảo hiểm liên kết đầu tư A-Life Hưng Thịnh.pdf",
+    "evidence_quote": "b. Việc xử lý thông tin dữ liệu cá nhân của Bên mua bảo hiểm và/hoặc Người được bảo hiểm phải có sự đồng ý của Bên mua bảo hiểm và/hoặc Người được bảo hiểm, trừ các trường hợp không cần sự đồng ý của chủ thể dữ liệu theo quy định của pháp luật.",
+    "evidence_page": 13
+  },
+  {
+    "from_source": "A_Bank/5. Sản phẩm bảo hiểm và tín dụng/BH 04 Quy định sản phẩm bảo hiểm giáo dục A-Life Tương Lai định kỳ.pdf",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 05 Quy định bảo vệ dữ liệu cá nhân theo Nghị định 13 2023 NĐ CP.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/5. Sản phẩm bảo hiểm và tín dụng/BH 04 Quy định sản phẩm bảo hiểm giáo dục A-Life Tương Lai định kỳ.pdf",
+    "evidence_quote": "b. Việc xử lý thông tin dữ liệu cá nhân của Bên mua bảo hiểm và/hoặc Người được bảo hiểm phải có sự đồng ý của Bên mua bảo hiểm và/hoặc Người được bảo hiểm, trừ các trường hợp không cần sự đồng ý của chủ thể dữ liệu theo quy định của pháp luật.",
+    "evidence_page": 10
+  },
+  {
+    "from_source": "A_Bank/5. Sản phẩm bảo hiểm và tín dụng/BH 05 Quy định sản phẩm bảo hiểm tích lũy A-Life Tích Lũy phí đơn kỳ.pdf",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 05 Quy định bảo vệ dữ liệu cá nhân theo Nghị định 13 2023 NĐ CP.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/5. Sản phẩm bảo hiểm và tín dụng/BH 05 Quy định sản phẩm bảo hiểm tích lũy A-Life Tích Lũy phí đơn kỳ.pdf",
+    "evidence_quote": "b. Việc xử lý thông tin dữ liệu cá nhân của Bên mua bảo. hiểm và/hoặc Người được bảo hiểm phải có sự đồng ý của Bên mua bảo hiểm và /hoặc Người được bảo hiểm, trừ các trường hợp không cần sự đồng ý của chủ thể dữ liệu theo quy định của pháp luật.",
+    "evidence_page": 9
+  },
+  {
+    "from_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 02 Quy định xử lý nghiêm mua bán thuê mượn tài khoản và thẻ.docx",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 01 Quy định chung sản phẩm thẻ ghi nợ và thẻ tín dụng.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 02 Quy định xử lý nghiêm mua bán thuê mượn tài khoản và thẻ.docx",
+    "evidence_quote": "1. Bộ luật Hình sự số 100/2015/QH13 và Luật sửa đổi, bổ sung một số điều của Bộ luật Hình sự số 12/2017/QH14 (đặc biệt là Điều 291 quy định về tội Thu thập, tàng trữ, trao đổi, mua bán, công khai hóa trái phép thông tin về tài khoản ngân hàng).",
+    "evidence_section": "Điều 2. Căn cứ pháp lý nền tảng"
+  },
+  {
+    "from_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 03 Quy định phòng chống rửa tiền và tài trợ khủng bố toàn hệ thống.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 04 Quy chế nhận biết khách hàng CDD và kiểm tra tăng cường EDD.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 03 Quy định phòng chống rửa tiền và tài trợ khủng bố toàn hệ thống.docx",
+    "evidence_quote": "4. Nhận biết khách hàng (Customer Due Diligence - CDD): Quá trình thu thập, đối soát, xác minh thông tin nhận dạng về khách hàng, người đại diện hợp pháp và người hưởng lợi cuối cùng của khách hàng.",
+    "evidence_section": "Điều 4. Giải thích thuật ngữ chuyên ngành"
+  },
+  {
+    "from_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 06 Quy chế phòng chống gian lận nội bộ và xung đột lợi ích.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 15 Quy chế quản trị xung đột lợi ích và giao dịch nội bộ ngành ngân hàng.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 06 Quy chế phòng chống gian lận nội bộ và xung đột lợi ích.docx",
+    "evidence_quote": "2. Nhận diện sớm, phòng ngừa chủ động và xử lý dứt điểm các tình huống xung đột lợi ích tiềm tàng giữa lợi ích cá nhân của cán bộ nhân viên với lợi ích hợp pháp của ngân hàng, khách hàng và cổ đông.",
+    "evidence_section": "Điều 1. Mục đích ban hành"
+  },
+  {
+    "from_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 06 Quy chế phòng chống gian lận nội bộ và xung đột lợi ích.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 18 Quy định về đạo đức nghề nghiệp và quy tắc ứng xử ngành ngân hàng.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 06 Quy chế phòng chống gian lận nội bộ và xung đột lợi ích.docx",
+    "evidence_quote": "• Việc nhận tiền bồi dưỡng, phong bì từ khách hàng dưới mọi hình thức (kể cả tự nguyện sau khi xong việc) đều cấu thành hành vi vi phạm nghiêm trọng Bộ Quy tắc Đạo đức Nghề nghiệp và Chính sách Quà tặng của ABank.",
+    "evidence_section": "PHỤ LỤC III: HỎI ĐÁP NGHIỆP VỤ THỰC TẾ DÀNH CHO CÁN BỘ NHÂN VIÊN (FAQ)"
+  },
+  {
+    "from_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 07 Quy định về giao dịch an toàn trên không gian mạng và bảo vệ bí mật kinh doanh.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 14 Quy định về quản trị rủi ro công nghệ thông tin và an ninh mạng theo Thông tư 09 2020.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 07 Quy định về giao dịch an toàn trên không gian mạng và bảo vệ bí mật kinh doanh.docx",
+    "evidence_quote": "3. Bảo đảm sự tuân thủ nghiêm ngặt Luật An ninh mạng năm 2018, Luật An toàn thông tin mạng năm 2015, Thông tư số 09/2020/TT-NHNN quy định về an toàn hệ thống thông tin trong hoạt động ngân hàng và Tiêu chuẩn an ninh thông tin quốc tế ISO/IEC 27001:2022.",
+    "evidence_section": "Điều 1. Mục đích ban hành"
+  },
+  {
+    "from_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 13 Quy chế hoạt động của Ban Kiểm soát và Ủy ban Kiểm toán nội bộ.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 23 Quy chế hoạt động của Hội đồng Quản trị và Ban Điều hành ngân hàng.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 13 Quy chế hoạt động của Ban Kiểm soát và Ủy ban Kiểm toán nội bộ.docx",
+    "evidence_quote": "1. Ban Kiểm soát của ABank có 05 thành viên, do Đại hội đồng Cổ đông bầu theo phương thức bầu dồn phiếu với nhiệm kỳ 05 năm theo nhiệm kỳ của Hội đồng Quản trị. Thành viên Ban Kiểm soát có thể được bầu lại với số nhiệm kỳ không hạn chế.",
+    "evidence_section": "Điều 4. Số lượng và cơ cấu thành phần Ban Kiểm soát"
+  },
+  {
+    "from_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 13 Quy chế hoạt động của Ban Kiểm soát và Ủy ban Kiểm toán nội bộ.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 24 Quy định về kiểm toán độc lập và công bố thông tin báo cáo tài chính.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 13 Quy chế hoạt động của Ban Kiểm soát và Ủy ban Kiểm toán nội bộ.docx",
+    "evidence_quote": "2. Giai đoạn thực hiện tại chỗ (Fieldwork): Kiểm toán viên đối chiếu chứng từ, kiểm tra thực địa, phỏng vấn cán bộ nhân viên, kiểm tra mã nguồn phần mềm và thu thập đầy đủ tài liệu chứng cứ kiểm toán độc lập.",
+    "evidence_section": "Điều 16. Các bước tiến hành một cuộc kiểm toán nội bộ chuẩn"
+  },
+  {
+    "from_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 16 Quy định về quản trị dữ liệu và chia sẻ dữ liệu mở Open Banking.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 05 Quy định bảo vệ dữ liệu cá nhân theo Nghị định 13 2023 NĐ CP.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 16 Quy định về quản trị dữ liệu và chia sẻ dữ liệu mở Open Banking.docx",
+    "evidence_quote": "2. ABank sẽ chuyển hồ sơ vi phạm sang cơ quan Công an có thẩm quyền để truy cứu trách nhiệm hình sự theo quy định của Bộ luật Hình sự và Nghị định 13/2023/NĐ-CP về bảo vệ dữ liệu cá nhân.",
+    "evidence_section": "Điều 23. Chế tài xử lý đối tác vi phạm"
+  },
+  {
+    "from_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 19 Quy chế quản trị rủi ro đối tác thanh toán trung gian và Ví điện tử.docx",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 14 Quy định về quản trị rủi ro công nghệ thông tin và an ninh mạng theo Thông tư 09 2020.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 19 Quy chế quản trị rủi ro đối tác thanh toán trung gian và Ví điện tử.docx",
+    "evidence_quote": "1. Hệ thống công nghệ thông tin phục vụ cung ứng dịch vụ TGTT phải được thẩm định và phê duyệt hồ sơ cấp độ an toàn thông tin tối thiểu từ Cấp độ 3 trở lên theo Nghị định 85/2016/NĐ-CP.",
+    "evidence_section": "Điều 5. Tiêu chuẩn năng lực công nghệ và an toàn thông tin"
+  },
+  {
+    "from_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 24 Quy định về kiểm toán độc lập và công bố thông tin báo cáo tài chính.docx",
+    "to_source": "A_Bank/6. Báo cáo tài chính và truyền thông/BC 02 Báo cáo thường niên ngân hàng năm 2025.pdf",
+    "relation": "references",
+    "evidence_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 24 Quy định về kiểm toán độc lập và công bố thông tin báo cáo tài chính.docx",
+    "evidence_quote": "• Nếu Lợi nhuận sau thuế của kỳ báo cáo có sự biến động tăng hoặc giảm từ 10% trở lên so với cùng kỳ năm trước, hoặc chuyển từ lãi sang lỗ (và ngược lại): ABank bắt buộc phải đính kèm Văn bản giải trình nguyên nhân cụ thể trong Báo cáo tài chính công bố.",
+    "evidence_section": "Điều 10. Trách nhiệm giải trình chênh lệch số liệu trước và sau kiểm toán"
+  },
+  {
+    "from_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 26 Quy định về trách nhiệm xã hội môi trường và quản trị bền vững ESG.docx",
+    "to_source": "A_Bank/6. Báo cáo tài chính và truyền thông/BC 02 Báo cáo thường niên ngân hàng năm 2025.pdf",
+    "relation": "references",
+    "evidence_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 26 Quy định về trách nhiệm xã hội môi trường và quản trị bền vững ESG.docx",
+    "evidence_quote": "2. Hàng năm, Ủy ban ESG chỉ đạo thuê tổ chức kiểm toán độc lập quốc tế để soát xét và phát hành chính thức Báo cáo Phát triển Bền vững (ESG & Sustainability Report) theo chuẩn mực sáng kiến báo cáo toàn cầu (GRI Standards).",
+    "evidence_section": "Điều 4. Chức năng của Ủy ban ESG trực thuộc Hội đồng Quản trị"
+  },
+  {
+    "from_source": "A_Bank/6. Báo cáo tài chính và truyền thông/BC 01 Báo cáo thường niên ngân hàng năm 2024.pdf",
+    "to_source": "A_Bank/6. Báo cáo tài chính và truyền thông/BC 02 Báo cáo thường niên ngân hàng năm 2025.pdf",
+    "relation": "references",
+    "evidence_source": "A_Bank/6. Báo cáo tài chính và truyền thông/BC 01 Báo cáo thường niên ngân hàng năm 2024.pdf",
+    "evidence_quote": "Kiên định mục tiêu tăng trưởng hiệu quả, kiểm soát rủi ro nghiêm ngặt, đẩy mạnh số hóa toàn diện quy trình nghiệp vụ và nâng cao trải nghiệm khách hàng theo chuẩn mực quốc tế.",
+    "evidence_page": 11
+  },
+  {
+    "from_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 01 Kích hoạt tính năng Sinh lời tự động A-Smart Earning.pdf",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 05 Quy định bảo vệ dữ liệu cá nhân theo Nghị định 13 2023 NĐ CP.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 01 Kích hoạt tính năng Sinh lời tự động A-Smart Earning.pdf",
+    "evidence_quote": "A-Bank Shield ĐÃ XÁC THỰC SINH TRẮC HỌC",
+    "evidence_page": 3
+  },
+  {
+    "from_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 02 Cài đặt thông báo biến động số dư OTT.pdf",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 05 Quy định bảo vệ dữ liệu cá nhân theo Nghị định 13 2023 NĐ CP.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 02 Cài đặt thông báo biến động số dư OTT.pdf",
+    "evidence_quote": "A-Bank Shield: ĐÃ XÁC THỰC SINH TRẮC HỌC",
+    "evidence_page": 2
+  },
+  {
+    "from_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 03 Cài đặt đăng nhập bằng vân tay và khuôn mặt Face ID.pdf",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 05 Quy định bảo vệ dữ liệu cá nhân theo Nghị định 13 2023 NĐ CP.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 03 Cài đặt đăng nhập bằng vân tay và khuôn mặt Face ID.pdf",
+    "evidence_quote": "Cho phép A-Bank Digital sử dụng sinh trắc học đã lưu trên máy. [ON]",
+    "evidence_page": 3
+  },
+  {
+    "from_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 04 Giới thiệu bạn bè mở tài khoản nhận thưởng.pdf",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 14 Quy định về quản trị rủi ro công nghệ thông tin và an ninh mạng theo Thông tư 09 2020.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 04 Giới thiệu bạn bè mở tài khoản nhận thưởng.pdf",
+    "evidence_quote": "Xác thực bảo mật Smart OTP an toàn và hoàn tất giao dịch.",
+    "evidence_page": 1
+  },
+  {
+    "from_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 05 Khóa ứng dụng và tạm khóa dịch vụ khẩn cấp.pdf",
+    "to_source": "A_Bank/3. Văn bản pháp lý tuân thủ/PL 14 Quy định về quản trị rủi ro công nghệ thông tin và an ninh mạng theo Thông tư 09 2020.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 05 Khóa ứng dụng và tạm khóa dịch vụ khẩn cấp.pdf",
+    "evidence_quote": "Lưu thông tin số Hotline 1900 6868 để mở lại khi an toàn",
+    "evidence_page": 2
+  },
+  {
+    "from_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 19 Chuyển tiền nhanh liên ngân hàng 247 Napas.pdf",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 01 Quy định chung sản phẩm thẻ ghi nợ và thẻ tín dụng.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 19 Chuyển tiền nhanh liên ngân hàng 247 Napas.pdf",
+    "evidence_quote": "Nhập Số TK/số thẻ/tên gọi nhớ và chọn NH thụ hưởng hoặc chọn người nhận đã lưu/ TK của tôi",
+    "evidence_page": 3
+  },
+  {
+    "from_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 22 Nạp tiền vào tài khoản chứng khoán ASC.pdf",
+    "to_source": "A_Bank/2. Chương trình thẻ/THE 01 Quy định chung sản phẩm thẻ ghi nợ và thẻ tín dụng.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 22 Nạp tiền vào tài khoản chứng khoán ASC.pdf",
+    "evidence_quote": "Chuyển tiền Dịch vụ thẻ Tiết kiệm Bảo hiểm",
+    "evidence_page": 3
+  },
+  {
+    "from_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 29 Mở và quản lý sổ tiết kiệm trực tuyến Thịnh Vượng.pdf",
+    "to_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 03 Quy định tiền gửi tiết kiệm có kỳ hạn và chứng chỉ tiền gửi cá nhân.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 29 Mở và quản lý sổ tiết kiệm trực tuyến Thịnh Vượng.pdf",
+    "evidence_quote": "Hiển thị thông tin chi tiết số tiết kiệm và chọn Tất toán",
+    "evidence_page": 5
+  },
+  {
+    "from_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 30 Mở tài khoản tiền gửi tích lũy lãi suất thả nổi.pdf",
+    "to_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 03 Quy định tiền gửi tiết kiệm có kỳ hạn và chứng chỉ tiền gửi cá nhân.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 30 Mở tài khoản tiền gửi tích lũy lãi suất thả nổi.pdf",
+    "evidence_quote": "BƯỚC 1: CHỌN TIẾT KIỆM TÍCH LŨY THẢ NỔI",
+    "evidence_page": 1
+  },
+  {
+    "from_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 31 Khởi tạo yêu cầu tra soát khiếu nại giao dịch trực tuyến.pdf",
+    "to_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 03 Quy định tiền gửi tiết kiệm có kỳ hạn và chứng chỉ tiền gửi cá nhân.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 31 Khởi tạo yêu cầu tra soát khiếu nại giao dịch trực tuyến.pdf",
+    "evidence_quote": "Chuyển tiền Dịch vụ thẻ Tiết kiệm Bảo hiểm",
+    "evidence_page": 3
+  },
+  {
+    "from_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 39 Mở thêm tài khoản thanh toán số đẹp Như ý.pdf",
+    "to_source": "A_Bank/1. Nghiệp vụ ngân hàng/NV 01 Quy định mở đóng và sử dụng tài khoản thanh toán cá nhân.docx",
+    "relation": "references",
+    "evidence_source": "A_Bank/4. Hướng dẫn sử dụng app Digital/HDSD 39 Mở thêm tài khoản thanh toán số đẹp Như ý.pdf",
+    "evidence_quote": "Mở thêm tài khoản thanh toán số đẹp Như ý",
+    "evidence_page": 1
+  }
+]

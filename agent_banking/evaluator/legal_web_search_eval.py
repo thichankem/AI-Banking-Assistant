@@ -40,12 +40,15 @@ def _evaluate(provider: str) -> dict:
         if len(details) < len(CASES):
             sleep(1.1)
     successes = [item["latency_ms"] for item in details if item["status"] in ("ok", "no_documents")]
+    median_ms = None
+    if successes:
+        median_ms = median(successes)
     return {
         "cases": details,
         "hit_at_4": sum(item["rank"] is not None for item in details),
         "evidence_terms": sum(item["evidence_terms"] for item in details),
         "reciprocal_rank": round(sum(1 / item["rank"] for item in details if item["rank"]) / len(CASES), 3),
-        "median_ms": median(successes) if successes else None,
+        "median_ms": median_ms,
     }
 
 
@@ -55,11 +58,14 @@ def main() -> None:
     for name, result in results.items():
         if len(result["cases"]) == len(CASES) and result["hit_at_4"]:
             ranked.append(((result["hit_at_4"], result["evidence_terms"], result["reciprocal_rank"], -result["median_ms"]), name))
+    recommended_primary = None
+    if len(results) == len(PROVIDERS) and ranked:
+        recommended_primary = max(ranked)[1]
     print(json.dumps({
         "case_count": len(CASES),
         "not_configured": [name for name in PROVIDERS if name not in results],
         "providers": results,
-        "recommended_primary": max(ranked)[1] if len(results) == len(PROVIDERS) and ranked else None,
+        "recommended_primary": recommended_primary,
     }, ensure_ascii=True, indent=2))
 
 

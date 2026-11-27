@@ -20,8 +20,11 @@ import sys
 import time
 import json
 import base64
+import binascii
 import asyncio
+import hmac
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
@@ -38,16 +41,21 @@ ROOT_DIR = Path(__file__).resolve().parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response, StreamingResponse
+from PIL import Image
 from pydantic import BaseModel, Field
 import uvicorn
 
 from agent_banking.core.config.settings import CoreConfig, get_core_messages
 from agent_banking.core.cloud_rate_limit import acquire_cloud_slot
+from agent_banking.core.attachment_privacy import prepare_vision_image
+from agent_banking.core.document_revisions import document_matches_version, is_document_version, revision_path
 from agent_banking.core.settings import Config
+from agent_banking.chunking.universal.extraction.sources import source_key
 from agent_banking.document_viewer import (
+    _configure_tesseract,
     find_document_path,
     get_pdf_manifest,
     locate_pdf_passages,
@@ -106,14 +114,7 @@ use_memory_env = False
 if os.environ.get(str(_API_CFG["use_memory_env"]), "0") == "1":
     use_memory_env = True
 
-try:
-    rag_pipeline = BankingRAGPipeline(config=config, use_memory=use_memory_env)
-except RuntimeError as lock_err:
-    if "already accessed by another instance" in str(lock_err):
-        print(_API_MESSAGES["lock_warning"])
-        rag_pipeline = BankingRAGPipeline(config=config, use_memory=True)
-    else:
-        raise
+rag_pipeline = BankingRAGPipeline(config=config, use_memory=use_memory_env)
 
 # Manage indexing and diagnostic folders.
 node_pipe = NodePipeline()
@@ -125,6 +126,7 @@ _MAX_VISION_SNIPPET_CHARS = 1200
 _ALLOWED_IMAGE_MIMES = ("png", "jpeg", "jpg", "webp", "gif")
 _DEFAULT_IMAGE_QUERY = "Hãy phân tích nội dung hình ảnh đính kèm và tư vấn hướng xử lý theo quy định của A-Bank."
 _VISION_ERROR_MARKER = "[Không thể trích xuất chi tiết từ ảnh do lỗi kết nối Cloud Vision]"
+_VISION_PRIVACY_MARKER = "[Ảnh chưa qua kiểm tra dữ liệu nhạy cảm nên chưa được gửi để phân tích]"
 
 
 # Pydantic Schemas
@@ -185,6 +187,7 @@ class PdfLocateRequest(BaseModel):
     excerpt: str = Field(default="", max_length=8000)
     section_title: str = Field(default="", max_length=400)
     images: list[dict] = Field(default_factory=list, max_length=24)
+    version: str = Field(default="", max_length=64)
 
 
 # -----------------------------------------------------------------------------
@@ -297,6 +300,27 @@ _agent_pipeline_instance = BankingAgentPipeline(
 )
 
 
+@app.middleware("http")
+async def require_configured_access(request: Request, call_next):
+    token = os.environ.get("ABANK_KNOWLEDGE_ACCESS_TOKEN", "")
+    if not token:
+        return await call_next(request)
+    scheme, _, credential = request.headers.get("authorization", "").partition(" ")
+    supplied = ""
+    if scheme.casefold() == "bearer":
+        supplied = credential
+    elif scheme.casefold() == "basic":
+        try:
+            username, _, password = base64.b64decode(credential, validate=True).decode("utf-8").partition(":")
+            if username == "banking":
+                supplied = password
+        except (binascii.Error, UnicodeError):
+            pass
+    if not hmac.compare_digest(supplied.encode("utf-8"), token.encode("utf-8")):
+        return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="A-Bank"'})
+    return await call_next(request)
+
+
 def get_agent_pipeline():
     return _agent_pipeline_instance
 
@@ -366,6 +390,72 @@ def _validate_and_decode_attachments(attachments: list[ImageAttachment] | None) 
     return decoded
 
 
+def _sanitize_vision_ocr_text(raw_text: str, agent=None) -> str:
+    """Scrub adversarial injection clauses line-by-line while preserving genuine receipt/screen facts."""
+    raw_lines = [line.strip() for line in str(raw_text or "").splitlines() if line.strip()]
+    if not raw_lines:
+        return ""
+    runtime = getattr(agent, "runtime", None)
+    guardrails = getattr(runtime, "guardrails", None)
+
+    def _segment_is_safe(segment_text: str) -> bool:
+        if not segment_text:
+            return False
+        if runtime is not None and hasattr(runtime, "guard_artifact"):
+            if not runtime.guard_artifact(segment_text):
+                return False
+        if guardrails is not None:
+            seg_low = segment_text.lower()
+            if hasattr(guardrails, "_check_prompt_injection") and guardrails._check_prompt_injection(seg_low) is not None:
+                return False
+            if hasattr(guardrails, "_check_auth_leak") and guardrails._check_auth_leak(seg_low)[0]:
+                return False
+            indirect = getattr(guardrails, "indirect_guardrail", None)
+            if indirect is not None and not indirect.scan_text(segment_text).get("is_safe", True):
+                return False
+        return True
+
+    safe_parts = []
+    for raw_line in raw_lines:
+        norm_line = " ".join(raw_line.split())
+        if _segment_is_safe(norm_line):
+            safe_parts.append(norm_line)
+            continue
+        candidate_clauses = []
+        for star_part in norm_line.split("* ["):
+            sub = star_part.strip()
+            if star_part != norm_line and norm_line.find("* [") >= 0 and not sub.startswith("[") and "[" in sub:
+                sub = "[" + sub
+            if " [" in sub and not sub.startswith("["):
+                bracket_parts = sub.split(" [")
+                for b_idx, bp in enumerate(bracket_parts):
+                    b_text = bp.strip()
+                    if b_idx > 0 and b_text:
+                        b_text = "[" + b_text
+                    for semi_part in b_text.split(";"):
+                        semi_clean = semi_part.strip()
+                        if semi_clean:
+                            candidate_clauses.append(semi_clean)
+            else:
+                for semi_part in sub.split(";"):
+                    semi_clean = semi_part.strip()
+                    if semi_clean:
+                        candidate_clauses.append(semi_clean)
+        for clause in candidate_clauses:
+            if _segment_is_safe(clause):
+                safe_parts.append(clause)
+            elif ". " in clause:
+                for sentence in clause.split(". "):
+                    sent_clean = sentence.strip()
+                    if _segment_is_safe(sent_clean):
+                        safe_parts.append(sent_clean)
+
+    cleaned = " | ".join(safe_parts)
+    if not cleaned or not _segment_is_safe(cleaned):
+        return "[Nội dung văn bản trong ảnh đã bị chặn bởi bộ lọc an toàn]"
+    return cleaned
+
+
 def _analyze_single_image_bytes(
     image_bytes: bytes,
     file_name: str,
@@ -400,15 +490,7 @@ def _analyze_single_image_bytes(
                 if model_name and base_url:
                     acquire_cloud_slot(model_name, base_url)
                 raw_text = client.ask(image_bytes, prompt=prompt, max_tokens=1500, temperature=0.0)
-                cleaned = " ".join(str(raw_text or "").split())
-                if cleaned:
-                    runtime = getattr(agent, "runtime", None)
-                    if runtime is not None and hasattr(runtime, "guard_artifact"):
-                        guarded = runtime.guard_artifact(cleaned)
-                        if not guarded:
-                            cleaned = "[Nội dung văn bản trong ảnh đã bị chặn bởi bộ lọc an toàn]"
-                        else:
-                            cleaned = guarded
+                cleaned = _sanitize_vision_ocr_text(raw_text, agent=agent)
                 if not cleaned:
                     cleaned = "[Không đọc được nội dung chữ rõ ràng từ ảnh]"
                 if len(cleaned) > _MAX_VISION_SNIPPET_CHARS:
@@ -453,17 +535,20 @@ def _extract_vision_text_from_attachments(
 ) -> list[dict]:
     """Analyze each decoded image attachment and return structured OCR summaries."""
     analyses = []
+    runtime = getattr(agent, "runtime", None)
     for idx, item in enumerate(decoded_items):
-        summary = _analyze_single_image_bytes(
-            item["bytes"],
-            item["name"],
-            user_hint,
-            agent=agent,
-            session_id=session_id,
-        )
+        safe_name = f"Ảnh {idx + 1}"
+        try:
+            if runtime is None:
+                raise RuntimeError("Attachment guardrail is unavailable")
+            image_bytes = prepare_vision_image(item["bytes"], runtime.guard_artifact, ocr_configure=_configure_tesseract)
+        except (OSError, ValueError, RuntimeError, Image.DecompressionBombError):
+            summary = _VISION_PRIVACY_MARKER
+        else:
+            summary = _analyze_single_image_bytes(image_bytes, safe_name, user_hint, agent=agent, session_id=session_id)
         analyses.append({
             "index": idx + 1,
-            "name": item["name"],
+            "name": safe_name,
             "summary": summary,
         })
     return analyses
@@ -481,6 +566,12 @@ def _prepare_query_with_attachments(
         return base_query, []
     if not base_query:
         base_query = _DEFAULT_IMAGE_QUERY
+    runtime = getattr(agent, "runtime", None)
+    if runtime is not None:
+        guard = runtime.guardrails.guard_input(base_query, local_only=True)
+        if not guard.is_safe:
+            return base_query, []
+        base_query = guard.sanitized_query
     analyses = _extract_vision_text_from_attachments(
         decoded_items,
         base_query,
@@ -783,7 +874,7 @@ async def stream_agent_chat(req: ChatRequest):
                 )
                 vision_ms = round((time.perf_counter() - vision_started) * 1000.0, 2)
                 vision_all_failed = bool(vision_analyses) and all(
-                    item.get("summary") == _VISION_ERROR_MARKER for item in vision_analyses
+                    item.get("summary") in {_VISION_ERROR_MARKER, _VISION_PRIVACY_MARKER} for item in vision_analyses
                 )
                 if vision_all_failed:
                     vision_desc = "Không thể đọc nội dung hình ảnh qua Cloud Vision"
@@ -1119,7 +1210,7 @@ def get_node_file_content(node_name: str, io_type: str, file_name: str):
 
 
 _SHARED_ASSETS_DIR = (ROOT_DIR / "agent_banking" / "chunking" / "output" / "assets").resolve()
-_PUBLICATION_KNOWLEDGE_DIR = (ROOT_DIR / "agent_banking" / "outputs" / "tuning_20261117" / "knowledge").resolve()
+_PUBLICATION_KNOWLEDGE_DIR = Path(config.CHUNKING_OUTPUT_DIR).resolve()
 _ASSET_INDEX_CACHE = {}
 _HEX_CHARS = "0123456789abcdef"
 
@@ -1147,8 +1238,16 @@ def _find_asset_file(asset_id: str):
     if cached is not None and cached.is_file():
         return cached
 
-    if _PUBLICATION_KNOWLEDGE_DIR.is_dir():
-        for pub_assets in _PUBLICATION_KNOWLEDGE_DIR.glob("*/assets"):
+    publication_dirs = [_PUBLICATION_KNOWLEDGE_DIR]
+    inventory = Path(rag_pipeline.vector_store.storage_path) / "knowledge_inventory.json"
+    if inventory.is_file():
+        try:
+            entries = json.loads(inventory.read_text(encoding="utf-8")).get("publications", [])
+            publication_dirs.extend(Path(item["publication"]) for item in entries if item.get("publication"))
+        except (OSError, ValueError):
+            pass
+    for directory in publication_dirs:
+        for pub_assets in (directory / "assets", *directory.glob("*/assets")):
             if not pub_assets.is_dir():
                 continue
             pub_base = pub_assets.resolve()
@@ -1165,17 +1264,22 @@ def get_visual_asset(asset_id: str):
     clean_id = asset_id.strip().lower()
     if not _is_valid_asset_id(clean_id):
         raise HTTPException(status_code=400, detail="Invalid visual asset identifier")
+    scope = config.KNOWLEDGE_PUBLICATION_SCOPE
+    if scope:
+        groups = rag_pipeline.vector_store.source_groups(scope)
+        allowed = any(clean_id in {image.get("asset_id"), image.get("sha256")}
+                      for chunks in groups.values() for chunk in chunks for image in chunk.get("images", [])
+                      if isinstance(image, dict))
+        if not allowed:
+            raise HTTPException(status_code=404, detail="Visual asset not found in this knowledge scope")
     target = _find_asset_file(clean_id)
     if target is None:
         raise HTTPException(status_code=404, detail="Visual asset not found")
     return FileResponse(
         str(target),
         media_type="image/png",
-        headers={"Cache-Control": "public, max-age=86400"}
+        headers={"Cache-Control": "private, max-age=86400"}
     )
-
-
-_PDF_DOC_INDEX_CACHE = {}
 
 
 def _allowed_pdf_dirs() -> list:
@@ -1200,67 +1304,6 @@ def _allowed_pdf_dirs() -> list:
     return resolved_dirs
 
 
-def _normalize_pdf_source(source: str) -> str:
-    """Validate and normalize a relative PDF source string without regex."""
-    if not isinstance(source, str) or "\x00" in source:
-        raise HTTPException(status_code=400, detail="Invalid PDF source parameter")
-    clean = source.replace("\\", "/").strip()
-    while clean.startswith("/"):
-        clean = clean[1:]
-    if not clean:
-        raise HTTPException(status_code=400, detail="Empty PDF source parameter")
-    if ":" in clean:
-        raise HTTPException(status_code=403, detail="Invalid PDF document path")
-    parts = clean.split("/")
-    for seg in parts:
-        if not seg:
-            continue
-        if seg == "." or seg == "..":
-            raise HTTPException(status_code=403, detail="Invalid PDF document path")
-    if not clean.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF documents are supported")
-    return clean
-
-
-def _is_within_allowed_dirs(resolved: Path, allowed_dirs: list) -> bool:
-    """Return True if resolved path resides inside any allowed base directory."""
-    for allowed_dir in allowed_dirs:
-        if resolved.is_relative_to(allowed_dir):
-            return True
-    return False
-
-
-def _find_pdf_document(source: str):
-    """Locate a PDF file inside allowed dataset/chunking directories."""
-    clean = _normalize_pdf_source(source)
-    allowed_dirs = _allowed_pdf_dirs()
-    parts = [seg for seg in clean.split("/") if seg]
-
-    for base_dir in allowed_dirs:
-        candidate = base_dir
-        for seg in parts:
-            candidate = candidate / seg
-        resolved = candidate.resolve()
-        if not _is_within_allowed_dirs(resolved, allowed_dirs):
-            raise HTTPException(status_code=403, detail="Invalid PDF document path")
-        if resolved.is_file() and resolved.suffix.lower() == ".pdf":
-            return resolved
-
-    if "/" not in clean:
-        cached = _PDF_DOC_INDEX_CACHE.get(clean)
-        if cached is not None and cached.is_file():
-            return cached
-        target_lower = clean.lower()
-        for base_dir in allowed_dirs:
-            for item in base_dir.rglob("*.pdf"):
-                if item.name == clean or item.name.lower() == target_lower:
-                    resolved = item.resolve()
-                    if _is_within_allowed_dirs(resolved, allowed_dirs) and resolved.is_file():
-                        _PDF_DOC_INDEX_CACHE[clean] = resolved
-                        return resolved
-    return None
-
-
 def _build_inline_content_disposition(filename: str) -> str:
     """Construct RFC 6266 inline Content-Disposition header for UTF-8 filenames."""
     ascii_chars = []
@@ -1278,20 +1321,37 @@ def _build_inline_content_disposition(filename: str) -> str:
 
 
 _PDF_OCR_CACHE_DB = (ROOT_DIR / "agent_banking" / "vector_db" / "pdf_ocr_cache.db").resolve()
+_PDF_PREWARM_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="pdf_prewarm")
+_PDF_PREWARM_LOCK = threading.Lock()
+_PDF_PREWARM_IN_FLIGHT = set()
 
 
 def _schedule_pdf_prewarm(citations) -> None:
-    """Pre-warm OCR bounding box cache in background for cited PDF pages."""
+    """Pre-warm OCR bounding box cache in background for cited PDF pages using bounded workers."""
     if not isinstance(citations, list) or not citations:
         return
-    has_pdf = False
-    for cit in citations:
-        if isinstance(cit, dict) and str(cit.get("source") or "").strip().lower().endswith(".pdf"):
-            has_pdf = True
-            break
-    if not has_pdf:
+    snapshot = []
+    batch_keys = []
+    with _PDF_PREWARM_LOCK:
+        for cit in citations:
+            if not isinstance(cit, dict):
+                continue
+            src = str(cit.get("source") or "").strip()
+            if not src.lower().endswith(".pdf"):
+                continue
+            pages = list(cit.get("page_numbers") or ())[:2]
+            if not pages:
+                pages = [1]
+            key = (src.lower(), tuple(pages))
+            if key in _PDF_PREWARM_IN_FLIGHT:
+                continue
+            _PDF_PREWARM_IN_FLIGHT.add(key)
+            snapshot.append(cit)
+            batch_keys.append(key)
+            if len(snapshot) >= 8:
+                break
+    if not snapshot:
         return
-    snapshot = list(citations)
     allowed = _allowed_pdf_dirs()
 
     def _run():
@@ -1299,43 +1359,87 @@ def _schedule_pdf_prewarm(citations) -> None:
             prewarm_pdf_citations(snapshot, allowed, _PDF_OCR_CACHE_DB)
         except Exception:
             pass
+        finally:
+            with _PDF_PREWARM_LOCK:
+                for key in batch_keys:
+                    _PDF_PREWARM_IN_FLIGHT.discard(key)
 
-    threading.Thread(target=_run, daemon=True).start()
+    _PDF_PREWARM_EXECUTOR.submit(_run)
 
 
-def _resolve_safe_document(source: str, allowed_exts: tuple) -> Path:
+def _indexed_source(source, scope, version=""):
+    source_groups = getattr(getattr(rag_pipeline, "vector_store", None), "source_groups", None)
+    if source_groups is None:
+        return source, []
+    groups = source_groups(scope)
+    clean = source_key(source)
+    exact = [name for name in groups if source_key(name) == clean]
+    if not exact and "/" not in clean:
+        exact = [name for name in groups if source_key(name).rsplit("/", 1)[-1] == clean]
+    if len(exact) != 1:
+        return source, []
+    name = exact[0]
+    chunks = groups[name]
+    if version:
+        chunks = [chunk for chunk in chunks if chunk["business_metadata"].get("document_version") == version]
+    return name, chunks
+
+
+def _indexed_chunk(chunks, chunk_id):
+    if not chunk_id:
+        return None
+    base_id = chunk_id.split(":row:", 1)[0].removesuffix(":summary")
+    return next((chunk for chunk in chunks if chunk["chunk_id"] == base_id), None)
+
+
+def _resolve_safe_document(source: str, allowed_exts: tuple, version: str = "") -> Path:
     """Resolve a PDF, DOCX, or XLSX document safely or raise structured HTTP errors."""
+    scope = config.KNOWLEDGE_PUBLICATION_SCOPE
+    if version and not is_document_version(version):
+        raise HTTPException(status_code=400, detail="Invalid document version")
+    canonical, indexed = source, []
+    if scope or version:
+        canonical, indexed = _indexed_source(source, scope, version)
+        if not indexed:
+            raise HTTPException(status_code=404, detail="Document revision is unavailable in this knowledge scope")
+    if version and Path(canonical).suffix.lower() in allowed_exts:
+        try:
+            archived = revision_path(Path(rag_pipeline.vector_store.storage_path) / "revisions", canonical, version)
+            if archived.is_file() and document_matches_version(archived, version):
+                return archived
+        except (ValueError, OSError):
+            pass
     try:
-        resolved = find_document_path(source, _allowed_pdf_dirs(), allowed_exts=allowed_exts)
+        resolved = find_document_path(canonical, _allowed_pdf_dirs(), allowed_exts=allowed_exts)
     except PermissionError:
         raise HTTPException(status_code=403, detail="Invalid document path") from None
     except ValueError as err:
         raise HTTPException(status_code=400, detail=str(err)) from None
     if resolved is None:
         raise HTTPException(status_code=404, detail="Document not found")
+    if version and not document_matches_version(resolved, version):
+        raise HTTPException(status_code=409, detail="The cited revision differs from the current source file")
     return resolved
 
 
 @app.get("/api/documents/pdf")
-def get_source_pdf(source: str):
+def get_source_pdf(source: str, version: str = ""):
     """Stream the original source PDF inline so browsers can jump directly to #page=N."""
-    target = _find_pdf_document(source)
-    if target is None:
-        raise HTTPException(status_code=404, detail="PDF document not found")
+    target = _resolve_safe_document(source, (".pdf",), version)
     return FileResponse(
         str(target),
         media_type="application/pdf",
         headers={
-            "Content-Disposition": _build_inline_content_disposition(target.name),
-            "Cache-Control": "public, max-age=3600",
+            "Content-Disposition": _build_inline_content_disposition(Path(source).name),
+            "Cache-Control": "private, max-age=3600",
         },
     )
 
 
 @app.get("/api/documents/file")
-def get_source_document_file(source: str):
+def get_source_document_file(source: str, version: str = ""):
     """Stream or download an original PDF, DOCX, or XLSX source document safely."""
-    target = _resolve_safe_document(source, (".pdf", ".docx", ".xlsx"))
+    target = _resolve_safe_document(source, (".pdf", ".docx", ".xlsx"), version)
     ext = target.suffix.lower()
     mime = "application/octet-stream"
     if ext == ".pdf":
@@ -1348,31 +1452,33 @@ def get_source_document_file(source: str):
         str(target),
         media_type=mime,
         headers={
-            "Content-Disposition": _build_inline_content_disposition(target.name),
-            "Cache-Control": "public, max-age=3600",
+            "Content-Disposition": _build_inline_content_disposition(Path(source).name),
+            "Cache-Control": "private, max-age=3600",
         },
     )
 
 
 @app.get("/api/documents/docx/preview")
-def preview_docx_document(source: str, chunk_id: str = ""):
+def preview_docx_document(source: str, chunk_id: str = "", version: str = ""):
     """Render a Word (.docx) document to structured HTML with 1:1 XPath anchors."""
-    target = _resolve_safe_document(source, (".docx",))
+    target = _resolve_safe_document(source, (".docx",), version)
+    _, chunks = _indexed_source(source, config.KNOWLEDGE_PUBLICATION_SCOPE, version)
     try:
         return render_docx_preview(
             target,
             source,
             chunk_id=chunk_id.strip(),
-            knowledge_root=_PUBLICATION_KNOWLEDGE_DIR,
+            indexed_chunk=_indexed_chunk(chunks, chunk_id.strip()),
+            document_version=version,
         )
     except ValueError as err:
         raise HTTPException(status_code=400, detail=str(err)) from None
 
 
 @app.get("/api/documents/docx/media")
-def get_docx_embedded_media(source: str, part: str):
+def get_docx_embedded_media(source: str, part: str, version: str = ""):
     """Serve an embedded image from inside a Word (.docx) document safely."""
-    target = _resolve_safe_document(source, (".docx",))
+    target = _resolve_safe_document(source, (".docx",), version)
     try:
         raw_bytes, mime = read_docx_media(target, part)
     except PermissionError:
@@ -1382,7 +1488,7 @@ def get_docx_embedded_media(source: str, part: str):
     return Response(
         content=raw_bytes,
         media_type=mime,
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers={"Cache-Control": "private, max-age=86400"},
     )
 
 
@@ -1392,9 +1498,11 @@ def preview_xlsx_document(
     sheet: str = "",
     range: str = "",
     chunk_id: str = "",
+    version: str = "",
 ):
     """Render an Excel (.xlsx) workbook with sheets, merged cells, and target range bounds."""
-    target = _resolve_safe_document(source, (".xlsx",))
+    target = _resolve_safe_document(source, (".xlsx",), version)
+    _, chunks = _indexed_source(source, config.KNOWLEDGE_PUBLICATION_SCOPE, version)
     try:
         return render_xlsx_preview(
             target,
@@ -1402,23 +1510,23 @@ def preview_xlsx_document(
             target_sheet=sheet,
             target_range=range,
             chunk_id=chunk_id.strip(),
-            knowledge_root=_PUBLICATION_KNOWLEDGE_DIR,
+            indexed_chunk=_indexed_chunk(chunks, chunk_id.strip()),
         )
     except Exception as err:
         raise HTTPException(status_code=400, detail=f"Cannot parse XLSX: {type(err).__name__}") from None
 
 
 @app.get("/api/documents/pdf/manifest")
-def get_source_pdf_manifest(source: str):
+def get_source_pdf_manifest(source: str, version: str = ""):
     """Return total pages and dimensions for full in-UI PDF reading."""
-    target = _resolve_safe_document(source, (".pdf",))
+    target = _resolve_safe_document(source, (".pdf",), version)
     return get_pdf_manifest(target, source)
 
 
 @app.get("/api/documents/pdf/page")
-def get_source_pdf_page_image(source: str, page: int = 1, dpi: int = 144):
+def get_source_pdf_page_image(source: str, page: int = 1, dpi: int = 144, version: str = ""):
     """Render a crisp PNG image of a single PDF page for the in-UI reader."""
-    target = _resolve_safe_document(source, (".pdf",))
+    target = _resolve_safe_document(source, (".pdf",), version)
     try:
         png_bytes = render_pdf_page_png(target, page, dpi=dpi)
     except IndexError:
@@ -1426,18 +1534,18 @@ def get_source_pdf_page_image(source: str, page: int = 1, dpi: int = 144):
     return Response(
         content=png_bytes,
         media_type="image/png",
-        headers={"Cache-Control": "public, max-age=3600"},
+        headers={"Cache-Control": "private, max-age=3600"},
     )
 
 
 @app.get("/api/documents/pdf/region")
-def get_source_pdf_region_image(source: str, page: int, bbox: str):
+def get_source_pdf_region_image(source: str, page: int, bbox: str, version: str = ""):
     """Serve a high-resolution PNG of a cited PDF region."""
     try:
         if len(bbox) > 128:
             raise ValueError("Invalid PDF region")
         coordinates = tuple(float(value) for value in bbox.split(","))
-        target = _resolve_safe_document(source, (".pdf",))
+        target = _resolve_safe_document(source, (".pdf",), version)
         png_bytes = render_pdf_region_png(target, page, coordinates)
     except IndexError:
         raise HTTPException(status_code=404, detail="PDF page out of range") from None
@@ -1446,14 +1554,15 @@ def get_source_pdf_region_image(source: str, page: int, bbox: str):
     return Response(
         content=png_bytes,
         media_type="image/png",
-        headers={"Cache-Control": "public, max-age=3600"},
+        headers={"Cache-Control": "private, max-age=3600"},
     )
 
 
 @app.post("/api/documents/pdf/locate")
 def locate_pdf_citation_passages(req: PdfLocateRequest):
     """Locate Level-2 exact bounding boxes for a citation inside its PDF pages."""
-    target = _resolve_safe_document(req.source, (".pdf",))
+    target = _resolve_safe_document(req.source, (".pdf",), req.version)
+    _, chunks = _indexed_source(req.source, config.KNOWLEDGE_PUBLICATION_SCOPE, req.version)
     return locate_pdf_passages(
         target,
         _PDF_OCR_CACHE_DB,
@@ -1462,25 +1571,28 @@ def locate_pdf_citation_passages(req: PdfLocateRequest):
         section_title=req.section_title,
         chunk_id=req.chunk_id,
         images=req.images,
-        knowledge_root=_PUBLICATION_KNOWLEDGE_DIR,
+        indexed_chunk=_indexed_chunk(chunks, req.chunk_id),
     )
 
 
 @app.get("/api/documents/pdf/search")
-def search_source_pdf(source: str, q: str = ""):
+def search_source_pdf(source: str, q: str = "", version: str = ""):
     """Search inside a PDF across chunks, native text, and OCR cache."""
-    target = _resolve_safe_document(source, (".pdf",))
+    target = _resolve_safe_document(source, (".pdf",), version)
+    _, chunks = _indexed_source(source, config.KNOWLEDGE_PUBLICATION_SCOPE, version)
     return search_pdf_document(
         target,
         source,
         q,
         _PDF_OCR_CACHE_DB,
-        knowledge_root=_PUBLICATION_KNOWLEDGE_DIR,
+        indexed_chunks=chunks,
     )
 
 
 if __name__ == "__main__":
     host = str(_API_CFG["host"])
+    if host not in {"127.0.0.1", "localhost", "::1"} and not os.environ.get("ABANK_KNOWLEDGE_ACCESS_TOKEN"):
+        raise RuntimeError("Set a knowledge access token before starting a shared API")
     port = int(_API_CFG["port"])
     print("=" * 70)
     print(_STARTUP_BANNER["title"])

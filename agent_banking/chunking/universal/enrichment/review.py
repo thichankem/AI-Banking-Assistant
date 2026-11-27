@@ -184,7 +184,15 @@ def review_extraction(enricher, ir, cloud_json):
                   "answers": {"review_route": {"choice": choice}}, "window_reviews": final}
     ir["decision_review"] = result
     if choice == "REPAIR_EXTRACTION":
-        result["status"] = "advisory"
+        cov = ir.get("deterministic_coverage") or {}
+        has_missing = any(cov.get(k) for k in ("missing_units", "missing_assets", "missing_image_occurrences", "oversized_passages"))
+        has_warnings = any(w.get("requires_review") for w in ir.get("warnings", []))
+        unresolved_imgs = any(b.get("image", {}).get("status") not in RESOLVED_IMAGE_STATUSES
+                              for b in ir.get("blocks", []) if b.get("type") == "image")
+        if cov.get("status") == "verified_source_reconstruction" and not has_missing and not has_warnings and not unresolved_imgs:
+            result["status"] = "advisory"
+        else:
+            result["status"] = "repair_required"
         record_model_warning(ir, "review_route", "cloud_requested_repair")
 
 

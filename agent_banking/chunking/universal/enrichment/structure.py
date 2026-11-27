@@ -46,11 +46,10 @@ def structure_request_options(model, json_mode=None):
         disabled = [name.strip().casefold() for name in names.split(",") if name.strip()]
         normalized = model.casefold()
         json_mode = not any(name in normalized for name in disabled)
-    options = {"temperature": _TEMPERATURE, "max_tokens": min(maximum, _STRUCTURE_COMPLETION_TOKENS)}
+    options = {"temperature": _TEMPERATURE, "max_tokens": min(maximum, _STRUCTURE_COMPLETION_TOKENS),
+               "chat_template_kwargs": {"enable_thinking": False}}
     if json_mode:
         options["response_format"] = {"type": "json_object"}
-    else:
-        options["chat_template_kwargs"] = {"enable_thinking": False}
     return options
 
 

@@ -178,6 +178,18 @@ def _ancestor_window(planner, chunk, parent):
     section_content = parent["content"]
     limit = planner.max_parent_words
     max_chars = planner.budget.maximum * _MAX_CHARS_MULTIPLIER
+    if not parent.get("parent_id") and planner.ir.get("format") != "xlsx":
+        content, word_starts = _subtree_content(planner, chunk["parent_id"])
+        anchor = child_content
+        start = content.find(anchor)
+        if start < 0 and section_content:
+            anchor = section_content
+            start = content.find(anchor)
+        if start >= 0:
+            window = _window(content, word_starts, start, start + len(anchor), limit, max_chars)
+            if window and not _same_text(window, child_content):
+                return window
+        return None
     cursor = parent
     while cursor.get("parent_id"):
         ancestor_id = cursor["parent_id"]

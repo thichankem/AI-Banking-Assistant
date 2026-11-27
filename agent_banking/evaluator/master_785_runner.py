@@ -95,7 +95,11 @@ def parse_judge_output(content):
                 raise ValueError("Invalid judge score range")
             scores[name] = score
         overall = round(sum(score * float(_J785[name + "_weight"]) for name, score in scores.items()), 1)
-        return {**scores, "overall_score": overall, "verdict": "PASS" if overall >= float(_J785["pass_threshold"]) else "FAIL",
+        if overall >= float(_J785["pass_threshold"]):
+            verdict = "PASS"
+        else:
+            verdict = "FAIL"
+        return {**scores, "overall_score": overall, "verdict": verdict,
                 "feedback": str(data.get("feedback", ""))}
     except (AttributeError, KeyError, TypeError, ValueError):
         pass
@@ -133,7 +137,7 @@ def call_llm_judge(client, question, reference_answer, must_include_list, agent_
             "faithfulness": 0.0,
             "completeness": 0.0,
             "overall_score": 0.0,
-            "verdict": "FAIL",
+            "verdict": "JUDGE_ERROR",
             "feedback": _FEEDBACK["judge_api_error_prefix"] + str(e)
         }
 
@@ -316,7 +320,7 @@ def is_case_flawed(case_id, answers_cache, scores_cache):
     if case_id not in scores_cache:
         return True
     sc = scores_cache[case_id]
-    if sc.get("verdict") == "FAIL":
+    if sc.get("verdict") in ("FAIL", "JUDGE_ERROR", "ERROR"):
         return True
     if float(sc.get("overall_score", 0.0)) < float(_J785["re_eval_min_score"]):
         return True

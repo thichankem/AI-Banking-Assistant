@@ -9,16 +9,22 @@ into a standard tool for AI Agents:
 - Returns normalized payload for Context Grounding and Citation.
 """
 
+from pathlib import Path
 import time
 
 from agent_banking.chunking.universal.planning.schema import payload_index_key
+from agent_banking.core.policy_dates import policy_query_date
+from agent_banking.core.numeric_tokens import extract_canonical_numeric_tokens
 from agent_banking.core.search_text import is_procedure_query, search_key
+from agent_banking.retrieval.hybrid_retriever import HybridRetriever, RetrievalUnavailable
+from agent_banking.retrieval.policy_graph import GRAPH_FILENAME, expand_links
+from agent_banking.retrieval.policy_versions import PolicyVersions
 from agent_banking.tools.config.prompts import RAG_TOOL_DESCRIPTION, TOOL_TEMPLATES
 from agent_banking.tools.config.settings import get_tool_runtime_config
 from agent_banking.tools.excel_rows import canonical_excel_text, lookup_excel_rows
 from agent_banking.tools.extensions.banking_query import decompose_subqueries
 from agent_banking.tracing.tracer import trace_span
-from agent_banking.vector_db.qdrant_store import compute_corpus_table_paths
+from agent_banking.vector_db.qdrant_store import QdrantBankingStore, compute_corpus_table_paths
 
 _RAG_CFG = get_tool_runtime_config()["rag_tool"]
 _HEADER_CFG = _RAG_CFG["guide_header"]
@@ -288,6 +294,99 @@ def _reserve_query_targets(candidates, ranked, seen, query):
     return chosen
 
 
+def _exact_excel_fee_evidence(candidates, query_key, policy, labels):
+    """Resolve service phrases to priced workbook rows in the retrieved sources."""
+    if " phi " not in query_key or not any(
+        cue in query_key for cue in (*_FEE_TABLE_CUES, " bao nhieu ", " mien phi ", " tinh phi ",
+                                     " mat phi ", " chiu phi ", " so sanh ")
+    ):
+        return []
+    fee_query = query_key.replace(" chuyen khoan ", " chuyen tien ").replace(
+        " chuyen tien lien ngan hang nhanh ", " chuyen tien nhanh lien ngan hang "
+    )
+    if " citad " in fee_query:
+        fee_query += "kenh thanh toan dien tu lien ngan hang "
+    operations = {operation for operation in (
+        "mo tai khoan", "dong tai khoan", "chuyen tien", "nop tien", "rut tien", "tra no",
+    ) if f" {operation} " in fee_query}
+    words = fee_query.split()
+    phrases = {}
+    for size in range(7, 2, -1):
+        for index in range(len(words) - size + 1):
+            terms = words[index:index + size]
+            if terms[0] not in _PIN_STOPWORDS and sum(term not in _PIN_STOPWORDS for term in terms) >= 2:
+                phrases[" ".join(terms)] = size
+    if not phrases:
+        return []
+    inspected = set()
+    matches = []
+    for item in candidates:
+        seed = item.get("chunk", item)
+        source = seed.get("source")
+        table_id = seed.get("business_metadata", {}).get("excel_table_id")
+        key = (source, table_id)
+        if not source or not table_id or key in inspected:
+            continue
+        inspected.add(key)
+        chunks = [chunk for chunk in policy.chunks_by_source.get(source, ())
+                  if chunk.get("business_metadata", {}).get("excel_table_id") == table_id
+                  and policy.allows(chunk, labels)]
+        seen_rows = set()
+        for chunk in chunks:
+            data = (chunk.get("table_data") or {}).get("excel") or {}
+            columns = data.get("columns", {})
+            names = [col for col, title in columns.items() if any(
+                cue in f" {search_key(title)} " for cue in (" khoan muc ", " dich vu ", " loai phi ", " ten phi ")
+            )]
+            prices = [col for col, title in columns.items()
+                      if col not in names and " phi " in f" {search_key(title)} "
+                      and " ma phi " not in f" {search_key(title)} "]
+            if not names or not prices:
+                continue
+            for row in data.get("rows", ()):
+                row_id = row["row"]
+                if row_id in seen_rows:
+                    continue
+                seen_rows.add(row_id)
+                values = row["values"]
+                priced = any(
+                    cell.get("type") in {"currency", "number", "percent"}
+                    or search_key(cell.get("text", "")).startswith("mien phi")
+                    or extract_canonical_numeric_tokens(cell.get("text", ""), max_tokens=1)
+                    for col in prices if (cell := values.get(col))
+                )
+                if not priced:
+                    continue
+                for column in names:
+                    value = values.get(column, {}).get("text", "")
+                    label = (" " + search_key(value.partition("\n")[0]) + " ").replace(" chuyen khoan ", " chuyen tien ")
+                    service = label.strip().removeprefix("phi ") + " "
+                    if operations and not any(f" {operation} " in (" " + service) for operation in operations):
+                        continue
+                    match = max(((size, int(phrase == label.strip())) for phrase, size in phrases.items()
+                                 if f" {phrase} " in label), default=(0, 0))
+                    if match[0]:
+                        matches.append((match, label, chunks, source, table_id, column, value))
+        if len(inspected) == 3:
+            break
+    related = []
+    included = set()
+    compare = " so sanh " in query_key or " so voi " in query_key
+    for _, label, chunks, source, table_id, column, value in sorted(matches, key=lambda match: match[0], reverse=True)[:6]:
+        if label in included:
+            continue
+        spec = {"table_id": table_id, "filters": [{"column": column, "op": "eq", "value": value}]}
+        if policy.dated:
+            spec["as_of"] = policy.day
+        result = lookup_excel_rows(chunks, spec, scope=policy.scope, source=source, limit=1)
+        if result.get("status") == "success" and result["excel_match_count"] == 1:
+            related.append({"chunk": result["documents"][0]})
+            included.add(label)
+            if not compare or len(related) >= 2:
+                break
+    return related
+
+
 def matches_exact(item: dict, exact: str) -> bool:
     raw = item.get("chunk", item)
     meta = raw.get("business_metadata") or {}
@@ -295,6 +394,20 @@ def matches_exact(item: dict, exact: str) -> bool:
     fields += [meta.get(field) for field in ("document_name", "product_name", "service_code")]
     needle = " " + search_key(exact) + " "
     return any(needle in " " + search_key(value) + " " for value in fields if isinstance(value, str))
+
+
+def _relevant_result(item):
+    method = item.get("rerank_method")
+    if "relevance_score" not in item:
+        return True
+    score = float(item.get("relevance_score") or 0.0)
+    dense = float(item.get("dense_score") or 0.0)
+    if method == "local_lexical":
+        return score > 0.0 or dense >= float(_RAG_CFG.get("min_dense_evidence_score", 0.42))
+    if method == "cloud_cross_encoder":
+        return (score >= float(_RAG_CFG.get("min_rerank_evidence_score", 0.02))
+                or dense >= float(_RAG_CFG.get("min_dense_evidence_score", 0.42)))
+    return True
 
 
 def _extract_item_pages(raw: dict) -> list:
@@ -511,7 +624,7 @@ def _attach_table_hierarchy_view(items, table_paths, table_notes):
     return enriched
 
 
-def _maybe_auto_excel_summary(clean_query, ranked, ordered, corpus, scope):
+def _maybe_auto_excel_summary(clean_query, ranked, ordered, corpus, scope, as_of=None):
     """Compute an exact row-aggregation summary chunk for Excel count/list queries."""
     if not ranked or not clean_query:
         return None
@@ -575,15 +688,20 @@ def _maybe_auto_excel_summary(clean_query, ranked, ordered, corpus, scope):
     filters = []
     group_by = []
     tinh_col = ""
+    quan_col = ""
     loai_col = ""
     for c_key, c_lbl in col_labels.items():
         lbl_key = search_key(c_lbl)
-        if "tinh" in lbl_key and "thanh pho" in lbl_key:
+        if not lbl_key.startswith("ma ") and "tinh" in lbl_key and "thanh pho" in lbl_key:
             tinh_col = c_lbl
+        elif not lbl_key.startswith("ma ") and "quan" in lbl_key and "huyen" in lbl_key:
+            quan_col = c_lbl
         elif lbl_key == "loai":
             loai_col = c_lbl
 
+    matched_quan = False
     if tinh_col:
+        matched_location = False
         for c_key, c_lbl in col_labels.items():
             if c_lbl == tinh_col:
                 matched_vals = []
@@ -592,42 +710,73 @@ def _maybe_auto_excel_summary(clean_query, ranked, ordered, corpus, scope):
                     if c_val and len(c_val) >= 3 and (" " + c_val + " ") in q_search:
                         matched_vals.append((len(c_val), val))
                 if matched_vals:
-                    matched_vals.sort(reverse=True)
-                    best_val = matched_vals[0][1]
-                    filters.append({"column": tinh_col, "op": "eq", "value": best_val})
+                    location_values = [val for _, val in sorted(matched_vals, reverse=True)]
+                    filters.append({"column": tinh_col, "op": "in", "value": location_values})
+                    matched_location = True
                 break
+        if quan_col:
+            for c_key, c_lbl in col_labels.items():
+                if c_lbl == quan_col:
+                    matched_q_vals = []
+                    for val in distinct_by_col.get(c_key, ()):
+                        c_val = canonical_excel_text(val)
+                        if c_val and len(c_val) >= 3 and (" " + c_val + " ") in q_search:
+                            matched_q_vals.append((len(c_val), val))
+                    if matched_q_vals:
+                        q_values = [val for _, val in sorted(matched_q_vals, reverse=True)]
+                        filters.append({"column": quan_col, "op": "in", "value": q_values})
+                        matched_quan = True
+                    break
+        if not matched_location and not matched_quan and any(phrase in q_search for phrase in (" tai ", " o ", " tinh ", " thanh pho ")):
+            return None
+
+    if quan_col and not matched_quan and (matched_quan or any(phrase in q_search for phrase in (" quan ", " huyen ", " theo quan ", " tung quan "))):
+        group_by.append(quan_col)
 
     if loai_col:
-        loai_vals = set()
-        for c_key, c_lbl in col_labels.items():
-            if c_lbl == loai_col:
-                loai_vals = distinct_by_col.get(c_key, set())
-                break
         want_cn = " chi nhanh " in q_search
         want_pgd = " phong giao dich " in q_search or " phong gd " in q_search or " pgd " in q_search
         want_atm = " atm " in q_search or " cay atm " in q_search
         want_cdm = " cdm " in q_search or " may nop tien tu dong " in q_search
         mentioned = []
-        if want_cn and "Chi nhánh" in loai_vals:
+        if want_cn:
             mentioned.append("Chi nhánh")
         if want_pgd:
-            for lv in loai_vals:
-                if "phong gd" in search_key(lv):
-                    mentioned.append(lv)
-                    break
-        if want_atm and "ATM" in loai_vals:
+            mentioned.append("Phòng giao dịch")
+        if want_atm:
             mentioned.append("ATM")
-        if want_cdm and "CDM" in loai_vals:
+        if want_cdm:
             mentioned.append("CDM")
-        if len(mentioned) == 1 and " diem giao dich " not in q_search:
-            filters.append({"column": loai_col, "op": "eq", "value": mentioned[0]})
+        if mentioned:
+            filters.append({"column": loai_col, "op": "in", "value": mentioned})
         group_by.append(loai_col)
     if tinh_col and not filters:
         group_by.append(tinh_col)
 
+    src_key = search_key(src)
+    if not group_by and not tinh_col and not loai_col and ("bp " in (" " + src_key + " ") or "bieu phi" in src_key):
+        preferred_fee_col = ""
+        fallback_fee_col = ""
+        for c_key, c_lbl in col_labels.items():
+            lbl_key = search_key(c_lbl)
+            if not lbl_key or lbl_key == "stt" or lbl_key.startswith(("stt ", "ma ", "ghi chu", "don vi", "muc phi", "ty le")):
+                continue
+            if not fallback_fee_col:
+                fallback_fee_col = c_lbl
+            if any(tok in (" " + lbl_key + " ") for tok in (" nhom ", " dich vu ", " loai ", " san pham ", " nghiep vu ")):
+                preferred_fee_col = c_lbl
+                break
+        chosen_fee_col = preferred_fee_col
+        if not chosen_fee_col:
+            chosen_fee_col = fallback_fee_col
+        if chosen_fee_col:
+            group_by.append(chosen_fee_col)
+
     if not group_by:
         return None
     excel_spec = {"table_id": table_id, "filters": filters, "group_by": group_by}
+    if as_of is not None:
+        excel_spec["as_of"] = as_of
     res = lookup_excel_rows(table_chunks, excel_spec, scope=scope, source=src, limit=1, offset=0)
     if res.get("status") != "success" or res.get("excel_match_count", 0) <= 0:
         return None
@@ -656,6 +805,11 @@ def _pin_intra_document_targets(ranked, ordered, seen, clean_query, related, rel
 
     wants_fee_table = any(cue in query_key for cue in _FEE_TABLE_CUES)
     wants_diagram = any(cue in query_key for cue in _DIAGRAM_CUES)
+    fee_terms = set()
+    if wants_fee_table:
+        words = query_key.split()
+        fee_terms = {" ".join(words[index:index + 3]) for index, word in enumerate(words[:-2])
+                     if word == "phi" and all(part not in _PIN_STOPWORDS for part in words[index:index + 3])}
     time_prefix = str(_RAG_CFG["guide_header"].get("excluded_terms", ["09:41"])[0])
 
     # Collect immediate linked siblings sharing the exact same section_title or table_id as ranked[:2]
@@ -758,6 +912,14 @@ def _pin_intra_document_targets(ranked, ordered, seen, clean_query, related, rel
             )
             if wants_fee_table and is_table_chunk:
                 score += 3
+                body_key = " " + search_key(content_str) + " "
+                for fee_term in fee_terms:
+                    if f" {fee_term} " in body_key:
+                        score += 4
+                        if extract_canonical_numeric_tokens(content_str, max_tokens=1):
+                            score += 2
+                if anchor is ranked[0]:
+                    score += 1
             if same_table:
                 slice_total = table_slice_counts.get(cand_tbl_id, 0)
                 if 2 <= slice_total <= 5 and (token_hits >= 1 or any(nc in cand_key for nc in note_cues)):
@@ -813,12 +975,23 @@ class BankingRAGTool:
             self.pipeline = BankingRAGPipeline(config=config, use_memory=use_memory)
 
     def _source_chunks(self, source, scope):
-        corpus = getattr(getattr(self.pipeline, "vector_store", None), "_bm25_corpus", [])
+        store = getattr(self.pipeline, "vector_store", None)
+        grouped = None
+        if isinstance(store, QdrantBankingStore):
+            grouped = store.source_groups(scope)
+        corpus = getattr(store, "_bm25_corpus", [])
         source = source.replace("\\", "/").casefold()
         path_requested = "/" in source
         matches = []
-        for chunk in corpus:
-            name = str(chunk.get("source", "")).replace("\\", "/").casefold()
+        entries = grouped
+        if entries is None:
+            entries = {}
+            for chunk in corpus:
+                name = chunk.get("source", "")
+                if name and (not scope or scope in chunk.get("business_metadata", {}).get("publication_scopes", [])):
+                    entries.setdefault(name, []).append(chunk)
+        for raw_name, chunks in sorted(entries.items()):
+            name = raw_name.replace("\\", "/").casefold()
             basename = name.rsplit("/", 1)[-1]
             if path_requested:
                 matches_name = name == source or name.endswith("/" + source)
@@ -826,20 +999,13 @@ class BankingRAGTool:
                 matches_name = name == source or basename == source or _source_stem(basename) == source
             if not matches_name:
                 continue
-            if scope and scope not in chunk.get("business_metadata", {}).get("publication_scopes", []):
-                continue
-            matches.append(chunk)
+            matches.extend(chunks)
         min_key_len = int(_SOURCE_CFG["min_key_length"])
         min_non_digit_len = int(_SOURCE_CFG["min_non_digit_key_length"])
         if not matches and not path_requested:
             src_key = search_key(_source_stem(source))
             if src_key:
-                sources = {}
-                for chunk in corpus:
-                    meta = chunk.get("business_metadata", {})
-                    name = chunk.get("source")
-                    if isinstance(name, str) and name and (not scope or scope in meta.get("publication_scopes", [])):
-                        sources.setdefault(name, []).append(chunk)
+                sources = entries
                 labels = {name: search_key(_source_stem(name)) for name in sources}
                 matched_names = [name for name, label in labels.items() if label == src_key or label.startswith(src_key + " ")]
                 source_code = _parse_source_code(src_key)
@@ -873,21 +1039,36 @@ class BankingRAGTool:
 
     def execute(self, query: str, top_k: int | None = None, exact: str = "", candidate_k: int | None = None,
                 source: str = "", offset: int | None = None, excel: dict | None = None,
-                page: int | None = None) -> dict:
+                page: int | None = None, as_of: str | None = None, expand_graph: bool = True,
+                *, include_candidates: bool = False) -> dict:
         """
         Execute banking knowledge retrieval via Hybrid Retrieval & Reranker.
         """
         if top_k is None:
             top_k = int(_RAG_CFG["default_top_k"])
         start_t = time.perf_counter()
+        clean_query = query.strip()
+        vector_store_ref = getattr(self.pipeline, "vector_store", None)
+        if isinstance(vector_store_ref, QdrantBankingStore):
+            vector_store_ref.refresh_if_changed()
         if excel is not None:
+            excel_date = excel.get("as_of")
+            if as_of is not None and excel_date is not None and as_of != excel_date:
+                return {"status": "excel_conflicting_dates", "documents": [], "sources": [], "citations": [],
+                        "latency_ms": (time.perf_counter() - start_t) * 1000}
+            if not excel_date:
+                try:
+                    requested_date, _ = policy_query_date(clean_query, as_of)
+                except ValueError as error:
+                    return {"status": str(error), "documents": [], "sources": [], "citations": [],
+                            "latency_ms": (time.perf_counter() - start_t) * 1000}
+                if requested_date is not None:
+                    excel = {**excel, "as_of": requested_date.isoformat()}
             scope = getattr(self.pipeline.config, "KNOWLEDGE_PUBLICATION_SCOPE", "")
             corpus = getattr(self.pipeline.vector_store, "_bm25_corpus", ())
             result = lookup_excel_rows(corpus, excel, scope=scope, source=source, limit=top_k, offset=offset or 0)
             result["latency_ms"] = (time.perf_counter() - start_t) * 1000
             return result
-        clean_query = query.strip()
-
         if not clean_query:
             return {
                 "status": "empty_query",
@@ -901,6 +1082,16 @@ class BankingRAGTool:
         reading = offset is not None or page is not None
         if offset is not None and (not source or type(offset) is not int or offset < 0):
             raise ValueError("Reading a document requires source and a nonnegative offset")
+        try:
+            requested_date, today = policy_query_date(clean_query, as_of)
+        except ValueError as error:
+            # A literal page read can contain other dates in its topic text.
+            if not reading or as_of is not None:
+                status = str(error)
+                return {"status": status, "documents": [], "sources": [], "citations": [],
+                        "latency_ms": (time.perf_counter() - start_t) * 1000,
+                        "retrieval_quality": {"temporal": {"status": status}}}
+            requested_date, today = policy_query_date("")
 
         # 1. Parse Query & Acronym Normalization
         search_text = clean_query
@@ -928,36 +1119,7 @@ class BankingRAGTool:
                 source_filter=source,
             )
 
-        # 2. Model-First Query Plan (when pipeline provides LLMQueryPlanner) + Hybrid Retrieval
-        llm_plan = None
-        if not reading and not source and not exact and hasattr(self.pipeline, "plan_query"):
-            try:
-                llm_plan = self.pipeline.plan_query(clean_query)
-            except Exception:
-                llm_plan = None
-        if isinstance(llm_plan, dict) and llm_plan.get("method") == "llm_model":
-            rewritten = str(llm_plan.get("rewritten_query") or "").strip()
-            sem_terms = [str(t).strip() for t in (llm_plan.get("semantic_terms") or ()) if str(t).strip()]
-            exp_base = str(getattr(parsed_q, "expanded_query", "") or clean_query)
-            extra_dense = []
-            if rewritten and rewritten.casefold() not in exp_base.casefold():
-                extra_dense.append(rewritten)
-            if sem_terms:
-                extra_dense.append(" ".join(sem_terms))
-            if extra_dense:
-                parsed_q.expanded_query = (exp_base + " " + " ".join(extra_dense)).strip()
-            if sem_terms:
-                extra_kws = self.pipeline.parse_query(" ".join(sem_terms)).keywords
-                cur_kws = list(getattr(parsed_q, "keywords", []) or [])
-                for ek in extra_kws:
-                    if ek not in cur_kws:
-                        cur_kws.append(ek)
-                parsed_q.keywords = cur_kws
-                existing_kw_str = str(getattr(parsed_q, "keywords_str", "") or "").strip()
-                add_tokens = [ek for ek in extra_kws if f" {ek} " not in f" {existing_kw_str} "]
-                if add_tokens:
-                    parsed_q.keywords_str = (existing_kw_str + " " + " ".join(add_tokens)).strip()
-
+        # 2. Resolve policy catalog and explicit source/folder scope before query planning
         candidate_count = candidate_k or self.pipeline.config.HYBRID_CANDIDATE_K
         top_candidates = max(candidate_count, top_k)
         exact_min_k = int(_RAG_CFG["exact_candidate_min_k"])
@@ -965,6 +1127,15 @@ class BankingRAGTool:
             candidate_count = max(exact_min_k, candidate_count)
             top_candidates = candidate_count
         scope = getattr(self.pipeline.config, "KNOWLEDGE_PUBLICATION_SCOPE", "")
+        corpus = getattr(vector_store_ref, "_bm25_corpus", ())
+        graph_path = getattr(self.pipeline.config, "KNOWLEDGE_GRAPH_PATH", None)
+        storage = getattr(self.pipeline.config, "STORAGE_DIR", None)
+        if graph_path is None and storage:
+            graph_path = Path(storage) / GRAPH_FILENAME
+        if isinstance(vector_store_ref, QdrantBankingStore):
+            policy = vector_store_ref.policy_catalog(scope, requested_date, today, graph_path)
+        else:
+            policy = PolicyVersions(corpus, scope, requested_date, today, graph_path=graph_path)
         filters = {}
         if scope:
             filters = {"business_metadata.publication_scopes": scope}
@@ -975,10 +1146,22 @@ class BankingRAGTool:
             try:
                 source_chunks = self._source_chunks(source, scope)
             except AmbiguousSource as error:
-                source_status = "source_ambiguous"
-                terms = set(search_key(search_query).split()) - _PIN_STOPWORDS
-                source_candidates = sorted(error.sources, key=lambda name: -len(terms.intersection(
-                    search_key(_source_stem(name)).split())))[:8]
+                eligible = {name for name, _ in policy.labels} & set(error.sources)
+                families = {chunk.get("business_metadata", {}).get("policy_revision", {}).get("policy_id")
+                            for chunk in policy.corpus if chunk["source"] in error.sources}
+                if len(eligible) == 1 and len(families) == 1 and None not in families:
+                    source_chunks = self._source_chunks(next(iter(eligible)), scope)
+                else:
+                    source_status = "source_ambiguous"
+                    terms = set(search_key(search_query).split()) - _PIN_STOPWORDS
+                    source_candidates = sorted(
+                        error.sources,
+                        key=lambda name: (
+                            -len(terms.intersection(search_key(_source_stem(name)).split())),
+                            name not in eligible,
+                            name,
+                        ),
+                    )[:8]
             if not source_chunks and not source_status:
                 folder = source.strip().replace("\\", "/").rstrip("/").casefold()
                 if folder:
@@ -1003,6 +1186,50 @@ class BankingRAGTool:
                     filters["source"] = names
             elif not source_status:
                 source_status = "source_not_found"
+        labels = policy.labels
+        if source and source_chunks and policy.enabled:
+            if len({chunk["source"] for chunk in source_chunks}) == 1:
+                labels = policy.with_sources(source_chunks)
+            source_chunks = [chunk for chunk in source_chunks if policy.allows(chunk, labels)]
+            selected_names = {chunk["source"] for chunk in source_chunks}
+            labels = {edition: status for edition, status in labels.items() if edition[0] in selected_names}
+        filters = policy.search_filters(filters, labels, policy.corpus)
+
+        single_file_source = bool(source) and len({chunk.get("source") for chunk in source_chunks}) == 1
+        plan_fn = getattr(self.pipeline, "plan_query", None)
+        llm_plan = None
+        if not reading and not (source and (single_file_source or not source_chunks)) and callable(plan_fn):
+            try:
+                llm_plan = plan_fn(clean_query)
+            except Exception:
+                llm_plan = None
+        if isinstance(llm_plan, dict) and llm_plan.get("method") == "llm_model":
+            rewritten = str(llm_plan.get("rewritten_query") or "").strip()
+            sem_terms = [str(t).strip() for t in (llm_plan.get("semantic_terms") or ()) if str(t).strip()]
+            exp_base = str(getattr(parsed_q, "expanded_query", "") or clean_query)
+            extra_dense = []
+            if rewritten and rewritten.casefold() not in exp_base.casefold():
+                extra_dense.append(rewritten)
+            if sem_terms:
+                extra_dense.append(" ".join(sem_terms))
+            if extra_dense:
+                parsed_q.expanded_query = (exp_base + " " + " ".join(extra_dense)).strip()
+            bm25_additions = []
+            if rewritten:
+                bm25_additions.append(rewritten)
+            if sem_terms:
+                bm25_additions.append(" ".join(sem_terms))
+            if bm25_additions:
+                extra_kws = self.pipeline.parse_query(" ".join(bm25_additions)).keywords
+                cur_kws = list(getattr(parsed_q, "keywords", []) or [])
+                for ek in extra_kws:
+                    if ek not in cur_kws:
+                        cur_kws.append(ek)
+                parsed_q.keywords = cur_kws
+                existing_kw_str = str(getattr(parsed_q, "keywords_str", "") or "").strip()
+                add_tokens = [ek for ek in extra_kws if f" {ek} " not in f" {existing_kw_str} "]
+                if add_tokens:
+                    parsed_q.keywords_str = (existing_kw_str + " " + " ".join(add_tokens)).strip()
         reading_chunks = source_chunks
         start_offset = offset or 0
         if page is None and source_chunks and offset is not None:
@@ -1013,26 +1240,32 @@ class BankingRAGTool:
             reading_chunks = [chunk for chunk in source_chunks if page in _extract_item_pages(chunk)]
             if not reading_chunks:
                 source_status = "page_not_found"
+        if reading and exact:
+            reading_chunks = [chunk for chunk in reading_chunks if matches_exact(chunk, exact)]
         allowed = {(chunk["source"], payload_index_key(chunk)) for chunk in source_chunks}
+        retriever = self.pipeline.retriever
+        retrieval_errors = []
+        query_embeddings = {}
 
         def _retrieve_with_weight(query, eff_top, eff_cand, fdict, d_weight=None):
+            if policy.enabled and not labels:
+                return []
+            options = {}
+            if policy.enabled:
+                options["strict_filters"] = True
+            if isinstance(retriever, HybridRetriever):
+                options.update(source_restricted=bool(source), prefer_query_filters=not source and not exact,
+                               query_embeddings=query_embeddings)
             if d_weight is not None:
-                try:
-                    return self.pipeline.retriever.retrieve(
-                        query=query,
-                        top_k=eff_top,
-                        candidate_k=eff_cand,
-                        filter_dict=fdict,
-                        dense_weight=d_weight,
-                    )
-                except TypeError:
-                    pass
-            return self.pipeline.retriever.retrieve(
-                query=query,
-                top_k=eff_top,
-                candidate_k=eff_cand,
-                filter_dict=fdict,
-            )
+                options["dense_weight"] = d_weight
+            try:
+                items = retriever.retrieve(query=query, top_k=eff_top, candidate_k=eff_cand, filter_dict=fdict, **options)
+            except RetrievalUnavailable as error:
+                retrieval_errors.append(error)
+                return []
+            if policy.enabled:
+                return [item for item in items if policy.allows(item.get("chunk", item), labels)]
+            return items
 
         def search(query):
             d_weight = None
@@ -1058,7 +1291,7 @@ class BankingRAGTool:
                 candidates = []
             else:
                 candidates = search(parsed_q)
-                if not source and not exact and candidates:
+                if not source and not exact:
                     sub_queries = []
                     if isinstance(llm_plan, dict) and llm_plan.get("method") == "llm_model":
                         sub_queries = list(llm_plan.get("sub_queries") or [])
@@ -1091,11 +1324,13 @@ class BankingRAGTool:
             relaxed = any(item.get("retrieval_meta", {}).get("fallback_unfiltered") for item in candidates)
             if exact:
                 candidates = [item for item in candidates if matches_exact(item, exact)]
-            source_fallback = bool(source_chunks and not reading and not candidates)
+            source_fallback = bool((source_chunks or exact and not source) and not reading and not candidates)
             if source_fallback:
                 terms = set(search_key(search_query).split()) - _PIN_STOPWORDS
                 scored = []
-                for chunk in source_chunks:
+                for chunk in source_chunks or policy.corpus:
+                    if not policy.allows(chunk, labels):
+                        continue
                     if exact and not matches_exact(chunk, exact):
                         continue
                     passage = search_key(str(chunk.get("section_title") or "") + " " + str(chunk.get("content") or ""))
@@ -1115,21 +1350,43 @@ class BankingRAGTool:
                 candidates_preview=_summarize_rag_items(candidates, limit=15),
             )
 
+        # Expand original search seeds only, within the configured retrieval scope.
+        expansions = []
+        graph_annotations = {}
+        local_names = {edition[0] for edition in labels}
+        all_labels = {edition: status for edition, status in policy.labels.items() if edition[0] not in local_names}
+        all_labels.update(labels)
         # 3. Cross-Encoder Reranker
-        vector_store_ref = getattr(self.pipeline, "vector_store", None)
         table_paths_map = getattr(vector_store_ref, "_bm25_table_paths", None)
         table_notes_map = getattr(vector_store_ref, "_bm25_table_notes", None)
         if not reading and (table_paths_map or table_notes_map):
             candidates = _attach_table_hierarchy_view(candidates, table_paths_map, table_notes_map)
-        with trace_span("top_k_cross_encoder_reranker", run_type="retriever", query=clean_query, input_count=len(candidates), top_k=top_k) as rr_span:
+        rerank_query = parsed_q.normalized_query
+        if not rerank_query:
+            rerank_query = clean_query
+        if isinstance(llm_plan, dict) and llm_plan.get("method") == "llm_model":
+            planned_rw = str(llm_plan.get("rewritten_query") or "").strip()
+            if planned_rw:
+                rerank_query = planned_rw
+        with trace_span("top_k_cross_encoder_reranker", run_type="retriever", query=clean_query, rerank_query=rerank_query, input_count=len(candidates), top_k=top_k) as rr_span:
             if reading:
                 reranked = candidates
             else:
-                reranked = self.pipeline.reranker.rerank(query=clean_query, candidates=candidates, top_k=top_k)
+                reranked = self.pipeline.reranker.rerank(query=rerank_query, candidates=candidates, top_k=top_k)
+                if not exact:
+                    reranked = [item for item in reranked if _relevant_result(item)]
             rr_span.update(
                 reranked_count=len(reranked),
                 reranked_preview=_summarize_rag_items(reranked, limit=15),
             )
+        if expand_graph and not reading and reranked:
+            expansions = expand_links(graph_path, reranked, policy, all_labels, clean_query)
+            if exact:
+                expansions = [expansion for expansion in expansions
+                              if all(matches_exact(chunk, exact) for chunk in expansion[:3])]
+            for _, target, evidence, details in expansions:
+                for raw in (target, evidence):
+                    graph_annotations.setdefault((raw["source"], payload_index_key(raw)), details)
 
         # 4. Extract documents and source references
         docs = []
@@ -1170,6 +1427,17 @@ class BankingRAGTool:
         ranked = [item.get("chunk", item) for item in reranked if isinstance(item, dict)]
         ranked = [chunk for chunk in ranked if isinstance(chunk, dict)]
         seen = {(chunk.get("source"), payload_index_key(chunk)) for chunk in ranked}
+        ranked_sources = {chunk.get("source") for chunk in ranked}
+        graph_related = []
+        for anchor, target, evidence, details in expansions:
+            if not {anchor["source"], target["source"]} & ranked_sources:
+                continue
+            for raw in (target, evidence, anchor):
+                identity = (raw["source"], payload_index_key(raw))
+                if identity not in seen:
+                    graph_related.append({"chunk": raw})
+                    graph_annotations.setdefault(identity, details)
+                    seen.add(identity)
         query_key = " " + search_key(clean_query) + " "
         procedure = is_procedure_query(clean_query)
         contact_phrases = tuple(_RAG_CFG["contact_phrases"])
@@ -1178,14 +1446,21 @@ class BankingRAGTool:
             name = chunk.get("source")
             if name and name not in ordered:
                 passages = self._source_chunks(name, scope)
+                if policy.enabled:
+                    passages = [passage for passage in passages if policy.allows(passage, all_labels)]
                 ordered[name] = (passages, {payload_index_key(p): i for i, p in enumerate(passages)})
         if not reading:
             related_limit = int(_RAG_CFG["related_limit"])
             if procedure and ranked and _app_guide(ranked[0]):
                 related_limit = int(_RAG_CFG["app_procedure_related_limit"])
+            if top_k >= 3 and related_limit > 1:
+                fee_rows = _exact_excel_fee_evidence(candidates, query_key, policy, all_labels)
+                related.extend(row for row in fee_rows if not exact or matches_exact(row, exact))
+            if top_k >= 3 and related_limit > 1 and any(cue in query_key for cue in _FEE_TABLE_CUES):
+                _pin_intra_document_targets(ranked, ordered, seen, clean_query, related, len(related) + 1)
             reserved = []
             if top_k >= 3 and ranked:
-                reserved = _reserve_query_targets(candidates, ranked, seen, clean_query)[:related_limit]
+                reserved = _reserve_query_targets(candidates, ranked, seen, clean_query)[:related_limit - len(related)]
                 related_limit -= len(reserved)
             header_scan_limit = int(_RAG_CFG["guide_header_scan_limit"])
             anchor_limit = int(_RAG_CFG["neighbor_anchor_limit"])
@@ -1240,6 +1515,7 @@ class BankingRAGTool:
                 related.append({"chunk": chunk, "context_for": anchor_id})
                 seen.add(identity)
             related.extend(reserved)
+            related = graph_related + related
 
         # Attach hierarchical table path/notes for any returned docs missing them & add auto-Excel summary
         for name, (passages, _) in ordered.items():
@@ -1249,11 +1525,18 @@ class BankingRAGTool:
                 related = _attach_table_hierarchy_view(related, src_paths, src_notes)
         if not reading and ranked:
             corpus_ref = getattr(getattr(self.pipeline, "vector_store", None), "_bm25_corpus", ())
-            auto_sum = _maybe_auto_excel_summary(clean_query, ranked, ordered, corpus_ref, scope)
+            auto_sum = None
+            if not exact:
+                excel_date = None
+                if policy.dated:
+                    excel_date = policy.day
+                auto_sum = _maybe_auto_excel_summary(clean_query, ranked, ordered, corpus_ref, scope, as_of=excel_date)
             if auto_sum is not None:
                 related.insert(0, auto_sum)
 
         default_source = TOOL_TEMPLATES["rag_default_source_label"]
+        if exact:
+            related = [item for item in related if matches_exact(item, exact)]
         score_precision = int(_RAG_CFG["score_precision"])
         for idx, item in enumerate([*reranked, *related]):
             if isinstance(item, dict):
@@ -1294,7 +1577,7 @@ class BankingRAGTool:
                 parent_content = str(raw_chunk.get("parent_content") or "")
                 bm = raw_chunk.get("business_metadata")
                 if isinstance(bm, dict):
-                    business_metadata = bm
+                    business_metadata = policy.annotate(raw_chunk, all_labels)
                 else:
                     business_metadata = {}
                 prev_chunk_id = str(raw_chunk.get("prev_chunk_id") or "")
@@ -1309,6 +1592,11 @@ class BankingRAGTool:
             doc_name = str(business_metadata.get("document_name") or source or "")
             if source:
                 sources.add(source)
+            graph_link = None
+            if isinstance(raw_chunk, dict):
+                graph_link = graph_annotations.get((source, payload_index_key(raw_chunk)))
+            if graph_link:
+                business_metadata = {**business_metadata, "graph_link": graph_link}
 
             excel_citation = business_metadata.get("citation", {})
             excel_location = {}
@@ -1328,7 +1616,7 @@ class BankingRAGTool:
             else:
                 cite_label = f"[{source}]"
 
-            citations.append({
+            citation = {
                 "index": idx + 1,
                 "label": cite_label,
                 "source": source,
@@ -1339,7 +1627,14 @@ class BankingRAGTool:
                 "chunk_type": chunk_type,
                 "relevance_score": round(score, score_precision),
                 **excel_location,
-            })
+            }
+            if isinstance(raw_chunk, dict) and (cited_pages := _extract_item_pages(raw_chunk)):
+                citation["page_numbers"] = cited_pages
+            if "temporal" in business_metadata:
+                citation["temporal"] = business_metadata["temporal"]
+            if graph_link:
+                citation["graph_link"] = graph_link
+            citations.append(citation)
 
             docs.append({
                 "rank": idx + 1,
@@ -1391,6 +1686,8 @@ class BankingRAGTool:
             retrieval_quality["source_status"] = source_status
             retrieval_quality["source_candidates"] = source_candidates
         retrieval_quality["relaxed_filters"] = relaxed
+        if retrieval_errors or any(item.get("retrieval_meta", {}).get("dense_degraded") for item in candidates):
+            retrieval_quality["dense_degraded"] = True
         retrieval_quality["reranker"] = method
         retrieval_quality["exact_match_missing"] = bool(exact and not docs)
         retrieval_quality["searched_candidates"] = len(candidates)
@@ -1406,6 +1703,14 @@ class BankingRAGTool:
             read_start = None
         retrieval_quality["next_offset"] = self._next_offset(read_start, top_k, len(reading_chunks))
         retrieval_quality["source_inventory"] = inventory
+        temporal_statuses = sorted({item["business_metadata"]["temporal"]["status"] for item in docs
+                                    if "temporal" in item["business_metadata"]})
+        if policy.dated or temporal_statuses:
+            retrieval_quality["temporal"] = {"as_of": policy.day, "statuses": temporal_statuses}
+            if policy.reference_only and "effective" not in temporal_statuses:
+                retrieval_quality["temporal"]["status"] = "unverified_as_of"
+        if graph_related or any("graph_link" in item for item in citations[:primary_count]):
+            retrieval_quality["graph_related_count"] = len(graph_related)
         excel_tables = []
         seen_excel_ids = set()
         for doc_item in docs[:primary_count]:
@@ -1418,28 +1723,46 @@ class BankingRAGTool:
             seen_excel_ids.add(tbl_id)
             td_item = doc_item.get("table_data")
             cols_item = {}
+            sheet_item = ""
             if isinstance(td_item, dict) and isinstance(td_item.get("excel"), dict):
                 cols_item = td_item["excel"].get("columns") or {}
-            excel_tables.append({
+                sheet_item = str(td_item["excel"].get("sheet") or "")
+            if not sheet_item and isinstance(bm_item.get("citation"), dict):
+                sheet_item = str(bm_item["citation"].get("sheet_name") or "")
+            entry = {
                 "source": doc_item.get("source", ""),
                 "excel_table_id": tbl_id,
                 "columns": cols_item,
-            })
+            }
+            if sheet_item:
+                entry["sheet_name"] = sheet_item
+            excel_tables.append(entry)
         if excel_tables:
             retrieval_quality["excel_tables_available"] = excel_tables
 
-        return {
-            "status": "success",
+        status = "success"
+        if not docs:
+            status = "no_results"
+            if retrieval_errors:
+                status = "retrieval_unavailable"
+        result = {
+            "status": status,
             "query": clean_query,
             "normalized_query": search_query,
             "total_found": primary_count,
             "documents": docs[:primary_count],
             "related_documents": docs[primary_count:],
             "sources": sorted(list(sources)),
-            "citations": citations[:primary_count],
+            "citations": citations[:primary_count] + [
+                item for item in citations[primary_count:]
+                if "graph_link" in item or str(item.get("chunk_id") or "").endswith(":summary")
+            ],
             "latency_ms": latency_ms,
             "retrieval_quality": retrieval_quality,
         }
+        if include_candidates:
+            result["candidate_documents"] = [item.get("chunk", item) for item in candidates]
+        return result
 
     @staticmethod
     def _next_offset(offset, count, total):

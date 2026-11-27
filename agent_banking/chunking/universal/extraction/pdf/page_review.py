@@ -13,8 +13,13 @@ from agent_banking.chunking.config.prompt_config import (
     PDF_SCHEMA_VERSION,
 )
 from agent_banking.chunking.config.settings import get_config_section, get_rules
+from agent_banking.core.numeric_tokens import extract_canonical_numeric_tokens
+from agent_banking.core.search_text import search_key
 from agent_banking.tracing.tracer import annotate_span, trace_stage
-from .layout import has_meaningful_layout, merge_region_observation, normalize_visual_layout, reading_order, validate_page, validate_scan_pixels
+from .layout import (
+    has_meaningful_layout, layout_text, merge_region_observation, normalize_visual_layout, reading_order,
+    validate_page, validate_scan_pixels,
+)
 from .tables import table_from_html, validate_table
 
 _PDF_CFG = get_config_section("extraction")["pdf"]
@@ -31,6 +36,19 @@ _CROP_PAD_RATIO = _PDF_CFG["crop_pad_ratio"]
 
 class CloudOCRUnavailable(ValueError):
     """No usable cloud transcription was returned for this page."""
+
+
+def _retains_partial_evidence(previous, candidate):
+    if candidate["visual_review"]["incomplete"]:
+        return False
+    old_text, new_text = layout_text(previous), layout_text(candidate)
+    old_terms = set(search_key(old_text).split())
+    new_terms = set(search_key(new_text).split())
+    old_tables = sum(element["type"] == "table" for element in previous["elements"])
+    new_tables = sum(element["type"] == "table" for element in candidate["elements"])
+    financial = set(extract_canonical_numeric_tokens(old_text, max_tokens=128))
+    return (new_tables >= old_tables and old_terms <= new_terms
+            and financial <= set(extract_canonical_numeric_tokens(new_text, max_tokens=128)))
 
 
 class _HTMLTextExtractor(HTMLParser):
@@ -92,7 +110,7 @@ class PdfVisualReviewer:
 
     @trace_stage("document.vision")
     def read(self, pixels, native, width, height, region_depth=0, *, allow_ocr_additions=False, attempt_budget=None,
-             review_incomplete=False):
+             review_incomplete=False, prefer_halves=False):
         from ...models.text_client import CloudAttempts
         from ...models.vision_client import DocumentVisionClient, QwenVisionClient, VisionPageOverflow
         from agent_banking.core.fallback import ModelFallbackError
@@ -120,6 +138,8 @@ class PdfVisualReviewer:
         key = base_key
         if review_incomplete:
             identity["review_incomplete"] = True
+            if prefer_halves:
+                identity["prefer_halves"] = True
             key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
         for cache_key in dict.fromkeys((key, base_key)):
             cached = self.cache.get(cache_key)
@@ -143,8 +163,11 @@ class PdfVisualReviewer:
         can_crop = False
         partial = None
         repair = False
+        reserved = 0
+        if prefer_halves and review_incomplete and region_depth == 0 and initial_budget >= 3 and region_depth < _MAX_CROP_DEPTH:
+            reserved = 2
         for index, client in enumerate(clients):
-            allowance = attempt_budget.remaining
+            allowance = max(0, attempt_budget.remaining - reserved)
             if isinstance(client, QwenVisionClient):
                 allowance = min(allowance, client.max_retries + 1)
             for _ in range(allowance):
@@ -204,13 +227,21 @@ class PdfVisualReviewer:
                 evidence["scope"] = "cloud_single_reading"
                 if (_SCHEMA_ISSUES.intersection(evidence["issues"])
                         or (routed or review_incomplete) and (evidence["incomplete"] or layout["uncertainties"])):
-                    if partial is None:
+                    if partial is None or len(evidence["issues"]) < len(partial["visual_review"]["issues"]):
                         partial = layout
                     repair = True
                     if (routed or review_incomplete) and index == 0 and len(clients) > 1:
                         break
                     continue
                 return self._finish(key, layout, width, height, failures, initial_budget - attempt_budget.remaining)
+        if reserved and attempt_budget.remaining >= reserved and (partial is not None or can_crop):
+            try:
+                cropped = self._overflow_regions(pixels, width, height, region_depth, failures, attempt_budget,
+                                                 review_incomplete=True, halves=True)
+            except CloudOCRUnavailable:
+                cropped = None
+            if cropped is not None and (partial is None or _retains_partial_evidence(partial, cropped)):
+                return self._finish(key, cropped, width, height, failures, initial_budget - attempt_budget.remaining)
         if partial is not None:
             return self._finish(key, partial, width, height, failures, initial_budget - attempt_budget.remaining)
         if can_crop and attempt_budget.remaining and region_depth < _MAX_CROP_DEPTH:
@@ -226,8 +257,10 @@ class PdfVisualReviewer:
             self.cache.put(key, layout, width, height)
         return deepcopy(layout)
 
-    def _overflow_regions(self, pixels, width, height, depth, failures, attempt_budget, *, review_incomplete=False):
+    def _overflow_regions(self, pixels, width, height, depth, failures, attempt_budget, *, review_incomplete=False,
+                          halves=False):
         from PIL import Image
+        from ...models.text_client import CloudAttempts
 
         observations = []
         audit = []
@@ -235,6 +268,8 @@ class PdfVisualReviewer:
         incomplete = False
         pad_x, pad_y = max(1, width // _CROP_PAD_RATIO), max(1, height // _CROP_PAD_RATIO)
         x_bands = ((0, min(width, width // 2 + pad_x)), (max(0, width // 2 - pad_x), width))
+        if halves:
+            x_bands = ((0, width),)
         y_bands = ((0, min(height, height // 2 + pad_y)), (max(0, height // 2 - pad_y), height))
         with Image.open(io.BytesIO(pixels)) as image:
             for top, bottom in y_bands:
@@ -248,13 +283,19 @@ class PdfVisualReviewer:
                         continue
                     stream = io.BytesIO()
                     image.crop(tuple(box)).save(stream, "PNG")
+                    region_budget = attempt_budget
+                    if halves:
+                        region_budget = CloudAttempts(1)
                     try:
                         crop = self.read(stream.getvalue(), [], right - left, bottom - top, depth + 1,
-                                         attempt_budget=attempt_budget, review_incomplete=review_incomplete)
+                                         attempt_budget=region_budget, review_incomplete=review_incomplete)
                     except CloudOCRUnavailable as error:
                         entry["error"] = str(error)
                         incomplete = True
                         continue
+                    finally:
+                        if halves and not region_budget.remaining:
+                            attempt_budget.consume()
                     entry["visual_review"] = crop["visual_review"]
                     entry["children"] = crop.get("region_audit", [])
                     incomplete |= crop["visual_review"]["incomplete"]

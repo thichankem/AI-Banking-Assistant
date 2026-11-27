@@ -2,7 +2,17 @@
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
+
+_IDENT_FIRST = set("abcdefghijklmnopqrstuvwxyz")
+_IDENT_REST = set("abcdefghijklmnopqrstuvwxyz0123456789_")
+
+
+def check_identifier(value: str) -> str:
+    if not (1 <= len(value) <= 24) or value[0] not in _IDENT_FIRST or any(ch not in _IDENT_REST for ch in value[1:]):
+        raise ValueError("Invalid identifier")
+    return value
+
 
 BlockKind = Literal[
     "column",
@@ -33,7 +43,7 @@ class LayoutBlock(BaseModel):
         ]
         | None
     ) = None
-    ref: Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{0,23}$")] | None = (
+    ref: Annotated[str, Field(min_length=1, max_length=24), AfterValidator(check_identifier)] | None = (
         None
     )
     tone: Literal["plain", "card", "accent"] = "plain"
@@ -69,11 +79,10 @@ def check_layout(
             continue
         # Blocks backed by the whole artifact can refer to themselves explicitly.
         # Normalize the reference so duplicate singleton blocks are still rejected.
-        ref = (
-            None
-            if block.type not in ("input", "result") and block.ref == block.type
-            else block.ref
-        )
+        if block.type not in ("input", "result") and block.ref == block.type:
+            ref = None
+        else:
+            ref = block.ref
         key = (block.type, ref)
         if key not in allowed or key in used:
             raise ValueError("Unknown or repeated layout reference")

@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from jsonschema import Draft202012Validator
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -17,7 +18,7 @@ from pydantic import (
     model_validator,
 )
 
-from agent_banking.agent.visual_layout import LayoutBlock, check_layout
+from agent_banking.agent.visual_layout import LayoutBlock, check_identifier, check_layout
 from agent_banking.agent.visualization import Label, VisualId, safe_visualization_label
 
 SKILL_ID = "interactive-simulator"
@@ -25,7 +26,7 @@ MAX_MAGNITUDE = 100_000_000_000_000
 Number = Annotated[
     float, Field(allow_inf_nan=False, ge=-MAX_MAGNITUDE, le=MAX_MAGNITUDE)
 ]
-Identifier = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{0,23}$")]
+Identifier = Annotated[str, Field(min_length=1, max_length=24), AfterValidator(check_identifier)]
 Unit = Annotated[str, StringConstraints(strip_whitespace=True, max_length=28)]
 Assumption = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=160)
@@ -180,9 +181,12 @@ class SimulatorSelection(_Fields):
                 if any(marker in rate_unit for marker in ("%", "phần trăm", "percent")):
                     raise ValueError("Loan operations require a decimal rate")
             try:
-                args = [
-                    values[arg] if isinstance(arg, str) else arg for arg in item.args
-                ]
+                args = []
+                for arg in item.args:
+                    if isinstance(arg, str):
+                        args.append(values[arg])
+                    else:
+                        args.append(arg)
                 result = _OPERATIONS[item.op](*args)
                 if not math.isfinite(result) or abs(result) > MAX_MAGNITUDE:
                     raise ValueError("Calculation exceeds supported range")
@@ -269,14 +273,20 @@ def prepare_simulator(raw: dict, recent: list[dict], guard) -> dict | None:
             safe_visualization_label(item.label, guard)
             if item.unit:
                 safe_visualization_label(item.unit, guard)
+        if prior:
+            vis_id = prior["id"]
+            revision = prior["revision"] + 1
+        else:
+            vis_id = uuid4().hex
+            revision = 1
         return {
             "simulator_defaults": selection._default_results,
             "visualization": {
                 **selection.model_dump(exclude={"update_of"}),
                 "schema_version": 1,
                 "kind": "calculator",
-                "id": prior["id"] if prior else uuid4().hex,
-                "revision": prior["revision"] + 1 if prior else 1,
+                "id": vis_id,
+                "revision": revision,
             },
         }
     except ValueError:

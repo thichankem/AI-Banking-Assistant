@@ -405,6 +405,104 @@ class IndirectInjectionGuardrail:
                     new_rows.append(row)
             cleaned["rows"] = new_rows
 
+        if isinstance(cleaned.get("header_grid"), list):
+            new_grid = []
+            for h_row in cleaned["header_grid"]:
+                if isinstance(h_row, list):
+                    new_h_cells = []
+                    for cell in h_row:
+                        if isinstance(cell, str) and cell:
+                            res = self.scan_text(cell)
+                            if res["is_safe"] is False:
+                                infected = True
+                                threats.extend(res["threats"])
+                                new_h_cells.append(res["sanitized_text"])
+                            else:
+                                new_h_cells.append(cell)
+                        elif isinstance(cell, dict):
+                            new_cd = dict(cell)
+                            for ckey in ("text", "value"):
+                                cval = new_cd.get(ckey)
+                                if isinstance(cval, str) and cval:
+                                    res = self.scan_text(cval)
+                                    if res["is_safe"] is False:
+                                        infected = True
+                                        threats.extend(res["threats"])
+                                        new_cd[ckey] = res["sanitized_text"]
+                            new_h_cells.append(new_cd)
+                        else:
+                            new_h_cells.append(cell)
+                    new_grid.append(new_h_cells)
+                else:
+                    new_grid.append(h_row)
+            cleaned["header_grid"] = new_grid
+
+        if isinstance(cleaned.get("excel"), dict):
+            new_excel = dict(cleaned["excel"])
+            sheet_val = new_excel.get("sheet")
+            if isinstance(sheet_val, str) and sheet_val:
+                res = self.scan_text(sheet_val)
+                if res["is_safe"] is False:
+                    infected = True
+                    threats.extend(res["threats"])
+                    new_excel["sheet"] = res["sanitized_text"]
+            if isinstance(new_excel.get("columns"), dict):
+                new_cols = dict(new_excel["columns"])
+                for ck, cv in new_cols.items():
+                    if isinstance(cv, str) and cv:
+                        res = self.scan_text(cv)
+                        if res["is_safe"] is False:
+                            infected = True
+                            threats.extend(res["threats"])
+                            new_cols[ck] = res["sanitized_text"]
+                new_excel["columns"] = new_cols
+            if isinstance(new_excel.get("notes"), list):
+                new_notes = []
+                for note_item in new_excel["notes"]:
+                    if isinstance(note_item, str) and note_item:
+                        res = self.scan_text(note_item)
+                        if res["is_safe"] is False:
+                            infected = True
+                            threats.extend(res["threats"])
+                            new_notes.append(res["sanitized_text"])
+                        else:
+                            new_notes.append(note_item)
+                    else:
+                        new_notes.append(note_item)
+                new_excel["notes"] = new_notes
+            if isinstance(new_excel.get("rows"), list):
+                new_xrows = []
+                for erow in new_excel["rows"]:
+                    if not isinstance(erow, dict):
+                        new_xrows.append(erow)
+                        continue
+                    new_erow = dict(erow)
+                    vals = new_erow.get("values")
+                    if isinstance(vals, dict):
+                        new_vals = dict(vals)
+                        for vk, cell_obj in new_vals.items():
+                            if isinstance(cell_obj, dict):
+                                new_cell_obj = dict(cell_obj)
+                                for ck in ("text", "value"):
+                                    c_raw = new_cell_obj.get(ck)
+                                    if isinstance(c_raw, str) and c_raw:
+                                        res = self.scan_text(c_raw)
+                                        if res["is_safe"] is False:
+                                            infected = True
+                                            threats.extend(res["threats"])
+                                            new_cell_obj[ck] = res["sanitized_text"]
+                                new_vals[vk] = new_cell_obj
+                            elif isinstance(cell_obj, str) and cell_obj:
+                                res = self.scan_text(cell_obj)
+                                if res["is_safe"] is False:
+                                    infected = True
+                                    threats.extend(res["threats"])
+                                    new_vals[vk] = res["sanitized_text"]
+                        new_erow["values"] = new_vals
+                    new_xrows.append(new_erow)
+                new_excel["rows"] = new_xrows
+            cleaned["excel"] = new_excel
+
         return threats, cleaned, infected
 
     def _scan_and_sanitize_images(self, images):

@@ -150,6 +150,8 @@ def _validate_document(output, chunks, artifact, source, digest, fingerprint):
                 or metadata.get("document_version") != digest or metadata.get("pipeline_fingerprint") != fingerprint
                 or chunk["parent_id"] not in artifact["parents"]):
             raise ValueError("Chunk identity, parent or pipeline fingerprint does not match the document")
+        if metadata.get("policy_revision") != document.get("policy_revision"):
+            raise ValueError("Chunk policy revision does not match the document")
     for asset in document["assets"].values():
         for path_key, hash_key in ASSET_REFERENCES:
             if path_key == "visual_path" and not asset.get(path_key):
@@ -169,6 +171,8 @@ def _read_cached(output, record, source, digest, fingerprint):
         chunks = read_verified_json(chunk_path, record["output_sha256"])
         artifact = read_verified_json(artifact_path, record["artifact_sha256"])
         _validate_document(output, chunks, artifact, source, digest, fingerprint)
+        if record.get("policy_revision") != artifact["document"].get("policy_revision"):
+            return None
         if type(record.get("chunk_count")) is not int or len(chunks) != record["chunk_count"]:
             return None
         return chunks, artifact
@@ -183,10 +187,13 @@ def _publish_document_files(output, chunks, artifact, digest, fingerprint):
     artifact_file = Path("artifacts") / (prefix + "_" + content_hash(artifact)[:n] + ".json")
     for path, value in ((chunk_file, chunks), (artifact_file, artifact)):
         atomic_json(_publication_path(output, path, path.parent.name), value)
-    return {"input_sha256": digest, "pipeline_fingerprint": fingerprint,
-            "output_file": chunk_file.as_posix(), "artifact_file": artifact_file.as_posix(),
-            "output_sha256": file_hash(output / chunk_file),
-            "artifact_sha256": file_hash(output / artifact_file), "chunk_count": len(chunks)}
+    record = {"input_sha256": digest, "pipeline_fingerprint": fingerprint,
+              "output_file": chunk_file.as_posix(), "artifact_file": artifact_file.as_posix(),
+              "output_sha256": file_hash(output / chunk_file),
+              "artifact_sha256": file_hash(output / artifact_file), "chunk_count": len(chunks)}
+    if "policy_revision" in artifact["document"]:
+        record["policy_revision"] = artifact["document"]["policy_revision"]
+    return record
 
 
 def publish_snapshot(output, chunks, manifest, aliases):
