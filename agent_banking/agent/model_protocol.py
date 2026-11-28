@@ -246,6 +246,77 @@ def pack_context(data: dict, budget: int, *, keep_evidence=False) -> str:
     return result
 
 
+def _repair_minor_json(text: str) -> str:
+    """Repair unescaped interior double quotes and trailing commas in JSON objects/arrays without regex."""
+    n = len(text)
+    escaped_chars = []
+    in_str = False
+    escape = False
+    ws = (" ", "\t", "\r", "\n")
+    for idx, ch in enumerate(text):
+        if not in_str:
+            if ch == '"':
+                in_str = True
+            escaped_chars.append(ch)
+            continue
+        if escape:
+            escaped_chars.append(ch)
+            escape = False
+            continue
+        if ch == "\\":
+            escaped_chars.append(ch)
+            escape = True
+            continue
+        if ch == '"':
+            j = idx + 1
+            while j < n and text[j] in ws:
+                j += 1
+            is_closing = False
+            if j >= n or text[j] in ("}", "]", ":"):
+                is_closing = True
+            elif text[j] == ",":
+                k = j + 1
+                while k < n and text[k] in ws:
+                    k += 1
+                if k >= n or text[k] in ('"', "{", "[", "}", "]") or text[k].isdigit() or text[k] == "-":
+                    is_closing = True
+            if is_closing:
+                in_str = False
+                escaped_chars.append(ch)
+            else:
+                escaped_chars.append('\\"')
+            continue
+        escaped_chars.append(ch)
+
+    stage1 = "".join(escaped_chars)
+    out = []
+    in_str = False
+    escape = False
+    m = len(stage1)
+    for idx, ch in enumerate(stage1):
+        if in_str:
+            out.append(ch)
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+            out.append(ch)
+            continue
+        if ch == ",":
+            j = idx + 1
+            while j < m and stage1[j] in ws:
+                j += 1
+            if j < m and stage1[j] in ("}", "]"):
+                continue
+        out.append(ch)
+    return "".join(out)
+
+
 def _parse(text: str) -> dict:
     text = text.strip()
     while "</think>" in text:
@@ -293,27 +364,42 @@ def _parse(text: str) -> dict:
                 candidates.append(text[first_brace : last_brace + 1])
 
     last_error = None
+    non_empty = []
     for cand in candidates:
         cand = cand.strip()
-        if not cand:
-            continue
+        if cand:
+            non_empty.append(cand)
+
+    def _try_load(cand_str: str) -> dict:
+        result = json.loads(
+            cand_str,
+            strict=False,
+            parse_constant=reject_constant,
+            parse_float=finite_float,
+            object_pairs_hook=distinct_keys
+        )
+        if not isinstance(result, dict):
+            raise ValueError("Expected a JSON object")
+        if result.get("kind") == "final":
+            ans_text = str(result.get("answer") or "").strip()
+            if not ans_text or not any(ch.isalnum() for ch in ans_text):
+                raise ValueError("Final answer must contain readable text")
+        return result
+
+    for cand in non_empty:
         try:
-            result = json.loads(
-                cand,
-                strict=False,
-                parse_constant=reject_constant,
-                parse_float=finite_float,
-                object_pairs_hook=distinct_keys
-            )
-            if not isinstance(result, dict):
-                raise ValueError("Expected a JSON object")
-            if result.get("kind") == "final":
-                ans_text = str(result.get("answer") or "").strip()
-                if not ans_text or not any(ch.isalnum() for ch in ans_text):
-                    raise ValueError("Final answer must contain readable text")
-            return result
+            return _try_load(cand)
         except (json.JSONDecodeError, ValueError) as err:
             last_error = err
+
+    for cand in non_empty:
+        repaired = _repair_minor_json(cand)
+        if repaired == cand:
+            continue
+        try:
+            return _try_load(repaired)
+        except (json.JSONDecodeError, ValueError):
+            pass
 
     if last_error is not None:
         raise last_error
@@ -328,7 +414,7 @@ class StructuredModel:
         self.context_bytes = int(os.getenv("AGENT_CONTEXT_BYTES", str(_CONTEXT_BYTES_DEFAULT)))
 
     def request(self, system: str, data: dict, schemas: list[dict], max_tokens=None, *, concise=False,
-                role="agent", deep_reason=None) -> dict:
+                role="agent", deep_reason=None, normalize=None) -> dict:
         if max_tokens is None:
             max_tokens = _DEFAULT_REQUEST_MAX_TOKENS
         validators = [Draft202012Validator(schema) for schema in schemas]
@@ -359,6 +445,10 @@ class StructuredModel:
                     ][:MAX_FOLLOW_UP_QUESTIONS]
             if any(schema is REVIEW_SCHEMA or schema is ARTIFACT_REVIEW_SCHEMA for schema in schemas):
                 result = _normalize_review(result)
+            if normalize is not None:
+                normalized = normalize(result)
+                if isinstance(normalized, dict):
+                    result = normalized
             if not any(validator.is_valid(result) for validator in validators):
                 issues = []
                 for validator in validators:

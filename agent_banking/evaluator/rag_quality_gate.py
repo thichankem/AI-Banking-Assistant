@@ -20,6 +20,7 @@ import time
 
 import openpyxl
 
+from agent_banking.chunking.universal.enrichment.contextual_enricher import strip_ui_noise_for_context
 from agent_banking.core.search_text import search_key
 from agent_banking.core.numeric_tokens import extract_canonical_numeric_tokens
 from agent_banking.core.settings import Config
@@ -110,6 +111,90 @@ def _anchor_hits(case, documents):
             if quote and f" {quote} " in f" {text} " or not quote and section and section in heading:
                 located = True
                 break
+        hits.append(located)
+    return hits
+
+
+_GROUND_STOPWORDS = frozenset({
+    "cua", "cho", "trong", "theo", "va", "hay", "hoac", "nhu", "the", "nao",
+    "cac", "nhung", "mot", "duoc", "khong", "khi", "sau", "truoc", "tai",
+    "ve", "tu", "den", "la", "gi", "co", "voi", "tren", "duoi", "nay", "do",
+    "ngan", "hang", "abank", "a", "bank", "lpbank",
+})
+
+
+def _split_ellipsis_segments(raw_quote: str) -> list:
+    normalized = str(raw_quote or "").replace("…", "...")
+    parts = normalized.split("...")
+    segments = []
+    for part in parts:
+        seg_key = search_key(part)
+        if seg_key:
+            segments.append(seg_key)
+    return segments
+
+
+def _grounded_anchor_hits(case, documents):
+    hits = []
+    for anchor in case.get("evidence", ()):
+        source = anchor.get("source_path", "")
+        raw_quote = str(anchor.get("verbatim_quote") or anchor.get("quote") or "")
+        quote = search_key(raw_quote)
+        section = search_key(str(anchor.get("section") or ""))
+        if not source or not (quote or section) or _expects_absent_evidence(anchor):
+            continue
+        code = _source_code_key(source)
+        target_docs = []
+        for document in documents:
+            if _matches_target(document.get("source", ""), {_source_stem(source)}, {code}):
+                target_docs.append(document)
+        if not target_docs:
+            hits.append(False)
+            continue
+
+        located = False
+        per_doc_texts = []
+        all_tokens = set()
+        for document in target_docs:
+            raw_content = str(document.get("content", "") or "")
+            raw_parent = str(document.get("parent_content", "") or "")
+            clean_content = strip_ui_noise_for_context(raw_content)
+            text_raw = search_key(raw_content + " " + raw_parent)
+            text_clean = search_key(clean_content + " " + raw_parent)
+            heading = search_key(str(document.get("section_title", "") or "") + " " + str(document.get("breadcrumb", "") or ""))
+            per_doc_texts.append((text_raw, text_clean, heading))
+            all_tokens.update(text_raw.split())
+            all_tokens.update(text_clean.split())
+            all_tokens.update(heading.split())
+            if quote and (f" {quote} " in f" {text_raw} " or f" {quote} " in f" {text_clean} "):
+                located = True
+                break
+            if not quote and section and section in heading:
+                located = True
+                break
+
+        if not located and quote:
+            segments = _split_ellipsis_segments(raw_quote)
+            substantive = [seg for seg in segments if len(seg) >= 4]
+            if substantive:
+                combined_raw = " " + " ".join(t[0] for t in per_doc_texts) + " "
+                combined_clean = " " + " ".join(t[1] for t in per_doc_texts) + " "
+                if all((f" {seg} " in combined_raw or f" {seg} " in combined_clean) for seg in substantive):
+                    located = True
+            if not located:
+                q_tokens = []
+                for tok in quote.split():
+                    if (len(tok) >= 2 or tok.isdigit()) and tok not in _GROUND_STOPWORDS:
+                        if tok not in q_tokens:
+                            q_tokens.append(tok)
+                if q_tokens:
+                    matched_toks = 0
+                    for tok in q_tokens:
+                        if tok in all_tokens:
+                            matched_toks += 1
+                    if (matched_toks / len(q_tokens)) >= 0.80:
+                        located = True
+
         hits.append(located)
     return hits
 
@@ -211,6 +296,23 @@ def main():
         absent_evidence_cases = []
         latencies_785 = []
 
+        corpus_docs = getattr(pipeline.vector_store, "_bm25_corpus", ())
+        corpus_numbers_by_target = {}
+        for c_doc in corpus_docs:
+            if not isinstance(c_doc, dict):
+                continue
+            c_meta = c_doc.get("business_metadata") or {}
+            if not c_meta.get("excel_table_id"):
+                continue
+            c_src = str(c_doc.get("source") or "")
+            c_code = _source_code_key(c_src)
+            c_stem = _source_stem(c_src)
+            c_nums = set(extract_canonical_numeric_tokens(str(c_doc.get("content") or "")))
+            if c_code:
+                corpus_numbers_by_target.setdefault(c_code, set()).update(c_nums)
+            if c_stem:
+                corpus_numbers_by_target.setdefault(c_stem, set()).update(c_nums)
+
         def _eval_785(case):
             exp_names, exp_codes = _extract_expected_targets(case)
             t0 = time.perf_counter()
@@ -219,7 +321,9 @@ def main():
             top = res.get("documents", [])
             top_sources = [d.get("source", "") for d in top]
             pool_sources = [d.get("source", "") for d in res.get("candidate_documents", [])[:45]]
-            anchors = _anchor_hits(case, [*top, *res.get("related_documents", [])])
+            combined_docs = [*top, *res.get("related_documents", [])]
+            anchors = _anchor_hits(case, combined_docs)
+            grounded_anchors = _grounded_anchor_hits(case, combined_docs)
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
             hit1 = bool(top_sources and _matches_target(top_sources[0], exp_names, exp_codes))
             hit5 = any(_matches_target(s, exp_names, exp_codes) for s in top_sources[:5])
@@ -232,6 +336,7 @@ def main():
                 "hit45": hit45,
                 "anchor_count": len(anchors),
                 "anchor_hits": sum(anchors),
+                "grounded_anchor_hits": sum(grounded_anchors),
                 "absent_evidence_count": sum(_expects_absent_evidence(anchor) for anchor in case.get("evidence", [])),
                 "ms": elapsed_ms,
                 "question": q[:100],
@@ -243,11 +348,15 @@ def main():
             for rec in [f.result() for f in as_completed([pool.submit(_eval_785, c) for c in cases_785])]:
                 grp = rec["group"]
                 if grp not in group_stats:
-                    group_stats[grp] = {"n": 0, "hit1": 0, "hit5": 0, "hit45": 0, "anchor_count": 0, "anchor_hits": 0}
+                    group_stats[grp] = {
+                        "n": 0, "hit1": 0, "hit5": 0, "hit45": 0,
+                        "anchor_count": 0, "anchor_hits": 0, "grounded_anchor_hits": 0,
+                    }
                 gs = group_stats[grp]
                 gs["n"] += 1
                 gs["anchor_count"] += rec["anchor_count"]
                 gs["anchor_hits"] += rec["anchor_hits"]
+                gs["grounded_anchor_hits"] += rec["grounded_anchor_hits"]
                 if rec["hit1"]:
                     gs["hit1"] += 1
                 if rec["hit5"]:
@@ -259,7 +368,10 @@ def main():
                 if not rec["hit5"] and rec["hit45"]:
                     misses_785.append(rec)
                 if rec["anchor_hits"] < rec["anchor_count"]:
-                    evidence_misses.append({key: rec[key] for key in ("id", "group", "anchor_hits", "anchor_count", "expected")})
+                    evidence_misses.append({
+                        key: rec[key]
+                        for key in ("id", "group", "anchor_hits", "grounded_anchor_hits", "anchor_count", "expected")
+                    })
                 if rec["absent_evidence_count"]:
                     absent_evidence_cases.append({key: rec[key] for key in ("id", "group", "absent_evidence_count", "expected")})
                 latencies_785.append(rec["ms"])
@@ -269,6 +381,8 @@ def main():
         excel_table_hits = 0
         excel_numeric_cases = 0
         excel_numeric_hits = 0
+        excel_source_numeric_cases = 0
+        excel_source_numeric_hits = 0
         excel_misses = []
         excel_evidence_misses = []
 
@@ -300,9 +414,14 @@ def main():
             for document in tables:
                 returned_numbers.update(extract_canonical_numeric_tokens(document["content"]))
             missing_numbers = expected_numbers - returned_numbers
+            corpus_target_nums = set()
+            for key_t in (*exp_codes, *exp_names):
+                corpus_target_nums.update(corpus_numbers_by_target.get(key_t, ()))
+            source_expected_numbers = expected_numbers & corpus_target_nums
             question_numbers = set(extract_canonical_numeric_tokens(q))
             reference = case["reference_answer"]
             alternate_codes = _reference_fee_codes(reference) - exp_codes
+            returned_top3 = [_source_stem(d.get("source", ""))[:35] for d in result.get("documents", [])[:3]]
             return {
                 "id": case["id"],
                 "doc_code": case["doc_code"],
@@ -311,12 +430,15 @@ def main():
                 "table_hit": bool(tables),
                 "numeric_checked": bool(expected_numbers),
                 "numeric_hit": bool(expected_numbers) and expected_numbers <= returned_numbers,
+                "source_numeric_checked": bool(source_expected_numbers),
+                "source_numeric_hit": bool(source_expected_numbers) and source_expected_numbers <= returned_numbers,
                 "missing_reference_numbers": sorted(missing_numbers),
                 "missing_numbers_given_in_question": sorted(missing_numbers & question_numbers),
                 "alternate_fee_codes_in_reference": sorted(alternate_codes),
                 "reference_contains_formula": "=" in reference and any(op in reference for op in ("*", "×")),
                 "question": q[:100],
                 "top3": [_source_stem(s)[:35] for s in pool_sources[:3]],
+                "returned_top3": returned_top3,
             }
 
         with ThreadPoolExecutor(max_workers=args.workers) as pool:
@@ -324,6 +446,8 @@ def main():
                 excel_table_hits += rec["table_hit"]
                 excel_numeric_cases += rec["numeric_checked"]
                 excel_numeric_hits += rec["numeric_hit"]
+                excel_source_numeric_cases += rec["source_numeric_checked"]
+                excel_source_numeric_hits += rec["source_numeric_hit"]
                 if rec["hit45"]:
                     excel_hit45 += 1
                 else:
@@ -349,6 +473,8 @@ def main():
                 "citable_table_hits": excel_table_hits,
                 "numeric_reference_cases": excel_numeric_cases,
                 "numeric_reference_hits": excel_numeric_hits,
+                "source_numeric_cases": excel_source_numeric_cases,
+                "source_numeric_hits": excel_source_numeric_hits,
                 "misses": sorted(excel_misses, key=lambda x: x["id"]),
                 "evidence_misses": sorted(excel_evidence_misses, key=lambda x: x["id"]),
             },
@@ -367,11 +493,13 @@ def main():
                 f" | Hit@5={gs['hit5']}/{gs['n']} ({100*gs['hit5']/n:.1f}%)"
                 f" | Hit@45={gs['hit45']}/{gs['n']} ({100*gs['hit45']/n:.1f}%)"
                 f" | Evidence anchors={gs['anchor_hits']}/{gs['anchor_count']}"
+                f" (grounded={gs['grounded_anchor_hits']}/{gs['anchor_count']})"
             )
         print(
             f"  EXCEL-350: Hit@45={excel_hit45}/{len(excel_cases)} "
             f"({report['excel_350']['hit45_pct']}%) | tables={excel_table_hits}/{len(excel_cases)} "
-            f"| reference figures={excel_numeric_hits}/{excel_numeric_cases}"
+            f"| reference figures={excel_numeric_hits}/{excel_numeric_cases} "
+            f"(source_figures={excel_source_numeric_hits}/{excel_source_numeric_cases})"
         )
         for m in sorted(misses_785, key=lambda x: x["id"])[:10]:
             print("  785 MISS:", m["id"], m["group"], m["expected"], "->", m["top3"])

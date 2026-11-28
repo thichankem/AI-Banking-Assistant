@@ -19,7 +19,8 @@ from agent_banking.core.document_revisions import archive_document
 from agent_banking.core.policy_dates import extract_policy_dates, policy_query_date
 from agent_banking.core.search_text import search_key
 from agent_banking.evaluator.policy_retrieval_check import _chunk, _search, knowledge
-from agent_banking.evaluator.rag_quality_gate import _anchor_hits, _expects_absent_evidence
+from agent_banking.evaluator.rag_quality_gate import _anchor_hits, _expects_absent_evidence, _grounded_anchor_hits
+from agent_banking.reranking.rag_reranker import BankingReranker
 from agent_banking.retrieval.hybrid_retriever import HybridRetriever, RetrievalUnavailable
 from agent_banking.retrieval.policy_graph import replace_links
 from agent_banking.retrieval.policy_versions import PolicyVersions
@@ -353,3 +354,188 @@ def test_source_endpoint_checks_scope_identity_and_serves_the_cited_version(tmp_
                               headers=headers).status_code == 404
     finally:
         store.close()
+
+
+def test_reranker_deprioritizes_and_deduplicates_khdn_sheets_on_individual_fee_queries(monkeypatch):
+    import json as _json
+
+    fake_cand = SimpleNamespace(name="primary", model="test-model", url="http://mock/rerank", api_key="test-key", timeout=5)
+    reranker = BankingReranker(model_name=fake_cand.model, api_key=fake_cand.api_key, rerank_url=fake_cand.url)
+    monkeypatch.setattr("agent_banking.reranking.rag_reranker.get_model_chain", lambda *args, **kwargs: [fake_cand])
+    monkeypatch.setattr("agent_banking.reranking.rag_reranker.run_fallback", lambda task, chain, call: call(chain[0]))
+
+    shared_khdn_text = "| 4.1 | Chuyển khoản cùng hệ thống ABank | Miễn phí |"
+    candidates = [
+        {"chunk": {
+            "chunk_id": f"khdn-{idx}",
+            "source": f"8. Biểu phí dịch vụ/{code} Biểu phí.xlsx",
+            "chunk_type": "table",
+            "content": shared_khdn_text,
+            "business_metadata": {"domain": "bieu_phi_dich_vu", "citation": {"sheet_name": "Bieu phi KHDN"}},
+        }}
+        for idx, code in enumerate(("BP 02", "BP 04", "BP 06"))
+    ] + [
+        {"chunk": {
+            "chunk_id": "bp04-tk",
+            "source": "8. Biểu phí dịch vụ/BP 04 Biểu phí giao dịch tiền gửi tiết kiệm.xlsx",
+            "chunk_type": "table",
+            "content": "| a | Rút VND | RUTTK020CN | 0,02% | 15.000đ | 500.000đ |",
+            "business_metadata": {"domain": "bieu_phi_dich_vu", "citation": {"sheet_name": "Phi GD Tiet kiem"}},
+        }},
+    ]
+
+    class FakeResp:
+        status = 200
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self):
+            payload = {"results": [{"index": i, "relevance_score": 0.92} for i in range(len(candidates))]}
+            return _json.dumps(payload).encode("utf-8")
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *args, **kwargs: FakeResp())
+    ranked = reranker.rerank("Phí rút tiền gửi tiết kiệm bằng VND là bao nhiêu?", candidates, top_k=5)
+    assert ranked[0]["chunk"]["chunk_id"] == "bp04-tk"
+    khdn_count = sum(
+        1 for item in ranked
+        if (item["chunk"].get("business_metadata") or {}).get("citation", {}).get("sheet_name") == "Bieu phi KHDN"
+    )
+    assert khdn_count <= 1
+
+
+def test_reranker_prefers_khdn_sheet_on_corporate_queries():
+    khdn_chunk = {
+        "source": "8. Biểu phí dịch vụ/BP 01 Biểu phí giao dịch tài khoản VND.xlsx",
+        "chunk_type": "table",
+        "content": "| 4.1 | Chuyển khoản doanh nghiệp | Miễn phí |",
+        "business_metadata": {"domain": "bieu_phi_dich_vu", "citation": {"sheet_name": "Bieu phi KHDN"}},
+    }
+    khcn_chunk = {
+        "source": "8. Biểu phí dịch vụ/BP 01 Biểu phí giao dịch tài khoản VND.xlsx",
+        "chunk_type": "table",
+        "content": "| 4.1 | Chuyển khoản cá nhân | Miễn phí |",
+        "business_metadata": {"domain": "bieu_phi_dich_vu", "citation": {"sheet_name": "TK VND"}},
+    }
+    corp_query = "Biểu phí chuyển khoản dành cho khách hàng doanh nghiệp KHDN"
+    assert BankingReranker._metadata_score_bonus(corp_query, khdn_chunk) > (
+        BankingReranker._metadata_score_bonus(corp_query, khcn_chunk)
+    )
+
+
+def test_exact_excel_fee_evidence_matches_via_inherited_section_hierarchy():
+    chunk = _workbook_chunk("8. Biểu phí dịch vụ/BP 04 Biểu phí giao dịch tiền gửi tiết kiệm.xlsx")
+    table = chunk["table_data"]["excel"]
+    table["sheet"] = "Phi GD Tiet kiem"
+    chunk["business_metadata"]["citation"] = {"sheet_name": "Phi GD Tiet kiem"}
+    table["columns"] = {"A": "STT", "B": "Khoản mục", "C": "Mã phí", "D": "Mức phí", "E": "Phí tối đa"}
+    table["rows"] = [
+        {"row": 12, "range": "A12:E12", "values": {
+            "A": {"type": "text", "text": "III", "value": "III"},
+            "B": {"type": "text", "text": "RÚT TIỀN GỬI TIẾT KIỆM", "value": "RÚT TIỀN GỬI TIẾT KIỆM"},
+        }},
+        {"row": 14, "range": "A14:E14", "values": {
+            "A": {"type": "text", "text": "2", "value": "2"},
+            "B": {"type": "text", "text": "Khác tỉnh/thành phố nơi mở sổ tiết kiệm", "value": "Khác tỉnh/thành phố nơi mở sổ tiết kiệm"},
+        }},
+        {"row": 16, "range": "A16:E16", "values": {
+            "A": {"type": "text", "text": "a", "value": "a"},
+            "B": {"type": "text", "text": "Rút VND", "value": "Rút VND", "origin": "B16"},
+            "C": {"type": "text", "text": "RUTTK020CN", "value": "RUTTK020CN"},
+            "D": {"type": "percent", "text": "0,02%", "value": "0.0002", "origin": "D16"},
+            "E": {"type": "currency", "text": "500.000đ", "value": "500000", "origin": "E16"},
+        }},
+    ]
+    day = date(2025, 8, 1)
+    policy = PolicyVersions([chunk], "pilot", day, day)
+    query = f" {search_key('Rút tiền gửi tiết kiệm khác tỉnh bằng VND thì phí tối đa là bao nhiêu?')} "
+    matched = _exact_excel_fee_evidence([chunk], query, policy, policy.labels)
+    assert matched
+    assert "500.000đ" in matched[0]["chunk"]["content"]
+
+
+def test_prose_anchor_pulls_adjacent_table_and_split_table_continuations(knowledge):
+    store, _, registry = knowledge
+    prose = _chunk("BH 01.pdf", "Điều 4.1 Phí ban đầu áp dụng theo tỷ lệ bên dưới.", "fees", "v1", "2024-01-01")
+    prose["chunk_id"] = "bh1-prose"
+    prose["next_chunk_id"] = "bh1-tbl-1"
+    tbl1 = _chunk("BH 01.pdf", "| Năm 1 | 50% |", "fees", "v1", "2024-01-01", vector=[0.1, 0.99])
+    tbl1["chunk_id"] = "bh1-tbl-1"
+    tbl1["section_title"] = "Bảng tỷ lệ"
+    tbl1["chunk_type"] = "table"
+    tbl1["table_data"] = {"table_id": "t-fee-1", "row_start": 0, "row_end": 1}
+    tbl1["prev_chunk_id"] = "bh1-prose"
+    tbl1["next_chunk_id"] = "bh1-tbl-2"
+    tbl2 = _chunk("BH 01.pdf", "| Năm 2 | 30% |", "fees", "v1", "2024-01-01", vector=[0.1, 0.99])
+    tbl2["chunk_id"] = "bh1-tbl-2"
+    tbl2["section_title"] = "Bảng tỷ lệ"
+    tbl2["chunk_type"] = "table"
+    tbl2["table_data"] = {"table_id": "t-fee-1", "row_start": 2, "row_end": 3}
+    tbl2["prev_chunk_id"] = "bh1-tbl-1"
+    store.add_chunks([prose, tbl1, tbl2])
+
+    res = _search(registry, query="Điều 4.1 Phí ban đầu", top_k=1)
+    assert res["documents"][0]["chunk_id"] == "bh1-prose"
+    # With top_k >= 3, prose anchor pulls adjacent table chunk and table continuation
+    res_full = _search(registry, query="Điều 4.1 Phí ban đầu", top_k=3)
+    all_ids = {doc["chunk_id"] for doc in [*res_full["documents"], *res_full.get("related_documents", [])]}
+    assert "bh1-tbl-1" in all_ids
+    assert "bh1-tbl-2" in all_ids
+
+
+def test_quality_gate_preserves_strict_anchor_hits_and_reports_grounded_hits():
+    case = {
+        "evidence": [{
+            "source_path": "4. Hướng dẫn sử dụng app Digital/HDSD 01.pdf",
+            "section": "Hướng dẫn rút sinh lời",
+            "verbatim_quote": "Bước 1: Chọn Tài khoản ... Bước 2: Xác thực Smart OTP",
+        }]
+    }
+    docs = [
+        {
+            "source": "4. Hướng dẫn sử dụng app Digital/HDSD 01.pdf",
+            "content": "Bước 1: Chọn Tài khoản\n09:41\nA-Bank Digital\n5G 100%\nBước 2: Xác thực Smart OTP",
+            "parent_content": "",
+            "section_title": "Hướng dẫn rút sinh lời",
+            "breadcrumb": "HDSD 01 > Hướng dẫn rút sinh lời",
+        }
+    ]
+    assert _anchor_hits(case, docs) == [False]
+    assert _grounded_anchor_hits(case, docs) == [True]
+
+
+def test_reranker_flagship_insurance_tiebreaker_and_cheque_fee_cue():
+    bh01_chunk = {
+        "source": "5. Sản phẩm bảo hiểm và tín dụng/BH 01 Quy định sản phẩm bảo hiểm nhân thọ A-Life Trọn Đời.pdf",
+        "content": "2.3.1 Nghĩa vụ cung cấp thông tin của Bên mua bảo hiểm.",
+        "business_metadata": {"domain": "bao_hiem_tin_dung"},
+    }
+    bh03_chunk = {
+        "source": "5. Sản phẩm bảo hiểm và tín dụng/BH 03 Quy định sản phẩm bảo hiểm liên kết đầu tư A-Life Hưng Thịnh.pdf",
+        "content": "2.3.1 Nghĩa vụ cung cấp thông tin của Bên mua bảo hiểm.",
+        "business_metadata": {"domain": "bao_hiem_tin_dung"},
+    }
+    gen_q = "Khách hàng không kê khai bệnh lý trong Giấy yêu cầu bảo hiểm thì có được bồi thường không?"
+    assert BankingReranker._metadata_score_bonus(gen_q, bh01_chunk) > (
+        BankingReranker._metadata_score_bonus(gen_q, bh03_chunk)
+    )
+    spec_q = "Khách hàng tham gia A-Life Hưng Thịnh thì nghĩa vụ cung cấp thông tin trong hợp đồng bảo hiểm thế nào?"
+    assert BankingReranker._metadata_score_bonus(spec_q, bh03_chunk) > (
+        BankingReranker._metadata_score_bonus(spec_q, bh01_chunk)
+    )
+
+    bp05_sec = {
+        "source": "8. Biểu phí dịch vụ/BP 05 Biểu phí giao dịch séc trong nước.xlsx",
+        "chunk_type": "table",
+        "content": "| V | THU HỘ SÉC DO NGÂN HÀNG TRONG NƯỚC PHÁT HÀNH | 4.000đ/tờ |",
+        "business_metadata": {"domain": "bieu_phi_dich_vu", "citation": {"sheet_name": "PL05-SEC"}},
+    }
+    bp05_khdn = {
+        "source": "8. Biểu phí dịch vụ/BP 05 Biểu phí giao dịch séc trong nước.xlsx",
+        "chunk_type": "table",
+        "content": "| XI | SÉC |",
+        "business_metadata": {"domain": "bieu_phi_dich_vu", "citation": {"sheet_name": "Bieu phi KHDN"}},
+    }
+    assert BankingReranker._metadata_score_bonus("Phí thu hộ séc là bao nhiêu?", bp05_sec) > (
+        BankingReranker._metadata_score_bonus("Phí thu hộ séc là bao nhiêu?", bp05_khdn)
+    )

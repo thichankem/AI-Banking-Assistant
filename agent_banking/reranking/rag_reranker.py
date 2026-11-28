@@ -29,6 +29,14 @@ from agent_banking.reranking.config.models import MODELS
 from agent_banking.reranking.config.settings import RerankingConfig
 
 
+_CORPORATE_QUERY_CUES = (
+    " khdn ", " doanh nghiep ", " cong ty ", " to chuc ", " phap nhan ",
+    " xuat khau ", " nhap khau ", " nho thu ", " thu tin dung ",
+    " standby ", " bao lanh ", " chi ho luong ", " lc ", " l c ",
+    " hop dong ngoai thuong ",
+)
+
+
 class BankingReranker:
     """
     Lightweight, resilient Cross-Encoder document reranker with local fallback.
@@ -195,6 +203,36 @@ class BankingReranker:
         return str(query).strip()
 
     @staticmethod
+    def _is_corporate_query(padded_q: str) -> bool:
+        if not padded_q:
+            return False
+        for cue in _CORPORATE_QUERY_CUES:
+            if cue in padded_q:
+                return True
+        return False
+
+    @staticmethod
+    def _chunk_sheet_key(chunk) -> str:
+        from agent_banking.core.search_text import search_key
+
+        if not isinstance(chunk, dict):
+            return ""
+        meta = chunk.get("business_metadata")
+        if not isinstance(meta, dict):
+            meta = {}
+        cit = meta.get("citation")
+        sheet_name = ""
+        if isinstance(cit, dict):
+            sheet_name = str(cit.get("sheet_name") or "").strip()
+        if not sheet_name:
+            td = chunk.get("table_data")
+            if isinstance(td, dict) and isinstance(td.get("excel"), dict):
+                sheet_name = str(td["excel"].get("sheet") or "").strip()
+        if not sheet_name:
+            return ""
+        return search_key(sheet_name)
+
+    @staticmethod
     def _metadata_score_bonus(query_text, chunk):
         from agent_banking.core.search_text import search_key
 
@@ -247,7 +285,8 @@ class BankingReranker:
         title_val = chunk.get("section_title", "")
         if not isinstance(title_val, str):
             title_val = str(title_val)
-        sec_key = search_key(bc_val + " " + title_val + " " + sheet_name)
+        inherited_path = str(chunk.get("_inherited_table_path") or meta.get("table_group_path") or "")
+        sec_key = search_key(bc_val + " " + title_val + " " + sheet_name + " " + inherited_path)
 
         bonus = 0.0
         padded_q = " " + q_key + " "
@@ -358,18 +397,45 @@ class BankingReranker:
             " phi nop tien ", " phi rut tien ", " phi bao lanh ", " phi nho thu ", " phi lc ",
             " phi chuyen tien ", " phi thanh toan quoc te ", " phi sao ke ",
             " chiu khoan phi ", " chiu phi ", " thu phi ", " tinh phi ", " chi phi ",
-            " phi dich vu ", " phi giu ho ", " giu ho tai san ", " phi sec ", " phi ngan quy ",
+            " phi dich vu ", " phi giu ho ", " giu ho tai san ", " phi sec ", " sec ", " phi ngan quy ",
             " phi tai san bao dam ", " phi giai chap ", " muc phi giai chap ", " niem phong ",
             " dormant ", " khong hoat dong ",
         )
         explicit_nv_or_tier = any(m in padded_q for m in (" nv ", " goi bach kim ", " goi uu tien ", " goi thinh vuong ", " phan hang "))
+        is_bp_excel = src_path_low.endswith(".xlsx") and (
+            "8. biểu phí dịch vụ/" in src_path_low
+            or src_key.startswith("bp ")
+            or meta.get("domain") == "bieu_phi_dich_vu"
+        )
         if any(fc in padded_q for fc in fee_cues) and not explicit_nv_or_tier:
-            if src_path_low.endswith(".xlsx") and (
-                "8. biểu phí dịch vụ/" in src_path_low
-                or src_key.startswith("bp ")
-                or meta.get("domain") == "bieu_phi_dich_vu"
-            ):
+            if is_bp_excel:
                 bonus += 0.08
+        if is_bp_excel:
+            sheet_key = BankingReranker._chunk_sheet_key(chunk)
+            is_corp = BankingReranker._is_corporate_query(padded_q)
+            if sheet_key == "bieu phi khdn":
+                if is_corp:
+                    bonus += 0.05
+                else:
+                    bonus -= 0.09
+            elif sheet_key and sheet_key != "luu y su dung bieu phi":
+                if not is_corp:
+                    bonus += 0.04
+                    if distinct_overlap > 0 or bigram_src_hits > 0:
+                        bonus += 0.05
+
+        if src_key.startswith("bh 01 "):
+            general_ins_cues = (
+                " bao hiem ", " giay yeu cau bao hiem ",
+                " hop dong bao hiem ", " boi thuong ",
+            )
+            other_bh_cues = (
+                " suc khoe ", " cham soc ", " lien ket dau tu ", " hung thinh ",
+                " giao duc ", " tuong lai ", " tich luy ", " an khang ", " vung tam ",
+                " bh 02 ", " bh 03 ", " bh 04 ", " bh 05 ",
+            )
+            if any(gc in padded_q for gc in general_ins_cues) and not any(oc in padded_q for oc in other_bh_cues):
+                bonus += 0.04
 
         network_cues = (" chi nhanh ", " phong giao dich ", " atm ", " cdm ", " mang luoi ", " diem giao dich ")
         if any(nc in padded_q for nc in network_cues):
@@ -559,8 +625,9 @@ class BankingReranker:
         """Build a deduplication key that preserves distinct continuations of multi-chunk tables."""
         if not isinstance(raw_chunk, dict) or not src_id:
             return None
+        is_shared_khdn = BankingReranker._chunk_sheet_key(raw_chunk) == "bieu phi khdn"
         td = raw_chunk.get("table_data")
-        if isinstance(td, dict):
+        if isinstance(td, dict) and not is_shared_khdn:
             tbl_id = str(td.get("table_id") or "").strip()
             r_start = td.get("row_start")
             r_end = td.get("row_end")
@@ -569,6 +636,9 @@ class BankingReranker:
         raw_content = str(raw_chunk.get("content") or "").strip()
         if not raw_content:
             return None
+        if is_shared_khdn:
+            norm_khdn = " ".join(raw_content.split()).casefold()
+            return ("shared_khdn_sheet", norm_khdn[:snippet_chars], norm_khdn[-snippet_chars:])
         is_md_table = raw_chunk.get("chunk_type") == "table" or raw_content.startswith("|")
         if is_md_table:
             data_lines = []
@@ -656,18 +726,26 @@ class BankingReranker:
         selected = []
         picked_ids = set()
         src_counts = {}
+        seen_shared_keys = set()
         scan_slice = ordered[:45]
         # Pass 1: maximize unique documents first (1 chunk per distinct source across CE Top-45)
         for idx, item in enumerate(scan_slice):
             raw_c = item.get("chunk", item)
             src_id = ""
+            shared_key = None
             if isinstance(raw_c, dict):
                 src_id = str(raw_c.get("source") or "").replace("\\", "/").casefold()
+                if BankingReranker._chunk_sheet_key(raw_c) == "bieu phi khdn":
+                    shared_key = BankingReranker._build_dedup_key(raw_c, src_id, 160)
+            if shared_key is not None and shared_key in seen_shared_keys:
+                continue
             if not src_id or src_id not in src_counts:
                 selected.append(item)
                 picked_ids.add(idx)
                 if src_id:
                     src_counts[src_id] = 1
+                if shared_key is not None:
+                    seen_shared_keys.add(shared_key)
                 if len(selected) >= pool_limit:
                     return selected
         # Pass 2: fill up to max_per_source per document
@@ -676,19 +754,34 @@ class BankingReranker:
                 continue
             raw_c = item.get("chunk", item)
             src_id = ""
+            shared_key = None
             if isinstance(raw_c, dict):
                 src_id = str(raw_c.get("source") or "").replace("\\", "/").casefold()
+                if BankingReranker._chunk_sheet_key(raw_c) == "bieu phi khdn":
+                    shared_key = BankingReranker._build_dedup_key(raw_c, src_id, 160)
+            if shared_key is not None and shared_key in seen_shared_keys:
+                continue
             cnt = src_counts.get(src_id, 0)
             if not src_id or cnt < max_per_source:
                 selected.append(item)
                 picked_ids.add(idx)
                 if src_id:
                     src_counts[src_id] = cnt + 1
+                if shared_key is not None:
+                    seen_shared_keys.add(shared_key)
                 if len(selected) >= pool_limit:
                     return selected
         # Pass 3: top up from remaining candidates if pool still under limit
         for idx, item in enumerate(scan_slice):
             if idx not in picked_ids:
+                raw_c = item.get("chunk", item)
+                if isinstance(raw_c, dict) and BankingReranker._chunk_sheet_key(raw_c) == "bieu phi khdn":
+                    src_id = str(raw_c.get("source") or "").replace("\\", "/").casefold()
+                    shared_key = BankingReranker._build_dedup_key(raw_c, src_id, 160)
+                    if shared_key is not None and shared_key in seen_shared_keys:
+                        continue
+                    if shared_key is not None:
+                        seen_shared_keys.add(shared_key)
                 selected.append(item)
                 if len(selected) >= pool_limit:
                     break
@@ -724,8 +817,22 @@ class BankingReranker:
             if not body:
                 body = str(chunk.get("content") or "")
             score_val = round(float(item.get("relevance_score", 0.0)), 3)
+            cit = meta.get("citation")
+            sheet_name = ""
+            if isinstance(cit, dict):
+                sheet_name = str(cit.get("sheet_name") or "").strip()
+            if not sheet_name:
+                td_item = chunk.get("table_data")
+                if isinstance(td_item, dict) and isinstance(td_item.get("excel"), dict):
+                    sheet_name = str(td_item["excel"].get("sheet") or "").strip()
+            inherited_path = str(chunk.get("_inherited_table_path") or meta.get("table_group_path") or "").strip()
+            meta_extras = ""
+            if sheet_name:
+                meta_extras += f" | sheet={sheet_name}"
+            if inherited_path:
+                meta_extras += f" | path={inherited_path[:120]}"
             line = (
-                f"[{idx}] source={src} | domain={dom} | section={sec[:60]} | ce={score_val}\n"
+                f"[{idx}] source={src} | domain={dom}{meta_extras} | section={sec[:60]} | ce={score_val}\n"
                 f"  context: {sit[:220]}\n"
                 f"  text: {body[:460]}"
             )
@@ -736,16 +843,16 @@ class BankingReranker:
             "Ban la bo tai xep hang danh sach (Listwise Reranker) cho he thong RAG ngan hang A-Bank. "
             "Tu danh sach ung vien [0..N-1], hay chon ra toi da " + str(top_k) + " doan phu hop nhat de tra loi cau hoi. "
             "Nguyen tac: "
-            "(1) Uu tien tai lieu chuyen biet khop dung tinh nang/san pham; "
+            "(1) Uu tien tai lieu chuyen biet khop dung tinh nang/san pham; voi cau hoi bao hiem chung khong neu ten goi san pham cu the, hay bao gom ca quy dinh san pham chu luc BH 01 (neu co trong danh sach) ben canh cac tai lieu BH lien quan; "
             "(2) Khi cau hoi hoi ve thao tac, tinh nang, loi hoac xu ly su co tren ung dung A-Bank Digital / A-Bank Plus, "
             "neu trong danh sach co tai lieu huong dan app (domain=ngan_hang_so, file HDSD) phu hop voi nghiep vu/tinh nang do thi BAT BUOC chon it nhat 1-2 doan HDSD dung chu de vao top ket qua (ngay ca khi diem ce thap hon tai lieu .docx chung), ket hop voi tai lieu quy dinh/xu ly su co (NV, THE, VH, PL); "
-            "(3) Neu hoi bieu phi hoac mang luoi -> uu tien file BP/ML co con so/ma phi cu the; "
+            "(3) Neu hoi bieu phi hoac mang luoi -> uu tien file BP/ML co con so/ma phi cu the; voi cau hoi phi chung hoac ca nhan khong nhac KHDN / doanh nghiep / L/C / bao lanh, uu tien sheet san pham chinh (TK VND, TK NGOAI TE, Phi TM, Phi GD Tiet kiem, PL05-SEC, NGAN QUY, THEO YC) hon sheet Bieu phi KHDN; "
             "(4) Khong chon lap nhieu doan chung chung neu da co tai lieu chuyen biet dung trong danh sach. "
             "Tra ve DUY NHAT JSON dang {\"selected\": [i1, i2, ...]} (chi so nguyen 0.." + str(len(pool) - 1) + "), khong giai thich."
         )
         user_prompt = f"Cau hoi: {query_text}\n\nCac ung vien:\n" + "\n".join(candidate_lines)
         parsed = call_rag_llm_json(
-            namespace="rag_listwise_reranker_v3",
+            namespace="rag_listwise_reranker_v5",
             seed_key=seed_key,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -1001,7 +1108,12 @@ class BankingReranker:
                     snippet_chars = RerankingConfig.RERANK_DEDUP_SNIPPET_CHARS
                     div_min_top_k = RerankingConfig.RERANK_DIVERSITY_MIN_TOP_K
                     div_max_per_src = RerankingConfig.RERANK_DIVERSITY_MAX_PER_SOURCE
-                    if len(ordered) > top_k:
+                    has_shared_khdn = any(
+                        isinstance(it.get("chunk", it), dict)
+                        and self._chunk_sheet_key(it.get("chunk", it)) == "bieu phi khdn"
+                        for it in ordered
+                    )
+                    if len(ordered) > top_k or has_shared_khdn:
                         selected = []
                         deferred = []
                         dup_deferred = []
@@ -1016,7 +1128,8 @@ class BankingReranker:
                                 src_id = str(raw_chunk.get("source") or "").replace("\\", "/").casefold()
                                 snippet_key = self._build_dedup_key(raw_chunk, src_id, snippet_chars)
                             if snippet_key is not None and snippet_key in seen_snippets:
-                                dup_deferred.append(item)
+                                if not (isinstance(snippet_key, tuple) and snippet_key and snippet_key[0] == "shared_khdn_sheet"):
+                                    dup_deferred.append(item)
                                 continue
                             item_score = float(item.get("relevance_score", 0.0))
                             count = source_counts.get(src_id, 0)

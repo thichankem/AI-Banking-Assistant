@@ -281,6 +281,7 @@ def _format_retrieved_doc_context(doc, max_chars=None, query="") -> str:
         temporal = {}
     status = temporal.get("status")
     as_of = temporal.get("as_of")
+    requested_date = bool(temporal.get("requested_date"))
     if status == "effective":
         header_parts.append(f"Có hiệu lực ngày {as_of}")
     elif status == "reference_only":
@@ -295,13 +296,13 @@ def _format_retrieved_doc_context(doc, max_chars=None, query="") -> str:
                 header_parts.append("Chưa xác định được bản mới nhất theo mốc tải lên hoặc nhập kho")
     elif status == "conflict":
         header_parts.append(f"Chỉ tham khảo. Mốc hiệu lực mâu thuẫn khi tra ngày {as_of}")
-    elif status == "latest_available":
+    elif status == "latest_available" and requested_date:
         revision = meta.get("policy_revision") or {}
         if revision.get("uploaded_at"):
             header_parts.append(f"Bản mới nhất trong kho theo mốc tải lên {revision['uploaded_at']}. Chưa rõ ngày hiệu lực")
         else:
             header_parts.append(f"Bản mới nhất trong kho theo mốc nhập {revision.get('first_ingested_at')}. Chưa rõ ngày hiệu lực")
-    elif status == "order_unknown":
+    elif status == "order_unknown" and requested_date:
         header_parts.append("Chưa xác định được thứ tự bản trong kho và ngày hiệu lực")
     if meta.get("legal_evidence_kind") == "search_excerpt":
         header_parts.append("Đoạn trích tìm kiếm web. Cần đối chiếu điều khoản và tình trạng hiệu lực khi kết luận.")

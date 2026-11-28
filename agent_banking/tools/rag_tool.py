@@ -42,6 +42,29 @@ _FEE_TABLE_CUES = (
     " bieu phi ", " bang phi ", " muc phi ", " phi chuyen doi ",
     " phi thuong nien ", " phu luc ", " ma phi ",
 )
+_FEE_DOMAIN_TRIGGER_CUES = (
+    " bieu phi ", " muc phi ", " tinh phi ", " phi chuyen ", " phi nop ", " phi rut ",
+    " nop tien mat ", " rut tien mat ", " sec ", " sec trang ", " bao chi ", " tai quay ",
+    " chuyen tien nhanh ", " so tiet kiem ", " tien gui tiet kiem ", " ngoai te mat ",
+    " cung ung sec ", " huy lenh chuyen tien ", " xac nhan so du ",
+    " chuyen quyen so huu so ", " cap lai so tiet kiem ", " rut ngoai te ",
+    " nop ngoai te ", " phan hang ",
+)
+_SCHEDULE_TABLE_CUES = (
+    " phi ban dau ", " ty le ", " lo trinh ", " muc tran ", " han muc ",
+    " bang 1 ", " table 1 ", " khau tru ", " phan bo ", " so sanh ",
+)
+_CORPORATE_FEE_QUERY_CUES = (
+    " khdn ", " doanh nghiep ", " cong ty ", " to chuc ", " phap nhan ",
+    " xuat khau ", " nhap khau ", " nho thu ", " thu tin dung ",
+    " standby ", " bao lanh ", " chi ho luong ", " lc ", " l c ",
+    " hop dong ngoai thuong ",
+)
+_ROMAN_HIERARCHY_TOKENS = frozenset({"i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii"})
+_APP_STEP_ONLY_CUES = (
+    " cac buoc ", " huong dan su dung ", " thao tac tren app ", " tren ung dung ",
+    " quy trinh ", " nuot tien ", " nuot the ", " thoi han tra soat ", " tiep nhan tra soat ",
+)
 _DIAGRAM_CUES = (
     " hinh 1 ", " hinh 2 ", " hinh 3 ", " so do ",
     " luu do ", " chu trinh ", " lo trinh ", " thap ",
@@ -294,12 +317,73 @@ def _reserve_query_targets(candidates, ranked, seen, query):
     return chosen
 
 
+def _is_corporate_fee_query(query_key: str) -> bool:
+    for cue in _CORPORATE_FEE_QUERY_CUES:
+        if cue in query_key:
+            return True
+    return False
+
+
+def _chunk_excel_sheet_key(chunk: dict) -> str:
+    if not isinstance(chunk, dict):
+        return ""
+    meta = chunk.get("business_metadata")
+    if not isinstance(meta, dict):
+        meta = {}
+    cit = meta.get("citation")
+    sheet_name = ""
+    if isinstance(cit, dict):
+        sheet_name = str(cit.get("sheet_name") or "").strip()
+    if not sheet_name:
+        td = chunk.get("table_data")
+        if isinstance(td, dict) and isinstance(td.get("excel"), dict):
+            sheet_name = str(td["excel"].get("sheet") or "").strip()
+    if not sheet_name:
+        return ""
+    return search_key(sheet_name)
+
+
+def _excel_marker_depth(marker_raw: str):
+    marker = str(marker_raw or "").strip().lower().rstrip(".)")
+    if not marker:
+        return None
+    if marker in _ROMAN_HIERARCHY_TOKENS:
+        return 1
+    if marker.isascii() and marker.isdecimal():
+        return 2
+    if "." in marker:
+        parts = marker.split(".")
+        if all(part.isascii() and part.isdecimal() for part in parts if part):
+            return min(5, 1 + len(parts))
+    if len(marker) == 1 and "a" <= marker <= "z":
+        return 6
+    if marker_raw.strip().startswith("(") and marker_raw.strip().endswith(")") and len(marker_raw.strip()) <= 5:
+        return 7
+    return None
+
+
 def _exact_excel_fee_evidence(candidates, query_key, policy, labels):
-    """Resolve service phrases to priced workbook rows in the retrieved sources."""
-    if " phi " not in query_key or not any(
+    """Resolve service phrases, hierarchical Excel sections, sheet names, and row numbers."""
+    has_fee_trigger = " phi " in query_key and any(
         cue in query_key for cue in (*_FEE_TABLE_CUES, " bao nhieu ", " mien phi ", " tinh phi ",
                                      " mat phi ", " chiu phi ", " so sanh ")
-    ):
+    )
+    has_bp_table_cand = False
+    for item in candidates[:12]:
+        seed = item.get("chunk", item)
+        if not isinstance(seed, dict):
+            continue
+        meta_seed = seed.get("business_metadata") or {}
+        if meta_seed.get("excel_table_id") and search_key(_source_stem(str(seed.get("source") or ""))).startswith("bp "):
+            has_bp_table_cand = True
+            break
+    service_tariff_cues = (
+        " phi ", " rut tien ", " nop tien ", " chuyen khoan ", " chuyen tien ",
+        " tiet kiem ", " ngoai te ", " sec ", " bao chi ", " xac nhan so du ",
+        " cap lai so ", " phong toa ", " chuyen quyen ", " huy lenh ",
+        " hoan tra ", " thanh toan ",
+    )
+    if not has_fee_trigger and not (has_bp_table_cand and any(cue in query_key for cue in service_tariff_cues)):
         return []
     fee_query = query_key.replace(" chuyen khoan ", " chuyen tien ").replace(
         " chuyen tien lien ngan hang nhanh ", " chuyen tien nhanh lien ngan hang "
@@ -310,30 +394,167 @@ def _exact_excel_fee_evidence(candidates, query_key, policy, labels):
         "mo tai khoan", "dong tai khoan", "chuyen tien", "nop tien", "rut tien", "tra no",
     ) if f" {operation} " in fee_query}
     words = fee_query.split()
+    requested_rows = set()
+    requested_codes = []
+    for idx, tok in enumerate(words):
+        if tok in ("dong", "hang") and idx + 1 < len(words) and words[idx + 1].isdecimal():
+            requested_rows.add(int(words[idx + 1]))
+        if tok in ("bp", "ml", "gd") and idx + 1 < len(words) and words[idx + 1].isascii() and words[idx + 1].isdecimal():
+            code_num = words[idx + 1]
+            if len(code_num) == 1:
+                code_num = "0" + code_num
+            requested_codes.append(f"{tok} {code_num} ")
+    if requested_rows:
+        min_phrase_size = 2
+    else:
+        min_phrase_size = 3
     phrases = {}
-    for size in range(7, 2, -1):
+    for size in range(7, min_phrase_size - 1, -1):
         for index in range(len(words) - size + 1):
             terms = words[index:index + size]
             if terms[0] not in _PIN_STOPWORDS and sum(term not in _PIN_STOPWORDS for term in terms) >= 2:
                 phrases[" ".join(terms)] = size
-    if not phrases:
+    fee_generic_words = _PIN_STOPWORDS | {
+        "phi", "muc", "giao", "dich", "thuc", "hien", "bieu", "bang", "tien", "lai", "suat",
+        "ngan", "bao", "nhieu", "phan", "tram", "dong", "vnd",
+    }
+    query_words = {tok for tok in words if tok not in _PIN_STOPWORDS and len(tok) >= 2}
+    distinct_q_words = {tok for tok in words if tok not in fee_generic_words and (len(tok) >= 2 or tok.isdigit())}
+    if not phrases and not requested_rows and len(distinct_q_words) < 2:
         return []
-    inspected = set()
-    matches = []
+
+    is_corp = _is_corporate_fee_query(fee_query)
+    inspected_sources = []
+    if requested_codes:
+        for src in policy.chunks_by_source:
+            src_key = search_key(src) + " "
+            if any(src_key.startswith(code) for code in requested_codes) and src not in inspected_sources:
+                inspected_sources.append(src)
+                if len(inspected_sources) >= 6:
+                    break
+    if distinct_q_words and len(inspected_sources) < 6:
+        title_matched_bps = []
+        for src in policy.chunks_by_source:
+            stem_key = search_key(_source_stem(src))
+            if not stem_key.startswith("bp "):
+                continue
+            title_words = set(stem_key.split()) - fee_generic_words - {"bp"}
+            ov_count = len(distinct_q_words.intersection(title_words))
+            if ov_count > 0 and src not in inspected_sources:
+                title_matched_bps.append((ov_count, src))
+        title_matched_bps.sort(key=lambda pair: (-pair[0], pair[1]))
+        for _, src in title_matched_bps:
+            inspected_sources.append(src)
+            if len(inspected_sources) >= 6:
+                break
+    for prefer_non_khdn in (True, False):
+        if len(inspected_sources) >= 6:
+            break
+        for item in candidates:
+            seed = item.get("chunk", item)
+            if not isinstance(seed, dict):
+                continue
+            source = seed.get("source")
+            table_id = seed.get("business_metadata", {}).get("excel_table_id")
+            if not source or not table_id or source in inspected_sources:
+                continue
+            sh_key = _chunk_excel_sheet_key(seed)
+            is_khdn_sh = sh_key == "bieu phi khdn"
+            if prefer_non_khdn and not is_corp and is_khdn_sh:
+                continue
+            inspected_sources.append(source)
+            if len(inspected_sources) >= 6:
+                break
+        if len(inspected_sources) >= 6:
+            break
+
+    candidate_tables = []
+    seen_tables = set()
     for item in candidates:
         seed = item.get("chunk", item)
+        if not isinstance(seed, dict):
+            continue
         source = seed.get("source")
         table_id = seed.get("business_metadata", {}).get("excel_table_id")
-        key = (source, table_id)
-        if not source or not table_id or key in inspected:
-            continue
-        inspected.add(key)
+        if source in inspected_sources and table_id and (source, table_id) not in seen_tables:
+            seen_tables.add((source, table_id))
+            sh_key = _chunk_excel_sheet_key(seed)
+            candidate_tables.append((source, table_id, sh_key))
+    for source in inspected_sources:
+        for ch in policy.chunks_by_source.get(source, ()):
+            tid = (ch.get("business_metadata") or {}).get("excel_table_id")
+            if tid and (source, tid) not in seen_tables:
+                seen_tables.add((source, tid))
+                candidate_tables.append((source, tid, _chunk_excel_sheet_key(ch)))
+
+    def _table_sort_key(entry):
+        _, _, sh_k = entry
+        is_khdn = sh_k == "bieu phi khdn"
+        if is_corp:
+            if is_khdn:
+                return 0
+            return 1
+        if is_khdn:
+            return 2
+        if sh_k == "luu y su dung bieu phi":
+            return 3
+        return 0
+
+    candidate_tables.sort(key=_table_sort_key)
+
+    qualifiers = []
+    for qual in (
+        "usd", "eur", "vnd", "ngoai te", "khac tinh", "cung tinh", "cung noi", "khac noi",
+        "co ky han", "khong ky han", "24 7", "napas", "citad", "tai quay", "online",
+        "cung chu", "khac chu", "uy quyen", "50", "5000", "menh gia", "mat so", "cap lai",
+        "chuyen quyen", "phong toa", "cam co", "huy lenh", "tra soat",
+    ):
+        if f" {qual} " in fee_query:
+            qualifiers.append(qual)
+
+    matches = []
+    for source, table_id, _ in candidate_tables:
         chunks = [chunk for chunk in policy.chunks_by_source.get(source, ())
                   if chunk.get("business_metadata", {}).get("excel_table_id") == table_id
                   and policy.allows(chunk, labels)]
+        if not chunks:
+            continue
+        ordered_rows = []
         seen_rows = set()
         for chunk in chunks:
             data = (chunk.get("table_data") or {}).get("excel") or {}
+            for row in data.get("rows", ()):
+                row_id = row["row"]
+                if row_id in seen_rows:
+                    continue
+                seen_rows.add(row_id)
+                ordered_rows.append((row_id, chunk, data, row))
+        ordered_rows.sort(key=lambda entry: entry[0])
+
+        sec_stack = {}
+        for row_id, chunk, data, row in ordered_rows:
+            sheet_name = str(
+                (chunk.get("business_metadata") or {}).get("citation", {}).get("sheet_name")
+                or data.get("sheet")
+                or ""
+            ).strip()
+            sheet_key = search_key(sheet_name)
+            if sheet_key and f" {sheet_key} " in fee_query:
+                sheet_match = 1
+            else:
+                sheet_match = 0
+            if sheet_key == "bieu phi khdn":
+                if is_corp:
+                    sheet_pref = 1
+                else:
+                    sheet_pref = 0
+            elif sheet_key and sheet_key != "luu y su dung bieu phi":
+                if is_corp:
+                    sheet_pref = 0
+                else:
+                    sheet_pref = 1
+            else:
+                sheet_pref = 0
             columns = data.get("columns", {})
             names = [col for col, title in columns.items() if any(
                 cue in f" {search_key(title)} " for cue in (" khoan muc ", " dich vu ", " loai phi ", " ten phi ")
@@ -343,47 +564,154 @@ def _exact_excel_fee_evidence(candidates, query_key, policy, labels):
                       and " ma phi " not in f" {search_key(title)} "]
             if not names or not prices:
                 continue
-            for row in data.get("rows", ()):
-                row_id = row["row"]
-                if row_id in seen_rows:
+            if row_id in requested_rows:
+                row_match = 1
+            else:
+                row_match = 0
+            values = row["values"]
+            stt_col = ""
+            for col_k, title_v in columns.items():
+                if search_key(title_v) in ("stt", "so thu tu"):
+                    stt_col = col_k
+                    break
+            priced = False
+            for col in prices:
+                cell = values.get(col)
+                if not cell:
                     continue
-                seen_rows.add(row_id)
-                values = row["values"]
-                priced = any(
-                    cell.get("type") in {"currency", "number", "percent"}
-                    or search_key(cell.get("text", "")).startswith("mien phi")
-                    or extract_canonical_numeric_tokens(cell.get("text", ""), max_tokens=1)
-                    for col in prices if (cell := values.get(col))
-                )
-                if not priced:
+                cell_txt = cell.get("text", "")
+                if (cell.get("type") in {"currency", "number", "percent"}
+                        or search_key(cell_txt).startswith(("mien phi", "thu theo"))
+                        or extract_canonical_numeric_tokens(cell_txt, max_tokens=1)
+                        or (row_match and any(ch.isdigit() for ch in cell_txt))):
+                    priced = True
+                    break
+
+            first_name = ""
+            for col in names:
+                raw_v = str(values.get(col, {}).get("text", "") or "").strip()
+                if raw_v:
+                    first_name = raw_v.partition("\n")[0].strip()
+                    break
+            if not priced and first_name:
+                marker_raw = ""
+                if stt_col:
+                    marker_raw = str(values.get(stt_col, {}).get("text", "") or "").strip()
+                depth = _excel_marker_depth(marker_raw)
+                if depth is not None:
+                    sec_stack = {lvl: txt for lvl, txt in sec_stack.items() if lvl < depth}
+                    sec_stack[depth] = first_name
+
+            if not priced and not row_match:
+                continue
+
+            sec_path_str = " ".join(sec_stack[lvl] for lvl in sorted(sec_stack))
+            sec_key_str = (" " + search_key(sec_path_str) + " ").replace(" chuyen khoan ", " chuyen tien ")
+            src_title_key = search_key(_source_stem(source))
+            for column in names:
+                value = values.get(column, {}).get("text", "")
+                if not str(value).strip():
                     continue
-                for column in names:
-                    value = values.get(column, {}).get("text", "")
-                    label = (" " + search_key(value.partition("\n")[0]) + " ").replace(" chuyen khoan ", " chuyen tien ")
-                    service = label.strip().removeprefix("phi ") + " "
-                    if operations and not any(f" {operation} " in (" " + service) for operation in operations):
-                        continue
-                    match = max(((size, int(phrase == label.strip())) for phrase, size in phrases.items()
-                                 if f" {phrase} " in label), default=(0, 0))
-                    if match[0]:
-                        matches.append((match, label, chunks, source, table_id, column, value))
-        if len(inspected) == 3:
-            break
+                leaf_label = (" " + search_key(value.partition("\n")[0]) + " ").replace(" chuyen khoan ", " chuyen tien ")
+                full_label = (" " + sec_key_str + " " + leaf_label + " ").strip()
+                full_padded = " " + full_label + " "
+                service = leaf_label.strip().removeprefix("phi ") + " "
+                if operations and not any(f" {operation} " in (" " + service + " " + sec_key_str + " ") for operation in operations) and not (row_match and sheet_match):
+                    continue
+
+                best_leaf = (0, 0)
+                best_full = (0, 0)
+                for phrase, size in phrases.items():
+                    if f" {phrase} " in leaf_label:
+                        exact_hit = int(phrase == leaf_label.strip())
+                        cand_phrase = (size, exact_hit)
+                        if cand_phrase > best_leaf:
+                            best_leaf = cand_phrase
+                    elif f" {phrase} " in full_padded:
+                        cand_phrase = (size, 0)
+                        if cand_phrase > best_full:
+                            best_full = cand_phrase
+
+                leaf_hit = 0
+                best_phrase = (0, 0)
+                if best_leaf[0] > 0:
+                    leaf_hit = 1
+                    best_phrase = best_leaf
+                elif best_full[0] > 0:
+                    best_phrase = best_full
+
+                row_tokens = set((full_label + " " + sheet_key + " " + src_title_key).split())
+                core_row_tokens = set((full_label + " " + sheet_key).split())
+                tok_overlap = len(distinct_q_words.intersection(core_row_tokens))
+                qual_bonus = 0
+                for qual in qualifiers:
+                    if f" {qual} " in full_padded:
+                        qual_bonus += 1
+                    elif qual in core_row_tokens:
+                        qual_bonus += 1
+
+                if best_phrase[0] == 0 and row_match and (sheet_match or query_words.intersection(leaf_label.split())):
+                    best_phrase = (1, 0)
+                if best_phrase[0] == 0 and (tok_overlap >= 3 or (tok_overlap >= 2 and sheet_pref == 1 and len(distinct_q_words.intersection(row_tokens)) >= 2)):
+                    best_phrase = (1, 0)
+
+                if best_phrase[0]:
+                    src_title_words = set(src_title_key.split()) - fee_generic_words - {"bp"}
+                    title_match = min(2, len(distinct_q_words.intersection(src_title_words)))
+                    score = (
+                        row_match, sheet_match, sheet_pref, title_match,
+                        leaf_hit, best_phrase[0], best_phrase[1], tok_overlap, qual_bonus,
+                    )
+                    matches.append((score, leaf_label, chunks, source, table_id, column, value, row_id, sec_path_str))
+
+    if not matches:
+        return []
+    ranked_matches = sorted(matches, key=lambda match: match[0], reverse=True)
+    top_score = ranked_matches[0][0]
     related = []
-    included = set()
+    included_rows = set()
+    included_labels = set()
     compare = " so sanh " in query_key or " so voi " in query_key
-    for _, label, chunks, source, table_id, column, value in sorted(matches, key=lambda match: match[0], reverse=True)[:6]:
-        if label in included:
+    max_pick = 2
+    if compare:
+        max_pick = 3
+    for score, label, chunks, source, table_id, column, value, matched_row_id, _ in ranked_matches[:8]:
+        if top_score[0] and score[0] < top_score[0]:
             continue
+        if top_score[1] and score[1] < top_score[1]:
+            continue
+        row_ident = (source, table_id, matched_row_id)
+        if row_ident in included_rows:
+            continue
+        if len(related) >= 1 and not compare:
+            same_table = (source, table_id) == (ranked_matches[0][3], ranked_matches[0][4])
+            close_phrase = score[5] >= top_score[5] - 1 and score[7] >= top_score[7] - 1
+            if not same_table or not close_phrase or score[2] < top_score[2]:
+                continue
+        if label in included_labels and not score[0] and not compare and len(related) >= 1:
+            same_table = (source, table_id) == (ranked_matches[0][3], ranked_matches[0][4])
+            if not same_table:
+                continue
         spec = {"table_id": table_id, "filters": [{"column": column, "op": "eq", "value": value}]}
         if policy.dated:
             spec["as_of"] = policy.day
-        result = lookup_excel_rows(chunks, spec, scope=policy.scope, source=source, limit=1)
-        if result.get("status") == "success" and result["excel_match_count"] == 1:
-            related.append({"chunk": result["documents"][0]})
-            included.add(label)
-            if not compare or len(related) >= 2:
-                break
+        result = lookup_excel_rows(chunks, spec, scope=policy.scope, source=source, limit=8)
+        if result.get("status") == "success":
+            docs = result.get("documents") or []
+            picked = None
+            row_suffix = f":row:{matched_row_id}"
+            for doc_cand in docs:
+                if str(doc_cand.get("chunk_id") or "").endswith(row_suffix):
+                    picked = doc_cand
+                    break
+            if picked is None and docs and result.get("excel_match_count") == 1:
+                picked = docs[0]
+            if picked is not None:
+                related.append({"chunk": picked})
+                included_rows.add(row_ident)
+                included_labels.add(label)
+                if len(related) >= max_pick:
+                    break
     return related
 
 
@@ -803,7 +1131,7 @@ def _pin_intra_document_targets(ranked, ordered, seen, clean_query, related, rel
     if not q_tokens:
         return
 
-    wants_fee_table = any(cue in query_key for cue in _FEE_TABLE_CUES)
+    wants_fee_table = any(cue in query_key for cue in (*_FEE_TABLE_CUES, *_SCHEDULE_TABLE_CUES))
     wants_diagram = any(cue in query_key for cue in _DIAGRAM_CUES)
     fee_terms = set()
     if wants_fee_table:
@@ -886,7 +1214,32 @@ def _pin_intra_document_targets(ranked, ordered, seen, clean_query, related, rel
             sec_key = " " + search_key(sec_str) + " "
             content_str = str(cand.get("content") or "")
             table_str = str(cand.get("table_data") or "")
-            cand_key = " " + search_key(content_str + " " + sec_str + " " + table_str) + " "
+            neighbor_ctx = ""
+            if cand.get("chunk_type") == "table" or bool(cand.get("table_data")):
+                cand_sec_title = str(cand.get("section_title") or "").strip()
+                for n_delta in (-1, 1):
+                    n_idx = idx + n_delta
+                    if 0 <= n_idx < len(passages):
+                        nb = passages[n_idx]
+                        if str(nb.get("section_title") or "").strip() == cand_sec_title or (
+                            nb.get("next_chunk_id") == cand.get("chunk_id")
+                            or cand.get("next_chunk_id") == nb.get("chunk_id")
+                        ):
+                            neighbor_ctx += " " + str(nb.get("section_title") or "") + " " + str(nb.get("content") or "")[:200]
+                if cand_sec_title:
+                    for p_idx in range(idx - 1, max(-1, idx - 8), -1):
+                        p_ch = passages[p_idx]
+                        if str(p_ch.get("section_title") or "").strip() != cand_sec_title:
+                            break
+                        if p_ch.get("chunk_type") != "table" and not p_ch.get("table_data"):
+                            neighbor_ctx += " " + str(p_ch.get("content") or "")[:200]
+                    for p_idx in range(idx + 1, min(len(passages), idx + 8)):
+                        p_ch = passages[p_idx]
+                        if str(p_ch.get("section_title") or "").strip() != cand_sec_title:
+                            break
+                        if p_ch.get("chunk_type") != "table" and not p_ch.get("table_data"):
+                            neighbor_ctx += " " + str(p_ch.get("content") or "")[:200]
+            cand_key = " " + search_key(content_str + " " + sec_str + " " + table_str + " " + neighbor_ctx) + " "
             cand_tokens = set(cand_key.split())
 
             token_hits = 0
@@ -1305,20 +1658,31 @@ class BankingRAGTool:
                             sq_items = _retrieve_with_weight(sq_parsed, sub_k, sub_k, filters)
                             if sq_items:
                                 sub_batches.append(sq_items)
+                    track_domains = []
                     if isinstance(llm_plan, dict) and llm_plan.get("method") == "llm_model":
-                        track_domains = []
                         if llm_plan.get("needs_app_guide"):
-                            track_domains.append(("ngan_hang_so", 12))
+                            track_domains.append(("ngan_hang_so", 12, 8, 0.35))
                         if llm_plan.get("needs_fee_schedule"):
-                            track_domains.append(("bieu_phi_dich_vu", 10))
+                            track_domains.append(("bieu_phi_dich_vu", 10, 8, 0.35))
                         if llm_plan.get("needs_network_lookup"):
-                            track_domains.append(("mang_luoi_hoat_dong", 10))
-                        for dom_name, dom_k in track_domains:
-                            dom_filter = dict(filters)
-                            dom_filter["business_metadata.domain"] = dom_name
-                            dom_items = _retrieve_with_weight(parsed_q, dom_k, dom_k, dom_filter)
-                            if dom_items:
-                                sub_batches.append((dom_items[:8], 0.35))
+                            track_domains.append(("mang_luoi_hoat_dong", 10, 8, 0.35))
+                    has_fee_domain = any(dom_name == "bieu_phi_dich_vu" for dom_name, _, _, _ in track_domains)
+                    if not has_fee_domain and candidates:
+                        has_fee_in_top = any(
+                            (item.get("chunk", item).get("business_metadata") or {}).get("domain") == "bieu_phi_dich_vu"
+                            for item in candidates[:8]
+                        )
+                        if not has_fee_in_top:
+                            q_pad = " " + search_key(clean_query) + " "
+                            if any(cue in q_pad for cue in _FEE_DOMAIN_TRIGGER_CUES):
+                                if not any(cue in q_pad for cue in _APP_STEP_ONLY_CUES):
+                                    track_domains.append(("bieu_phi_dich_vu", 12, 10, 0.40))
+                    for dom_name, dom_k, take_k, dom_weight in track_domains:
+                        dom_filter = dict(filters)
+                        dom_filter["business_metadata.domain"] = dom_name
+                        dom_items = _retrieve_with_weight(parsed_q, dom_k, dom_k, dom_filter)
+                        if dom_items:
+                            sub_batches.append((dom_items[:take_k], dom_weight))
                     if sub_batches:
                         candidates = _merge_subquery_candidates(candidates, sub_batches, top_candidates)
             relaxed = any(item.get("retrieval_meta", {}).get("fallback_unfiltered") for item in candidates)
@@ -1455,9 +1819,14 @@ class BankingRAGTool:
                 related_limit = int(_RAG_CFG["app_procedure_related_limit"])
             if top_k >= 3 and related_limit > 1:
                 fee_rows = _exact_excel_fee_evidence(candidates, query_key, policy, all_labels)
-                related.extend(row for row in fee_rows if not exact or matches_exact(row, exact))
-            if top_k >= 3 and related_limit > 1 and any(cue in query_key for cue in _FEE_TABLE_CUES):
-                _pin_intra_document_targets(ranked, ordered, seen, clean_query, related, len(related) + 1)
+                for row in fee_rows:
+                    if not exact or matches_exact(row, exact):
+                        related.append(row)
+                        row_chunk = row.get("chunk", row)
+                        if isinstance(row_chunk, dict):
+                            seen.add((row_chunk.get("source"), payload_index_key(row_chunk)))
+            if top_k >= 3 and related_limit > 1 and any(cue in query_key for cue in (*_FEE_TABLE_CUES, *_SCHEDULE_TABLE_CUES)):
+                _pin_intra_document_targets(ranked, ordered, seen, clean_query, related, len(related) + 2)
             reserved = []
             if top_k >= 3 and ranked:
                 reserved = _reserve_query_targets(candidates, ranked, seen, clean_query)[:related_limit - len(related)]
@@ -1488,10 +1857,112 @@ class BankingRAGTool:
                 neighbor_cap = related_limit - 2
             deferred_neighbors = []
             for anchor in ranked[:anchor_limit]:
-                is_table = anchor.get("chunk_type") == "table" or bool(anchor.get("table_data"))
-                if not (procedure or is_table) or anchor.get("source") not in ordered:
+                if anchor.get("source") not in ordered:
                     continue
+                is_table = anchor.get("chunk_type") == "table" or bool(anchor.get("table_data"))
                 passages, positions = ordered[anchor["source"]]
+                if not (procedure or is_table):
+                    pos = positions.get(payload_index_key(anchor))
+                    if pos is not None:
+                        anchor_scopes = set(anchor.get("business_metadata", {}).get("publication_scopes", []))
+                        for delta in (-1, 1):
+                            nb_idx = pos + delta
+                            if not 0 <= nb_idx < len(passages):
+                                continue
+                            nb = passages[nb_idx]
+                            if delta == -1:
+                                linked = (nb.get("next_chunk_id") == anchor.get("chunk_id")
+                                          and anchor.get("prev_chunk_id") == nb.get("chunk_id"))
+                            else:
+                                linked = (anchor.get("next_chunk_id") == nb.get("chunk_id")
+                                          and nb.get("prev_chunk_id") == anchor.get("chunk_id"))
+                            if not linked:
+                                continue
+                            nb_scopes = set(nb.get("business_metadata", {}).get("publication_scopes", []))
+                            if (anchor_scopes or nb_scopes) and not anchor_scopes.intersection(nb_scopes):
+                                continue
+                            if nb.get("chunk_type") == "table" or bool(nb.get("table_data")):
+                                identity = (nb.get("source"), payload_index_key(nb))
+                                if identity not in seen:
+                                    if len(related) < neighbor_cap:
+                                        related.append({"chunk": nb, "context_for": anchor["chunk_id"]})
+                                        seen.add(identity)
+                                    else:
+                                        deferred_neighbors.append((identity, nb, anchor["chunk_id"]))
+                                nb_td = nb.get("table_data")
+                                nb_tid = ""
+                                if isinstance(nb_td, dict):
+                                    nb_tid = str(nb_td.get("table_id") or "")
+                                if nb_tid:
+                                    cont_idx = nb_idx + delta
+                                    if 0 <= cont_idx < len(passages):
+                                        cont_ch = passages[cont_idx]
+                                        if delta == 1:
+                                            cont_linked = (nb.get("next_chunk_id") == cont_ch.get("chunk_id")
+                                                           and cont_ch.get("prev_chunk_id") == nb.get("chunk_id"))
+                                        else:
+                                            cont_linked = (cont_ch.get("next_chunk_id") == nb.get("chunk_id")
+                                                           and nb.get("prev_chunk_id") == cont_ch.get("chunk_id"))
+                                        cont_td = cont_ch.get("table_data")
+                                        cont_tid = ""
+                                        if isinstance(cont_td, dict):
+                                            cont_tid = str(cont_td.get("table_id") or "")
+                                        if cont_linked and cont_tid == nb_tid:
+                                            c_ident = (cont_ch.get("source"), payload_index_key(cont_ch))
+                                            if c_ident not in seen:
+                                                if len(related) < neighbor_cap:
+                                                    related.append({"chunk": cont_ch, "context_for": anchor["chunk_id"]})
+                                                    seen.add(c_ident)
+                                                else:
+                                                    deferred_neighbors.append((c_ident, cont_ch, anchor["chunk_id"]))
+                    continue
+                is_excel_tbl = bool((anchor.get("business_metadata") or {}).get("excel_table_id"))
+                anchor_td = anchor.get("table_data")
+                anchor_tid = ""
+                if isinstance(anchor_td, dict):
+                    anchor_tid = str(anchor_td.get("table_id") or "")
+                if is_table and not is_excel_tbl and anchor_tid:
+                    pos = positions.get(payload_index_key(anchor))
+                    if pos is not None:
+                        anchor_scopes = set(anchor.get("business_metadata", {}).get("publication_scopes", []))
+                        added_slices = 0
+                        for direction in (1, -1):
+                            prev_ch = anchor
+                            for hop in range(1, 3):
+                                s_idx = pos + direction * hop
+                                if not 0 <= s_idx < len(passages):
+                                    break
+                                cand_ch = passages[s_idx]
+                                if direction == 1:
+                                    linked = (prev_ch.get("next_chunk_id") == cand_ch.get("chunk_id")
+                                              and cand_ch.get("prev_chunk_id") == prev_ch.get("chunk_id"))
+                                else:
+                                    linked = (cand_ch.get("next_chunk_id") == prev_ch.get("chunk_id")
+                                              and prev_ch.get("prev_chunk_id") == cand_ch.get("chunk_id"))
+                                if not linked:
+                                    break
+                                cand_scopes = set(cand_ch.get("business_metadata", {}).get("publication_scopes", []))
+                                if (anchor_scopes or cand_scopes) and not anchor_scopes.intersection(cand_scopes):
+                                    break
+                                cand_td = cand_ch.get("table_data")
+                                cand_tid = ""
+                                if isinstance(cand_td, dict):
+                                    cand_tid = str(cand_td.get("table_id") or "")
+                                if cand_tid != anchor_tid:
+                                    break
+                                prev_ch = cand_ch
+                                identity = (cand_ch.get("source"), payload_index_key(cand_ch))
+                                if identity not in seen:
+                                    if len(related) < neighbor_cap:
+                                        related.append({"chunk": cand_ch, "context_for": anchor["chunk_id"]})
+                                        seen.add(identity)
+                                    else:
+                                        deferred_neighbors.append((identity, cand_ch, anchor["chunk_id"]))
+                                    added_slices += 1
+                                    if added_slices >= 2:
+                                        break
+                            if added_slices >= 2:
+                                break
                 for _, _, chunk in _source_neighbors(anchor, passages, positions, procedure):
                     identity = (chunk.get("source"), payload_index_key(chunk))
                     if identity in seen:
@@ -1514,6 +1985,46 @@ class BankingRAGTool:
                     continue
                 related.append({"chunk": chunk, "context_for": anchor_id})
                 seen.add(identity)
+            if top_k >= 3:
+                wants_vat_note = any(cue in query_key for cue in (" phi ", " thue ", " vat ", " gtgt ", " bao nhieu ", " tinh phi "))
+                if wants_vat_note:
+                    has_vat_already = False
+                    for existing_ch in [*ranked, *(item.get("chunk", item) for item in related)]:
+                        if not isinstance(existing_ch, dict):
+                            continue
+                        ex_key = search_key(str(existing_ch.get("content") or ""))
+                        if "gtgt" in ex_key or "10%" in str(existing_ch.get("content") or ""):
+                            has_vat_already = True
+                            break
+                    if not has_vat_already:
+                        bp_sources = []
+                        for existing_ch in [*ranked, *(item.get("chunk", item) for item in related)]:
+                            if not isinstance(existing_ch, dict):
+                                continue
+                            ex_src = str(existing_ch.get("source") or "")
+                            if ex_src and ex_src not in bp_sources and search_key(_source_stem(ex_src)).startswith("bp "):
+                                bp_sources.append(ex_src)
+                        for bp_src in bp_sources:
+                            if bp_src not in ordered:
+                                passages = self._source_chunks(bp_src, scope)
+                                if policy.enabled:
+                                    passages = [p for p in passages if policy.allows(p, all_labels)]
+                                ordered[bp_src] = (passages, {payload_index_key(p): i for i, p in enumerate(passages)})
+                            passages_bp, _ = ordered[bp_src]
+                            attached_vat = False
+                            for note_ch in passages_bp:
+                                if _chunk_excel_sheet_key(note_ch) != "luu y su dung bieu phi":
+                                    continue
+                                note_txt = str(note_ch.get("content") or "")
+                                if "gtgt" in search_key(note_txt) or "10%" in note_txt:
+                                    note_ident = (note_ch.get("source"), payload_index_key(note_ch))
+                                    if note_ident not in seen:
+                                        related.append({"chunk": note_ch})
+                                        seen.add(note_ident)
+                                        attached_vat = True
+                                        break
+                            if attached_vat:
+                                break
             related.extend(reserved)
             related = graph_related + related
 

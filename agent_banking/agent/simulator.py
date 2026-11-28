@@ -250,6 +250,23 @@ def prepare_simulator(raw: dict, recent: list[dict], guard) -> dict | None:
                 item["id"] for item in prior["inputs"]
             }:
                 return None
+            updated_inputs = []
+            for item in prior["inputs"]:
+                new_val = selection.defaults.get(item["id"], item["value"])
+                new_min = item["min"]
+                new_max = item["max"]
+                if new_val > new_max:
+                    new_max = new_val
+                elif new_val < new_min and (new_min <= 0 or new_val > 0):
+                    new_min = new_val
+                updated_inputs.append(
+                    {
+                        **item,
+                        "min": new_min,
+                        "max": new_max,
+                        "value": new_val,
+                    }
+                )
             selection = SimulatorSelection.model_validate(
                 {
                     **{
@@ -257,13 +274,7 @@ def prepare_simulator(raw: dict, recent: list[dict], guard) -> dict | None:
                         for key in ("engine", "title", "calculations", "assumptions")
                     },
                     "layout": prior.get("layout"),
-                    "inputs": [
-                        {
-                            **item,
-                            "value": selection.defaults.get(item["id"], item["value"]),
-                        }
-                        for item in prior["inputs"]
-                    ],
+                    "inputs": updated_inputs,
                 }
             )
         for value in (selection.title, *selection.assumptions):

@@ -130,6 +130,188 @@ def _alnum_or_space(text: str) -> str:
     return " " + " ".join("".join(chars).split()) + " "
 
 
+_SIMULATOR_INPUT_FIELDS = ("id", "label", "unit", "value", "min", "max", "step", "whole", "control")
+_SIMULATOR_CALC_FIELDS = ("id", "label", "unit", "op", "args", "show", "decimals")
+_LAYOUT_BLOCK_FIELDS = ("type", "children", "columns", "text", "ref", "tone")
+_CONTAINER_BLOCK_TYPES = ("column", "row", "grid")
+_LAYOUT_TEXT_MAX = 180
+_LAYOUT_REF_MAX = 24
+
+
+def _fold_layout_children(children: list) -> list:
+    """Group overflow layout children (>12) into column sub-containers without dropping controls."""
+    if len(children) <= 12:
+        return children
+    folded = list(children[:10])
+    idx = 10
+    while idx < len(children) and len(folded) < 12:
+        folded.append({"type": "column", "children": list(children[idx:idx + 10])})
+        idx += 10
+    return folded
+
+
+def _sanitize_layout_block(block, result_tones=None):
+    """Strip disallowed non-grid 'columns', out-of-range text, and null optional keys from layout blocks."""
+    if not isinstance(block, dict):
+        return block
+    btype = block.get("type")
+    cleaned = {}
+    for key, val in block.items():
+        if val is None or key not in _LAYOUT_BLOCK_FIELDS:
+            continue
+        if key == "columns":
+            if btype != "grid" or isinstance(val, bool) or not isinstance(val, int):
+                continue
+            if val < 1:
+                val = 1
+            elif val > 4:
+                val = 4
+        elif key == "text" and isinstance(val, str):
+            val = " ".join(val.split())
+            if not val:
+                continue
+            if len(val) > _LAYOUT_TEXT_MAX:
+                val = val[:_LAYOUT_TEXT_MAX - 3].rstrip() + "..."
+        elif key == "ref" and isinstance(val, str):
+            val = val.strip()
+            if not val:
+                continue
+            if len(val) > _LAYOUT_REF_MAX:
+                val = val[:_LAYOUT_REF_MAX]
+        elif key == "tone" and val not in ("plain", "card", "accent"):
+            continue
+        elif key == "children" and isinstance(val, list):
+            sanitized_children = [_sanitize_layout_block(child, result_tones) for child in val]
+            if btype not in _CONTAINER_BLOCK_TYPES and not sanitized_children:
+                continue
+            val = _fold_layout_children(sanitized_children)
+        cleaned[key] = val
+    if btype == "result" and result_tones:
+        ref_id = cleaned.get("ref")
+        if isinstance(ref_id, str) and ref_id in result_tones:
+            if cleaned.get("tone", "plain") == "plain":
+                cleaned["tone"] = result_tones[ref_id]
+    return cleaned
+
+
+def _ensure_layout_completeness(artifact: dict, result_tones: dict) -> None:
+    """Append any missing declared controls/renderers into a container layout without dropping existing blocks."""
+    layout = artifact.get("layout")
+    if not isinstance(layout, dict) or layout.get("type") not in _CONTAINER_BLOCK_TYPES:
+        return
+    used_refs = set()
+    stack = [layout]
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, dict):
+            continue
+        ntype = node.get("type")
+        if ntype in _CONTAINER_BLOCK_TYPES:
+            children = node.get("children")
+            if isinstance(children, list):
+                stack.extend(children)
+            continue
+        ref = node.get("ref")
+        if ntype not in ("input", "result") and ref == ntype:
+            ref = None
+        if ntype:
+            used_refs.add((ntype, ref))
+
+    missing_blocks = []
+    engine = artifact.get("engine")
+    if engine == "simulator" and isinstance(artifact.get("inputs"), list) and isinstance(artifact.get("calculations"), list):
+        for inp in artifact["inputs"]:
+            if isinstance(inp, dict) and isinstance(inp.get("id"), str) and ("input", inp["id"]) not in used_refs:
+                missing_blocks.append({"type": "input", "ref": inp["id"]})
+                used_refs.add(("input", inp["id"]))
+        for calc in artifact["calculations"]:
+            if (isinstance(calc, dict) and isinstance(calc.get("id"), str)
+                    and calc.get("show", True) is not False
+                    and ("result", calc["id"]) not in used_refs):
+                blk = {"type": "result", "ref": calc["id"]}
+                if calc["id"] in result_tones:
+                    blk["tone"] = result_tones[calc["id"]]
+                missing_blocks.append(blk)
+                used_refs.add(("result", calc["id"]))
+    elif engine == "echarts" and ("chart", None) not in used_refs:
+        missing_blocks.append({"type": "chart"})
+    elif engine == "mermaid" and ("diagram", None) not in used_refs:
+        missing_blocks.append({"type": "diagram"})
+
+    if not missing_blocks:
+        return
+    existing = layout.get("children")
+    if isinstance(existing, list):
+        combined = list(existing) + missing_blocks
+    else:
+        combined = missing_blocks
+    layout["children"] = _fold_layout_children(combined)
+
+
+def _sanitize_calculator_item(item: dict, allowed_fields: tuple[str, ...]) -> dict:
+    """Drop unsupported keys and null optionals from simulator input or calculation dicts."""
+    cleaned = {}
+    for key, val in item.items():
+        if key not in allowed_fields or val is None:
+            continue
+        if key == "decimals":
+            if isinstance(val, bool) or not isinstance(val, int):
+                continue
+            if val < 0:
+                val = 0
+            elif val > 4:
+                val = 4
+        cleaned[key] = val
+    return cleaned
+
+
+def _sanitize_presentation_arguments(arguments):
+    """Normalize minor LLM layout/calculation quirks before schema and Pydantic validation."""
+    if not isinstance(arguments, dict):
+        return arguments
+    artifact = arguments.get("artifact")
+    if not isinstance(artifact, dict):
+        return arguments
+    result_tones = {}
+    raw_calcs = artifact.get("calculations")
+    if isinstance(raw_calcs, list):
+        for calc in raw_calcs:
+            if isinstance(calc, dict):
+                calc_id = calc.get("id")
+                tone = calc.get("tone")
+                if isinstance(calc_id, str) and tone in ("card", "accent"):
+                    result_tones[calc_id] = tone
+    clean_art = {}
+    has_full_body = "inputs" in artifact or "presentation" in artifact or "data" in artifact or "source" in artifact
+    for key, val in artifact.items():
+        if val is None and key in ("update_of", "layout"):
+            continue
+        if has_full_body and key in ("description", "operation", "defaults"):
+            continue
+        if key == "inputs" and isinstance(val, list):
+            sanitized_inputs = []
+            for item in val:
+                if isinstance(item, dict):
+                    sanitized_inputs.append(_sanitize_calculator_item(item, _SIMULATOR_INPUT_FIELDS))
+                else:
+                    sanitized_inputs.append(item)
+            clean_art[key] = sanitized_inputs
+        elif key == "calculations" and isinstance(val, list):
+            sanitized_calcs = []
+            for item in val:
+                if isinstance(item, dict):
+                    sanitized_calcs.append(_sanitize_calculator_item(item, _SIMULATOR_CALC_FIELDS))
+                else:
+                    sanitized_calcs.append(item)
+            clean_art[key] = sanitized_calcs
+        elif key == "layout" and isinstance(val, dict):
+            clean_art[key] = _sanitize_layout_block(val, result_tones=result_tones)
+        else:
+            clean_art[key] = val
+    _ensure_layout_completeness(clean_art, result_tones)
+    return {**arguments, "artifact": clean_art}
+
+
 def _evidence_view(evidence: list[dict]) -> list[dict]:
     result = []
     for item in evidence:
@@ -138,7 +320,9 @@ def _evidence_view(evidence: list[dict]) -> list[dict]:
         record = {"label": _label(item["index"]), "text": item["context"], "source": item["source"],
                   "version": meta.get("document_version", "")}
         temporal = meta.get("temporal")
-        if temporal:
+        if isinstance(temporal, dict) and (
+            temporal.get("requested_date") or temporal.get("status") in ("conflict", "effective")
+        ):
             record["temporal"] = temporal
         if type(chunk.get("source_offset")) is int:
             record["source_offset"] = chunk["source_offset"]
@@ -150,6 +334,22 @@ def _evidence_view(evidence: list[dict]) -> list[dict]:
         section_title = str(chunk.get("section_title") or "").strip()
         if section_title:
             record["section"] = section_title
+        breadcrumb = str(chunk.get("breadcrumb") or "").strip()
+        if breadcrumb and breadcrumb != section_title:
+            record["breadcrumb"] = breadcrumb
+        prov_summary = _extract_citation_provenance(meta)
+        locs = prov_summary.get("locations")
+        if isinstance(locs, list) and locs:
+            compact_locs = []
+            for loc in locs[:2]:
+                entry = {}
+                for k in ("part", "xpath", "region", "page_number", "page_index", "sheet_name", "cell_range", "source_row"):
+                    if k in loc:
+                        entry[k] = loc[k]
+                if entry:
+                    compact_locs.append(entry)
+            if compact_locs:
+                record["locations"] = compact_locs
         cit_meta = meta.get("citation")
         if isinstance(cit_meta, dict) and cit_meta.get("sheet_name"):
             record["sheet_name"] = str(cit_meta["sheet_name"])
@@ -296,6 +496,112 @@ def _extract_fx_tokens(text: str) -> set[str]:
     return tokens
 
 
+_NON_PCT_PREV = frozenset((
+    "ngày", "ngay", "tháng", "thang", "năm", "nam",
+    "điều", "dieu", "khoản", "khoan", "mục", "muc",
+    "trang", "chương", "chuong", "hình", "hinh", "bảng", "bang", "bước", "buoc", "lần", "lan",
+))
+
+
+def _extract_bare_pct_tokens(text: str) -> set[str]:
+    """Extract decimal/bounded percentage values from table/percentage-labeled sources lacking '%' suffix."""
+    if not text:
+        return set()
+    low = normalize("NFC", text).casefold()
+    if "%" not in low and "phần trăm" not in low and "phan tram" not in low and "tỷ lệ" not in low and "ty le" not in low:
+        return set()
+    work = low
+    for ch in _FX_SPLIT_CHARS:
+        if ch in work:
+            work = work.replace(ch, " ")
+    words = work.split()
+    tokens = set()
+    for idx, raw_tok in enumerate(words):
+        if idx > 0:
+            prev_word = words[idx - 1].strip(",.;:!?\"'()[]*+-")
+            if prev_word in _NON_PCT_PREV:
+                continue
+        tok = raw_tok.strip(",.;:!?\"'()[]*+-")
+        if not tok or not tok[0].isdigit():
+            continue
+        if tok.count(",") + tok.count(".") > 1:
+            continue
+        norm = tok.replace(",", ".")
+        if "." in norm:
+            left, right = norm.split(".", 1)
+            if not left.isdigit() or not right.isdigit() or len(right) > 2:
+                continue
+            val = float(norm)
+            if val > 100.0:
+                continue
+            dec = right.rstrip("0")
+            int_part = str(int(left))
+            if dec:
+                tokens.add(f"~pct_{int_part}_{dec}")
+            else:
+                tokens.add(f"~pct_{int_part}")
+        elif tok.isdigit():
+            val = int(tok)
+            if 0 <= val <= 100:
+                tokens.add(f"~pct_{val}")
+    return tokens
+
+
+def _derived_numeric_tokens(source_numbers: set[str]) -> set[str]:
+    """Derive arithmetic and percentage deltas supported by pairs of grounded source figures."""
+    derived = set()
+    vnd_vals = set()
+    pct_vals = set()
+    for tok in source_numbers:
+        if tok.startswith("~vnd_"):
+            raw = tok[5:]
+            if raw.isdigit():
+                vnd_vals.add(int(raw))
+        elif tok.startswith("~pct_"):
+            raw = tok[5:].replace("_", ".")
+            try:
+                pct_vals.add(float(raw))
+            except ValueError:
+                pass
+    if 2 <= len(vnd_vals) <= 150:
+        ordered_vnd = sorted(vnd_vals)
+        for i, val_a in enumerate(ordered_vnd):
+            for val_b in ordered_vnd[i + 1:]:
+                diff_v = abs(val_b - val_a)
+                if diff_v >= 1_000:
+                    derived.add(f"~vnd_{diff_v}")
+                if val_a > 0:
+                    rel_pct = diff_v * 100.0 / val_a
+                    for digits in (0, 1, 2):
+                        formatted = f"{rel_pct:.{digits}f}"
+                        if "." in formatted:
+                            formatted = formatted.rstrip("0").rstrip(".")
+                        if not formatted:
+                            formatted = "0"
+                        derived.add("~pct_" + formatted.replace(".", "_"))
+    if 2 <= len(pct_vals) <= 150:
+        ordered_pct = sorted(pct_vals)
+        for i, pct_a in enumerate(ordered_pct):
+            for pct_b in ordered_pct[i + 1:]:
+                diff_p = abs(pct_b - pct_a)
+                for digits in (1, 2):
+                    formatted = f"{diff_p:.{digits}f}".rstrip("0").rstrip(".")
+                    if not formatted:
+                        formatted = "0"
+                    derived.add("~pct_" + formatted.replace(".", "_"))
+    if vnd_vals and pct_vals and len(vnd_vals) * len(pct_vals) <= 400:
+        for val_v in vnd_vals:
+            for val_p in pct_vals:
+                if val_v > 0 and val_p > 0:
+                    prod = int(round(val_v * val_p / 100.0))
+                    if prod >= 1_000:
+                        derived.add(f"~vnd_{prod}")
+                        derived.add(f"~vnd_{val_v + prod}")
+                        if val_v > prod:
+                            derived.add(f"~vnd_{val_v - prod}")
+    return derived
+
+
 def validate_review(verdict: dict, draft: str, citations: list, evidence: list, support: dict) -> None:
     sources = {item["label"]: item["text"] for item in evidence}
     sources.update(support)
@@ -375,12 +681,22 @@ def validate_review(verdict: dict, draft: str, citations: list, evidence: list, 
             fx_numbers = _extract_fx_tokens(line)
             source_numbers = set()
             source_fx = set()
-            for label in set(line_labels) | (claimed & support.keys()):
+            user_label = _DEEP_MESSAGES.get("user_support_label", "[Khách]")
+            tool_prefix = _DEEP_MESSAGES.get("tool_support_prefix", "[Tool ")
+            grounded_support = {
+                key for key in support
+                if key == user_label or key.startswith(tool_prefix)
+            }
+            for label in set(line_labels) | (claimed & support.keys()) | grounded_support:
                 src_val = sources.get(label, "")
-                source_numbers.update(extract_canonical_numeric_tokens(src_val, max_tokens=128))
+                source_numbers.update(extract_canonical_numeric_tokens(src_val, max_tokens=512))
+                source_numbers.update(_extract_bare_pct_tokens(src_val))
                 source_fx.update(_extract_fx_tokens(src_val))
-            if numbers - source_numbers or fx_numbers - source_fx:
-                raise ValueError("Unsupported financial figure in cited answer line")
+            derived_numbers = _derived_numeric_tokens(source_numbers)
+            bad_tokens = (numbers - (source_numbers | derived_numbers)) | (fx_numbers - source_fx)
+            if bad_tokens:
+                detail = ", ".join(sorted(bad_tokens)[:4])
+                raise ValueError(f"Unsupported financial figure in cited answer line ({detail})")
         if ungrounded_line_cites:
             raise ValueError("Citation missing claim grounding: " + ", ".join(ungrounded_line_cites))
 
@@ -435,15 +751,28 @@ def _compact_observations(observations: list[dict]) -> list[dict]:
     return bounded
 
 
-_CREDENTIAL_SOLICITATION_CUES = (
-    " nhap ", " cung cap ", " gui ", " cho biet ", " dien ", " doc ", " chia se ",
-    " bao nhieu ", " la gi ", " cua ban ", " cua quy khach ", " de tiep tuc ",
+_DIRECT_SOLICITATION_CUES = (
+    " nhap ", " cung cap ", " cho biet ", " chia se ",
+    " dien ma ", " dien so ", " dien thong tin ", " vui long dien ",
+    " doc ma ", " doc so ", " doc thong tin ",
     " xac minh so ", " doi chieu so ", " xac nhan ma ",
+    " gui ma otp ", " gui ma pin ", " gui otp ", " gui pin ",
+    " gui cvv ", " gui cvc ", " gui mat khau ", " gui so the ",
+    " gui so tai khoan ", " gui so cccd ", " gui cccd ",
+)
+_POSSESSIVE_SOLICITATION_CUES = (
+    " bao nhieu ", " la gi ", " cua ban ", " cua quy khach ", " de tiep tuc ",
+)
+_GUI_SAFE_RECIPIENT_CUES = (
+    " bo phan ", " phong ", " yeu cau ", " phieu ", " khieu nai ", " ho tro ",
 )
 _STRICT_SECRET_FIELDS = {"otp", "pin", "cvv", "cvc", "mat khau", "mật khẩu", "password"}
 _TOPIC_CONTEXT_CUES = (
     " tinh huong ", " van de ", " dich vu ", " loi ", " chu de ", " nhom ",
     " quy trinh ", " chinh sach ", " huong dan ", " mo khoa ", " quen ",
+    " khong nhan duoc ", " tao phieu ", " lap phieu ", " phieu ho tro ",
+    " bo phan ", " chuyen vien ", " khieu nai ", " tra soat ", " bi khoa ",
+    " su co ", " ho tro ",
 )
 
 
@@ -453,10 +782,23 @@ def _requests_restricted_field(text: str) -> bool:
     has_field = any(f" {field} " in normalized or f" {search_key(field)} " in folded for field in RESTRICTED_CARD_FIELDS)
     if not has_field:
         return False
-    if any(cue in folded for cue in _CREDENTIAL_SOLICITATION_CUES):
+    if any(cue in folded for cue in _DIRECT_SOLICITATION_CUES):
+        return True
+    words = folded.split()
+    for idx, tok in enumerate(words):
+        if tok == "gui":
+            win_text = " " + " ".join(words[idx + 1:idx + 6]) + " "
+            if any(neg in win_text for neg in _GUI_SAFE_RECIPIENT_CUES):
+                continue
+            if any(f" {search_key(field)} " in win_text for field in RESTRICTED_CARD_FIELDS):
+                return True
+    if any(cue in folded for cue in (" bao nhieu ", " la gi ")):
+        return True
+    has_topic_context = any(cue in folded for cue in _TOPIC_CONTEXT_CUES)
+    if any(cue in folded for cue in _POSSESSIVE_SOLICITATION_CUES) and not has_topic_context:
         return True
     has_secret = any(f" {field} " in normalized or f" {search_key(field)} " in folded for field in _STRICT_SECRET_FIELDS)
-    if has_secret and not any(cue in folded for cue in _TOPIC_CONTEXT_CUES):
+    if has_secret and not has_topic_context:
         return True
     return False
 
@@ -475,15 +817,28 @@ def _requests_brief_summary(state: dict) -> bool:
     return not any(count.isdecimal() and unit in size_units for count, unit in zip(words, words[1:]))
 
 
-def _fits_brief_summary(draft: str) -> bool:
-    if len(draft.split()) > SUMMARY_MAX_WORDS:
-        return False
+def _brief_summary_counts(draft: str) -> tuple[int, int]:
+    cleaned = _normalize_citation_markers(draft).replace("][", "] [")
+    # Count prose words without penalizing [Nguồn N] tags or standalone list symbols.
+    words = 0
+    for tok in cleaned.split():
+        bare = tok.strip(".,;:!?\"'()").lower()
+        if not bare or bare in ("-", "*", "+"):
+            continue
+        if bare == "[nguồn" or (bare.endswith("]") and bare[:-1].isdigit()):
+            continue
+        words += 1
     line_starts = (line.lstrip().split(" ", 1)[0] for line in draft.splitlines())
     list_items = sum(
         start in ("-", "*", "+") or (start[-1:] in (".", ")") and start[:-1].isdigit())
         for start in line_starts
     )
-    return list_items <= SUMMARY_MAX_POINTS
+    return words, list_items
+
+
+def _fits_brief_summary(draft: str) -> bool:
+    words, list_items = _brief_summary_counts(draft)
+    return words <= SUMMARY_MAX_WORDS and list_items <= SUMMARY_MAX_POINTS
 
 
 _SUPPORT_LINE_MARKERS = (
@@ -1287,17 +1642,19 @@ class BankingDeepAgent(BankingReActNodes):
         recent = state.get("recent_visualizations", [])
         active_skills = state.get("active_skills", {})
         if VISUALIZATION_SKILL in active_skills and "tool" in allowed:
-            system += "\nFor charts and diagrams, call present_visualization. Its arguments.artifact must match: " + json.dumps(
-                VISUALIZATION_SCHEMA, ensure_ascii=False, separators=(",", ":")
+            system += (
+                "\nVisualization skill is ALREADY active — do NOT call inspect_skill again. "
+                "Gather necessary evidence first, then either call present_visualization with arguments={} "
+                "(so the dedicated designer builds and validates the full schema automatically), OR return kind='final' "
+                "and the designer will generate and validate the visual."
             )
         if SIMULATOR_SKILL in active_skills and "tool" in allowed:
-            system += "\nFor interactive calculators, call present_visualization. Its arguments.artifact must match: " + json.dumps(
-                SIMULATOR_SCHEMA, ensure_ascii=False, separators=(",", ":")
-            )
-        if "tool" in allowed and {SIMULATOR_SKILL, VISUALIZATION_SKILL}.intersection(active_skills):
             system += (
-                "\nSet kind to tool and name to present_visualization. Put artifact inside arguments. "
-                "Every complete artifact needs engine and layout. Gather necessary evidence before presenting it."
+                "\nInteractive-simulator skill is ALREADY active — do NOT call inspect_skill again. "
+                "Gather rates/rules if needed, then either call present_visualization with arguments={} "
+                "(or {'artifact': {'engine': 'simulator', 'update_of': '<id>', 'defaults': {...}}} when updating defaults "
+                "on a recent simulator) — the dedicated calculator designer will build and validate the full schema automatically — "
+                "OR return kind='final' (including with insufficient_evidence=true for hypothetical scenarios)."
             )
         if prepared:
             data["active_skills"] = {key: value for key, value in active_skills.items()
@@ -1312,6 +1669,11 @@ class BankingDeepAgent(BankingReActNodes):
                                   "and adjustable slider defaults in final.answer without inventing ungrounded fee codes or rates.")
             if type(prepared_vis.get("revision")) is int and prepared_vis["revision"] > 1:
                 extra_vis_hint += " Explicitly describe how this visual was updated from the previous version."
+            if state["react_turn"].get("evidence"):
+                extra_vis_hint += (
+                    " Because available_evidence is non-empty, you MUST include valid [Nguồn N] citations "
+                    "(e.g. [Nguồn 1]) next to any fee/policy facts taken from the retrieved documents so review does not fail on missing citations."
+                )
             system += ("\nThe visualization is ready and will appear in the conversation. Return final with a helpful "
                        "customer-facing explanation and any necessary citations. Explain assumptions or trade-offs."
                        + extra_vis_hint)
@@ -1365,8 +1727,25 @@ class BankingDeepAgent(BankingReActNodes):
                 "any gaps. Do not call search_banking_knowledge again."
             )
         system += "\n\n" + ANSWER_SCOPE + "\n\n" + COORDINATION_POLICY
+        mem_forgotten = [
+            str(obs.get("key") or "").strip()
+            for obs in turn.get("observations", [])
+            if obs.get("kind") == "memory" and obs.get("name") == "forget" and obs.get("status") == "SUCCESS"
+        ]
+        if mem_forgotten:
+            deleted_label = ", ".join(k for k in mem_forgotten if k)
+            system += (
+                f"\nMemory note(s) ({deleted_label}) already deleted in this turn (memory:forget SUCCESS). "
+                "Do not call forget again for already-deleted keys; confirm deletion to the customer."
+            )
         if data["brief_summary_requested"]:
             system += "\n" + SUMMARY_INSTRUCTION
+            if state.get("audit_feedback"):
+                system += (
+                    f"\nSTRICT WORD LIMIT RETRY: Count every space-separated word carefully and keep the "
+                    f"ENTIRE response under {max(80, SUMMARY_MAX_WORDS - 30)} words and at most {SUMMARY_MAX_POINTS} bullets. "
+                    "Omit greetings, introductions, repetition, and closing filler."
+                )
 
         try:
             decision = self.model.decide(system, data, allowed, max_tokens=_DECIDE_MAX_TOKENS, deep_reason=deep_reason)
@@ -1395,19 +1774,32 @@ class BankingDeepAgent(BankingReActNodes):
             decision = self.recover_decision(data, state["confirmation_required"], can_clarify="clarify" in allowed)
             if decision is None:
                 return {**state, "audit_status": "ERROR", "final_answer": FALLBACK_ANSWER}
-        if (decision["kind"] == "final" and not decision.get("insufficient_evidence") and "tool" in allowed
+        prefers_sim = self._prefers_simulator(state["user_query"], recent)
+        if (decision["kind"] == "final" and (not decision.get("insufficient_evidence") or prefers_sim)
+                and "tool" in allowed
                 and not state.get("presentation_arguments_requested")
-                and int(state.get("visual_revisions") or 0) < 1
+                and int(state.get("visual_revisions") or 0) < 2
                 and self._explicit_chart_request(state["user_query"], recent)):
             definition = state["capabilities"]["tool"].get(PRESENT_VISUALIZATION_TOOL)
             if definition:
                 state = {**state, "presentation_arguments_requested": True}
-                if self._prefers_simulator(state["user_query"], recent):
-                    target_skills = {SIMULATOR_SKILL: active_skills.get(SIMULATOR_SKILL, {})}
+                if prefers_sim:
+                    selected_skill_id = SIMULATOR_SKILL
                 else:
-                    target_skills = {VISUALIZATION_SKILL: active_skills.get(VISUALIZATION_SKILL, {})}
-                arguments = self._design_presentation_arguments(
-                    definition, target_skills, data, recent,
+                    selected_skill_id = VISUALIZATION_SKILL
+                skill_entry = active_skills.get(selected_skill_id)
+                if not isinstance(skill_entry, dict) or not skill_entry.get("instructions"):
+                    skill_spec = state["capabilities"]["skill"].get(selected_skill_id)
+                    if skill_spec and hasattr(self.skills, "instructions"):
+                        try:
+                            skill_entry = self.skills.instructions(skill_spec)
+                        except (OSError, ValueError):
+                            skill_entry = {}
+                    else:
+                        skill_entry = {}
+                target_skills = {selected_skill_id: skill_entry}
+                arguments = _sanitize_presentation_arguments(
+                    self._design_presentation_arguments(definition, target_skills, data, recent)
                 )
                 if self._valid_presentation_arguments(arguments, recent):
                     decision = {"kind": "tool", "name": PRESENT_VISUALIZATION_TOOL, "arguments": arguments}
@@ -1448,21 +1840,30 @@ class BankingDeepAgent(BankingReActNodes):
                             or (engine in ("echarts", "mermaid") and VISUALIZATION_SKILL in active_skills)):
                         name = PRESENT_VISUALIZATION_TOOL
                 if name == PRESENT_VISUALIZATION_TOOL and name in registered:
-                    if int(state.get("visual_revisions") or 0) >= 1:
+                    if int(state.get("visual_revisions") or 0) >= 2:
                         valid = False
                         state = {**state, "presentation_arguments_requested": True}
                     else:
-                        valid = self._valid_presentation_arguments(arguments, recent)
+                        if not arguments and not state.get("presentation_arguments_requested"):
+                            valid = False
+                        else:
+                            arguments = _sanitize_presentation_arguments(arguments)
+                            valid = self._valid_presentation_arguments(arguments, recent)
                         if not valid and not state.get("presentation_arguments_requested"):
                             state = {**state, "presentation_arguments_requested": True}
-                            arguments = self._design_presentation_arguments(registered[name], active_skills, data, recent)
+                            arguments = _sanitize_presentation_arguments(
+                                self._design_presentation_arguments(registered[name], active_skills, data, recent)
+                            )
                             valid = self._valid_presentation_arguments(arguments, recent)
                     if valid:
                         decision = {**decision, "name": name, "arguments": arguments}
                     else:
                         try:
                             decision = self.model.decide(
-                                system + "\nContinue with a useful text answer. This turn's visualization is unavailable.",
+                                system
+                                + "\nThis turn's visualization is unavailable after validation. "
+                                + "Do NOT emit kind='tool' or claim any simulator or chart was created; "
+                                + "output ONLY kind='final' with verified formulas and figures in text.",
                                 data, ["final"], max_tokens=_RECOVER_MAX_TOKENS,
                             )
                         except ModelFallbackError:
@@ -1550,30 +1951,55 @@ class BankingDeepAgent(BankingReActNodes):
                     **full, "required": [*full["required"], "layout"],
                     "properties": {**full["properties"], "layout": {"$ref": "#/$defs/LayoutBlock"}},
                 }
+        artifact_branches = []
+        for artifact in schemas:
+            branch = {key: value for key, value in artifact.items() if key != "$defs"}
+            if not recent and "anyOf" in branch:
+                filtered = [item for item in branch["anyOf"] if "Update" not in str(item.get("$ref", ""))]
+                if len(filtered) == 1:
+                    branch = filtered[0]
+            artifact_branches.append(branch)
+        if len(artifact_branches) == 1:
+            artifact_schema = artifact_branches[0]
+        else:
+            artifact_schema = {"anyOf": artifact_branches}
         schema = {
             **base,
             "$defs": definitions,
             "properties": {
                 **base["properties"],
-                "artifact": {"anyOf": [{key: value for key, value in artifact.items() if key != "$defs"} for artifact in schemas]},
+                "artifact": artifact_schema,
             },
         }
         system = (
             "Design a useful customer-facing visualization. Return only the JSON object with artifact. "
             "Every complete artifact needs a layout. For charts the layout includes a chart block, "
             "for diagrams a diagram block, and for calculators add input and result blocks by ID. "
+            "ONLY 'grid' layout blocks accept 'columns' (never put 'columns' on 'column' or 'row'). "
+            "Never add extra keys such as 'description' or top-level 'operation' on artifact. "
             "Use verified or supplied data and clearly label hypothetical scenarios. "
             "For a chart presentation edit use update_of and presentation with the changed fields, "
-            "preserving the original data. For calculator formulas use one operation per row.\n"
+            "preserving the original data. For an interactive simulator default edit (SimulatorDefaultUpdate) "
+            "use engine='simulator', update_of (exact id from recent_visualizations), and defaults with the "
+            "updated input id->value pairs (do NOT resend inputs/formulas unless changing schema). "
+            "For calculator formulas use one operation per row; put 'tone' ('plain'|'card'|'accent') ONLY on layout blocks, "
+            "NEVER inside calculations items; keep layout 'text' non-empty and at most 180 characters. "
+            "When available_evidence contains exact fee rates, floors, caps, or interest rates matching the customer's scenario, "
+            "set simulator input defaults to those verified figures (and cite the fee code in assumptions); "
+            "only use clearly labeled hypothetical defaults when no matching figure exists in available_evidence. "
+            "If review_feedback is provided, fix every visualization issue it names.\n"
             + "\n".join(active_skills.get(skill, {}).get("instructions", "") for skill in selected)
             + "\nJSON Schema: " + json.dumps(schema, ensure_ascii=False)
             + "\nReturn the arguments themselves, without a tool name, action wrapper or commentary."
         )
-        context = {key: data[key] for key in ("request", "observations", "available_evidence", "human_replies") if key in data}
+        context = {key: data[key] for key in ("request", "observations", "available_evidence", "human_replies", "review_feedback") if key in data}
         if recent:
             context["recent_visualizations"] = recent_visualizations(recent)
         try:
-            return self.model.request(system, context, [schema], max_tokens=_DECIDE_MAX_TOKENS, concise=True)
+            return self.model.request(
+                system, context, [schema], max_tokens=_REVIEW_MAX_TOKENS,
+                concise=True, normalize=_sanitize_presentation_arguments,
+            )
         except ModelFallbackError:
             return {}
 
@@ -1626,7 +2052,10 @@ class BankingDeepAgent(BankingReActNodes):
             if spec is None and state.get("worker_role"):
                 return self._record(state, {"kind": "skill", "name": "restricted", "status": "ERROR",
                                             "error": _DEEP_MESSAGES.get("skill_restricted_worker", "")})
-            if spec and "revision" in spec and spec["skill_id"] not in state.get("active_skills", {}):
+            if spec and "revision" in spec and (
+                spec["skill_id"] not in state.get("active_skills", {})
+                or spec["skill_id"] in (SIMULATOR_SKILL, VISUALIZATION_SKILL)
+            ):
                 return self.inspect_skill(state)
         if decision.get("kind") == "tool" and decision.get("name") == PRESENT_VISUALIZATION_TOOL and state.get("prepared_visualization"):
             return {**state, "last_action": None}
@@ -1847,7 +2276,8 @@ class BankingDeepAgent(BankingReActNodes):
         if error:
             status = "ERROR"
         return self._record(state, {
-            "kind": "memory", "name": kind, "status": status, "error": error
+            "kind": "memory", "name": kind, "key": str(decision.get("key") or "").strip(),
+            "status": status, "error": error
         })
 
     def _worker_snapshot(self, role: str, snapshot: dict) -> dict:
@@ -2120,8 +2550,18 @@ class BankingDeepAgent(BankingReActNodes):
         data["review_feedback"] = result["audit_feedback"]
         data["previous_draft"] = result["draft_answer"]
         instruction = "\n\n".join((BASE_PROMPT, _PARTIAL_RECOVERY_PROMPT, ANSWER_SCOPE))
+        if data.get("available_evidence"):
+            instruction += (
+                "\nMANDATORY CITATION: available_evidence is non-empty; embed valid [Nguồn N] tags "
+                "matching available_evidence in your final answer."
+            )
         if data["brief_summary_requested"]:
-            instruction += "\n" + SUMMARY_INSTRUCTION
+            prev_words = len(str(result.get("draft_answer") or "").split())
+            target_words = max(80, SUMMARY_MAX_WORDS - 25)
+            instruction += (
+                f"\n{SUMMARY_INSTRUCTION} "
+                f"(Bản nháp trước dài {prev_words} từ; hãy viết bản tóm tắt mới dưới {target_words} từ và tối đa {SUMMARY_MAX_POINTS} ý.)"
+            )
         try:
             decision = self.model.decide(instruction, data, ["final"], max_tokens=_PARTIAL_RECOVERY_MAX_TOKENS,
                                          deep_reason="review_revision")
@@ -2159,8 +2599,72 @@ class BankingDeepAgent(BankingReActNodes):
         draft = output.sanitized_answer
         if not output.is_safe or not draft or output.flags:
             return self._retry_review(state, "", _DEEP_MESSAGES.get("review_draft_blocked", ""), "blocked")
-        if _requests_brief_summary(state) and not _fits_brief_summary(draft):
-            return self._retry_review(state, draft, SUMMARY_INSTRUCTION, "revise")
+        if _requests_brief_summary(state) and not partial:
+            word_count, point_count = _brief_summary_counts(draft)
+            if word_count > SUMMARY_MAX_WORDS or point_count > SUMMARY_MAX_POINTS:
+                target_words = max(80, SUMMARY_MAX_WORDS - 30)
+                over_words = max(0, word_count - SUMMARY_MAX_WORDS)
+                cut_need = max(1, word_count - target_words)
+                feedback = (
+                    f"{SUMMARY_INSTRUCTION} "
+                    f"(Bản nháp hiện tại có {word_count} từ — vượt {over_words} từ — và {point_count}/{SUMMARY_MAX_POINTS} ý. "
+                    f"Hãy cắt bỏ ÍT NHẤT {cut_need} từ để còn tối đa {target_words} từ và tối đa {SUMMARY_MAX_POINTS} ý: "
+                    "bỏ toàn bộ câu chào/dẫn nhập/kết luận, viết súc tích mỗi ý một dòng ngắn.)"
+                )
+                return self._retry_review(state, draft, feedback, "revise")
+        recent_vis = state.get("recent_visualizations", [])
+        if (not state.get("prepared_visualization")
+                and self._explicit_chart_request(state["user_query"], recent_vis)):
+            draft_vis_key = _alnum_or_space(search_key(draft))
+            fake_vis_cues = (
+                " da tao bo mo phong ",
+                " da cap nhat bo mo phong ",
+                " da xay dung bo mo phong ",
+                " da thiet lap bo mo phong ",
+                " da tao trinh mo phong ",
+                " da cap nhat trinh mo phong ",
+                " da xay dung trinh mo phong ",
+                " da tao cong cu mo phong ",
+                " da tao trinh tinh toan ",
+                " da tao bieu do ",
+                " da cap nhat bieu do ",
+                " da tao so do ",
+                " da cap nhat so do ",
+                " hien thi trong giao dien mo phong ",
+                " giao dien mo phong ben duoi ",
+                " cong cu mo phong ben duoi ",
+            )
+            passive_vis_claim = (
+                (
+                    " da duoc tao " in draft_vis_key
+                    or " da duoc cap nhat " in draft_vis_key
+                    or " da duoc xay dung " in draft_vis_key
+                    or " da duoc thiet lap " in draft_vis_key
+                    or " duoc tich hop ben duoi " in draft_vis_key
+                )
+                and any(
+                    noun in draft_vis_key
+                    for noun in (
+                        " bo mo phong ", " trinh mo phong ", " cong cu mo phong ",
+                        " trinh tinh toan ", " bieu do ", " so do ",
+                    )
+                )
+            )
+            if passive_vis_claim or any(cue in draft_vis_key for cue in fake_vis_cues):
+                if state.get("presentation_arguments_requested"):
+                    vis_feedback = (
+                        "Chưa có visualization/simulator nào được tạo thành công trong lượt này. "
+                        "Tuyệt đối KHÔNG khẳng định 'đã tạo/đã xây dựng/đã cập nhật bộ mô phỏng hoặc biểu đồ'. "
+                        "Chỉ trình bày công thức, giả định và số liệu tính toán minh họa bằng văn bản."
+                    )
+                else:
+                    vis_feedback = (
+                        "Chưa có visualization/simulator nào được tạo thành công qua công cụ present_visualization "
+                        "trong lượt này. Tuyệt đối KHÔNG khẳng định 'đã tạo/đã xây dựng/đã cập nhật bộ mô phỏng hoặc biểu đồ'. "
+                        "Hãy kích hoạt skill interactive-simulator/visualization rồi gọi công cụ present_visualization "
+                        "với artifact hợp lệ; hoặc nếu không tạo được artifact, chỉ trình bày công thức và số liệu bằng văn bản."
+                    )
+                return self._retry_review(state, draft, vis_feedback, "revise")
         try:
             citations = self.validate_citations({**decision, "answer": draft}, turn["evidence"])
             if partial and not citations and (turn["evidence"] or not self._has_non_rag_grounding(state)):
@@ -2191,6 +2695,12 @@ class BankingDeepAgent(BankingReActNodes):
                         "Tuyệt đối KHÔNG sử dụng nhãn [Nguồn N] từ các lượt cũ trong lịch sử trò chuyện. "
                         "Hãy gọi công cụ search_banking_knowledge để tìm kiếm tài liệu dẫn chứng, "
                         "hoặc nếu trả lời trực tiếp mà không cần trích dẫn thì BẮT BUỘC phải xóa bỏ toàn bộ nhãn [Nguồn ...]."
+                    )
+                elif err_msg == "Missing citation":
+                    feedback = (
+                        f"Bản nháp hiện tại thiếu hoàn toàn thẻ trích dẫn [Nguồn N] trong khi lượt này có {evidence_count} tài liệu "
+                        f"trong available_evidence. BẮT BUỘC chèn trực tiếp [Nguồn 1]..[Nguồn {evidence_count}] "
+                        "ngay sau các câu nêu quy định, mức phí hoặc thông tin lấy từ tài liệu."
                     )
                 else:
                     feedback = (
@@ -2244,11 +2754,16 @@ class BankingDeepAgent(BankingReActNodes):
         review_schema = REVIEW_SCHEMA
         review_tokens = _REVIEW_MAX_TOKENS
         visualization = None
+        prepared_candidate = state.get("prepared_visualization")
+        prepared_is_sim = (
+            isinstance(prepared_candidate, dict)
+            and (prepared_candidate.get("visualization") or {}).get("engine") == "simulator"
+        )
         if partial:
             review_prompt = PARTIAL_REVIEW_PROMPT
             review_tokens = _PARTIAL_REVIEW_MAX_TOKENS
-        elif not decision.get("insufficient_evidence"):
-            visualization = state.get("prepared_visualization")
+        elif not decision.get("insufficient_evidence") or prepared_is_sim:
+            visualization = prepared_candidate
             if visualization:
                 visual = visualization["visualization"]
                 review_input["visualization"] = visual
@@ -2294,6 +2809,7 @@ class BankingDeepAgent(BankingReActNodes):
                 state = {
                     **state,
                     "prepared_visualization": None,
+                    "presentation_arguments_requested": False,
                     "visual_revisions": int(state.get("visual_revisions") or 0) + 1,
                 }
             return self._retry_review(state, draft, feedback, "revise")
@@ -2319,6 +2835,7 @@ class BankingDeepAgent(BankingReActNodes):
                         state = {
                             **state,
                             "prepared_visualization": None,
+                            "presentation_arguments_requested": False,
                             "visual_revisions": int(state.get("visual_revisions") or 0) + 1,
                         }
                     return self._retry_review(state, draft, feedback, "revise")
@@ -2328,18 +2845,35 @@ class BankingDeepAgent(BankingReActNodes):
                 reason = str(error)
                 if isinstance(repair_error, ValueError):
                     reason = str(repair_error)
+                if reason.startswith("Unsupported financial figure in cited answer line"):
+                    feedback_msg = (
+                        f"Lỗi đối soát số liệu ở dòng có trích dẫn: {reason}. "
+                        "Trên mỗi câu chứa con số tài chính, hãy gắn đúng tất cả nhãn [Nguồn N] thực sự chứa con số đó ngay trong câu, "
+                        "hoặc bỏ con số chưa có trong các nguồn được trích dẫn."
+                    )
+                else:
+                    feedback_msg = (
+                        _DEEP_MESSAGES.get("review_claim_failed_prefix", "")
+                        + reason
+                        + _DEEP_MESSAGES.get("review_claim_failed_suffix", "")
+                    )
                 return self._retry_review(
                     state,
                     draft,
-                    _DEEP_MESSAGES.get("review_claim_failed_prefix", "")
-                    + reason
-                    + _DEEP_MESSAGES.get("review_claim_failed_suffix", ""),
+                    feedback_msg,
                     "claim_failed",
                 )
 
         if partial and not any(item["status"] == "answered" for item in verdict["coverage"]):
             return self._retry_review(state, draft, _DEEP_MESSAGES.get("review_partial_empty", ""), "revise")
+        negative_absence_ok = bool(decision.get("insufficient_evidence")) and not verdict["claims"]
+        non_rag_grounded = (
+            ("[Ảnh đính kèm]" in support or "[Lịch sử trả lời trước]" in support)
+            and (not turn["evidence"] or bool(decision.get("insufficient_evidence")))
+            and (not verdict["claims"] or all(item["source"] in support for item in verdict["claims"]))
+        )
         if (state.get("intent", "") == "RAG_SEARCH" and not citations
+                and not negative_absence_ok and not non_rag_grounded
                 and (verdict["claims"] or any(item["status"] == "answered" for item in verdict["coverage"]))
                 and not (verdict["claims"] and all(item["source"] in support for item in verdict["claims"]))):
             feedback = _DEEP_MESSAGES.get("review_citation_failed_prefix", "") + "Missing citation for an answered item"

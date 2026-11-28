@@ -186,6 +186,9 @@ def _detect_refusal_or_block(res: dict[str, Any], answer: str) -> bool:
         "không có sản phẩm",
         "chưa đủ thông tin để trả lời",
         "vui lòng cung cấp tên khách hàng hợp lệ",
+        "vui lòng không thực hiện",
+        "vi phạm chính sách bảo mật",
+        "chứa mã độc",
     )
     for marker in refusal_markers:
         if marker in low:
@@ -263,6 +266,157 @@ def _verify_rendered_artifact(
         if rev < 2 and all_count < 2:
             errs.append("artifact_update_revision_expected")
     return errs
+
+
+def _summarize_hitl_reply(interaction: dict[str, Any], reply: dict[str, Any]) -> str:
+    """Format human-readable HITL selection labels for multi-turn evaluation."""
+    options = interaction.get("options") or interaction.get("choices") or []
+    label_by_id: dict[str, str] = {}
+    for idx, opt in enumerate(options, start=1):
+        if isinstance(opt, dict):
+            cid = str(opt.get("id", f"option_{idx}"))
+            label_by_id[cid] = str(opt.get("label") or cid)
+        else:
+            label_by_id[f"option_{idx}"] = str(opt)
+    chosen_ids: list[str] = []
+    if isinstance(reply.get("choice_ids"), list) and reply["choice_ids"]:
+        for cid in reply["choice_ids"]:
+            chosen_ids.append(str(cid))
+    elif reply.get("choice_id"):
+        chosen_ids.append(str(reply["choice_id"]))
+    labels: list[str] = []
+    for cid in chosen_ids:
+        if cid == "other" and reply.get("text"):
+            labels.append(str(reply["text"]).strip())
+        elif cid in label_by_id:
+            labels.append(label_by_id[cid])
+        else:
+            labels.append(cid)
+    return "; ".join(labels)
+
+
+def _format_artifact_summary(turn_num: int, res: dict[str, Any], prev_id: str | None) -> str:
+    """Summarize rendered visualization or simulator payload from a turn result."""
+    vis = res.get("visualization")
+    if not isinstance(vis, dict) or not vis:
+        return ""
+    vis_id = str(vis.get("id") or "")
+    engine = str(vis.get("engine") or "")
+    kind = str(vis.get("kind") or vis.get("chart_type") or "")
+    title = str(vis.get("title") or "")
+    revision = vis.get("revision")
+    parts = [f"Lượt {turn_num}: id={vis_id}", f"engine={engine}"]
+    if kind:
+        parts.append(f"type={kind}")
+    if title:
+        parts.append(f"title={title!r}")
+    if revision is not None:
+        parts.append(f"revision={revision}")
+    if prev_id and vis_id == prev_id:
+        parts.append(f"update_of={prev_id}")
+    if engine == "simulator":
+        if vis.get("operation"):
+            parts.append(f"operation={vis.get('operation')}")
+        calcs = vis.get("calculations")
+        if isinstance(calcs, list) and calcs:
+            ops = [str(item.get("op") or item.get("operation")) for item in calcs if isinstance(item, dict) and (item.get("op") or item.get("operation"))]
+            if ops:
+                parts.append("operations=[" + ", ".join(ops) + "]")
+        inputs = vis.get("inputs")
+        if isinstance(inputs, list) and inputs:
+            defs = []
+            for item in inputs:
+                if not isinstance(item, dict):
+                    continue
+                inp_val = item.get("value")
+                if inp_val is None:
+                    inp_val = item.get("default")
+                defs.append(f"{item.get('id') or item.get('label')}={inp_val}")
+            if defs:
+                parts.append("inputs=[" + ", ".join(defs) + "]")
+    return "- " + ", ".join(parts)
+
+
+def _build_judge_context(
+    case: dict[str, Any],
+    turns: list[Any],
+    turn_results: list[dict[str, Any]],
+    interaction_records: list[tuple[int, dict[str, Any], dict[str, Any]]],
+    final_answer: str,
+) -> tuple[str, str]:
+    """Include full turns, HITL clarify/confirm steps, and rendered artifact metadata for judge accuracy."""
+    has_artifacts = any(isinstance(r.get("visualization"), dict) and r.get("visualization") for r in turn_results)
+    group_name = str(case.get("group") or "")
+    is_hitl_group = group_name.startswith("G2_") or group_name.startswith("G3_") or group_name.startswith("G4_")
+    cit_contract = (case.get("checks") or {}).get("citation_contract")
+    final_cits = []
+    if turn_results:
+        raw_cits = turn_results[-1].get("citations") or []
+        if isinstance(raw_cits, list):
+            final_cits = raw_cits
+    if len(turns) <= 1 and not interaction_records and not has_artifacts and not is_hitl_group and not cit_contract:
+        return str(case.get("question", "")), final_answer
+
+    if len(turns) > 1:
+        q_lines = [f"[Lượt {idx + 1}] {str(msg)}" for idx, msg in enumerate(turns)]
+    else:
+        q_lines = [str(case.get("question", ""))]
+    if interaction_records:
+        q_lines.append("[Tương tác HITL đã diễn ra trong phiên]")
+        for turn_num, inter, reply in interaction_records:
+            kind = str(inter.get("kind") or "clarify")
+            is_multi = bool(inter.get("multi_select", False))
+            msg = str(inter.get("message") or "")
+            chosen = _summarize_hitl_reply(inter, reply)
+            q_lines.append(
+                f"- Lượt {turn_num} | Agent hỏi thẻ {kind} (multi_select={is_multi}): {msg} -> Khách hàng chọn: {chosen}"
+            )
+    elif is_hitl_group:
+        q_lines.append("[Tương tác HITL đã diễn ra trong phiên]: Không phát sinh bước clarify hoặc confirm nào.")
+
+    ans_parts = [final_answer]
+    artifact_lines: list[str] = []
+    prev_art_id: str | None = None
+    for idx, res in enumerate(turn_results, start=1):
+        art_line = _format_artifact_summary(idx, res, prev_art_id)
+        if art_line:
+            artifact_lines.append(art_line)
+            vis = res.get("visualization")
+            if isinstance(vis, dict) and vis.get("id"):
+                prev_art_id = str(vis.get("id"))
+    if artifact_lines:
+        ans_parts.append("[Artifact hệ thống đã render]\n" + "\n".join(artifact_lines))
+    if cit_contract and final_cits:
+        cit_lines = []
+        for cit in final_cits[:8]:
+            if not isinstance(cit, dict):
+                continue
+            lbl = str(cit.get("label") or "")
+            src = str(cit.get("source") or "")
+            pages = cit.get("page_numbers") or []
+            prov = cit.get("provenance") or {}
+            if isinstance(prov, dict):
+                locs = prov.get("locations") or []
+            else:
+                locs = []
+            loc_str = ""
+            if isinstance(locs, list) and locs:
+                first_loc = locs[0]
+                if isinstance(first_loc, dict):
+                    parts_l = [
+                        f"{k}={first_loc[k]}"
+                        for k in ("part", "xpath", "sheet_name", "cell_range", "source_row", "page_number")
+                        if first_loc.get(k) is not None
+                    ]
+                    if parts_l:
+                        loc_str = ", loc={" + ", ".join(parts_l) + "}"
+            cit_lines.append(f"- {lbl}: source={src}, pages={pages}{loc_str}")
+        if cit_lines:
+            ans_parts.append(
+                "[Thông tin citation hệ thống gắn kèm ([Nguồn 1], [Nguồn 2]... là dạng cụ thể của mẫu [Nguồn N])]\n"
+                + "\n".join(cit_lines)
+            )
+    return "\n".join(q_lines), "\n\n".join(ans_parts)
 
 
 def verify_deterministic_checks(
@@ -649,6 +803,7 @@ def run_suite(args: argparse.Namespace) -> dict[str, Any]:
 
         t0 = time.perf_counter()
         turn_results: list[dict[str, Any]] = []
+        interaction_records: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
         try:
             for turn_idx, user_msg in enumerate(turns):
                 chat_query = str(user_msg)
@@ -681,6 +836,7 @@ def run_suite(args: argparse.Namespace) -> dict[str, Any]:
                     if not inter_id:
                         break
                     reply = _select_hitl_reply(interaction, hitl_replies)
+                    interaction_records.append((turn_idx + 1, interaction, reply))
                     res = pipe.resume(
                         session_id=session_id,
                         interaction_id=inter_id,
@@ -699,12 +855,15 @@ def run_suite(args: argparse.Namespace) -> dict[str, Any]:
             has_ref_text = bool(str(case.get("reference_answer", "")).strip())
             must_inc = case.get("rubric", {}).get("must_include", [])
             if judge_client is not None and exp_blocked is None and has_ref_text:
+                judge_question, judge_answer = _build_judge_context(
+                    case, turns, turn_results, interaction_records, final_answer
+                )
                 judge = call_llm_judge(
                     judge_client,
-                    str(case.get("question", "")),
+                    judge_question,
                     str(case.get("reference_answer", "")),
                     must_inc,
-                    final_answer,
+                    judge_answer,
                 )
             else:
                 if det["deterministic_pass"]:

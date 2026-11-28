@@ -412,6 +412,22 @@ class BankingGuardrailManager:
             "bo nho phien lam viec khac",
             "hội thoại phiên làm việc khác",
             "hoi thoai phien lam viec khac",
+            "<script",
+            "</script",
+            "document.cookie",
+            "window.location",
+            "javascript:",
+            "onerror=",
+            "onload=",
+            "; drop table",
+            "drop table ",
+            "union select ",
+            "' or 1=1",
+            "' or '1'='1",
+            "; delete from ",
+            "trong .env",
+            "mật khẩu quản trị qdrant",
+            "mat khau quan tri qdrant",
         )
         for marker in explicit_markers:
             if marker in text_lower:
@@ -1314,6 +1330,17 @@ class BankingGuardrailManager:
             rb = answer_lower.find("]", lb)
             if rb == -1:
                 break
+            if lb > 0 and (answer_lower[lb - 1].isalnum() or answer_lower[lb - 1] in ("_", "-", ")")):
+                prev_sep = max(
+                    answer_lower.rfind(" ", 0, lb),
+                    answer_lower.rfind("\n", 0, lb),
+                    answer_lower.rfind("(", 0, lb),
+                    answer_lower.rfind("`", 0, lb),
+                )
+                tok_prefix = answer_lower[prev_sep + 1:lb]
+                if "/" in tok_prefix or "w:" in tok_prefix or ":" in tok_prefix:
+                    start_idx = rb + 1
+                    continue
             tag = answer_lower[lb:rb + 1]
             inner = tag[1:-1].strip()
             is_citation = False
